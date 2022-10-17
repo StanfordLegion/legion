@@ -3357,26 +3357,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceConditionSet::remove_equivalence_sets(const FieldMask &mask,
-                                  const FieldMaskSet<EquivalenceSet> &to_filter)
+    void TraceConditionSet::invalidate_equivalence_sets(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(set_lock);
+      if (!(mask - invalid_mask))
+        return;
       invalid_mask |= mask;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            to_filter.begin(); it != to_filter.end(); it++)
+      std::vector<EquivalenceSet*> to_delete;
+      for (FieldMaskSet<EquivalenceSet>::iterator it =
+            current_sets.begin(); it != current_sets.end(); it++)
       {
-        FieldMaskSet<EquivalenceSet>::iterator finder = 
-          current_sets.find(it->first);
-        if (finder == current_sets.end())
-          continue;
-        finder.filter(it->second);
-        if (!finder->second)
-        {
-          current_sets.erase(finder);
-          if (it->first->remove_base_resource_ref(TRACE_REF))
-            assert(false); // should never end up deleting this here
-        }
+        it.filter(mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        current_sets.erase(*it);
+        if ((*it)->remove_base_resource_ref(TRACE_REF))
+          assert(false); // should never end up deleting this here
       }
       current_sets.tighten_valid_mask();
     }

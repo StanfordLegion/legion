@@ -679,8 +679,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual void remove_equivalence_sets(const FieldMask &mask,
-                  const FieldMaskSet<EquivalenceSet> &to_filter);
+      virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void invalidate_equivalence_sets(void);
       void capture(EquivalenceSet *set, const FieldMask &mask,

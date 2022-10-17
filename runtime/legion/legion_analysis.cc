@@ -17536,33 +17536,25 @@ namespace Legion {
     /*static*/ void EqSetTracker::finish_subscriptions(
         Runtime *runtime, VersionManager &manager,
         LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-        const FieldMaskSet<EquivalenceSet> &to_filter,
-        std::set<RtEvent> &applied_events, bool remove_references)
+        std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID local_space = runtime->address_space;
       for (LegionMap<AddressSpaceID,SubscriberInvalidations>::const_iterator
             ait = subscribers.begin(); ait != subscribers.end(); ait++)
       {
-#ifdef DEBUG_LEGION
-        assert(!to_filter.empty());
-#endif
         if (ait->first != local_space)
         {
           const RtUserEvent applied = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize<size_t>(to_filter.size());
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-                  to_filter.begin(); it != to_filter.end(); it++)
-            {
-              rez.serialize(it->first->did);
-              rez.serialize(it->second);
-            }
+#ifdef DEBUG_LEGION
+            assert(!ait->second.subscribers.empty());
+#endif
+            rez.serialize<size_t>(ait->second.subscribers.size());
             rez.serialize<VersionManager*>(&manager);
             rez.serialize(applied);
-            rez.serialize<size_t>(ait->second.subscribers.size());
             if (ait->second.delete_all)
               rez.serialize<size_t>(ait->second.subscribers.size());
             else
@@ -17591,7 +17583,7 @@ namespace Legion {
                 ait->second.subscribers.begin(); it != 
                 ait->second.subscribers.end(); it++)
           {
-            it->first->remove_equivalence_sets(it->second, to_filter);
+            it->first->invalidate_equivalence_sets(it->second);
             if (ait->second.delete_all && 
                 it->first->finish_subscription(&manager, local_space))
               delete it->first;
@@ -17603,13 +17595,6 @@ namespace Legion {
               delete *it;
         }
       }
-      if (remove_references)
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              to_filter.begin(); it != to_filter.end(); it++)
-          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-            delete it->first;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -17618,28 +17603,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      size_t num_sets;
-      derez.deserialize(num_sets);
-      if (num_sets > 0)
+      size_t num_subscribers;
+      derez.deserialize(num_subscribers);
+      if (num_subscribers > 0)
       {
-        FieldMaskSet<EquivalenceSet> to_filter;
-        for (unsigned idx = 0; idx < num_sets; idx++)
-        {
-          DistributedID did;
-          derez.deserialize(did);
-          EquivalenceSet *set = static_cast<EquivalenceSet*>(
-              runtime->weak_find_distributed_collectable(did));
-          FieldMask mask;
-          derez.deserialize(mask);
-          if (set != NULL)
-            to_filter.insert(set, mask);
-        }
         VersionManager *owner;
         derez.deserialize(owner);
         RtUserEvent done;
         derez.deserialize(done);
-        size_t num_subscribers, num_finished;
-        derez.deserialize(num_subscribers);
+        size_t num_finished;
         derez.deserialize(num_finished);
         for (unsigned idx = 0; idx < num_subscribers; idx++)
         {
@@ -17647,7 +17619,7 @@ namespace Legion {
           derez.deserialize(subscriber);
           FieldMask mask;
           derez.deserialize(mask);
-          subscriber->remove_equivalence_sets(mask, to_filter);
+          subscriber->invalidate_equivalence_sets(mask);
           if ((num_finished == num_subscribers) &&
               subscriber->finish_subscription(owner, source))
             delete subscriber;
@@ -17663,10 +17635,6 @@ namespace Legion {
           }
         }
         Runtime::trigger_event(done);
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-              to_filter.begin(); it != to_filter.end(); it++)
-          if (it->first->remove_base_resource_ref(RUNTIME_REF))
-            delete it->first;
       }
       else
       {
@@ -17959,25 +17927,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::remove_equivalence_sets(const FieldMask &mask,
-                                  const FieldMaskSet<EquivalenceSet> &to_filter)
+    void VersionManager::invalidate_equivalence_sets(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
-            to_filter.begin(); it != to_filter.end(); it++)
+      // This is very subtle so pay attention!
+      // If you invalidate any of the equivalence sets for a version manager
+      // that is not part of the disjoint complete refinement then you have
+      // to invalidate ALL the equivalence sets with the same fields since 
+      // we use the presence of any equivalence set with a field to indicate
+      // that this VersionManager has an up-to-date copy of the equivalence
+      // sets corresponding to this logical region.
+      if (mask * equivalence_sets.get_valid_mask())
+        return;
+      std::vector<EquivalenceSet*> to_delete;
+      for (FieldMaskSet<EquivalenceSet>::iterator it =
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
       {
-        FieldMaskSet<EquivalenceSet>::iterator finder = 
-          equivalence_sets.find(it->first);
-        if (finder == equivalence_sets.end())
-          continue;
-        finder.filter(it->second);
-        if (!finder->second)
-        {
-          equivalence_sets.erase(finder);
-          if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
-            assert(false); // should never end up deleting this here
-        }
+        it.filter(mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        equivalence_sets.erase(*it);
+        if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
+          assert(false); // should never end up deleting this here
       }
       equivalence_sets.tighten_valid_mask();
     }
@@ -18597,7 +18573,6 @@ namespace Legion {
     void VersionManager::invalidate_refinement(InnerContext &context,
                                       const FieldMask &mask, bool self,
                                       FieldMaskSet<RegionTreeNode> &to_traverse,
-                                      FieldMaskSet<EquivalenceSet> &to_untrack,
                                       LegionMap<AddressSpaceID,
                                         SubscriberInvalidations> &subscribers,
                                       std::vector<EquivalenceSet*> &to_release,
@@ -18650,7 +18625,6 @@ namespace Legion {
           if (!!overlap)
           {
             finder.filter(overlap);
-            to_untrack.insert(finder->first, overlap);
             untrack_mask |= overlap;
             // Remove this if the only remaining fields are not refinements
             if (!finder->second || (finder->second * disjoint_complete))
@@ -18661,8 +18635,6 @@ namespace Legion {
               // Record this to be released once all the effects are applied
               to_release.push_back(finder->first);
             }
-            else // Need a reference to flow back here
-              finder->first->add_base_resource_ref(VERSION_MANAGER_REF);
           }
         }
         else
@@ -18689,7 +18661,6 @@ namespace Legion {
               if (!overlap)
                 continue;
             }
-            to_untrack.insert(it->first, overlap);
             untrack_mask |= overlap; 
             it.filter(overlap);
             if (!it->second)
@@ -18697,10 +18668,7 @@ namespace Legion {
               to_delete.push_back(it->first);
               // Record this to be released once all the effects are applied
               to_release.push_back(it->first);
-              // Version manager resource reference flows back
             }
-            else // Add a version manager reference to flow back
-              it->first->add_base_resource_ref(VERSION_MANAGER_REF);
           }
         }
         if (!!untrack_mask && !refinement_subscriptions.empty())
@@ -18709,7 +18677,14 @@ namespace Legion {
         {
           for (std::vector<EquivalenceSet*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
+          {
             equivalence_sets.erase(*it);
+            // Remove our version manager reference here, this shouldn't
+            // end up deleting the equivalence set though since the 
+            // to_release data structure still holds a disjoin-complete ref
+            if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
+              assert(false);
+          }
         }
         equivalence_sets.tighten_valid_mask();
       }
@@ -18828,7 +18803,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::merge(VersionManager &src, 
                                std::set<RegionTreeNode*> &to_traverse,
-                               FieldMaskSet<EquivalenceSet> &to_untrack,
                                LegionMap<AddressSpaceID,
                                 SubscriberInvalidations> &subscribers)
     //--------------------------------------------------------------------------
@@ -18853,7 +18827,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!(it->second - src.disjoint_complete));
 #endif
-          to_untrack.insert(it->first, it->second);
           untrack_mask |= it->second; 
           // Figure out whether we've already recorded this equivalence set
           FieldMaskSet<EquivalenceSet>::iterator finder = 
@@ -18902,7 +18875,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::swap(VersionManager &src,
                               std::set<RegionTreeNode*> &to_traverse,
-                              FieldMaskSet<EquivalenceSet> &to_untrack,
                               LegionMap<AddressSpaceID,
                                 SubscriberInvalidations> &subscribers)
     //--------------------------------------------------------------------------
@@ -18935,7 +18907,6 @@ namespace Legion {
           // reference flows back
           if (!equivalence_sets.insert(it->first, it->second))
             assert(false); // should never already be there
-          to_untrack.insert(it->first, it->second);
           untrack_mask |= it->second;
         }
         if (!!untrack_mask && !refinement_subscriptions.empty())
@@ -18952,7 +18923,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionManager::pack_manager(Serializer &rez, const bool invalidate,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                          FieldMaskSet<EquivalenceSet> &to_untrack,
                           LegionMap<AddressSpaceID,
                             SubscriberInvalidations> &subscribers,
                           std::vector<DistributedCollectable*> &to_remove)
@@ -18984,8 +18954,6 @@ namespace Legion {
             to_remove.push_back(it->first);
             if (invalidate)
             {
-              if (to_untrack.insert(it->first, it->second))
-                it->first->add_base_resource_ref(VERSION_MANAGER_REF);
               it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
               untrack_mask |= it->second; 
             }
@@ -19014,8 +18982,6 @@ namespace Legion {
               to_remove.push_back(it->first);
               if (invalidate)
               {
-                if (to_untrack.insert(it->first, it->second))
-                  it->first->add_base_resource_ref(VERSION_MANAGER_REF);
                 it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
                 untrack_mask |= it->second;
               }
