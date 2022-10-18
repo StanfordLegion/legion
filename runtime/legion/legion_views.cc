@@ -4123,8 +4123,9 @@ namespace Legion {
               current_users->add_reference();
             }
           }
-          const RegionUsage usage(reading ? LEGION_READ_ONLY: (redop > 0) ? 
-              LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
+          const RegionUsage usage(reading ? LEGION_READ_ONLY : 
+            (redop > 0) ? LEGION_REDUCE : LEGION_READ_WRITE, 
+            (redop > 0) ? LEGION_ATOMIC : LEGION_EXCLUSIVE, redop);
           add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
                                  collect_event, op_id, index, trace_recording);
           // Increment the remote added users count
@@ -4217,8 +4218,9 @@ namespace Legion {
         }
 #endif
         // Now we can do our local analysis
-        const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
-            LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
+        const RegionUsage usage(reading ? LEGION_READ_ONLY : 
+            (redop > 0) ? LEGION_REDUCE : LEGION_READ_WRITE, 
+            (redop > 0) ? LEGION_ATOMIC : LEGION_EXCLUSIVE, redop);
         add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
                                collect_event, op_id, index, trace_recording);
       }
@@ -5864,8 +5866,9 @@ namespace Legion {
       }
       else
       {
-        const RegionUsage usage(reading ? LEGION_READ_ONLY : (redop > 0) ?
-            LEGION_REDUCE : LEGION_READ_WRITE, LEGION_EXCLUSIVE, redop);
+        const RegionUsage usage(reading ? LEGION_READ_ONLY : 
+              (redop > 0) ? LEGION_REDUCE : LEGION_READ_WRITE, 
+              (redop > 0) ? LEGION_ATOMIC : LEGION_EXCLUSIVE, redop);
         const bool issue_collect = add_user(usage, copy_expr, copy_mask,
             term_event, collect_event, op_id, index, true/*copy*/,
             applied_events, trace_recording);

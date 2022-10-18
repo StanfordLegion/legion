@@ -299,7 +299,21 @@ namespace Legion {
         // If they are the same kind of reduction, no dependence, 
         // otherwise true dependence
         if (u1.redop == u2.redop)
+        {
+          // Exclusive and atomic coherence are effectively the same
+          // thing in these contexts. Similarly simultaneous/relaxed
+          // are also effectively the same thing for reductions.
+          // However, mixing one of those "group modes" with the other
+          // can result in races, so we don't allow that
+          if (u1.prop != u2.prop)
+          {
+            const bool atomic1 = IS_EXCLUSIVE(u1) || IS_ATOMIC(u1);
+            const bool atomic2 = IS_EXCLUSIVE(u2) || IS_ATOMIC(u2);
+            if (atomic1 != atomic2)
+              return LEGION_TRUE_DEPENDENCE;
+          }
           return LEGION_NO_DEPENDENCE;
+        }
         else
           return LEGION_TRUE_DEPENDENCE;
       }
