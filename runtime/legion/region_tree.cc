@@ -2187,7 +2187,7 @@ namespace Legion {
                                     check_initialized, record_valid);
       analysis->add_reference(); 
       const RtEvent views_ready = analysis->convert_views(req.region,
-                                      targets, &sources, collective_rendezvous);
+          targets, &sources, &analysis->usage, collective_rendezvous);
       const RtEvent traversal_done = analysis->perform_traversal(
           views_ready, version_info, map_applied_events);
       // Send out any remote updates
@@ -2225,9 +2225,6 @@ namespace Legion {
       // Perform any output copies (e.g. for restriction) that need to be done
       if (registered.exists() || analysis->has_output_updates())
         analysis->perform_output(registered, map_applied_events);
-      // Lastly see if there are any atomic reservations to find
-      // Note this is not deferred! We need the results before we return
-      analysis->find_atomic_reservations();
       // Remove the reference that we added in the updates step
       if (analysis->remove_reference())
         delete analysis;
@@ -3177,7 +3174,7 @@ namespace Legion {
       // If we have a filter precondition, then we know this is not the first
       // potential collective analysis to be used here
       const RtEvent views_ready = analysis->convert_views(req.region, 
-          instances, NULL/*sources*/, false/*collective*/, 
+          instances, NULL/*sources*/, NULL/*usage*/, false/*collective*/, 
           second_analysis ? 1 : 0);
       // Don't start the analysis until the views are ready and the filter
       // precondition has been met

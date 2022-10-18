@@ -1934,7 +1934,8 @@ namespace Legion {
     public:
       RtEvent convert_views(LogicalRegion region, const InstanceSet &targets,
           const std::vector<PhysicalManager*> *sources = NULL,
-          bool collective_rendezvous = false, unsigned analysis_index = 0);
+          const RegionUsage *usage = NULL, bool collective_rendezvous = false,
+          unsigned analysis_index = 0);
     public:
       virtual RtEvent perform_registration(RtEvent precondition,
                                            const RegionUsage &usage,
@@ -2207,7 +2208,6 @@ namespace Legion {
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
     public:
-      void find_atomic_reservations(void);
       void record_uninitialized(const FieldMask &uninit,
                                 std::set<RtEvent> &applied_events);
       virtual bool perform_analysis(EquivalenceSet *set,

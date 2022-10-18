@@ -6102,6 +6102,7 @@ namespace Legion {
     RtEvent RegistrationAnalysis::convert_views(LogicalRegion region,
                         const InstanceSet &targets,
                         const std::vector<PhysicalManager*> *sources,
+                        const RegionUsage *usage,
                         bool collective_rendezvous, unsigned analysis_index)
     //--------------------------------------------------------------------------
     {
@@ -6111,6 +6112,21 @@ namespace Legion {
       target_instances.resize(targets.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
         target_instances[idx] = targets[idx].get_physical_manager();
+      // Find any atomic locks we need to take for these instances
+      // Note that for now we also treat exclusive-reductions as
+      // needing to be atomic since we don't have a semantics for
+      // what exclusive reductions mean today
+      // Note this needs to be done eagerly and cannot be deferred!
+      if ((usage != NULL) && 
+          (IS_ATOMIC(*usage) || (IS_REDUCE(*usage) && IS_EXCLUSIVE(*usage))))
+      {
+        std::vector<IndividualView*> individual_views;
+        context->convert_individual_views(target_instances, individual_views);
+        const bool exclusive = HAS_WRITE(*usage);
+        for (unsigned idx = 0; idx < individual_views.size(); idx++)
+          individual_views[idx]->find_atomic_reservations(
+              targets[idx].get_valid_fields(), op, index, exclusive);
+      }
       if (collective_rendezvous)
       {
         // Rendezvous must be done in the immediate parent context
@@ -7266,26 +7282,6 @@ namespace Legion {
       if (user_registered.exists())
         Runtime::trigger_event(user_registered, registered);
       return registered;
-    }
-
-    //--------------------------------------------------------------------------
-    void UpdateAnalysis::find_atomic_reservations(void)
-    //--------------------------------------------------------------------------
-    {
-      // Find any atomic locks we need to take for these instances
-      // Note that for now we also treat exclusive-reductions as
-      // needing to be atomic since we don't have a semantics for
-      // what exclusive reductions mean today
-      if (IS_ATOMIC(usage) || (IS_REDUCE(usage) && IS_EXCLUSIVE(usage)))
-      {
-        InnerContext *context = op->find_physical_context(index);
-        std::vector<IndividualView*> individual_views;
-        context->convert_individual_views(target_instances, individual_views);
-        const bool exclusive = HAS_WRITE(usage);
-        for (unsigned idx = 0; idx < target_views.size(); idx++)
-          individual_views[idx]->find_atomic_reservations(
-              target_views[idx].get_valid_mask(), op, index, exclusive);
-      }
     }
 
     //--------------------------------------------------------------------------
