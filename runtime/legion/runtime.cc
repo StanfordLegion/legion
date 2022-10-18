@@ -19329,10 +19329,8 @@ namespace Legion {
       AutoLock d_lock(distributed_collectable_lock);
       std::map<DistributedID,DistributedCollectable*>::iterator finder =
         dist_collectables.find(did);
-#ifdef DEBUG_LEGION
-      assert(finder != dist_collectables.end());
-#endif
-      if (!finder->second->confirm_deletion())
+      if ((finder == dist_collectables.end()) ||
+          !finder->second->confirm_deletion())
         return false;
       dist_collectables.erase(finder);
       return true;
