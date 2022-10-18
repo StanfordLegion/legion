@@ -190,6 +190,12 @@ namespace Legion {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
 #ifdef DEBUG_LEGION
       assert(!space.empty());
+      // If we're doing any reductions with this copy then make sure they
+      // are marked exclusive or we have some reservations
+      for (std::vector<CopySrcDstField>::const_iterator it =
+            dst_fields.begin(); it != dst_fields.end(); it++)
+        assert((it->redop_id == 0) ||
+                it->red_exclusive || !reservations.empty());
 #endif
       // Now that we know we're going to do this copy add any profling requests
       Realm::ProfilingRequestSet requests;
