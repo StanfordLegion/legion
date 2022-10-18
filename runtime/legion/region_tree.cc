@@ -8495,9 +8495,14 @@ namespace Legion {
       {
         if ((collective_mapping != NULL) && 
             collective_mapping->contains(local_space))
+        {
           send_remote_valid_decrement(
-           collective_mapping->get_parent(owner_space, local_space), mutator,
-           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
+           collective_mapping->get_parent(owner_space, local_space), mutator);
+          const unsigned owner_refs = remote_owner_valid_references.exchange(0);
+          if (owner_refs > 0)
+            send_remote_valid_decrement(owner_space, mutator,
+                                        RtEvent::NO_RT_EVENT, owner_refs);
+        }
         else
           send_remote_valid_decrement(owner_space, mutator,
            RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
