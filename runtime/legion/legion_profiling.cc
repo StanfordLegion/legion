@@ -2027,9 +2027,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      decrement_total_outstanding_requests(LEGION_PROF_INST, 2/*two requests*/);
+      decrement_total_outstanding_requests(LEGION_PROF_INST);
 #else
-      decrement_total_outstanding_requests(2/*expecting two responses*/);
+      decrement_total_outstanding_requests();
 #endif
     }
 
