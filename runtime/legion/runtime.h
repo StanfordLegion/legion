@@ -3294,8 +3294,6 @@ namespace Legion {
                                                     Serializer &rez);
       void send_control_replicate_find_collective_view(AddressSpaceID target,
                                                        Serializer &rez);
-      void send_control_replicate_collective_rendezvous(
-                                  AddressSpaceID target, Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -3781,7 +3779,6 @@ namespace Legion {
                                                      AddressSpaceID source);
       void handle_control_replicate_implicit_response(Deserializer &derez);
       void handle_control_replicate_find_collective_view(Deserializer &derez);
-      void handle_control_replicate_collective_rendezvous(Deserializer &derez);
       void handle_library_mapper_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_library_mapper_response(Deserializer &derez);
@@ -5922,8 +5919,6 @@ namespace Legion {
         case SEND_REPL_IMPLICIT_RESPONSE:
           return TASK_VIRTUAL_CHANNEL;
         case SEND_REPL_FIND_COLLECTIVE_VIEW:
-          break;
-        case SEND_REPL_COLLECTIVE_RENDEZVOUS:
           break;
         case SEND_MAPPER_MESSAGE:
           return MAPPER_VIRTUAL_CHANNEL;

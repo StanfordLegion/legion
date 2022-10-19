@@ -2850,18 +2850,6 @@ namespace Legion {
         unsigned done_count;
       };
     public:
-      typedef InnerContext::RendezvousKey RendezvousKey;
-      typedef InnerContext::RendezvousResult RendezvousResult;
-      typedef InnerContext::CollectiveRendezvous CollectiveRendezvous;
-      struct ShardRendezvous {
-        std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
-        CollectiveMapping *mapping;
-        Operation *local_op;
-        int remaining_local;
-        int remaining_remote;
-        bool field_failure;
-      };
-    public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, bool top, bool isomorphic_points,
                    const Domain &shard_domain,
@@ -3042,11 +3030,6 @@ namespace Legion {
       ShardID find_collective_owner(RegionTreeID tid) const;
       void send_find_or_create_collective_view(ShardID target, Serializer &rez);
       void handle_find_or_create_collective_view(Deserializer &derez);
-      void construct_collective_mapping(const RendezvousKey &key,
-        Operation *op,std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
-      void pack_collective_rendezvous(Serializer &rez, 
-          const RendezvousKey &key,
-          const std::map<LogicalRegion,CollectiveRendezvous> &rendezvous) const;
     public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
@@ -3074,7 +3057,6 @@ namespace Legion {
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
       static void handle_find_collective_view(Deserializer &derez, Runtime *rt);
-      static void handle_collective_rendezvous(Deserializer &derez,Runtime *rt);
 #ifdef NO_EXPLICIT_COLLECTIVES
       static void handle_collective_instance_message(Deserializer &derez,
                                                      Runtime *runtime);
@@ -3161,7 +3143,6 @@ namespace Legion {
                                         created_equivalence_sets;
       std::map<DistributedID,std::pair<FillView*,size_t> > 
                                         created_fill_views;
-      std::map<RendezvousKey,ShardRendezvous> collective_rendezvous;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
     protected:
