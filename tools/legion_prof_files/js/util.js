@@ -214,7 +214,8 @@ function redoData(proc) {
                     children: d.children,
                     parents: d.parents,
                     prof_uid: d.prof_uid,
-                    proc: d.proc
+                    proc: d.proc,
+                    instances: d.instances
 		};
 		// switch levels if we need to
 		if (d.level_ready_set == undefined || d.level_ready_set == false)
@@ -326,7 +327,7 @@ function filterAndMergeBlocks(state) {
                 out: [],
                 children: [],
                 parents: [],
-		instances: d.instances
+                instances: d.instances
               });
               i += (count - 1);
             } else {
@@ -346,7 +347,7 @@ function filterAndMergeBlocks(state) {
                 out: d.out,
                 children: d.children,
                 parents: d.parents,
-		instances: d.instances
+                instances: d.instances
               }
               state.dataToDraw.push(elem);
               if (isMemory) {
@@ -371,7 +372,7 @@ function filterAndMergeBlocks(state) {
               out: d.out,
               children: d.children,
               parents: d.parents,
-	      instances: d.instances
+              instances: d.instances
             }
             state.dataToDraw.push(elem);
             if (isMemory) {

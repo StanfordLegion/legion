@@ -2320,6 +2320,7 @@ function load_proc_timeline(proc) {
         var parents = d.parents === "" ? [] : JSON.parse(d.parents)
         // if op_id is empty, then we set it to -1
         var op_id = d.op_id == "" ? -1 : parseInt(d.op_id)
+	var instances = d.instances === "" ? [] : JSON.parse(d.instances)
         if (total > state.resolution) {
             return {
                 id: i,
@@ -2339,7 +2340,7 @@ function load_proc_timeline(proc) {
                 prof_uid: d.prof_uid,
                 op_id: op_id,
                 proc: proc,
-		instances: d.instances
+                instances: instances
             };
         }
     },
