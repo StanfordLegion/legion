@@ -1115,7 +1115,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::activate_operation(void)
+    void Operation::activate(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1156,10 +1156,11 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Operation::deactivate_operation(void)
+    void Operation::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!freeop);
       assert(activated);
 #endif
       activated = false;
@@ -1650,6 +1651,20 @@ namespace Legion {
       // Should only be called in derived types
       assert(false);
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Operation::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called in derived types
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -2823,6 +2838,707 @@ namespace Legion {
       }
       return true;
     }
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveViewCreatorBase
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::RendezvousResult::RendezvousResult(
+                  CollectiveViewCreatorBase *own, const PendingRendezvousKey &k,
+                  const InstanceSet &insts, InnerContext *ctx)
+      : owner(own), physical_ctx(ctx), key(k), instances(init_instances(insts)),
+        ready(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LegionVector<std::pair<DistributedID,FieldMask> >
+        CollectiveViewCreatorBase::RendezvousResult::init_instances(
+                                                       const InstanceSet &insts)
+    //--------------------------------------------------------------------------
+    {
+      LegionVector<std::pair<DistributedID,FieldMask> > result(insts.size());
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        result[idx].first = ref.get_manager()->did;
+        result[idx].second = ref.get_valid_fields();
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::RendezvousResult::~RendezvousResult(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::RendezvousResult::matches(
+                                                 const InstanceSet &insts) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        if (instances[idx].first != ref.get_manager()->did)
+          return false;
+        if (instances[idx].second != ref.get_valid_fields())
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::RendezvousResult::finalize_rendezvous(
+       CollectiveMapping *mapping, const FieldMaskSet<CollectiveResult> &views,
+       const std::map<DistributedID,size_t> &counts, Runtime *runtime,
+       bool first, size_t local_analyses)
+    //--------------------------------------------------------------------------
+    {
+      mapping->add_reference(target_mappings.size());
+      for (unsigned idx = 0; idx < target_mappings.size(); idx++)
+        *target_mappings[idx] = mapping;
+      for (unsigned idx = 0; idx < target_first_locals.size(); idx++)
+      {
+        *target_first_locals[idx] = first;
+        first = false;
+      }
+      std::vector<RtEvent> ready_events;
+      LegionVector<FieldMaskSet<InstanceView> > result_views(instances.size()); 
+      std::map<InstanceView*,size_t> collective_arrivals;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const DistributedID inst_did = instances[idx].first;
+        const FieldMask &mask = instances[idx].second;
+        for (FieldMaskSet<CollectiveResult>::const_iterator vit =
+              views.begin(); vit != views.end(); vit++)
+        {
+          const FieldMask overlap = mask & vit->second;
+          if (!overlap)
+            continue;
+          if (!std::binary_search(vit->first->individual_dids.begin(),
+                vit->first->individual_dids.end(), inst_did))
+            continue;
+          // Successfully found one of the views
+          // Wait until it is safe to request it
+          if (vit->first->ready_event.exists() &&
+              !vit->first->ready_event.has_triggered())
+            vit->first->ready_event.wait();
+          if (vit->first->collective_did > 0)
+          {
+            RtEvent ready;
+            CollectiveView *view = static_cast<CollectiveView*>(
+                runtime->find_or_request_logical_view(
+                  vit->first->collective_did, ready));
+            if (ready.exists())
+              ready_events.push_back(ready);
+            result_views[idx].insert(view, overlap);
+            // Now count how many local arrivals we have for 
+            // instances on the same address space
+            size_t local_arrivals = 0;
+            const AddressSpaceID inst_space = 
+              runtime->determine_owner(inst_did);
+            for (std::vector<DistributedID>::const_iterator it =
+                  vit->first->individual_dids.begin(); it !=
+                  vit->first->individual_dids.end(); it++)
+            {
+              if (inst_space != runtime->determine_owner(*it))
+                continue;
+              std::map<DistributedID,size_t>::const_iterator
+                count_finder = counts.find(*it);
+              if (count_finder != counts.end())
+                local_arrivals += count_finder->second;
+              else
+                local_arrivals++;
+            }
+            collective_arrivals[view] = local_arrivals;
+          }
+          else
+          {
+            // No collective instance matches here so we can just
+            // get the normal view for the instance
+#ifdef DEBUG_LEGION
+            assert(vit->first->individual_dids.size() == 1);
+#endif
+            // Manager should still be here
+            DistributedID inst_did = vit->first->individual_dids.back();
+            PhysicalManager *manager = static_cast<PhysicalManager*>(
+                runtime->find_distributed_collectable(inst_did));
+            std::vector<PhysicalManager*> instances(1, manager);
+            std::vector<IndividualView*> views;
+            physical_ctx->convert_individual_views(instances, views);
+            IndividualView *view = views.back();
+            result_views[idx].insert(view, overlap);
+            // Note we don't use the count of the instance uses here
+            // but instead use our local number of local analyses since this
+            // is an individual view and not a collective view
+            collective_arrivals[view] = local_analyses;
+          }
+        }
+#ifdef DEBUG_LEGION
+        // Should have seen all the fields at this point
+        assert(result_views[idx].get_valid_mask() == mask);
+#endif
+      }
+      for (int idx = target_views.size()-1; idx >= 0; idx--)
+      {
+        if (idx == 0)
+        {
+          target_views[idx]->swap(result_views);
+          target_arrivals[idx]->swap(collective_arrivals);
+        }
+        else
+        {
+          *target_views[idx] = result_views;
+          *target_arrivals[idx] = collective_arrivals;
+        }
+      }
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+      return owner->remove_pending_rendezvous(this);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+       const std::vector<DistributedID> &dids, DistributedID did, RtEvent ready)
+      : individual_dids(dids.begin(), dids.end()), collective_did(did),
+        ready_event(ready)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+            std::vector<DistributedID> &&dids, DistributedID did, RtEvent ready)
+      : individual_dids(dids), collective_did(did), ready_event(ready)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+                                                         DistributedID inst_did)
+      : individual_dids(1, inst_did), collective_did(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+            const std::vector<DistributedID> &dids)
+      : individual_dids(dids), collective_did(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::CollectiveResult::matches(
+                                   const std::vector<DistributedID> &dids) const
+    //--------------------------------------------------------------------------
+    {
+      if (dids.size() != individual_dids.size())
+        return false;
+      for (unsigned idx = 0; idx < dids.size(); idx++)
+        if (dids[idx] != individual_dids[idx])
+          return false;
+      return true;
+    } 
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::RendezvousResult* 
+                        CollectiveViewCreatorBase::find_or_create_rendezvous(
+                        unsigned index, unsigned analysis, LogicalRegion region,
+                        const InstanceSet &targets, InnerContext *physical_ctx,
+                        CollectiveMapping *&analysis_mapping, bool &first_local,
+                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                        std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      RendezvousResult *result = NULL;
+      // Find or create a rendezvous result and record for this context
+      const PendingRendezvousKey key(index, analysis, region);
+      AutoLock c_lock(collective_lock);
+      std::vector<RendezvousResult*> &pending = pending_rendezvous[key];
+      for (std::vector<RendezvousResult*>::const_iterator it =
+            pending.begin(); it != pending.end(); it++)
+      {
+        if (!(*it)->matches(targets))
+          continue;
+        result = (*it);
+        break;
+      }
+      if (result == NULL)
+      {
+        result = new RendezvousResult(this, key, targets, physical_ctx);
+        // Reference for pending_rendezvous
+        result->add_reference();
+        pending.push_back(result);
+      }
+      // Record all our targets in the result
+      result->target_mappings.push_back(&analysis_mapping);
+      result->target_first_locals.push_back(&first_local);
+      result->target_views.push_back(&target_views);
+      result->target_arrivals.push_back(&collective_arrivals);
+      // Reference for ourselves
+      result->add_reference();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::remove_pending_rendezvous(
+                                                       RendezvousResult *result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+      std::map<PendingRendezvousKey,std::vector<RendezvousResult*> >::iterator
+        finder = pending_rendezvous.find(result->key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_rendezvous.end());
+#endif
+      for (std::vector<RendezvousResult*>::iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it) != result)
+          continue;
+        finder->second.erase(it);
+        break;
+      }
+      if (finder->second.empty())
+        pending_rendezvous.erase(finder);
+      return result->remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveViewCreatorBase::finalize_collective_mapping(
+        Runtime *runtime, CollectiveMapping *mapping, AddressSpaceID owner,
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
+        const std::map<DistributedID,size_t> &counts,
+        const FieldMaskSet<CollectiveResult> &views)
+    //--------------------------------------------------------------------------
+    {
+      // Next figure out which targets to send the results to
+      std::vector<AddressSpaceID> targets;
+      if (mapping->contains(runtime->address_space))
+        mapping->get_children(owner, runtime->address_space, targets); 
+      else
+        targets.push_back(owner);
+      // Send out the results to the next participants
+      if (!targets.empty())
+      {
+        // These help out with building broadcasting trees so not all
+        // the realm event registrations go to the same node
+        std::map<CollectiveResult*,RtEvent> local_registered_events;
+        std::map<CollectiveResult*,RtEvent> local_ready_events;
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            mapping->pack(rez);
+            rez.serialize(owner);
+            rez.serialize<size_t>(results.size());
+            for (unsigned idx = 0; idx < results.size(); idx++)
+            {
+              rez.serialize(results[idx].first);
+              rez.serialize(results[idx].second);
+            }
+            rez.serialize<size_t>(counts.size());
+            for (std::map<DistributedID,size_t>::const_iterator cit =
+                  counts.begin(); cit != counts.end(); cit++)
+            {
+              rez.serialize(cit->first);
+              rez.serialize(cit->second);
+            }
+            rez.serialize<size_t>(views.size());
+            for (FieldMaskSet<CollectiveResult>::const_iterator vit =
+                  views.begin(); vit != views.end(); vit++)
+            {
+              rez.serialize(vit->first->collective_did);
+              rez.serialize<size_t>(vit->first->individual_dids.size());
+              for (unsigned idx = 0; 
+                    idx < vit->first->individual_dids.size(); idx++)
+                rez.serialize(vit->first->individual_dids[idx]);
+              if (!vit->first->ready_event.exists())
+              {
+                std::map<CollectiveResult*,RtEvent>::const_iterator finder =
+                  local_ready_events.find(vit->first);
+                if (finder == local_ready_events.end())
+                {
+                  const RtUserEvent local = Runtime::create_rt_user_event();
+                  Runtime::trigger_event(local, vit->first->ready_event);
+                  local_ready_events[vit->first] = local;
+                  rez.serialize(local);
+                }
+                else
+                  rez.serialize(finder->second);
+              }
+              else
+                rez.serialize(vit->first->ready_event);
+              rez.serialize(vit->second);
+            }
+          }
+          runtime->send_collective_finalize_mapping(*it, rez);
+        }
+      }
+      // Now handle all of the local results
+      if (targets.empty() || (targets.back() != owner))
+      {
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+          result_it = results.begin();
+        // Skip the non-local results
+        while (result_it->first != runtime->address_space)
+          result_it++;
+#ifdef DEBUG_LEGION
+        assert(result_it != results.end());
+#endif
+        // Count how many local analyses we have here in case we need it
+        size_t local_analyses = 0;
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+          local_it = result_it;
+        while (local_it->first == runtime->address_space)
+        {
+          local_analyses += local_it->second->target_mappings.size();
+          if (++local_it == results.end())
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(local_analyses > 0);
+#endif
+        while (result_it->first == runtime->address_space)
+        {
+          bool first = true;
+          if (result_it->second->finalize_rendezvous(mapping, views,
+                            counts, runtime, first, local_analyses))
+            delete result_it->second;
+          first = false;
+          if (++result_it == results.end())
+            break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/
+        void CollectiveViewCreatorBase::handle_finalize_collective_mapping(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+      mapping->add_reference();
+      AddressSpaceID owner;
+      derez.deserialize(owner);
+      size_t num_results;
+      derez.deserialize(num_results);
+      std::vector<std::pair<AddressSpaceID,RendezvousResult*> > 
+        results(num_results);
+      for (unsigned idx = 0; idx < num_results; idx++)
+      {
+        derez.deserialize(results[idx].first);
+        derez.deserialize(results[idx].second);
+      }
+      size_t num_counts;
+      derez.deserialize(num_counts);
+      std::map<DistributedID,size_t> counts;
+      for (unsigned idx = 0; idx < num_counts; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        derez.deserialize(counts[did]);
+      }
+      size_t num_views;
+      derez.deserialize(num_views);
+      FieldMaskSet<CollectiveResult> views;
+      for (unsigned idx = 0; idx < num_views; idx++)
+      {
+        DistributedID collective_did;
+        derez.deserialize(collective_did);
+        size_t num_dids;
+        derez.deserialize(num_dids);
+        std::vector<DistributedID> individual_dids(num_dids);
+        for (unsigned idx = 0; idx < num_dids; idx++)
+          derez.deserialize(individual_dids[idx]);
+        RtEvent view_ready;
+        derez.deserialize(view_ready);
+        CollectiveResult *view = new CollectiveResult(
+            std::move(individual_dids), collective_did, view_ready);
+        view->add_reference();
+        FieldMask mask;
+        derez.deserialize(mask);
+        views.insert(view, mask);
+      }
+      finalize_collective_mapping(runtime, mapping, owner,results,counts,views);
+      for (FieldMaskSet<CollectiveResult>::const_iterator it =
+            views.begin(); it != views.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      if (mapping->remove_reference())
+        delete mapping;
+    } 
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveViewCreator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveViewCreator<OP>::CollectiveViewCreator(Runtime *rt)
+      : OP(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveViewCreator<OP>::CollectiveViewCreator(
+                                           const CollectiveViewCreator<OP> &rhs)
+      : OP(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      OP::deactivate(freeop);
+#ifdef DEBUG_LEGION
+      assert(pending_rendezvous.empty());
+      assert(pending_collectives.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent CollectiveViewCreator<OP>::convert_collective_views(unsigned index,
+                        unsigned analysis, LogicalRegion region, 
+                        const InstanceSet &targets, InnerContext *physical_ctx,
+                        CollectiveMapping *&analysis_mapping, bool &first_local,
+                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                        std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      // Find or create a rendezvous result and for this request
+      RendezvousResult *result = find_or_create_rendezvous(index, 
+          analysis, region, targets, physical_ctx, analysis_mapping, 
+          first_local, target_views, collective_arrivals);
+      // Now perform the rendezvous for this result
+      rendezvous_collective_mapping(index, analysis, region, result,
+          this->runtime->address_space, result->instances);
+      const RtEvent ready = result->ready;
+      if (result->remove_reference())
+        delete result;
+      return ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::rendezvous_collective_mapping(
+         unsigned requirement_index, unsigned analysis, LogicalRegion region,
+         RendezvousResult *result, AddressSpaceID source, 
+         const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LogicalRegion,CollectiveRendezvous> to_construct;
+      const RendezvousKey key(requirement_index, analysis);
+      {
+        AutoLock c_lock(collective_lock);
+        std::map<RendezvousKey,PendingCollective>::iterator finder =
+          pending_collectives.find(key);
+        if (finder == pending_collectives.end())
+          finder = pending_collectives.insert(
+              std::make_pair(key,
+                PendingCollective(this->get_collective_points()))).first;
+        CollectiveRendezvous &collective = finder->second.rendezvous[region];
+        bool found = false;
+        for (std::vector<std::pair<AddressSpaceID,
+                                   RendezvousResult*> >::const_iterator it =
+              collective.results.begin(); it != collective.results.end(); it++)
+        {
+          if (it->first != source)
+            continue;
+          if (it->second != result)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+          collective.results.emplace_back(std::make_pair(source, result));
+        // Now update the counts for all the instances
+        for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
+              it = insts.begin(); it != insts.end(); it++)
+        {
+          LegionMap<DistributedID,FieldMask>::iterator group_finder =
+            collective.groups.find(it->first);
+          if (group_finder != collective.groups.end())
+          {
+            if (group_finder->second == it->second)
+            {
+              // Bump the counts
+              std::map<DistributedID,size_t>::iterator count_finder =
+                collective.counts.find(it->first);
+              if (count_finder == collective.counts.end())
+                collective.counts[it->first] = 2;
+              else
+                count_finder->second++;
+            }
+            else
+              // If you ever hit this then heaven help you
+              // The user has done something really out there and
+              // is using the same instance with different sets of
+              // fields for multiple point ops/tasks in the same 
+              // index space operation. All the tricks we do to 
+              // compute the collective arrivals are not going to
+              // work in this case so the arrival counts will need 
+              // to look something like:
+              //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
+              REPORT_LEGION_FATAL(
+                  LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+                  "Operation %s (UID %lld) in context %s (UID %lld) "
+                  "requested a very strange pattern for collective "
+                  "instance rendezvous with different points asking to "
+                  "rendezvous with different field sets on the same "
+                  "physical instance. This isn't currently supported. "
+                  "Please report your use case to the Legion "
+                  "developer's mailing list.", this->get_logging_name(),
+                  this->get_unique_op_id(), 
+                  this->parent_ctx->get_task_name(),
+                  this->parent_ctx->get_unique_id())
+          }
+          else // No need to update counts since empty implies only one
+            collective.groups[it->first] = it->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_arrivals > 0);
+#endif
+        if (--finder->second.remaining_arrivals == 0)
+        {
+          to_construct.swap(finder->second.rendezvous);
+          pending_collectives.erase(finder);
+        }
+      }
+      if (!to_construct.empty())
+        construct_collective_mapping(key, to_construct);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::construct_collective_mapping(
+                       const RendezvousKey &key,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
+      InnerContext *physical_ctx = 
+        this->find_physical_context(key.region_index);
+      Runtime *runtime = this->runtime;
+      for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
+            rendezvous.begin(); rit != rendezvous.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        // All the regions should be from the same region tree
+        assert(tid == rit->first.get_tree_id());
+#endif
+        LegionList<FieldSet<DistributedID> > field_sets;
+        compute_field_sets(FieldMask(), rit->second.groups, field_sets);
+        FieldMaskSet<CollectiveResult> results;
+        std::vector<RtEvent> ready_events;
+        for (LegionList<FieldSet<DistributedID> >::const_iterator it =
+              field_sets.begin(); it != field_sets.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(!it->elements.empty());
+#endif
+          if (it->elements.size() > 1)
+          {
+            const std::vector<DistributedID> instances(it->elements.begin(),
+                                                       it->elements.end());
+            // Use the right physical context to find or create the collective
+            // view in case there have been any virtual mappings
+            RtEvent ready;
+            InnerContext::CollectiveResult *result = 
+              physical_ctx->find_or_create_collective_view(tid,instances,ready);
+            if (ready.exists())
+              ready_events.push_back(ready);
+            // References already added by method so deduplicate references
+            if (!results.insert(result, it->set_mask))
+              result->remove_reference();
+          }
+          else
+          {
+            // If there is just one instance then we send back a 
+            // collective did of zero to indicate to just use the 
+            // normal single view
+            CollectiveResult *result = 
+              new CollectiveResult(*it->elements.begin());
+            if (results.insert(result, it->set_mask))
+              result->add_reference();
+          }
+        }
+        // Send the resulting views back out to all the RendezvousResults
+        std::sort(rit->second.results.begin(), rit->second.results.end());
+        // First build the collective mapping
+        std::vector<AddressSpaceID> unique_spaces;
+        for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+              it = rit->second.results.begin(); 
+              it != rit->second.results.end(); it++)
+        {
+          if (unique_spaces.empty() || (unique_spaces.back() != it->first))
+            unique_spaces.push_back(it->first);
+        }
+        CollectiveMapping *mapping =
+          new CollectiveMapping(unique_spaces, runtime->legion_collective_radix);
+        mapping->add_reference();
+        // Determine the owner for this collective mapping
+        AddressSpaceID owner = mapping->contains(runtime->address_space) ?
+          runtime->address_space : mapping->find_nearest(runtime->address_space);
+        // Make sure all the results are ready before we send them out
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        finalize_collective_mapping(runtime, mapping, owner,
+            rit->second.results, rit->second.counts, results);
+        if (mapping->remove_reference())
+          delete mapping;
+        for (FieldMaskSet<CollectiveResult>::const_iterator it =
+              results.begin(); it != results.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+      }
+    }
+
+    // Explicit instantiations
+    template class CollectiveViewCreator<Operation>;
+    template class CollectiveViewCreator<MapOp>;
+    template class CollectiveViewCreator<AttachOp>;
+    template class CollectiveViewCreator<DetachOp>;
+    template class CollectiveViewCreator<AcquireOp>;
+    template class CollectiveViewCreator<ReleaseOp>;
+    template class CollectiveViewCreator<TaskOp>;
 
 #ifdef NO_EXPLICIT_COLLECTIVES
     ///////////////////////////////////////////////////////////// 
@@ -4353,10 +5069,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PredicateImpl::activate_predicate(void)
+    void PredicateImpl::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       predicate_resolved = false;
       collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
       predicate_references = 0;
@@ -4366,10 +5082,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PredicateImpl::deactivate_predicate(void)
+    void PredicateImpl::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(freeop);
 #ifdef DEBUG_LEGION
       assert(predicate_references == 0);
 #endif
@@ -4637,12 +5353,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoizableOp::activate_memoizable(void)
+    void MemoizableOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       tpl = NULL;
       memo_state = NO_MEMO;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoizableOp::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      Operation::deactivate(freeop);
     }
 
     //--------------------------------------------------------------------------
@@ -4731,10 +5454,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PredicatedOp::activate_predication(void)
+    void PredicatedOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_memoizable();
+      MemoizableOp::activate();
       predication_state = PENDING_ANALYSIS_STATE;
       predicate = NULL;
       true_guard = PredEvent::NO_PRED_EVENT;
@@ -4743,10 +5466,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PredicatedOp::deactivate_predication(void)
+    void PredicatedOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      MemoizableOp::deactivate(freeop);
     }
 
     //--------------------------------------------------------------------------
@@ -5062,7 +5785,7 @@ namespace Legion {
     void MapOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       parent_ctx = NULL;
       remap_region = false;
       mapper = NULL;
@@ -5076,10 +5799,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::deactivate_map_op(void)
+    void MapOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       // Remove our reference to the region
       region = PhysicalRegion();
       grants.clear();
@@ -5104,15 +5827,9 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MapOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_map_op(); 
       // Now return this operation to the queue
-      runtime->free_map_op(this);
+      if (freeop)
+        runtime->free_map_op(this);
     } 
 
     //--------------------------------------------------------------------------
@@ -6687,10 +7404,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::activate_copy(void)
+    void CopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predication();
+      PredicatedOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -6700,10 +7417,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::deactivate_copy(void)
+    void CopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predication();
+      PredicatedOp::deactivate(false/*free*/);
       // Clear out our region tree state
       src_requirements.clear();
       dst_requirements.clear();
@@ -6746,22 +7463,9 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_copy(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_copy(); 
       // Return this operation to the runtime
-      runtime->free_copy_op(this);
+      if (freeop)
+        runtime->free_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -7312,9 +8016,6 @@ namespace Legion {
           PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
-          const bool check_collective = 
-            (output.check_collective_srcs.find(idx) !=
-             output.check_collective_srcs.end());
           const RegionRequirement &src_req = src_requirements[idx];
           src_ready =
             runtime->forest->physical_perform_updates_and_registration(
@@ -7332,7 +8033,7 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
-                                              check_collective,
+                                              false/*check collective*/,
                                               record_valid);
         }
         else
@@ -7408,9 +8109,6 @@ namespace Legion {
           PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
-          const bool check_collective = 
-            (output.check_collective_ind_srcs.find(idx) !=
-             output.check_collective_ind_srcs.end());
           gather_ready =
             runtime->forest->physical_perform_updates_and_registration(
                                        src_indirect_requirements[idx],
@@ -7426,7 +8124,7 @@ namespace Legion {
                                        get_logging_name(),
                                        unique_op_id,
 #endif
-                                       check_collective,
+                                       false/*check collective*/,
                                        record_valid);
           if (runtime->legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
@@ -7449,9 +8147,6 @@ namespace Legion {
             dst_requirements.size() + src_indirect_requirements.size() + idx;
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
-          const bool check_collective =
-            (output.check_collective_ind_dsts.find(idx) !=
-             output.check_collective_ind_dsts.end());
           PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
           scatter_ready =
             runtime->forest->physical_perform_updates_and_registration(
@@ -7468,7 +8163,7 @@ namespace Legion {
                                       get_logging_name(),
                                       unique_op_id,
 #endif
-                                      check_collective,
+                                      false/*check collective*/,
                                       record_valid);
           if (runtime->legion_spy_enabled)
             runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
@@ -9033,14 +9728,7 @@ namespace Legion {
     void IndexCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_copy();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::activate_index_copy(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_copy();
+      CopyOp::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -9049,19 +9737,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexCopyOp::deactivate(void)
+    void IndexCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_index_copy(); 
-      // Return this operation to the runtime
-      runtime->free_index_copy_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::deactivate_index_copy(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_copy();
+      CopyOp::deactivate(false/*free*/);
       // We can deactivate all of our point operations
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -9074,6 +9753,9 @@ namespace Legion {
       pending_intra_space_dependences.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      // Return this operation to the runtime
+      if (freeop)
+        runtime->free_index_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9295,11 +9977,13 @@ namespace Legion {
       if (!src_indirect_requirements.empty())
       {
         gather_versions.resize(src_indirect_requirements.size());
+        const unsigned offset = 
+          src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           ProjectionInfo gather_info(runtime, src_indirect_requirements[idx], 
                                      launch_space);
-          runtime->forest->perform_dependence_analysis(this, idx, 
+          runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
@@ -9310,11 +9994,13 @@ namespace Legion {
       if (!dst_indirect_requirements.empty())
       {
         scatter_versions.resize(dst_indirect_requirements.size());
+        const unsigned offset = src_requirements.size() + 
+          dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           ProjectionInfo scatter_info(runtime, dst_indirect_requirements[idx],
                                       launch_space);
-          runtime->forest->perform_dependence_analysis(this, idx, 
+          runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
@@ -10071,17 +10757,18 @@ namespace Legion {
     void PointCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_copy();
+      CopyOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointCopyOp::deactivate(void)
+    void PointCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_copy();
+      CopyOp::deactivate(false/*free*/);
       intra_space_mapping_dependences.clear();
-      runtime->free_point_copy_op(this);
+      if (freeop)
+        runtime->free_point_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -10518,32 +11205,19 @@ namespace Legion {
     void FenceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence(); 
+      MemoizableOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::activate_fence(void)
+    void FenceOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      activate_memoizable();
-    }
-
-    //--------------------------------------------------------------------------
-    void FenceOp::deactivate_fence(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      MemoizableOp::deactivate(false/*free*/);
       map_applied_conditions.clear();
       execution_preconditions.clear();
       result = Future(); // clear out our future reference
-    }
-
-    //--------------------------------------------------------------------------
-    void FenceOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_fence();
-      runtime->free_fence_op(this);
+      if (freeop)
+        runtime->free_fence_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -10744,16 +11418,17 @@ namespace Legion {
     void FrameOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      FenceOp::activate();
       previous_completion = ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::deactivate(void)
+    void FrameOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
-      runtime->free_frame_op(this);
+      FenceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_frame_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -10937,7 +11612,7 @@ namespace Legion {
     void CreationOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       index_space_node = NULL;
       field_space_node = NULL;
       mapping_precondition = RtEvent::NO_RT_EVENT;
@@ -10946,13 +11621,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::deactivate(void)
+    void CreationOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       futures.clear();
       fields.clear();
-      runtime->free_creation_op(this);
+      if (freeop)
+        runtime->free_creation_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -11334,31 +12010,16 @@ namespace Legion {
     void DeletionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_deletion();
-    }
-
-    //--------------------------------------------------------------------------
-    void DeletionOp::activate_deletion(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       allocator = NULL;
       has_preconditions = false;
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::deactivate(void)
+    void DeletionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_deletion(); 
-      // Return this to the available deletion ops on the queue
-      runtime->free_deletion_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void DeletionOp::deactivate_deletion(void)
-    //--------------------------------------------------------------------------
-    {
+      Operation::deactivate(false/*free*/);
       // We can remove the reference to the allocator once we are
       // done with all of our free operations
       if ((allocator != NULL) && allocator->remove_reference())
@@ -11366,7 +12027,6 @@ namespace Legion {
         allocator->free_from_runtime();
         delete allocator;
       }
-      deactivate_operation();
       sub_partitions.clear();
       free_fields.clear();
       local_fields.clear();
@@ -11380,6 +12040,9 @@ namespace Legion {
       map_applied_conditions.clear();
       to_release.clear();
       dependences.clear();
+      // Return this to the available deletion ops on the queue
+      if (freeop)
+        runtime->free_deletion_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -11730,20 +12393,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InternalOp::activate_internal(void)
+    void InternalOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       creator_req_idx = -1;
       create_op = NULL;
       create_gen = 0;
     }
 
     //--------------------------------------------------------------------------
-    void InternalOp::deactivate_internal(void)
+    void InternalOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(freeop);
     }
 
     //--------------------------------------------------------------------------
@@ -11982,17 +12645,17 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::activate_close(void)
+    void CloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_internal();
+      InternalOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::deactivate_close(void)
+    void CloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_internal();
+      InternalOp::deactivate(freeop);
       privilege_path.clear();
       version_info.clear();
       if (mapper_data != NULL)
@@ -12081,36 +12744,23 @@ namespace Legion {
     void MergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_merge();
-    }
-
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::activate_merge(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_close();
+      CloseOp::activate();
       refinement_overwrite = false;
     }
 
     //--------------------------------------------------------------------------
-    void MergeCloseOp::deactivate(void)
+    void MergeCloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_merge();
-      runtime->free_merge_close_op(this);
-    }
-    
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::deactivate_merge(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_close();
+      CloseOp::deactivate(false/*free*/);
       close_mask.clear();
       version_info.clear();
       to_release.clear();
       refinement_mask.clear();
+      if (freeop)
+        runtime->free_merge_close_op(this);
     }
-
+    
     //--------------------------------------------------------------------------
     const char* MergeCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
@@ -12287,7 +12937,7 @@ namespace Legion {
     void PostCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_close();
+      CloseOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -12296,10 +12946,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::deactivate(void)
+    void PostCloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
+      CloseOp::deactivate(false/*free*/);
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
@@ -12311,7 +12961,8 @@ namespace Legion {
         profiling_info.clear();
       }
       target_instances.clear();
-      runtime->free_post_close_op(this);
+      if (freeop)
+        runtime->free_post_close_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12669,17 +13320,18 @@ namespace Legion {
     void VirtualCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_close();
+      CloseOp::activate();
       target_version_info = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void VirtualCloseOp::deactivate(void)
+    void VirtualCloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
+      CloseOp::deactivate(false/*free*/);
       source_version_info.clear();
-      runtime->free_virtual_close_op(this);
+      if (freeop)
+        runtime->free_virtual_close_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12811,23 +13463,15 @@ namespace Legion {
     void RefinementOp::activate_refinement(void)
     //--------------------------------------------------------------------------
     {
-      activate_internal();
+      InternalOp::activate();
       to_refine = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::deactivate(void)
+    void RefinementOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_refinement(); 
-      runtime->free_refinement_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::deactivate_refinement(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_internal();
+      InternalOp::deactivate(false/*free*/);
       version_info.clear();
       make_from.clear();
       if (!projections.empty())
@@ -12845,6 +13489,8 @@ namespace Legion {
       }
       to_release.clear();
       uninitialized_fields.clear();
+      if (freeop)
+        runtime->free_refinement_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -13292,16 +13938,16 @@ namespace Legion {
     void AdvisementOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       parent = LogicalRegion::NO_REGION;
       sharding_function = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::deactivate(void)
+    void AdvisementOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       regions.clear();
       partitions.clear();
       fields.clear();
@@ -13309,7 +13955,8 @@ namespace Legion {
       parent_indexes.clear();
       privilege_paths.clear();
       map_applied_conditions.clear();
-      runtime->free_advisement_op(this);
+      if (freeop)
+        runtime->free_advisement_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -13808,14 +14455,7 @@ namespace Legion {
     void AcquireOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_acquire(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::activate_acquire(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_predication(); 
+      PredicatedOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -13825,19 +14465,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::deactivate(void)
+    void AcquireOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_acquire(); 
-      // Return this operation to the runtime
-      runtime->free_acquire_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::deactivate_acquire(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_predication();  
+      PredicatedOp::deactivate(false/*free*/);
       restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
@@ -13861,6 +14492,9 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+      // Return this operation to the runtime
+      if (freeop)
+        runtime->free_acquire_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14725,14 +15359,7 @@ namespace Legion {
     void ReleaseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_release(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::activate_release(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_predication(); 
+      PredicatedOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -14742,19 +15369,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::deactivate(void)
+    void ReleaseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_release(); 
-      // Return this operation to the runtime
-      runtime->free_release_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::deactivate_release(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_predication();
+      PredicatedOp::deactivate(false/*free*/);
       restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
@@ -14778,6 +15396,9 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+      // Return this operation to the runtime
+      if (freeop)
+        runtime->free_release_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -15566,17 +16187,18 @@ namespace Legion {
     void DynamicCollectiveOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_memoizable();
+      MemoizableOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::deactivate(void)
+    void DynamicCollectiveOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
+      MemoizableOp::deactivate(false/*free*/);
       // Free the future
       future = Future();
-      deactivate_operation();
-      runtime->free_dynamic_collective_op(this);
+      if (freeop)
+        runtime->free_dynamic_collective_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -15681,16 +16303,17 @@ namespace Legion {
     void FuturePredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::deactivate(void)
+    void FuturePredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
+      PredicateOp::deactivate(false/*free*/);
       future = Future();
-      runtime->free_future_predicate_op(this);
+      if (freeop)
+        runtime->free_future_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -15838,16 +16461,17 @@ namespace Legion {
     void NotPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
       pred_op = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::deactivate(void)
+    void NotPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
-      runtime->free_not_predicate_op(this);
+      PredicateOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_not_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -15976,18 +16600,19 @@ namespace Legion {
     void AndPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
       true_count = 0;
       false_short = false;
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::deactivate(void)
+    void AndPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
+      PredicateOp::deactivate(false/*free*/);
       previous.clear();
-      runtime->free_and_predicate_op(this);
+      if (freeop)
+        runtime->free_and_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -16152,18 +16777,19 @@ namespace Legion {
     void OrPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
       false_count = 0;
       true_short = false;
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::deactivate(void)
+    void OrPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
+      PredicateOp::deactivate(false/*free*/);
       previous.clear();
-      runtime->free_or_predicate_op(this);
+      if (freeop)
+        runtime->free_or_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -16450,14 +17076,7 @@ namespace Legion {
     void MustEpochOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_must_epoch_op(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::activate_must_epoch_op(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       map_id = 0;
       tag = 0;
       parent_task = NULL;
@@ -16472,19 +17091,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::deactivate(void)
+    void MustEpochOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_must_epoch_op();      
-      // Return this operation to the free list
-      runtime->free_epoch_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::deactivate_must_epoch_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       // All the sub-operations we have will deactivate themselves
       indiv_tasks.clear();
       indiv_triggered.clear();
@@ -16514,6 +17124,9 @@ namespace Legion {
       completion_preconditions.clear();
       commit_preconditions.clear();
       completion_effects.clear();
+      // Return this operation to the free list
+      if (freeop)
+        runtime->free_epoch_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -17926,34 +18539,21 @@ namespace Legion {
     void PendingPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_pending();
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::activate_pending(void)
+    void PendingPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_pending(); 
-      runtime->free_pending_partition_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::deactivate_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       if (thunk != NULL)
         delete thunk;
       thunk = NULL;
       future_map = FutureMap(); // clear any references
       sources.clear();
+      if (freeop)
+        runtime->free_pending_partition_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -18117,7 +18717,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(const DependentPartitionOp &rhs)
-      : ExternalPartition(), Operation(NULL)
+      : ExternalPartition(), Operation(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -18790,9 +19390,8 @@ namespace Legion {
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
-      bool check_collective = false;
       const bool record_valid = 
-        invoke_mapper(mapped_instances, source_instances, check_collective);
+        invoke_mapper(mapped_instances, source_instances);
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
                                               0/*idx*/, requirement,
@@ -18816,7 +19415,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                check_collective,
+                                                false/*check collective*/,
                                                 record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                                instances_ready, mapped_instances, trace_info);
@@ -18912,14 +19511,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DependentPartitionOp::invoke_mapper(InstanceSet &mapped_instances,
-        std::vector<PhysicalManager*> &source_instances, bool &check_collective)
+                                std::vector<PhysicalManager*> &source_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapPartitionInput input;
       Mapper::MapPartitionOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       output.track_valid_region = true;
-      output.check_collective = false;
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -18937,7 +19535,6 @@ namespace Legion {
       }
       output.copy_fill_priority = 0;
       mapper->invoke_map_partition(this, &input, &output);
-      check_collective = output.check_collective;
       copy_fill_priority = output.copy_fill_priority;
       if (!output.source_instances.empty())
         runtime->forest->physical_convert_sources(this, requirement,
@@ -19451,14 +20048,7 @@ namespace Legion {
     void DependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_dependent_op(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::activate_dependent_op(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       is_index_space = false;
       launch_space = NULL;
       index_domain = Domain::NO_DOMAIN;
@@ -19477,20 +20067,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::deactivate(void)
+    void DependentPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_dependent_op(); 
-      if (remove_launch_space_reference(launch_space))
-        delete launch_space;
-      runtime->free_dependent_partition_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::deactivate_dependent_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       if (thunk != NULL)
       {
         delete thunk;
@@ -19522,6 +20102,10 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
+      if (freeop)
+        runtime->free_dependent_partition_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20113,18 +20697,19 @@ namespace Legion {
     void PointDepPartOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_dependent_op();
+      DependentPartitionOp::activate();
       // Reset this to true after it was cleared by the base call
       is_index_space = true;
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointDepPartOp::deactivate(void)
+    void PointDepPartOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_dependent_op();
-      runtime->free_point_dep_part_op(this);
+      DependentPartitionOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_dep_part_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20506,10 +21091,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::activate_fill(void)
+    void FillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predication();
+      PredicatedOp::activate();
       fill_view = NULL;
       value = NULL;
       value_size = 0;
@@ -20517,10 +21102,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::deactivate_fill(void)
+    void FillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predication();
+      PredicatedOp::deactivate(false/*free*/);
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
@@ -20536,21 +21121,8 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_fill(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_fill(); 
-      runtime->free_fill_op(this);
+      if (freeop)
+        runtime->free_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -21282,14 +21854,7 @@ namespace Legion {
     void IndexFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_fill(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::activate_index_fill(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_fill();
+      FillOp::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -21298,19 +21863,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexFillOp::deactivate(void)
+    void IndexFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_index_fill(); 
-      // Return the operation to the runtime
-      runtime->free_index_fill_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::deactivate_index_fill(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_fill();
+      FillOp::deactivate(false/*free*/);
       // We can deactivate our point operations
       for (std::vector<PointFillOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -21318,6 +21874,9 @@ namespace Legion {
       points.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      // Return the operation to the runtime
+      if (freeop)
+        runtime->free_index_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -21824,16 +22383,17 @@ namespace Legion {
     void PointFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fill();
+      FillOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::deactivate(void)
+    void PointFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fill();
-      runtime->free_point_fill_op(this);
+      FillOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22238,20 +22798,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::activate_attach_op(void)
+    void AttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       file_name = NULL;
       footprint = 0;
       restricted = true;
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::deactivate_attach_op(void)
+    void AttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       if (file_name != NULL)
       {
         free(const_cast<char*>(file_name));
@@ -22270,21 +22830,8 @@ namespace Legion {
       map_applied_conditions.clear();
       external_instances.clear();
       layout_constraint_set = LayoutConstraintSet();
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_attach_op(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_attach_op(); 
-      runtime->free_attach_op(this);
+      if (freeop)
+        runtime->free_attach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22812,14 +23359,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexAttachOp::IndexAttachOp(Runtime *rt)
-      : Operation(rt)
+      : CollectiveViewCreator<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexAttachOp::IndexAttachOp(const IndexAttachOp &rhs)
-      : Operation(NULL)
+      : CollectiveViewCreator<Operation>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -22845,32 +23392,17 @@ namespace Legion {
     void IndexAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_attach();
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndexAttachOp::activate_index_attach(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      CollectiveViewCreator<Operation>::activate();
       launch_space = NULL;
       points_committed = 0;
       commit_request = false;
     }
-
+    
     //--------------------------------------------------------------------------
-    void IndexAttachOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_index_attach();
-      runtime->free_index_attach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAttachOp::deactivate_index_attach(void)
+    void IndexAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      CollectiveViewCreator<Operation>::deactivate(false/*free*/);
       resources = ExternalResources();
       privilege_path.clear();
       // We can deactivate all of our point operations
@@ -22879,6 +23411,8 @@ namespace Legion {
         (*it)->deactivate();
       points.clear();
       map_applied_conditions.clear();
+      if (freeop)
+        runtime->free_index_attach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -23460,16 +23994,17 @@ namespace Legion {
     void PointAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_attach_op();
+      AttachOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointAttachOp::deactivate(void) 
+    void PointAttachOp::deactivate(bool freeop) 
     //--------------------------------------------------------------------------
     {
-      deactivate_attach_op();
-      runtime->free_point_attach_op(this);
+      AttachOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_attach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -23636,6 +24171,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent PointAttachOp::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      return owner->convert_collective_views(requirement_index, analysis_index,
+          region, targets, physical_ctx, analysis_mapping, first_local,
+          target_views, collective_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
     bool PointAttachOp::perform_collective_analysis(CollectiveMapping *&mapping,
                                                     bool &first_local)
     //--------------------------------------------------------------------------
@@ -23709,35 +24258,22 @@ namespace Legion {
     void DetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_detach_op();
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::activate_detach_op(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       flush = true;
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::deactivate(void)
+    void DetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_detach_op();
-      runtime->free_detach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::deactivate_detach_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
       result = Future(); // clear any references on the future
+      if (freeop)
+        runtime->free_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -24000,14 +24536,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexDetachOp::IndexDetachOp(Runtime *rt)
-      : Operation(rt)
+      : CollectiveViewCreator<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexDetachOp::IndexDetachOp(const IndexDetachOp &rhs)
-      : Operation(NULL)
+      : CollectiveViewCreator<Operation>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -24033,34 +24569,20 @@ namespace Legion {
     void IndexDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_detach();
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndexDetachOp::activate_index_detach(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      CollectiveViewCreator<Operation>::activate();
       launch_space = NULL;
       points_completed = 0;
       points_committed = 0;
       complete_request = false;
       commit_request = false;
+      flush = false;
     }
-
+    
     //--------------------------------------------------------------------------
-    void IndexDetachOp::deactivate(void)
+    void IndexDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_index_detach();
-      runtime->free_index_detach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexDetachOp::deactivate_index_detach(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      CollectiveViewCreator<Operation>::deactivate(false/*free*/);
       resources = ExternalResources();
       privilege_path.clear();
       // We can deactivate all of our point operations
@@ -24070,6 +24592,8 @@ namespace Legion {
       points.clear();
       map_applied_conditions.clear();
       result = Future();
+      if (freeop)
+        runtime->free_index_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -24101,7 +24625,7 @@ namespace Legion {
                                    ExternalResourcesImpl *external,
                                    const std::vector<FieldID> &privilege_fields,
                                    const std::vector<PhysicalRegion> &regions,
-                                   bool flush, bool unordered,
+                                   bool flsh, bool unordered,
                                    Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -24122,6 +24646,7 @@ namespace Legion {
       resources = ExternalResources(external);
       launch_space = launch_bounds;
       points.reserve(regions.size());
+      flush = flsh;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         PointDetachOp *point = runtime->get_available_point_detach_op();
@@ -24368,16 +24893,17 @@ namespace Legion {
     void PointDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_detach_op();
+      DetachOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointDetachOp::deactivate(void)
+    void PointDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_detach_op();
-      runtime->free_point_detach_op(this);
+      DetachOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -24470,6 +24996,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent PointDetachOp::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      return owner->convert_collective_views(requirement_index, analysis_index,
+          region, targets, physical_ctx, analysis_mapping, first_local,
+          target_views, collective_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
     bool PointDetachOp::perform_collective_analysis(CollectiveMapping *&mapping,
                                                     bool &first_local)
     //--------------------------------------------------------------------------
@@ -24555,31 +25095,18 @@ namespace Legion {
     void TimingOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_timing();
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TimingOp::activate_timing(void)
+    void TimingOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      activate_operation(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void TimingOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_timing(); 
-      runtime->free_timing_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void TimingOp::deactivate_timing(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       preconditions.clear();
       result = Future();
+      if (freeop)
+        runtime->free_timing_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -24698,32 +25225,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TunableOp::activate_tunable(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
-      tunable_id = 0;
-      mapper_id = 0;
-      tag = 0;
-      arg = NULL;
-      argsize = 0;
-      tunable_index = 0;
-      return_type_size = 0;
-      instance = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void TunableOp::deactivate_tunable(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
-      if (arg != NULL)
-        free(arg);
-      result = Future();
-      futures.clear();
-    }
-
-    //--------------------------------------------------------------------------
     Future TunableOp::initialize(InnerContext *ctx, 
                         const TunableLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -24761,15 +25262,28 @@ namespace Legion {
     void TunableOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_tunable();
+      Operation::activate();
+      tunable_id = 0;
+      mapper_id = 0;
+      tag = 0;
+      arg = NULL;
+      argsize = 0;
+      tunable_index = 0;
+      return_type_size = 0;
+      instance = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void TunableOp::deactivate(void)
+    void TunableOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_tunable();
-      runtime->free_tunable_op(this);
+      Operation::deactivate(false/*free*/);
+      if (arg != NULL)
+        free(arg);
+      result = Future();
+      futures.clear();
+      if (freeop)
+        runtime->free_tunable_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -24947,15 +25461,26 @@ namespace Legion {
     void AllReduceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_all_reduce();
+      Operation::activate();
+      redop_id = 0;
+      future_result_size = 0;
+      serdez_redop_buffer = NULL;
+      serdez_upper_bound = SIZE_MAX;
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::deactivate(void)
+    void AllReduceOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_all_reduce(); 
-      runtime->free_all_reduce_op(this);
+      Operation::deactivate(false/*free*/);
+      future_map = FutureMap();
+      result = Future();
+      sources.clear();
+      targets.clear();
+      if (serdez_redop_buffer != NULL)
+        free(serdez_redop_buffer);
+      if (freeop)
+        runtime->free_all_reduce_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -24970,30 +25495,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ALL_REDUCE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::activate_all_reduce(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation(); 
-      redop_id = 0;
-      future_result_size = 0;
-      serdez_redop_buffer = NULL;
-      serdez_upper_bound = SIZE_MAX;
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::deactivate_all_reduce(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
-      future_map = FutureMap();
-      result = Future();
-      sources.clear();
-      targets.clear();
-      if (serdez_redop_buffer != NULL)
-        free(serdez_redop_buffer);
     }
 
     //--------------------------------------------------------------------------
@@ -25499,7 +26000,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::deactivate(void)
+    void RemoteOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       // should never be called

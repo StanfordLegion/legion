@@ -169,6 +169,8 @@ namespace Legion {
     public:
       GatherCollective(CollectiveIndexLocation loc,
                        ReplicateContext *ctx, ShardID target);
+      GatherCollective(ReplicateContext *ctx, 
+                       CollectiveID id, ShardID origin);
       virtual ~GatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
@@ -449,6 +451,13 @@ namespace Legion {
       BufferBroadcast(ReplicateContext *ctx, ShardID origin,
                      CollectiveIndexLocation loc)
         : BroadcastCollective(loc, ctx, origin),
+          buffer(NULL), size(0), own(false) { }
+      BufferBroadcast(CollectiveID id, ReplicateContext *ctx)
+        : BroadcastCollective(ctx, id, ctx->owner_shard->shard_id),
+          buffer(NULL), size(0), own(false) { }
+      BufferBroadcast(CollectiveID id, ShardID origin,
+                      ReplicateContext *ctx)
+        : BroadcastCollective(ctx, id, origin),
           buffer(NULL), size(0), own(false) { }
       BufferBroadcast(const BufferBroadcast &rhs) 
         : BroadcastCollective(rhs) { assert(false); }
@@ -1277,6 +1286,42 @@ namespace Legion {
     };
 
     /**
+     * \class CollectiveViewRendezvous
+     * A gather collective for performing the rendezvous for the creation
+     * of collective views across all the shards
+     */
+    class CollectiveViewRendezvous : public GatherCollective {
+    public:
+      typedef CollectiveViewCreatorBase::RendezvousKey RendezvousKey;
+      typedef CollectiveViewCreatorBase::RendezvousResult RendezvousResult;
+      typedef CollectiveViewCreatorBase::CollectiveRendezvous 
+        CollectiveRendezvous;
+      class Finalizer {
+      public:
+        virtual void finalize_collective_mapping(const RendezvousKey &key,
+                std::map<LogicalRegion,CollectiveRendezvous> &rendezvous) = 0;
+      };
+    public:
+      CollectiveViewRendezvous(CollectiveID, ReplicateContext *ctx, 
+          Operation *op, Finalizer *finalizer, 
+          const RendezvousKey &key, RegionTreeID tid);
+      virtual ~CollectiveViewRendezvous(void);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_gather(void);
+    public:
+      void perform_rendezvous(
+          std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+    public:
+      const RendezvousKey key;
+      Operation *const op;
+      Finalizer *const finalizer;
+    protected:
+      std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1326,6 +1371,35 @@ namespace Legion {
     protected:
       std::vector<ShardID> unique_sorted_shards;
       size_t radix;
+    };
+
+    /**
+     * \class ReplCollectiveViewCreator
+     * This class provides additional functionality for creating collective
+     * views in control replication contexts by helping to manage the 
+     * rendezvous between the shards.
+     */
+    template<typename OP>
+    class ReplCollectiveViewCreator : public OP, 
+      public CollectiveViewRendezvous::Finalizer {
+    public:
+      typedef typename OP::RendezvousKey RendezvousKey;
+      typedef typename OP::CollectiveRendezvous CollectiveRendezvous;
+    public:
+      ReplCollectiveViewCreator(Runtime *rt);
+      ReplCollectiveViewCreator(const ReplCollectiveViewCreator<OP> &rhs);
+    public:
+      virtual void deactivate(bool free = true);
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      virtual void finalize_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+      void create_collective_view_rendezvous(RegionTreeID tid,
+          unsigned requirement_index, unsigned analysis_index = 0);
+      void shard_off_collective_view_rendezvous(std::set<RtEvent> &done_events);
+    protected:
+      std::map<RendezvousKey,
+               CollectiveViewRendezvous*> collective_view_rendezvous;
     };
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -1493,7 +1567,7 @@ namespace Legion {
       ReplIndividualTask& operator=(const ReplIndividualTask &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
@@ -1530,7 +1604,7 @@ namespace Legion {
      * An individual task that is aware that it is 
      * being executed in a control replication context.
      */
-    class ReplIndexTask : public IndexTask {
+    class ReplIndexTask : public ReplCollectiveViewCreator<IndexTask> {
     public:
       ReplIndexTask(Runtime *rt);
       ReplIndexTask(const ReplIndexTask &rhs);
@@ -1539,7 +1613,7 @@ namespace Legion {
       ReplIndexTask& operator=(const ReplIndexTask &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
@@ -1577,6 +1651,7 @@ namespace Legion {
       BufferExchange *serdez_redop_collective;
       FutureAllReduceCollective *all_reduce_collective;
       OutputSizeExchange *output_size_collective;
+      CollectiveID collective_check_id;
     protected:
       // Map of output sizes collected by this shard
       std::map<unsigned,SizeMap> local_output_sizes;
@@ -1607,7 +1682,7 @@ namespace Legion {
       ReplMergeCloseOp& operator=(const ReplMergeCloseOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       void set_repl_close_info(RtBarrier mapped_barrier);
       virtual void record_refinements(const FieldMask &refinement_mask,
@@ -1635,7 +1710,7 @@ namespace Legion {
       ReplRefinementOp& operator=(const ReplRefinementOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       void set_repl_refinement_info(RtBarrier mapped_barrier, 
                                     RtBarrier refinement_barrier);
@@ -1683,7 +1758,7 @@ namespace Legion {
                                   bool is_first_local);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -1715,7 +1790,7 @@ namespace Legion {
       ReplIndexFillOp& operator=(const ReplIndexFillOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
@@ -1761,7 +1836,7 @@ namespace Legion {
       void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
@@ -1795,7 +1870,7 @@ namespace Legion {
       ReplIndexCopyOp& operator=(const ReplIndexCopyOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
@@ -1853,7 +1928,7 @@ namespace Legion {
       ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -1892,7 +1967,7 @@ namespace Legion {
       ReplPendingPartitionOp& operator=(const ReplPendingPartitionOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void populate_sources(const FutureMap &fm);
       virtual void trigger_execution(void);
@@ -1903,7 +1978,7 @@ namespace Legion {
      * A dependent partitioning operation that knows that it
      * is being executed in a control replication context
      */
-    class ReplDependentPartitionOp : public DependentPartitionOp { 
+    class ReplDependentPartitionOp : public DependentPartitionOp {
     public:
       class ReplByFieldThunk : public ByFieldThunk {
       public:
@@ -2058,7 +2133,7 @@ namespace Legion {
                                Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       // Need to pick our sharding functor
       virtual void trigger_dependence_analysis(void);
@@ -2111,7 +2186,7 @@ namespace Legion {
       ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                       IndexSpace domain, IndexSpace shard_space);
       virtual void instantiate_tasks(InnerContext *ctx,
@@ -2178,7 +2253,7 @@ namespace Legion {
       ReplTimingOp& operator=(const ReplTimingOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_mapping(void);
       virtual void trigger_execution(void);
@@ -2205,7 +2280,7 @@ namespace Legion {
       void initialize_replication(ReplicateContext *context);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void process_result(MapperManager *mapper, 
                                   void *buffer, size_t size) const;
     protected:
@@ -2228,7 +2303,7 @@ namespace Legion {
       void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     protected:
       virtual void populate_sources(void);
       virtual void create_future_instances(std::vector<Memory> &target_mems);
@@ -2254,7 +2329,7 @@ namespace Legion {
       ReplFenceOp& operator=(const ReplFenceOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -2276,7 +2351,8 @@ namespace Legion {
      * mappings can act like a kind of communication between shards
      * where they are all reading/writing to the same logical region.
      */
-    class ReplMapOp : public MapOp {
+    class ReplMapOp : 
+      public ReplCollectiveViewCreator<CollectiveViewCreator<MapOp> > {
     public:
       ReplMapOp(Runtime *rt);
       ReplMapOp(const ReplMapOp &rhs);
@@ -2289,7 +2365,7 @@ namespace Legion {
                                   bool first_local_shard);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual bool invoke_mapper(InstanceSet &mapped_instances,
@@ -2311,7 +2387,8 @@ namespace Legion {
      * An attach operation that is aware that it is being
      * executed in a control replicated context.
      */
-    class ReplAttachOp : public AttachOp {
+    class ReplAttachOp : 
+      public ReplCollectiveViewCreator<CollectiveViewCreator<AttachOp> > {
     public:
       ReplAttachOp(Runtime *rt);
       ReplAttachOp(const ReplAttachOp &rhs);
@@ -2326,7 +2403,7 @@ namespace Legion {
                                   bool first_local_shard);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
@@ -2366,7 +2443,7 @@ namespace Legion {
      * An index space attach operation that is aware
      * that it is executing in a control replicated context
      */
-    class ReplIndexAttachOp : public IndexAttachOp {
+    class ReplIndexAttachOp : public ReplCollectiveViewCreator<IndexAttachOp> {
     public:
       ReplIndexAttachOp(Runtime *rt);
       ReplIndexAttachOp(const ReplIndexAttachOp &rhs);
@@ -2375,7 +2452,7 @@ namespace Legion {
       ReplIndexAttachOp& operator=(const ReplIndexAttachOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2396,7 +2473,8 @@ namespace Legion {
      * An detach operation that is aware that it is being
      * executed in a control replicated context.
      */
-    class ReplDetachOp : public DetachOp {
+    class ReplDetachOp : 
+      public ReplCollectiveViewCreator<CollectiveViewCreator<DetachOp> > {
     public:
       ReplDetachOp(Runtime *rt);
       ReplDetachOp(const ReplDetachOp &rhs);
@@ -2409,7 +2487,7 @@ namespace Legion {
                                   bool first_local_shard);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
@@ -2431,7 +2509,7 @@ namespace Legion {
      * An index space detach operation that is aware
      * that it is executing in a control replicated context
      */
-    class ReplIndexDetachOp : public IndexDetachOp {
+    class ReplIndexDetachOp : public ReplCollectiveViewCreator<IndexDetachOp> {
     public:
       ReplIndexDetachOp(Runtime *rt);
       ReplIndexDetachOp(const ReplIndexDetachOp &rhs);
@@ -2440,7 +2518,7 @@ namespace Legion {
       ReplIndexDetachOp& operator=(const ReplIndexDetachOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2457,7 +2535,8 @@ namespace Legion {
      * An acquire op that is aware that it is
      * executing in a control replicated context
      */
-    class ReplAcquireOp : public AcquireOp {
+    class ReplAcquireOp : 
+      public ReplCollectiveViewCreator<CollectiveViewCreator<AcquireOp> > {
     public:
       ReplAcquireOp(Runtime *rt);
       ReplAcquireOp(const ReplAcquireOp &rhs);
@@ -2469,7 +2548,7 @@ namespace Legion {
                                   bool first_local_shard);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -2486,7 +2565,8 @@ namespace Legion {
      * \class ReplReleaseOp
      * A release op that is aware that it 
      */
-    class ReplReleaseOp : public ReleaseOp {
+    class ReplReleaseOp : 
+      public ReplCollectiveViewCreator<CollectiveViewCreator<ReleaseOp> > {
     public:
       ReplReleaseOp(Runtime *rt);
       ReplReleaseOp(const ReplReleaseOp &rhs);
@@ -2506,7 +2586,7 @@ namespace Legion {
                                                bool &first_local);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     protected:
       CollectiveID sources_check;
       RtBarrier collective_map_barrier;
@@ -2549,7 +2629,7 @@ namespace Legion {
           bool has_blocking_call, bool remove_trace_reference);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
@@ -2587,7 +2667,7 @@ namespace Legion {
                                bool has_blocking_call);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
@@ -2626,7 +2706,7 @@ namespace Legion {
                              Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
@@ -2662,7 +2742,7 @@ namespace Legion {
                             Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     };
@@ -2688,7 +2768,7 @@ namespace Legion {
       void perform_logging(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2959,7 +3039,7 @@ namespace Legion {
       void send_trace_update(ShardID target, Serializer &rez);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source); 
     public:
-      AddressSpaceID find_collective_owner(RegionTreeID tid) const;
+      ShardID find_collective_owner(RegionTreeID tid) const;
       void send_find_or_create_collective_view(ShardID target, Serializer &rez);
       void handle_find_or_create_collective_view(Deserializer &derez);
       void construct_collective_mapping(const RendezvousKey &key,

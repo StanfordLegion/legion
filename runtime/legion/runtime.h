@@ -3167,6 +3167,7 @@ namespace Legion {
                                                   Serializer &rez);
       void send_slice_record_intra_space_dependence(Processor target,
                                                     Serializer &rez);
+      void send_slice_remote_rendezvous(Processor target, Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
@@ -3542,6 +3543,8 @@ namespace Legion {
       void handle_slice_remote_commit(Deserializer &derez);
       void handle_slice_find_intra_dependence(Deserializer &derez);
       void handle_slice_record_intra_dependence(Deserializer &derez);
+      void handle_slice_remote_collective_rendezvous(Deserializer &derez,
+                                                     AddressSpaceID source);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
@@ -3676,8 +3679,6 @@ namespace Legion {
                                                       AddressSpaceID source);
       void handle_remote_context_find_collective_view_response(
                                                       Deserializer &derez);
-      void handle_remote_context_collective_rendezvous(Deserializer &derez,
-                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_request(Deserializer &derez, 
                                                    AddressSpaceID source);
       void handle_compute_equivalence_sets_response(Deserializer &derez,
@@ -5758,6 +5759,8 @@ namespace Legion {
           break;
         case SLICE_RECORD_INTRA_DEP:
           break;
+        case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
+          break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_VALID_UPDATE:
@@ -5967,8 +5970,6 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST:
           break;
         case SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE:
-          break;
-        case SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS:
           break;
         case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST:
           break;

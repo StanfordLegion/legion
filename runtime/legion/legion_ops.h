@@ -379,6 +379,7 @@ namespace Legion {
         bool fill;
         bool task;
       };
+    
     public:
       Operation(Runtime *rt);
       virtual ~Operation(void);
@@ -386,7 +387,7 @@ namespace Legion {
       static const char* get_string_rep(OpKind kind);
     public:
       virtual void activate(void) = 0;
-      virtual void deactivate(void) = 0; 
+      virtual void deactivate(bool free = true) = 0; 
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
       virtual size_t get_region_count(void) const;
@@ -395,10 +396,6 @@ namespace Legion {
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { exec_fence = false; return true; }
       virtual Operation* get_origin_operation(void) { return this; }
-    protected:
-      // Base call
-      void activate_operation(void);
-      void deactivate_operation(void);
     public:
       inline GenerationID get_generation(void) const { return gen; }
       inline RtEvent get_mapped_event(void) const { return mapped_event; }
@@ -532,10 +529,17 @@ namespace Legion {
                                   std::vector<unsigned> &ranking,
                                   std::map<unsigned,PhysicalManager*> &points);
     public:
+      // Methods for help in performing collective analysis/view creation
       virtual size_t get_collective_points(void) const;
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // Collective instance support
@@ -841,6 +845,182 @@ namespace Legion {
       Provenance *provenance;
     };
 
+    /**
+     * \class CollectiveViewCreatorBase
+     * The base class that has most of the implementations for 
+     * collective views creation, modulo the parts that hook in
+     * to the operation class.
+     */
+    class CollectiveViewCreatorBase {
+    public: // Data structures for collective view rendezvous
+      struct RendezvousKey {
+      public:
+        RendezvousKey(void) : region_index(0), analysis(0) { }
+        RendezvousKey(unsigned index, unsigned ana)
+          : region_index(index), analysis(ana) { }
+      public:
+        inline bool operator<(const RendezvousKey &rhs) const
+        {
+          if (region_index < rhs.region_index) return true;
+          if (region_index > rhs.region_index) return false;
+          return (analysis < rhs.analysis);
+        }
+        inline bool operator==(const RendezvousKey &rhs) const
+        {
+          if (region_index != rhs.region_index) return false;
+          return (analysis == rhs.analysis);
+        }
+      public:
+        unsigned region_index;
+        unsigned analysis;
+      };
+      struct PendingRendezvousKey : public RendezvousKey {
+      public:
+        PendingRendezvousKey(void) 
+          : RendezvousKey(), region(LogicalRegion::NO_REGION) { }
+        PendingRendezvousKey(unsigned index, unsigned ana, LogicalRegion r)
+          : RendezvousKey(index, ana), region(r) { }
+      public:
+        inline bool operator<(const PendingRendezvousKey &rhs) const
+        {
+          if (region_index < rhs.region_index) return true;
+          if (region_index > rhs.region_index) return false;
+          if (analysis < rhs.analysis) return true;
+          if (analysis > rhs.analysis) return false;
+          return (region < rhs.region);
+        }
+        inline bool operator==(const PendingRendezvousKey &rhs) const
+        {
+          if (region_index != rhs.region_index) return false;
+          if (analysis != rhs.analysis) return false;
+          return (region == rhs.region);
+        }
+      public:
+        LogicalRegion region;
+      };
+      struct CollectiveResult : public Collectable {
+      public:
+        CollectiveResult(const std::vector<DistributedID> &dids,
+                         DistributedID collective_did, RtEvent ready);
+        CollectiveResult(std::vector<DistributedID> &&dids,
+                         DistributedID collective_did, RtEvent ready);
+        // No-collective instance result
+        CollectiveResult(DistributedID instance_did);
+        // Temporary result pending response message
+        CollectiveResult(const std::vector<DistributedID> &dids);
+      public:
+        bool matches(const std::vector<DistributedID> &dids) const;
+      public:
+        const std::vector<DistributedID> individual_dids;
+        // Not const so they can be updated by response messages
+        DistributedID collective_did;
+        RtEvent ready_event;
+      };
+      struct RendezvousResult : public Collectable {
+      public:
+        RendezvousResult(CollectiveViewCreatorBase *owner,
+                         const PendingRendezvousKey &key,
+                         const InstanceSet &insts, InnerContext *physical_ctx);
+        ~RendezvousResult(void);
+      public:
+        bool matches(const InstanceSet &insts) const;
+        static LegionVector<std::pair<DistributedID,FieldMask> >
+                                  init_instances(const InstanceSet &insts);
+        bool finalize_rendezvous(CollectiveMapping *mapping,
+                                 const FieldMaskSet<CollectiveResult> &views,
+                                 const std::map<DistributedID,size_t> &counts,
+                                 Runtime *runtime, bool first, size_t local);
+      public:
+        CollectiveViewCreatorBase *const owner;
+        InnerContext *const physical_ctx;
+        const PendingRendezvousKey key;
+        // These are the instances represented for this particular result
+        const LegionVector<std::pair<DistributedID,FieldMask> > instances;
+        const RtUserEvent ready;
+      public:
+        // These are the places to put the results when ready
+        std::vector<CollectiveMapping**> target_mappings;
+        std::vector<bool*> target_first_locals;
+        std::vector<LegionVector<FieldMaskSet<InstanceView> >*> target_views;
+        std::vector<std::map<InstanceView*,size_t>*> target_arrivals;
+      };
+      struct CollectiveRendezvous {
+      public:
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> > results;
+        LegionMap<DistributedID,FieldMask> groups;
+        std::map<DistributedID,size_t> counts;
+      };
+      struct PendingCollective {
+      public:
+        PendingCollective(size_t arrivals) : remaining_arrivals(arrivals) { }
+      public:
+        // Note you can't count the rendezvous results because you can
+        // get duplicate arrivals from multiple operations
+        std::map<LogicalRegion,CollectiveRendezvous> rendezvous;
+        size_t remaining_arrivals;
+      };
+    public:
+      RendezvousResult* find_or_create_rendezvous(unsigned index,
+                        unsigned analysis, LogicalRegion region, 
+                        const InstanceSet &targets, InnerContext *physical_ctx,
+                        CollectiveMapping *&analysis_mapping, bool &first_local,
+                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                        std::map<InstanceView*,size_t> &collective_arrivals);
+      bool remove_pending_rendezvous(RendezvousResult *result);
+      static void finalize_collective_mapping(Runtime *runtime,
+          CollectiveMapping *mapping, AddressSpaceID owner_space,
+          // Can assume that the results are sorted
+          std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
+          // Instance DID to counts of users
+          const std::map<DistributedID,size_t> &counts,
+          // The collective views that describes the results for this region
+          const FieldMaskSet<CollectiveResult> &views);
+      static void handle_finalize_collective_mapping(Deserializer &derez,
+                                                     Runtime *runtime);
+    protected:
+      // Collective instance rendezvous data structures
+      mutable LocalLock                                 collective_lock;
+      std::map<PendingRendezvousKey,
+               std::vector<RendezvousResult*> >         pending_rendezvous;
+      std::map<RendezvousKey,PendingCollective>         pending_collectives;
+    };
+
+    /**
+     * \class CollectiveViewCreator
+     * This class provides common functionality for all index space 
+     * operations that are going to need to perform rendezvous between
+     * point ops/tasks that need to create collective views 
+     */
+    template<typename OP>
+    class CollectiveViewCreator : public OP, public CollectiveViewCreatorBase {
+    public:
+      CollectiveViewCreator(Runtime *rt);
+      CollectiveViewCreator(const CollectiveViewCreator<OP> &rhs); 
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+    public:
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
+      // This always needs to happen on the origin node for the operation
+      // so we override it in the case of slice task to handle the remote case
+      virtual void rendezvous_collective_mapping(unsigned requirement_index,
+                                  unsigned analysis_index,
+                                  LogicalRegion region,
+                                  RendezvousResult *result,
+                                  AddressSpaceID source,
+                                  const LegionVector<
+                                   std::pair<DistributedID,FieldMask> > &insts);
+      // In the case of control replication we need to perform additional 
+      // rendezvous steps across the shards so we override for those cases
+      virtual void construct_collective_mapping(const RendezvousKey &key,
+                      std::map<LogicalRegion,CollectiveRendezvous> &rendezvous);
+    };
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     /**
      * \class CollectiveInstanceCreator
@@ -1115,8 +1295,8 @@ namespace Legion {
     public:
       PredicateImpl(Runtime *rt);
     public:
-      void activate_predicate(void);
-      void deactivate_predicate(void);
+      virtual void activate(void);
+      virtual void deactivate(bool free);
     public:
       void add_predicate_reference(void);
       void remove_predicate_reference(void);
@@ -1179,8 +1359,9 @@ namespace Legion {
     public:
       MemoizableOp(Runtime *rt);
       virtual ~MemoizableOp(void);
-    protected:
-      void activate_memoizable(void);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
     public:
       inline PhysicalTemplate* get_template(void) const { return tpl; }
       inline bool is_memoizing(void) const { return memo_state != NO_MEMO; }
@@ -1252,8 +1433,8 @@ namespace Legion {
     public:
       PredicatedOp(Runtime *rt);
     public:
-      void activate_predication(void);
-      void deactivate_predication(void);
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
     public:
       void initialize_predication(InnerContext *ctx,bool track,unsigned regions,
           const std::vector<StaticDependence> *dependences, const Predicate &p,
@@ -1352,11 +1533,9 @@ namespace Legion {
                       Provenance *provenance);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
-    protected:
-      void deactivate_map_op(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -1522,13 +1701,11 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx,
                       const CopyLauncher &launcher, Provenance *provenance);
-      void activate_copy(void);
-      void deactivate_copy(void);
       void log_copy_requirements(void) const;
       void perform_base_dependence_analysis(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -1690,10 +1867,7 @@ namespace Legion {
                       Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void); 
-    protected:
-      void activate_index_copy(void);
-      void deactivate_index_copy(void);
+      virtual void deactivate(bool free = true); 
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
@@ -1772,7 +1946,7 @@ namespace Legion {
       void launch(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -1873,7 +2047,7 @@ namespace Legion {
         { execution_preconditions.insert(precondition); }
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
@@ -1885,8 +2059,6 @@ namespace Legion {
       virtual void complete_replay(ApEvent pre, ApEvent complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
     protected:
-      void activate_fence(void);
-      void deactivate_fence(void);
       void perform_fence_analysis(bool update_fence = false);
       void update_current_fence(void);
     protected:
@@ -1918,7 +2090,7 @@ namespace Legion {
       void set_previous(ApEvent previous);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -1970,7 +2142,7 @@ namespace Legion {
                           const std::map<DomainPoint,Future> &futures);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2046,12 +2218,10 @@ namespace Legion {
                                       const bool skip_dep_analysis = false);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      void activate_deletion(void);
-      void deactivate_deletion(void);
       void log_deletion_requirements(void);
     public:
       virtual void trigger_dependence_analysis(void);
@@ -2102,8 +2272,8 @@ namespace Legion {
     public:
       void initialize_internal(Operation *creator, int creator_req_idx,
                                const LogicalTraceInfo &trace_info);
-      void activate_internal(void);
-      void deactivate_internal(void);
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual bool is_internal_op(void) const { return true; }
       virtual const FieldMask& get_internal_mask(void) const = 0;
@@ -2168,8 +2338,6 @@ namespace Legion {
       virtual const std::string& get_provenance_string(void) const;
       virtual Mappable* get_mappable(void);
     public:
-      void activate_close(void);
-      void deactivate_close(void);
       // This is for post and virtual close ops
       void initialize_close(InnerContext *ctx,
                             const RegionRequirement &req, bool track);
@@ -2180,8 +2348,8 @@ namespace Legion {
                             const LogicalTraceInfo &trace_info);
       void perform_logging(void);
     public:
-      virtual void activate(void) = 0;
-      virtual void deactivate(void) = 0;
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
       virtual size_t get_region_count(void) const;
@@ -2213,11 +2381,9 @@ namespace Legion {
       // Make this virtual so we can override for ReplMergeCloseOp
       virtual void record_refinements(const FieldMask &refinement_mask, 
                                       const bool overwrite);
-      void activate_merge(void);
-      void deactivate_merge(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
@@ -2255,7 +2421,7 @@ namespace Legion {
                       const InstanceSet &target_instances); 
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2322,7 +2488,7 @@ namespace Legion {
                       const VersionInfo *targets);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2378,7 +2544,7 @@ namespace Legion {
                               std::set<RtEvent> &applied_events);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual const FieldMask& get_internal_mask(void) const;
@@ -2428,7 +2594,7 @@ namespace Legion {
                       ShardingFunction *function = NULL);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -2485,7 +2651,7 @@ namespace Legion {
                       Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const; 
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -2529,8 +2695,6 @@ namespace Legion {
       // These are helper methods for ReplAcquireOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
-      void activate_acquire(void);
-      void deactivate_acquire(void);
       void check_acquire_privilege(void);
       void compute_parent_index(void);
       void invoke_mapper(void);
@@ -2605,7 +2769,7 @@ namespace Legion {
                       Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -2653,8 +2817,6 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances);
     protected:
-      void activate_release(void);
-      void deactivate_release(void);
       void check_release_privilege(void);
       void compute_parent_index(void);
       void log_release_requirement(void);
@@ -2722,7 +2884,7 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2751,7 +2913,7 @@ namespace Legion {
       void initialize(InnerContext *ctx, Future f, Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       const char* get_logging_name(void) const;
       OpKind get_operation_kind(void) const;
     public:
@@ -2780,7 +2942,7 @@ namespace Legion {
                       Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2810,7 +2972,7 @@ namespace Legion {
                       Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2842,7 +3004,7 @@ namespace Legion {
                       Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:
@@ -2962,10 +3124,7 @@ namespace Legion {
           std::vector<PhysicalRegion> &unmapped); 
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      void activate_must_epoch_op(void);
-      void deactivate_must_epoch_op(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
@@ -3442,9 +3601,6 @@ namespace Legion {
                                         Provenance *provenance);
       void perform_logging(void);
     public:
-      void activate_pending(void);
-      void deactivate_pending(void);
-    public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
@@ -3452,7 +3608,7 @@ namespace Legion {
       virtual bool is_partition_op(void) const { return true; } 
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
@@ -3677,7 +3833,7 @@ namespace Legion {
       virtual Mappable* get_mappable(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -3755,8 +3911,7 @@ namespace Legion {
       void check_privilege(void);
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances,
-                         std::vector<PhysicalManager*> &source_instances,
-                         bool &check_collective);
+                         std::vector<PhysicalManager*> &source_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
       void finalize_partition_profiling(void);
@@ -3819,7 +3974,7 @@ namespace Legion {
       void launch(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual ApEvent trigger_thunk(IndexSpace handle, ApEvent insts_ready,
@@ -3923,11 +4078,9 @@ namespace Legion {
                       Provenance *provenance);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
-      void activate_fill(void);
-      void deactivate_fill(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4015,7 +4168,7 @@ namespace Legion {
                       IndexSpace launch_space, Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     protected:
       void activate_index_fill(void);
       void deactivate_index_fill(void);
@@ -4064,7 +4217,7 @@ namespace Legion {
       void launch(RtEvent view_ready);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
@@ -4146,7 +4299,7 @@ namespace Legion {
         { return requirement; }
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4172,8 +4325,6 @@ namespace Legion {
                                               const FieldMask &external_mask);
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     protected:
-      void activate_attach_op(void);
-      void deactivate_attach_op(void);
       void check_privilege(void);
       void compute_parent_index(void);
       void log_requirement(void);
@@ -4206,7 +4357,7 @@ namespace Legion {
      * operations where we are attaching external resources
      * to many subregions of a region tree with a single operation
      */
-    class IndexAttachOp : public Operation {
+    class IndexAttachOp : public CollectiveViewCreator<Operation> {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
     public:
@@ -4227,7 +4378,7 @@ namespace Legion {
         { return requirement; }
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4245,8 +4396,6 @@ namespace Legion {
     public:
       void handle_point_commit(void);
     protected:
-      void activate_index_attach(void);
-      void deactivate_index_attach(void);
       void compute_parent_index(void);
       void check_privilege(void);
       void log_requirement(void);
@@ -4275,7 +4424,7 @@ namespace Legion {
       PointAttachOp& operator=(const PointAttachOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       PhysicalRegionImpl* initialize(IndexAttachOp *owner, InnerContext *ctx,
         const IndexAttachLauncher &launcher, const OrderingConstraint &ordering,
@@ -4289,6 +4438,12 @@ namespace Legion {
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
     protected:
@@ -4315,7 +4470,7 @@ namespace Legion {
                                Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4340,8 +4495,6 @@ namespace Legion {
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
       virtual bool is_point_detach(void) const { return false; }
     protected:
-      void activate_detach_op(void);
-      void deactivate_detach_op(void);
       void compute_parent_index(void);
       void log_requirement(void);
     public:
@@ -4359,7 +4512,7 @@ namespace Legion {
      * \class IndexDetachOp
      * This is an index space detach operation for performing many detaches
      */
-    class IndexDetachOp : public Operation {
+    class IndexDetachOp : public CollectiveViewCreator<Operation> {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:
@@ -4379,7 +4532,7 @@ namespace Legion {
                                Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4397,8 +4550,6 @@ namespace Legion {
       void handle_point_complete(void);
       void handle_point_commit(void);
     protected:
-      void activate_index_detach(void);
-      void deactivate_index_detach(void);
       void compute_parent_index(void);
       void log_requirement(void);
     protected:
@@ -4414,6 +4565,7 @@ namespace Legion {
       unsigned                                      points_committed;
       bool                                          complete_request;
       bool                                          commit_request;
+      bool                                          flush;
     };
 
     /**
@@ -4429,7 +4581,7 @@ namespace Legion {
       PointDetachOp& operator=(const PointDetachOp &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     public:
       void initialize_detach(IndexDetachOp *owner, InnerContext *ctx,
             const PhysicalRegion &region, const DomainPoint &point, bool flush);
@@ -4443,6 +4595,12 @@ namespace Legion {
       virtual void record_completion_effects(const std::set<ApEvent> &effects);
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
     protected:
@@ -4466,14 +4624,11 @@ namespace Legion {
                         Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
         { return false; }
-    protected:
-      void activate_timing(void);
-      void deactivate_timing(void);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
@@ -4496,13 +4651,11 @@ namespace Legion {
     public:
       TunableOp& operator=(const TunableOp &rhs);
     public:
-      void activate_tunable(void);
-      void deactivate_tunable(void);
       Future initialize(InnerContext *ctx, const TunableLauncher &launcher,
                         Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
@@ -4545,7 +4698,7 @@ namespace Legion {
                         Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual bool invalidates_physical_trace_template(bool &exec_fence) const
@@ -4555,8 +4708,6 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void) { return NULL; }
     protected:
-      void activate_all_reduce(void);
-      void deactivate_all_reduce(void);
       void invoke_mapper(std::vector<Memory> &targets);
       ApEvent finalize_serdez_targets(RtEvent &protect);
     public:
@@ -4616,7 +4767,7 @@ namespace Legion {
                           ReferenceMutator &mutator) = 0;
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
       virtual Operation* get_origin_operation(void) 

@@ -147,9 +147,6 @@ namespace Legion {
       inline void set_origin_mapped(bool origin) { map_origin = origin; }
       inline void set_replicated(bool repl) { replicate = repl; }
       inline void set_target_proc(Processor next) { target_proc = next; }
-    protected:
-      void activate_task(void);
-      void deactivate_task(void);
     public:
       void set_must_epoch(MustEpochOp *epoch, unsigned index,
                           bool do_registration);
@@ -170,8 +167,8 @@ namespace Legion {
     public:
       bool select_task_options(bool prioritize);
     public:
-      virtual void activate(void) = 0;
-      virtual void deactivate(void) = 0;
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual size_t get_region_count(void) const;
@@ -271,6 +268,8 @@ namespace Legion {
       virtual void trigger_task_commit(void) = 0;
     protected:
       TaskRequirements                          logical_regions;
+      // Region requirements to check for collective behavior
+      std::vector<unsigned>                     check_collective_regions;
       // A map of any locks that we need to take for this task
       std::map<Reservation,bool/*exclusive*/>   atomic_locks;
       // Set of acquired instances for this task
@@ -380,9 +379,6 @@ namespace Legion {
     public:
       SingleTask(Runtime *rt);
       virtual ~SingleTask(void);
-    protected:
-      void activate_single(void);
-      void deactivate_single(void);
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
@@ -452,8 +448,8 @@ namespace Legion {
       virtual void handle_profiling_update(int count);
       void finalize_single_task_profiling(void);
     public:
-      virtual void activate(void) = 0;
-      virtual void deactivate(void) = 0;
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
       virtual bool is_top_level_task(void) const { return false; }
 #ifdef DEBUG_LEGION
       virtual bool is_implicit_top_level_task(void) const { return false; }
@@ -525,7 +521,6 @@ namespace Legion {
       std::vector<Memory>                         future_memories;
     protected: // Mapper choices 
       std::vector<unsigned>                       untracked_valid_regions;
-      std::vector<unsigned>                       check_collective_regions;
       VariantID                                   selected_variant;
       TaskPriority                                task_priority;
       bool                                        perform_postmap;
@@ -588,7 +583,7 @@ namespace Legion {
      * This is the parent type for each of the multi-task
      * kinds of classes.
      */
-    class MultiTask : public TaskOp {
+    class MultiTask : public CollectiveViewCreator<TaskOp> {
     public:
       class OutputOptions {
       public:
@@ -608,9 +603,6 @@ namespace Legion {
     public:
       MultiTask(Runtime *rt);
       virtual ~MultiTask(void);
-    protected:
-      void activate_multi(void);
-      void deactivate_multi(void);
     public:
       bool is_sliced(void) const;
       void slice_index_space(void);
@@ -618,8 +610,8 @@ namespace Legion {
       void clone_multi_from(MultiTask *task, IndexSpace is, Processor p,
                             bool recurse, bool stealable);
     public:
-      virtual void activate(void) = 0;
-      virtual void deactivate(void) = 0;
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
       virtual bool is_reducing_future(void) const { return (redop > 0); }
       virtual Domain get_slice_domain(void) const;
       virtual ShardID get_shard_id(void) const { return 0; }
@@ -729,10 +721,8 @@ namespace Legion {
       IndividualTask& operator=(const IndividualTask &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
     protected:
-      void activate_individual_task(void);
-      void deactivate_individual_task(void);
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
       virtual Domain get_slice_domain(void) const { return Domain::NO_DOMAIN; }
       virtual ShardID get_shard_id(void) const { return 0; }
@@ -859,7 +849,7 @@ namespace Legion {
       PointTask& operator=(const PointTask &rhs);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual Operation* get_origin_operation(void); 
       virtual SingleTask* get_origin_task(void) const { return orig_task; }
       virtual Domain get_slice_domain(void) const 
@@ -927,6 +917,12 @@ namespace Legion {
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation
@@ -996,7 +992,7 @@ namespace Legion {
       ShardTask& operator=(const ShardTask &rhs);
     public:
       virtual void activate(void); 
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual Domain get_slice_domain(void) const;
       virtual ShardID get_shard_id(void) const { return shard_id; }
       virtual size_t get_total_shards(void) const;
@@ -1155,10 +1151,7 @@ namespace Legion {
                                  IndexSpace launch_space);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
-    protected:
-      void activate_index_task(void);
-      void deactivate_index_task(void);
+      virtual void deactivate(bool free = true);
     public:
       virtual void prepare_map_must_epoch(void);
     protected:
@@ -1347,7 +1340,7 @@ namespace Legion {
         { return remote_owner_uid; }
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual Operation* get_origin_operation(void) { return index_owner; }
     public:
       virtual void trigger_dependence_analysis(void);
@@ -1455,6 +1448,21 @@ namespace Legion {
     public:
       virtual size_t get_collective_points(void) const;
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual RtEvent convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals);
+      virtual void rendezvous_collective_mapping(unsigned requirement_index,
+                                  unsigned analysis_index,
+                                  LogicalRegion region,
+                                  RendezvousResult *result,
+                                  AddressSpaceID source,
+                                  const LegionVector<
+                                   std::pair<DistributedID,FieldMask> > &insts);
+      static void handle_collective_rendezvous(Deserializer &derez,
+                                       Runtime *runtime, AddressSpaceID source);
 #ifdef NO_EXPLICIT_COLLECTIVES
     public:
       // For collective instance creation

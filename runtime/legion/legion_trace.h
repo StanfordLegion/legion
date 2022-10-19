@@ -335,7 +335,7 @@ namespace Legion {
                     bool remove_trace_reference, Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
@@ -369,7 +369,7 @@ namespace Legion {
                                Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
@@ -402,7 +402,7 @@ namespace Legion {
                              Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
@@ -430,7 +430,7 @@ namespace Legion {
                             Provenance *provenance);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     };
@@ -452,7 +452,7 @@ namespace Legion {
       void perform_logging(void);
     public:
       virtual void activate(void);
-      virtual void deactivate(void);
+      virtual void deactivate(bool free = true);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     public:

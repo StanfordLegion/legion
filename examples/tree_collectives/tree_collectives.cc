@@ -185,20 +185,16 @@ public:
                            Processor local, const char *mapper_name)
     : DefaultMapper(rt, machine, local, mapper_name) { }
 
-  virtual void map_task(const Mapping::MapperContext ctx,
-                        const Task& task,
-                        const Mapping::Mapper::MapTaskInput& input,
-                              Mapping::Mapper::MapTaskOutput& output)
+  virtual void select_task_options(const Mapping::MapperContext ctx,
+                                   const Task& task,
+                                   Mapping::Mapper::TaskOptions& options)
   {
-    Mapping::DefaultMapper::map_task(ctx, task, input, output);
+    // Do the base mapper call and look for collective instances
+    DefaultMapper::select_task_options(ctx, task, options);
     for (unsigned idx = 0; idx < task.regions.size(); idx++)
       if (task.regions[idx].tag & COLLECTIVE_INST_TAG)
-        output.check_collective_regions.insert(idx);
+        options.check_collective_regions.insert(idx);
   }
-
-protected:
-  std::map<std::pair<Memory::Kind,FieldSpace>,
-    LayoutConstraintID> collective_constraint_cache;
 };
 
 void update_mappers(Machine machine, Runtime *runtime,

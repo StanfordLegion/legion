@@ -12148,6 +12148,12 @@ namespace Legion {
               runtime->handle_slice_record_intra_dependence(derez);
               break;
             }
+          case SLICE_REMOTE_COLLECTIVE_RENDEZVOUS:
+            {
+              runtime->handle_slice_remote_collective_rendezvous(derez,
+                                                  remote_address_space);
+              break;
+            }
           case DISTRIBUTED_REMOTE_REGISTRATION:
             {
               runtime->handle_did_remote_registration(derez, 
@@ -12692,12 +12698,6 @@ namespace Legion {
             {
               runtime->handle_remote_context_find_collective_view_response(
                                                                     derez);
-              break;
-            }
-          case SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS:
-            {
-              runtime->handle_remote_context_collective_rendezvous(derez,
-                                                    remote_address_space);
               break;
             }
           case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
@@ -21801,6 +21801,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_remote_rendezvous(Processor target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SLICE_REMOTE_COLLECTIVE_RENDEZVOUS>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_did_remote_registration(AddressSpaceID target, 
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22683,16 +22691,7 @@ namespace Legion {
       find_messenger(target)->send_message<
           SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE>(rez, 
               true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_remote_context_collective_rendezvous(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<
-        SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS>(rez, true/*flush*/);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
@@ -24114,6 +24113,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_remote_collective_rendezvous(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_collective_rendezvous(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_did_remote_registration(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -24409,7 +24416,7 @@ namespace Legion {
     void Runtime::handle_collective_finalize_mapping(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      InnerContext::handle_finalize_collective_mapping(derez, this);
+      CollectiveViewCreatorBase::handle_finalize_collective_mapping(derez,this);
     }
 
     //--------------------------------------------------------------------------
@@ -24945,15 +24952,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RemoteContext::handle_find_collective_view_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_remote_context_collective_rendezvous(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RemoteContext::handle_collective_rendezvous(derez, this, source);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void Runtime::handle_compute_equivalence_sets_request(Deserializer &derez,

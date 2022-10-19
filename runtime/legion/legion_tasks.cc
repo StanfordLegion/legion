@@ -339,10 +339,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::activate_task(void)
+    void TaskOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predication();
+      PredicatedOp::activate();
       complete_received = false;
       commit_received = false;
       children_complete = false;
@@ -364,10 +364,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::deactivate_task(void)
+    void TaskOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predication();
+      PredicatedOp::deactivate(freeop);
       indexes.clear();
       regions.clear();
       output_regions.clear();
@@ -402,6 +402,7 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+      check_collective_regions.clear();
       atomic_locks.clear(); 
       parent_req_indexes.clear();
       version_infos.clear();
@@ -461,6 +462,9 @@ namespace Legion {
           rez.serialize(tpl);
           rez.serialize(trace_local_id);
         }
+        rez.serialize<size_t>(check_collective_regions.size());
+        for (unsigned idx = 0; idx < check_collective_regions.size(); idx++)
+          rez.serialize(check_collective_regions[idx]);
       }
       rez.serialize(request_valid_instances);
       rez.serialize(execution_fence_event);
@@ -507,6 +511,11 @@ namespace Legion {
           derez.deserialize(tpl);
           derez.deserialize(trace_local_id);
         }
+        size_t num_check_collective_regions;
+        derez.deserialize(num_check_collective_regions);
+        check_collective_regions.resize(num_check_collective_regions);
+        for (unsigned idx = 0; idx < num_check_collective_regions; idx++)
+          derez.deserialize(check_collective_regions[idx]);
       }
       derez.deserialize(request_valid_instances);
       derez.deserialize(execution_fence_event);
@@ -760,6 +769,27 @@ namespace Legion {
                                 parent_ctx->get_task_name(),
                                 parent_ctx->get_unique_id(), 
                                 get_task_name(), get_unique_id())
+      }
+      if (!options.check_collective_regions.empty() && is_index_space)
+      {
+        for (std::set<unsigned>::const_iterator it =
+              options.check_collective_regions.begin(); it !=
+              options.check_collective_regions.end(); it++)
+        {
+          // Remove it if it is too big or 
+          if ((*it >= regions.size()) || IS_WRITE(regions[*it]))
+          {
+            if (*it < regions.size())
+              REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
+                  "Ignoring request by mapper %s to check for collective usage "
+                  "for region requirement %d of task %s (UID %lld) because "
+                  "region requirement has writing privileges.",
+                  mapper->get_mapper_name(), *it, 
+                  get_task_name(), unique_op_id)
+          }
+          else
+            check_collective_regions.push_back(*it);
+        }
       }
       return options.inline_task;
     }
@@ -1415,6 +1445,7 @@ namespace Legion {
       this->sharding_space = rhs->sharding_space;
       this->request_valid_instances = rhs->request_valid_instances;
       // From TaskOp
+      this->check_collective_regions = rhs->check_collective_regions;
       this->atomic_locks = rhs->atomic_locks;
       this->parent_req_indexes = rhs->parent_req_indexes;
       this->current_proc = rhs->current_proc;
@@ -2210,11 +2241,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::activate_single(void)
+    void SingleTask::activate(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_SINGLE_CALL);
-      activate_task();
+      TaskOp::activate();
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
@@ -2232,11 +2263,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::deactivate_single(void)
+    void SingleTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_SINGLE_CALL);
-      deactivate_task();
+      TaskOp::deactivate(freeop);
       target_processors.clear();
       physical_instances.clear();
       region_preconditions.clear();
@@ -2256,7 +2287,6 @@ namespace Legion {
         profiling_info.clear();
       }
       untracked_valid_regions.clear();
-      check_collective_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context; 
       if ((shard_manager != NULL) && shard_manager->remove_reference())
@@ -2375,10 +2405,7 @@ namespace Legion {
           rez.serialize(profiling_priority);
         rez.serialize<size_t>(untracked_valid_regions.size());
         for (unsigned idx = 0; idx < untracked_valid_regions.size(); idx++)
-          rez.serialize(untracked_valid_regions[idx]);
-        rez.serialize<size_t>(check_collective_regions.size());
-        for (unsigned idx = 0; idx < check_collective_regions.size(); idx++)
-          rez.serialize(check_collective_regions[idx]);
+          rez.serialize(untracked_valid_regions[idx]); 
       }
       else
       { 
@@ -2485,12 +2512,7 @@ namespace Legion {
         derez.deserialize(num_untracked_valid_regions);
         untracked_valid_regions.resize(num_untracked_valid_regions);
         for (unsigned idx = 0; idx < num_untracked_valid_regions; idx++)
-          derez.deserialize(untracked_valid_regions[idx]);
-        size_t num_check_collective_regions;
-        derez.deserialize(num_check_collective_regions);
-        check_collective_regions.resize(num_check_collective_regions);
-        for (unsigned idx = 0; idx < num_check_collective_regions; idx++)
-          derez.deserialize(check_collective_regions[idx]);
+          derez.deserialize(untracked_valid_regions[idx]); 
       }
       else
       {
@@ -3475,28 +3497,7 @@ namespace Legion {
           else
             untracked_valid_regions.push_back(*it);
         }
-      }
-      if (!output.check_collective_regions.empty())
-      {
-        for (std::set<unsigned>::const_iterator it = 
-              output.check_collective_regions.begin(); it !=
-              output.check_collective_regions.end(); it++)
-        {
-          // Remove it if it is too big or 
-          if ((*it >= regions.size()) || IS_WRITE(regions[*it]))
-          {
-            if (*it < regions.size())
-              REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
-                  "Ignoring request by mapper %s to check for collective usage "
-                  "for region requirement %d of task %s (UID %lld) because "
-                  "region requirement has writing privileges.",
-                  mapper->get_mapper_name(), *it, 
-                  get_task_name(), unique_op_id)
-          }
-          else
-            check_collective_regions.push_back(*it);
-        }
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -5235,7 +5236,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MultiTask::MultiTask(Runtime *rt)
-      : TaskOp(rt)
+      : CollectiveViewCreator<TaskOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -5247,11 +5248,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MultiTask::activate_multi(void)
+    void MultiTask::activate(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
-      activate_task();
+      CollectiveViewCreator<TaskOp>::activate();
       launch_space = NULL;
       future_handles = NULL;
       internal_space = IndexSpace::NO_SPACE;
@@ -5273,13 +5274,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MultiTask::deactivate_multi(void)
+    void MultiTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_MULTI_CALL);
       if (runtime->profiler != NULL)
         runtime->profiler->register_multi_task(this, task_id);
-      deactivate_task();
+      CollectiveViewCreator<TaskOp>::deactivate(freeop);
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       if ((future_handles != NULL) && future_handles->remove_reference())
@@ -5875,14 +5876,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, ACTIVATE_INDIVIDUAL_CALL);
-      activate_individual_task(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::activate_individual_task(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_single();
+      SingleTask::activate();
       predicate_false_result = NULL;
       predicate_false_size = 0;
       orig_task = this;
@@ -5895,19 +5889,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::deactivate(void)
+    void IndividualTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, DEACTIVATE_INDIVIDUAL_CALL);
-      deactivate_individual_task(); 
-      runtime->free_individual_task(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::deactivate_individual_task(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_single();
+      SingleTask::deactivate(false/*free*/);
       if (predicate_false_result != NULL)
       {
         legion_free(PREDICATE_ALLOC, predicate_false_result, 
@@ -5920,6 +5906,8 @@ namespace Legion {
       predicate_false_future = Future();
       privilege_paths.clear();
       valid_output_regions.clear();
+      if (freeop)
+        runtime->free_individual_task(this);
     }
 
     //--------------------------------------------------------------------------
@@ -7074,13 +7062,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_ACTIVATE_CALL);
-      activate_single();
+      SingleTask::activate();
       orig_task = this;
       slice_owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::deactivate(void)
+    void PointTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_DEACTIVATE_CALL);
@@ -7088,7 +7076,7 @@ namespace Legion {
         runtime->profiler->register_slice_owner(
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
-      deactivate_single();
+      SingleTask::deactivate(false/*free*/);
       if (!remote_instances.empty())
       {
         UniqueID local_uid = get_unique_id();
@@ -7104,7 +7092,8 @@ namespace Legion {
         }
         remote_instances.clear();
       }
-      runtime->free_point_task(this);
+      if (freeop)
+        runtime->free_point_task(this);
     } 
 
     //--------------------------------------------------------------------------
@@ -7727,6 +7716,20 @@ namespace Legion {
       return slice_owner->find_shard_participants(shards);
     }
 
+    //--------------------------------------------------------------------------
+    RtEvent PointTask::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->convert_collective_views(requirement_index, 
+          analysis_index, region, targets, physical_ctx, analysis_mapping,
+          first_local, target_views, collective_arrivals);
+    }
+
 #ifdef NO_EXPLICIT_COLLECTIVES
     //--------------------------------------------------------------------------
     RtEvent PointTask::acquire_collective_allocation_privileges(
@@ -7882,7 +7885,7 @@ namespace Legion {
       : SingleTask(rt), shard_id(id), all_shards_complete(false)
     //--------------------------------------------------------------------------
     {
-      activate_single();
+      SingleTask::activate();
       resolved = true;
       target_proc = proc;
       current_proc = proc;
@@ -7927,7 +7930,7 @@ namespace Legion {
 #endif
         repl_ctx->clear_instance_top_views();
       }
-      deactivate_single();
+      SingleTask::deactivate(false/*free*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7947,7 +7950,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::deactivate(void)
+    void ShardTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -8657,14 +8660,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_ACTIVATE_CALL);
-      activate_index_task(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::activate_index_task(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_multi();
+      MultiTask::activate();
       serdez_redop_fns = NULL;
       total_points = 0;
       mapped_points = 0;
@@ -8679,20 +8675,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::deactivate(void)
+    void IndexTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
-      deactivate_index_task(); 
-      runtime->free_index_task(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::deactivate_index_task(void)
-    //--------------------------------------------------------------------------
-    {
+      MultiTask::deactivate(false/*free*/);
       reduction_instance = NULL; // we don't own this so clear it
-      deactivate_multi();
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
       {
@@ -8739,6 +8727,8 @@ namespace Legion {
       point_requirements.clear();
       assert(pending_intra_space_dependences.empty());
 #endif
+      if (freeop)
+        runtime->free_index_task(this);
     }
 
     //--------------------------------------------------------------------------
@@ -11042,7 +11032,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ACTIVATE_CALL);
-      activate_multi();
+      MultiTask::activate();
       num_unmapped_points = 0;
       num_uncomplete_points = 0;
       num_uncommitted_points = 0;
@@ -11056,11 +11046,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::deactivate(void)
+    void SliceTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_DEACTIVATE_CALL);
-      deactivate_multi();
+      MultiTask::deactivate(false/*free*/);
       // Deactivate all our points 
       for (std::vector<PointTask*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -11091,7 +11081,8 @@ namespace Legion {
       created_index_partitions.clear();
       unique_intra_space_deps.clear();
       all_output_sizes.clear();
-      runtime->free_slice_task(this);
+      if (freeop)
+        runtime->free_slice_task(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12549,6 +12540,84 @@ namespace Legion {
       assert(!is_remote());
 #endif
       return index_owner->find_shard_participants(shards);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent SliceTask::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      if (is_remote())
+        return MultiTask::convert_collective_views(requirement_index,
+            analysis_index, region, targets, physical_ctx, analysis_mapping,
+            first_local, target_views, collective_arrivals);
+      else
+        return index_owner->convert_collective_views(requirement_index,
+            analysis_index, region, targets, physical_ctx, analysis_mapping,
+            first_local, target_views, collective_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::rendezvous_collective_mapping(unsigned requirement_index, 
+                 unsigned analysis_index, LogicalRegion region,
+                 RendezvousResult *result, AddressSpaceID source,
+                 const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_remote());
+      assert(source == runtime->address_space);
+#endif
+      // Send this back to the owner node
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(index_owner);
+        rez.serialize(requirement_index);
+        rez.serialize(analysis_index);
+        rez.serialize(region);
+        rez.serialize(result);
+        rez.serialize<size_t>(insts.size());
+        for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
+              it = insts.begin(); it != insts.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      runtime->send_slice_remote_rendezvous(orig_proc, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void SliceTask::handle_collective_rendezvous(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexTask *index_owner;
+      derez.deserialize(index_owner);
+      unsigned requirement_index, analysis_index;
+      derez.deserialize(requirement_index);
+      derez.deserialize(analysis_index);
+      LogicalRegion region;
+      derez.deserialize(region);
+      RendezvousResult *result;
+      derez.deserialize(result);
+      size_t num_insts;
+      derez.deserialize(num_insts);
+      LegionVector<std::pair<DistributedID,FieldMask> > instances(num_insts);
+      for (unsigned idx = 0; idx < num_insts; idx++)
+      {
+        derez.deserialize(instances[idx].first);
+        derez.deserialize(instances[idx].second);
+      }
+
+      index_owner->rendezvous_collective_mapping(requirement_index,
+          analysis_index, region, result, source, instances);
     }
     
 #ifdef NO_EXPLICIT_COLLECTIVES

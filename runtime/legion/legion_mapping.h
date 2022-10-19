@@ -395,6 +395,11 @@ namespace Legion {
        *     operations to mutate the priority of the parent task
        *     then the mapper can use this field to alter the 
        *     priority of the parent task
+       *
+       * check_collective_regions:empty
+       *     For index space tasks, provide the indexes of any region 
+       *     requirements that the runtime should check for collective
+       *     mappings between the point tasks.
        */
       struct TaskOptions {
         Processor                              initial_proc; // = current
@@ -405,6 +410,7 @@ namespace Legion {
         bool                                   memoize;  // = false
         bool                                   replicate;    // = false
         TaskPriority                           parent_priority; // = current
+        std::set<unsigned>                     check_collective_regions;
       };
       //------------------------------------------------------------------------
       virtual void select_task_options(const MapperContext    ctx,
@@ -596,7 +602,6 @@ namespace Legion {
         std::vector<Memory>                         output_targets;
         std::vector<LayoutConstraintSet>            output_constraints;
         std::set<unsigned>                          untracked_valid_regions;
-        std::set<unsigned>                          check_collective_regions;
         std::vector<Memory>                         future_locations;
         std::vector<Processor>                      target_procs;
         VariantID                                   chosen_variant; // = 0 
@@ -1011,9 +1016,6 @@ namespace Legion {
         std::set<unsigned>                            untracked_valid_srcs;
         std::set<unsigned>                            untracked_valid_ind_srcs;
         std::set<unsigned>                            untracked_valid_ind_dsts;
-        std::set<unsigned>                            check_collective_srcs;
-        std::set<unsigned>                            check_collective_ind_srcs;
-        std::set<unsigned>                            check_collective_ind_dsts;
         ProfilingRequest                              profiling_requests;
         RealmPriority                                 profiling_priority;
         RealmPriority                                 copy_fill_priority;
@@ -1455,7 +1457,7 @@ namespace Legion {
        * where a previous index space launch filled in the field containing
        * the colors). In these cases , the mapper may want to specify that
        * the mapping for the projection operation should not be done with
-       * respect to the region being partitioning, but for each fo the
+       * respect to the region being partitioning, but for each of the
        * subregions of a complete partition of the logical region. This
        * mapper call permits the mapper to decide whether to make the 
        * partition operation an 'index' operation over the color space
@@ -1514,7 +1516,6 @@ namespace Legion {
         RealmPriority                           profiling_priority;
         RealmPriority                           copy_fill_priority;
         bool                                    track_valid_region; /*=true*/
-        bool                                    check_collective; /*=false*/
       };
       //------------------------------------------------------------------------
       virtual void map_partition(const MapperContext        ctx,

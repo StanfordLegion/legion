@@ -1178,15 +1178,16 @@ namespace Legion {
     void TraceCaptureOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::deactivate(void)
+    void TraceCaptureOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_capture_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_capture_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1321,15 +1322,16 @@ namespace Legion {
     void TraceCompleteOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::deactivate(void)
+    void TraceCompleteOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_trace_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_trace_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1523,15 +1525,16 @@ namespace Legion {
     void TraceReplayOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::deactivate(void)
+    void TraceReplayOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_replay_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_replay_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1685,15 +1688,16 @@ namespace Legion {
     void TraceBeginOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::deactivate(void)
+    void TraceBeginOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_begin_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_begin_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1769,16 +1773,17 @@ namespace Legion {
     void TraceSummaryOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
       current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void TraceSummaryOp::deactivate(void)
+    void TraceSummaryOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_summary_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_summary_op(this);
     }
 
     //--------------------------------------------------------------------------

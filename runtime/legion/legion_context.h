@@ -1127,24 +1127,7 @@ namespace Legion {
       public:
         LogicalRegion region;
       }; 
-      struct CollectiveResult : public Collectable {
-      public:
-        CollectiveResult(const std::vector<DistributedID> &dids,
-                         DistributedID collective_did, RtEvent ready);
-        CollectiveResult(std::vector<DistributedID> &&dids,
-                         DistributedID collective_did, RtEvent ready);
-        // No-collective instance result
-        CollectiveResult(DistributedID instance_did);
-        // Temporary result pending response message
-        CollectiveResult(const std::vector<DistributedID> &dids);
-      public:
-        bool matches(const std::vector<DistributedID> &dids) const;
-      public:
-        const std::vector<DistributedID> individual_dids;
-        // Not const so they can be updated by response messages
-        DistributedID collective_did;
-        RtEvent ready_event;
-      };
+      typedef CollectiveViewCreatorBase::CollectiveResult CollectiveResult;
       struct RendezvousResult : public Collectable {
       public:
         RendezvousResult(InnerContext *context, const PendingRendezvousKey &key,
@@ -3403,16 +3386,6 @@ namespace Legion {
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
-      virtual void rendezvous_collective_mapping(Operation *op,
-                                  unsigned requirement_index,
-                                  unsigned analysis_index,
-                                  RendezvousResult *result,
-                                  AddressSpaceID source,
-                                  LogicalRegion region,
-                                  const LegionVector<
-                                   std::pair<DistributedID,FieldMask> > &insts);
-      static void handle_collective_rendezvous(Deserializer &derez,
-                                       Runtime *runtime, AddressSpaceID source);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,

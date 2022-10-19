@@ -153,16 +153,15 @@ public:
                            Processor local, const char *mapper_name)
     : DefaultMapper(rt, machine, local, mapper_name) { }
 
-  virtual void map_task(const Mapping::MapperContext ctx,
-                        const Task& task,
-                        const Mapping::Mapper::MapTaskInput& input,
-                              Mapping::Mapper::MapTaskOutput& output)
+  virtual void select_task_options(const Mapping::MapperContext ctx,
+                                   const Task& task,
+                                   Mapping::Mapper::TaskOptions& options)
   {
     // Do the base mapper call and look for collective instances
-    DefaultMapper::map_task(ctx, task, input, output);
+    DefaultMapper::select_task_options(ctx, task, options);
     if ((task.task_id == REDUCE_FIELD_TASK_ID) ||
         (task.task_id == READ_FIELD_TASK_ID))
-      output.check_collective_regions.insert(0);
+      options.check_collective_regions.insert(0);
   }
 };
 

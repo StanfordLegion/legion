@@ -791,6 +791,7 @@ namespace Legion {
       SLICE_REMOTE_COMMIT,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
+      SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
@@ -891,7 +892,6 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_RESPONSE,
-      SEND_REMOTE_CONTEXT_COLLECTIVE_RENDEZVOUS,
       SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_COMPUTE_EQUIVALENCE_SETS_RESPONSE,
       SEND_CANCEL_EQUIVALENCE_SETS_SUBSCRIPTION,
@@ -1043,6 +1043,7 @@ namespace Legion {
         "Slice Remote Commit",                                        \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
+        "Slice Remote Collective Rendezvous",                         \
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
@@ -1143,7 +1144,6 @@ namespace Legion {
         "Send Remote Context Physical Response",                      \
         "Send Remote Context Find Collective View Request",           \
         "Send Remote Context Find Collective View Response",          \
-        "Send Remote Context Collective Rendezvous",                  \
         "Send Compute Equivalence Sets Request",                      \
         "Send Compute Equivalence Sets Response",                     \
         "Send Cancel Equivalence Sets Subscription",                  \
@@ -1664,7 +1664,9 @@ namespace Legion {
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
       COLLECTIVE_LOC_104 = 104,
-      COLLECTIVE_LOC_105 = 105
+      COLLECTIVE_LOC_105 = 105,
+      COLLECTIVE_LOC_106 = 106,
+      COLLECTIVE_LOC_107 = 107,
     };
 
     // legion_types.h

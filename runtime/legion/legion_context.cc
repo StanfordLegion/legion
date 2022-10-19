@@ -10947,51 +10947,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext::CollectiveResult::CollectiveResult(
-       const std::vector<DistributedID> &dids, DistributedID did, RtEvent ready)
-      : individual_dids(dids.begin(), dids.end()), collective_did(did),
-        ready_event(ready)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext::CollectiveResult::CollectiveResult(
-            std::vector<DistributedID> &&dids, DistributedID did, RtEvent ready)
-      : individual_dids(dids), collective_did(did), ready_event(ready)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext::CollectiveResult::CollectiveResult(DistributedID inst_did)
-      : individual_dids(1, inst_did), collective_did(0)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext::CollectiveResult::CollectiveResult(
-            const std::vector<DistributedID> &dids)
-      : individual_dids(dids), collective_did(0)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::CollectiveResult::matches(
-                                   const std::vector<DistributedID> &dids) const
-    //--------------------------------------------------------------------------
-    {
-      if (dids.size() != individual_dids.size())
-        return false;
-      for (unsigned idx = 0; idx < dids.size(); idx++)
-        if (dids[idx] != individual_dids[idx])
-          return false;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext::CollectiveResult* 
       InnerContext::find_or_create_collective_view(RegionTreeID tid, 
           const std::vector<DistributedID> &instances, RtEvent &ready)
@@ -23141,69 +23096,6 @@ namespace Legion {
       runtime->send_remote_context_find_collective_view_request(owner, rez);
       ready = to_trigger;
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::rendezvous_collective_mapping(Operation *op,
-          unsigned requirement_index, unsigned analysis_index,
-          RendezvousResult *result, AddressSpaceID source, LogicalRegion region,
-          const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(source == runtime->address_space);
-#endif
-      // Send this back to the owner node
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(context_uid);
-        rez.serialize(op->get_origin_operation());
-        rez.serialize(requirement_index);
-        rez.serialize(analysis_index);
-        rez.serialize(result);
-        rez.serialize(region);
-        rez.serialize<size_t>(insts.size());
-        for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
-              it = insts.begin(); it != insts.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-      const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
-      runtime->send_remote_context_collective_rendezvous(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteContext::handle_collective_rendezvous(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      Operation *op;
-      derez.deserialize(op);
-      unsigned requirement_index, analysis_index;
-      derez.deserialize(requirement_index);
-      derez.deserialize(analysis_index);
-      RendezvousResult *result;
-      derez.deserialize(result);
-      LogicalRegion region;
-      derez.deserialize(region);
-      size_t num_insts;
-      derez.deserialize(num_insts);
-      LegionVector<std::pair<DistributedID,FieldMask> > instances(num_insts);
-      for (unsigned idx = 0; idx < num_insts; idx++)
-      {
-        derez.deserialize(instances[idx].first);
-        derez.deserialize(instances[idx].second);
-      }
-
-      InnerContext *context = runtime->find_context(context_uid);
-      context->rendezvous_collective_mapping(op, requirement_index,
-          analysis_index, result, source, region, instances);
     }
 
     //--------------------------------------------------------------------------

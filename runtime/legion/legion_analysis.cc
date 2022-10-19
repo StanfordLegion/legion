@@ -6128,14 +6128,10 @@ namespace Legion {
               targets[idx].get_valid_fields(), op, index, exclusive);
       }
       if (collective_rendezvous)
-      {
-        // Rendezvous must be done in the immediate parent context
-        InnerContext *parent_ctx = op->get_context();
-        return parent_ctx->convert_collective_views(op, index, analysis_index,
+        return op->convert_collective_views(index, analysis_index,
                                   region, targets, context, collective_mapping,
                                   collective_first_local, target_views,
                                   collective_arrivals);
-      }
       else if (op->perform_collective_analysis(collective_mapping,
                                                collective_first_local))
       {
@@ -6149,14 +6145,10 @@ namespace Legion {
                 targets[idx].get_valid_fields());
         }
         else
-        {
-          // Rendezvous must be done in the immediate parent context
-          InnerContext *parent_ctx = op->get_context();
-          return parent_ctx->convert_collective_views(op, index, analysis_index,
+          return op->convert_collective_views(index, analysis_index,
                                   region, targets, context, collective_mapping,
                                   collective_first_local, target_views,
                                   collective_arrivals);
-        }
       }
       else
         context->convert_analysis_views(targets, target_views);
@@ -8612,9 +8604,7 @@ namespace Legion {
         else
         {
           dummy_arrivals = new std::map<InstanceView*,size_t>();
-          // Rendezvous must be done in the immediate parent context
-          InnerContext *parent_ctx = op->get_context();
-          return parent_ctx->convert_collective_views(op, index, analysis_index,
+          return op->convert_collective_views(index, analysis_index,
                       region, targets, context, collective_mapping,
                       collective_first_local, target_views, *dummy_arrivals);
         }
