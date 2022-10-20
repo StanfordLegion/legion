@@ -434,7 +434,7 @@ class HasInitiationDependencies(Dependencies):
         if isinstance(self, (MetaTask, MapperCall, Copy, Fill, DepPart, Instance)):
             unique_tuple = self.get_unique_tuple()
             if self.initiation in state.operations:
-                op = state.find_op(self.initiation)
+                op = state.find_or_create_op(self.initiation)
                 # this op exists
                 if op.proc is not None:
                     if self.initiation not in op_dependencies:
@@ -462,7 +462,7 @@ class HasInitiationDependencies(Dependencies):
         """
         # add the out direction
         if self.initiation in state.operations:
-            op = state.find_op(self.initiation)
+            op = state.find_or_create_op(self.initiation)
             if op.proc is not None: # this op exists
                 op_tuple = op.get_unique_tuple()
                 assert isinstance(self, TimeRange)
@@ -1979,22 +1979,28 @@ class ChanOperation(Base):
 
 class CopyInstInfo(object):
     __slots__ = [
-        'src_inst_uid', 'dst_inst_uid', 'fevent', 'num_fields', 'request_type', 'num_hops',
+        'src', 'dst', 'src_fid', 'dst_fid', 'src_inst_uid', 'dst_inst_uid', 'fevent', 'indirect',
         'src_instance', 'dst_instance'
         ]
 
-    @typecheck
-    def __init__(self, 
+    @typeassert(src_fid=int, dst_fid=int,
+                src_inst_uid=int, dst_inst_uid=int,
+                fevent=int, indirect=bool)
+    def __init__(self, src: Union["Memory", None], 
+                 dst: Union["Memory", None],
+                 src_fid: int, dst_fid: int,
                  src_inst_uid: int, dst_inst_uid: int, 
-                 fevent: int, num_fields: int, 
-                 request_type: int, num_hops: int
+                 fevent: int, indirect: bool
     ) -> None:
+        self.src = src
+        self.dst = dst
+        self.src_fid = src_fid
+        self.dst_fid = dst_fid
         self.src_inst_uid = src_inst_uid
         self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
-        self.num_fields = num_fields
-        self.request_type = request_type
-        self.num_hops = num_hops
+        self.indirect = indirect
+        # if gather dst = None, if scatter, src = None
         self.src_instance: Optional["Instance"] = None
         self.dst_instance: Optional["Instance"] = None
 
@@ -2010,6 +2016,12 @@ class CopyInstInfo(object):
             if  self.dst_inst_uid == key:
                 self.dst_instance = instance
                 dst_flag = True
+            if self.src_inst_uid == 0:
+                assert self.indirect == True
+                src_flag = True
+            if  self.dst_inst_uid == 0:
+                assert self.indirect == True
+                dst_flag = True   
             if src_flag and dst_flag:
                 break
         if src_flag == False:
@@ -2019,35 +2031,54 @@ class CopyInstInfo(object):
 
     @typecheck
     def get_short_text(self) -> str:
-        assert (self.src_instance is not None) and (self.dst_instance is not None) 
-        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_instance.inst_id), hex(self.dst_instance.inst_id), self.num_fields, request[self.request_type], self.num_hops)
+        if (self.src_instance is not None) and (self.dst_instance is not None):
+            return 'src_inst=%s, dst_inst=%s' % (hex(self.src_instance.inst_id), hex(self.dst_instance.inst_id))
+        elif self.src_instance is None:
+            assert self.dst_instance is not None
+            return 'Scatter: dst_indirect_inst=%s' % (hex(self.dst_instance.inst_id))
+        elif self.dst_instance is None:
+            return 'Gather: src_indirect_inst=%s' % (hex(self.src_instance.inst_id))
+        else:
+            print(self.src_inst_uid, self.dst_inst_uid)
+            assert 0
 
     @typecheck
     def __repr__(self) -> str:
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'fevent', 'src_inst', 'dst_inst', 'num_requests', 'copy_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_type', 'is_inchannel', 'copy_inst_infos']
     
     # FIXME: fix for python 3.8
-    @typeassert(initiation_op=Operation, size=int,
-                create=float, ready=float, start=float, stop=float,
-                fevent=int, num_requests=int)
-    def __init__(self, src: "Memory", dst: "Memory", 
-                 initiation_op: Operation, size: int, 
-                 create: float, ready: float, 
-                 start: float, stop: float, 
-                 fevent: int, num_requests: int
-    ) -> None:
+    @typecheck
+    def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
-        HasInitiationDependencies.__init__(self, initiation_op)
-        TimeRange.__init__(self, create, ready, start, stop)
-        self.src = src
-        self.dst = dst
-        self.size = size
+        TimeRange.__init__(self, None, None, None, None)
+        assert isinstance(EMPTY_OP, Operation)
+        HasInitiationDependencies.__init__(self, EMPTY_OP)
+        self.size = 0
+        self.num_hops = 0
+        self.request_type = 0
         self.fevent = fevent
-        self.num_requests = num_requests
+        self.copy_type = 0 # 0 is normal, 1 is gather, 2 is scatter, 3 is gather with scatter
+        self.is_inchannel = False
         self.copy_inst_infos: List[CopyInstInfo] = list()
+
+    @typecheck
+    def add_copy_info(self, initiation_op: Operation, size: int, 
+                      create: float, ready: float, 
+                      start: float, stop: float, 
+                      num_hops: int, request_type: int
+    ) -> None:
+        self.size = size
+        self.num_hops = num_hops
+        self.request_type = request_type
+        self.create = create
+        self.ready = ready
+        self.start = start
+        self.stop = stop
+        self.initiation_op = initiation_op
+        self.initiation = initiation_op.op_id
 
     @typecheck
     def add_copy_inst_info(self, entry: CopyInstInfo) -> None:
@@ -2060,7 +2091,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val = 'Copy: size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
+        val = 'Copy: size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ' type=' + str(self.copy_type)
         cnt = 0
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -2077,10 +2108,10 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         instances = ""
         instances_list = []
         for node in self.copy_inst_infos:
-            assert node.src_instance is not None
-            instances_list.append((node.src_instance.inst_id, node.src_instance.prof_uid))
-            assert node.dst_instance is not None
-            instances_list.append((node.dst_instance.inst_id, node.dst_instance.prof_uid))
+            if node.src_instance is not None:
+                instances_list.append((node.src_instance.inst_id, node.src_instance.prof_uid))
+            if node.dst_instance is not None:
+                instances_list.append((node.dst_instance.inst_id, node.dst_instance.prof_uid))
         # instances = "|".join(instances_list)
         instances = dump_json(instances_list)
         return instances
@@ -2125,17 +2156,18 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
 class FillInstInfo(object):
     __slots__ = [
-        'dst_inst_uid', 'fevent', 'num_fields', 'dst_instance'
+        'dst', 'fid', 'dst_inst_uid', 'fevent', 'dst_instance'
         ]
 
-    @typecheck
-    def __init__(self, 
+    @typeassert(fid=int, dst_inst_uid=int, fevent=int)
+    def __init__(self, dst: "Memory", fid: int,
                  dst_inst_uid: int, 
-                 fevent: int, num_fields: int
+                 fevent: int
     ) -> None:
+        self.dst = dst
+        self.fid = fid
         self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
-        self.num_fields = num_fields
         self.dst_instance: Optional["Instance"] = None
 
     # add instance by instance_id
@@ -2153,34 +2185,47 @@ class FillInstInfo(object):
     @typecheck
     def get_short_text(self) -> str:
         assert self.dst_instance is not None
-        return 'dst_inst=%s, fields=%s' % (hex(self.dst_instance.inst_id), self.num_fields)
+        return 'dst_inst=%s, fid=%s' % (hex(self.dst_instance.inst_id), self.fid)
 
     @typecheck
     def __repr__(self) -> str:
         return self.get_short_text()
 
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'fevent', 'num_requests', 'fill_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'size', 'fevent', 'is_inchannel', 'fill_inst_infos']
 
     # FIXME: fix for python 3.8
-    @typeassert(initiation_op=Operation,
-                create=float, ready=float, start=float, stop=float)
-    def __init__(self, dst: "Memory", initiation_op: Operation, 
-                 create: float, ready: float, 
-                 start: float, stop: float,
-                 fevent: int, num_requests: int
-    ) -> None:
+    @typecheck
+    def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
-        HasInitiationDependencies.__init__(self, initiation_op)
-        TimeRange.__init__(self, create, ready, start, stop)
-        self.dst = dst
+        TimeRange.__init__(self, None, None, None, None)
+        assert isinstance(EMPTY_OP, Operation)
+        HasInitiationDependencies.__init__(self, EMPTY_OP)
+        self.dst: Optional["Memory"] = None
+        self.size = 0
         self.fevent = fevent
-        self.num_requests = num_requests
+        self.is_inchannel = False
         self.fill_inst_infos: List[FillInstInfo] = list()
+
+    @typecheck
+    def add_fill_info(self, initiation_op: Operation, size: int,
+                      create: float, ready: float, 
+                      start: float, stop: float,
+    ) -> None:
+        self.size = size
+        self.create = create
+        self.ready = ready
+        self.start = start
+        self.stop = stop
+        self.initiation_op = initiation_op
+        self.initiation = initiation_op.op_id
 
     @typecheck
     def add_fill_inst_info(self, entry: FillInstInfo) -> None:
         self.fill_inst_infos.append(entry)
+
+    def add_mem(self, dst: "Memory") -> None:
+        self.dst = dst
 
     def __repr__(self) -> str:
         val = 'Fill: num reqs=' + str(len(self.fill_inst_infos))
@@ -2989,16 +3034,18 @@ class Memory(object):
 
 class Channel(object):
     __slots__ = [
-        'src', 'dst', 'copies', 'time_points', 'max_live_copies', 'last_time'
+        'src', 'dst', 'channel_type', 'copies', 'time_points', 'max_live_copies', 'last_time'
     ]
 
     @typecheck
     def __init__(self, 
                  src: Union[Memory, None], 
-                 dst: Union[Memory, None]
+                 dst: Union[Memory, None],
+                 channel_type: str
     ) -> None:
         self.src = src
         self.dst = dst
+        self.channel_type = channel_type
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_copies = 0
@@ -3065,14 +3112,20 @@ class Channel(object):
     def get_short_text(self) -> str:
         if self.dst is None and self.src is None:
             return "Dependent Partition Channel"
-        # fill channel
+        # fill/gather channel
         elif self.src is None:
             assert self.dst is not None
-            dst_mem = self.dst
             if self.dst.affinity is not None:
                 return self.dst.affinity.get_short_text()
             else:
-                return "Fill Channel"
+                return self.channel_type + "Channel"
+        # scatter channel
+        elif self.dst is None:
+            assert self.src is not None
+            if self.src.affinity is not None:
+                return self.src.affinity.get_short_text()
+            else:
+                return self.channel_type + "Channel"
         # normal channels
         elif self.src is not None and self.dst is not None:
             return self.mem_str(self.src) + " to " + self.mem_str(self.dst)
@@ -3181,8 +3234,8 @@ class Channel(object):
     def __repr__(self) -> str:
         if self.src is None and self.dst is None:
             return 'Dependent Partition Channel'
-        if self.src is None:
-            return 'Fill ' + self.dst.__repr__() + ' Channel'
+        if self.src is None or self.dst is None:
+            return self.channel_type + ' ' + self.dst.__repr__() + ' Channel'
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
@@ -3294,7 +3347,7 @@ class State(object):
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
-        self.channels: Dict[Union[Tuple[Memory, Memory], Memory, None], Channel] = {}
+        self.channels: Dict[Tuple[Union[Memory, None], Union[Memory, None], str], Channel] = {}
         self.task_kinds: Dict[int, TaskKind] = {}
         self.variants: Dict[Tuple[int, int], Variant] = {}
         self.meta_variants: Dict[int, Variant] = {}
@@ -3364,6 +3417,10 @@ class State(object):
             "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
+
+    #############################################################
+    # process logging statement
+    #############################################################
 
     # MaxDimDesc
     @typecheck
@@ -3453,7 +3510,7 @@ class State(object):
                                       ispace_id: int, fspace_id: int, 
                                       tree_id: int
     ) -> None:
-        inst = self.create_instance(inst_uid)
+        inst = self.find_or_create_instance(inst_uid)
         fspace = self.find_field_space(fspace_id)
         inst.ispace.append(self.find_index_space(ispace_id))
         inst.fspace.append(fspace)
@@ -3469,7 +3526,7 @@ class State(object):
                                       has_align: Union[bool, int], 
                                       eqk: int, align_desc: int
     ) -> None:
-        inst = self.create_instance(inst_uid)
+        inst = self.find_or_create_instance(inst_uid)
         field = self.find_field(fspace_id, field_id)
         fspace = self.find_field_space(fspace_id)
         if fspace not in inst.fields:
@@ -3484,7 +3541,7 @@ class State(object):
     def log_physical_inst_layout_dim_desc(self, inst_uid: int, 
                                           dim: int, dim_kind: int
     ) -> None:
-        inst = self.create_instance(inst_uid)
+        inst = self.find_or_create_instance(inst_uid)
         inst.dim_order_desc.insert(dim, dim_kind)
 
     # PhysicalInstanceUsage
@@ -3492,7 +3549,7 @@ class State(object):
     def log_physical_inst_usage(self, inst_uid: int, op_id: int, 
                                 index_id: int, field_id: int
     ) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         entry = self.create_operation_inst_info(inst_uid, index_id, field_id)
         op.add_operation_inst_info(entry)
         # assert instance is not None
@@ -3505,11 +3562,11 @@ class State(object):
                       create: float, ready: float, 
                       start: float, stop: float
     ) -> None:
-        variant = self.find_variant(task_id, variant_id)
-        task = self.find_task(op_id, variant, create, ready, start, stop)
+        variant = self.find_or_create_variant(task_id, variant_id)
+        task = self.find_or_create_task(op_id, variant, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(task)
 
     # GPUTaskInfo
@@ -3520,12 +3577,12 @@ class State(object):
                           start: float, stop: float, 
                           gpu_start: float, gpu_stop: float
     ) -> None:
-        variant = self.find_variant(task_id, variant_id)
-        task = self.find_task(op_id, variant, create, ready, gpu_start, gpu_stop)
+        variant = self.find_or_create_variant(task_id, variant_id)
+        task = self.find_or_create_task(op_id, variant, create, ready, gpu_start, gpu_stop)
 
         if gpu_stop > self.last_time:
             self.last_time = gpu_stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(task)
 
     # MetaInfo
@@ -3535,12 +3592,12 @@ class State(object):
                       create: float, ready: float, 
                       start: float, stop: float
     ) -> None:
-        op = self.find_op(op_id)
-        variant = self.find_meta_variant(lg_id)
+        op = self.find_or_create_op(op_id)
+        variant = self.find_or_create_meta_variant(lg_id)
         meta = self.create_meta(variant, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(meta)
 
     @typecheck
@@ -3551,33 +3608,111 @@ class State(object):
 
     # CopyInfo
     @typecheck
-    def log_copy_info(self, op_id: int, 
-                      src: int, dst: int, size: int,
+    def log_copy_info(self, op_id: int, size: int,
                       create: float, ready: float, 
-                      start: float, stop: float, 
-                      fevent: int, num_requests: int
+                      start: float, stop: float,
+                      num_hops: int, request_type: int,
+                      fevent: int
     ) -> None:
-        op = self.find_op(op_id)
-        src = self.find_memory(src)
-        dst = self.find_memory(dst)
-        copy = self.create_copy(src, dst, op, size, create, ready, start, stop, fevent, num_requests)
-        self.add_copy_map(fevent,copy)
+        op = self.find_or_create_op(op_id)
+        copy = self.find_or_create_copy(fevent)
+        copy.add_copy_info(op, size, create, ready, start, stop, num_hops, request_type)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_channel(src, dst)
-        channel.add_copy(copy)
 
     # CopyInstInfo
     @typecheck
-    def log_copy_inst_info(self, src_inst: int, dst_inst: int, 
-                           fevent: int, num_fields: int, 
-                           request_type: int, num_hops: int
+    def log_copy_inst_info(self, src: int, dst: int,
+                           src_fid: int, dst_fid: int,
+                           src_inst: int, dst_inst: int, 
+                           fevent: int, indirect: int
     ) -> None:
         # src_inst and dst_inst are inst_uid
-        cpy = self.find_copy(fevent)
+        indirect = bool(indirect)
+        copy = self.find_or_create_copy(fevent)
+        if copy.copy_type != 0:
+            # even if indirect is False, it is still a indirect copy
+            self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
+            assert copy.is_inchannel == True
+        else:
+          if indirect == False:
+              self.__log_copy_inst_info_normal(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, copy)
+          else:
+              # this is the first time we see this copy
+              self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
+              # we are not able to push the indirect copy into a channel
+              assert copy.is_inchannel == False
+            
+
+    def __log_copy_inst_info_normal(self, src: int, dst: int,
+                                    src_fid: int, dst_fid: int,
+                                    src_inst: int, dst_inst: int, 
+                                    fevent: int, copy: Copy
+    ) -> None:
         assert(src_inst != 0) and (dst_inst != 0)
-        entry = self.create_copy_inst_info(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
-        cpy.add_copy_inst_info(entry)
+        src_mem = self.find_or_create_memory(src)
+        dst_mem = self.find_or_create_memory(dst)
+        entry = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, False)
+        copy.add_copy_inst_info(entry)
+        if copy.is_inchannel == False:
+            copy.copy_type = 0
+            channel = self.find_or_create_channel(src_mem, dst_mem, "Copy")
+            channel.add_copy(copy)
+            copy.is_inchannel = True
+        else:
+            # this is not the first time we see this copy
+            assert len(copy.copy_inst_infos) > 1
+            assert (copy.copy_inst_infos[0].src == src_mem) and (copy.copy_inst_infos[0].dst == dst_mem)
+
+    def __log_copy_inst_info_indirect(self, src: int, dst: int,
+                                      src_fid: int, dst_fid: int,
+                                      src_inst: int, dst_inst: int, 
+                                      fevent: int, indirect: bool, copy: Copy
+    ) -> None:
+        if indirect:
+            if dst == 0:
+                # gather
+                copy.copy_type = 1
+                src_mem = self.find_or_create_memory(src)
+                dst_mem = None
+            elif src == 0:
+                # scatter
+                copy.copy_type = 2
+                src_mem = None
+                dst_mem = self.find_or_create_memory(dst)
+            else:
+                # gather with scatter
+                print(hex(src), hex(dst), hex(fevent), indirect)
+                copy.copy_type = 3
+                assert 0
+        else:
+            # indirect = false for indirect copy
+            src_mem = self.find_or_create_memory(src)
+            dst_mem = self.find_or_create_memory(dst)
+        entry = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy.add_copy_inst_info(entry)
+
+        # we will create a channel here
+        if indirect == False:
+            assert copy.copy_type != 0
+            if copy.is_inchannel == False:
+                if copy.copy_type == 1:
+                    # gather
+                    channel = self.find_or_create_channel(None, dst_mem, "Gather")
+                elif copy.copy_type == 2:
+                    # scatter
+                    channel = self.find_or_create_channel(src_mem, None, "Scatter")
+                else:
+                    assert 0
+                channel.add_copy(copy)
+                copy.is_inchannel = True
+            else:
+                # we have at least two CopyInstInfo, the first one is the indirect.
+                assert len(copy.copy_inst_infos) >= 2
+                if copy.copy_type == 1:
+                    assert copy.copy_inst_infos[1].dst == dst_mem
+                elif copy.copy_type == 2:
+                    assert copy.copy_inst_infos[1].src == src_mem
 
     @typecheck
     def add_fill_map(self, fevent: int, fill: Fill) -> None:
@@ -3587,29 +3722,34 @@ class State(object):
 
     # FillInfo
     @typecheck
-    def log_fill_info(self, op_id: int, dst: int, 
+    def log_fill_info(self, op_id: int, size: int,
                       create: float, ready: float, 
                       start: float, stop: float,
-                      fevent: int, num_requests: int
+                      fevent: int
     ) -> None:
-        op = self.find_op(op_id)
-        dst = self.find_memory(dst)
-        fill = self.create_fill(dst, op, create, ready, start, stop, fevent, num_requests)
-        self.add_fill_map(fevent,fill)
+        op = self.find_or_create_op(op_id)
+        fill = self.find_or_create_fill(fevent)
+        fill.add_fill_info(op, size, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_channel(None, dst)
-        channel.add_copy(fill)
 
     # FillInstInfo
     @typecheck
-    def log_fill_inst_info(self, dst_inst: int, 
-                           fevent: int, num_fields: int
+    def log_fill_inst_info(self, dst: int, fid: int,
+                           dst_inst: int, fevent: int
     ) -> None:
-        # src_inst and dst_inst are inst_uid
-        fill = self.find_fill(fevent)
-        entry = self.create_fill_inst_info(dst_inst, fevent, num_fields)
+        # dst_inst are inst_uid
+        fill = self.find_or_create_fill(fevent)
+        dst_mem = self.find_or_create_memory(dst)
+        entry = self.create_fill_inst_info(dst_mem, fid, dst_inst, fevent)
         fill.add_fill_inst_info(entry)
+        if fill.is_inchannel == False:
+            fill.add_mem(dst_mem)
+            channel = self.find_or_create_channel(None, dst_mem, "Fill")
+            channel.add_copy(fill)
+            fill.is_inchannel = True
+        else:
+            assert fill.dst == dst_mem
 
     # InstTimelineInfo
     @typecheck
@@ -3617,9 +3757,9 @@ class State(object):
                           mem_id: int, size: int, op_id: int,
                           create: float, ready: float, destroy: float
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_uid)
-        mem = self.find_memory(mem_id)
+        op = self.find_or_create_op(op_id)
+        inst = self.find_or_create_instance(inst_uid)
+        mem = self.find_or_create_memory(mem_id)
         inst.add_instance_info(inst_id, mem, size, create, ready, destroy, op)
         if destroy > self.last_time:
             self.last_time = destroy
@@ -3631,11 +3771,11 @@ class State(object):
                            create: float, ready: float, 
                            start: float, stop: float
     ) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         deppart = self.create_deppart(part_op, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_channel(None, None)
+        channel = self.find_or_create_channel(None, None, "DepPart")
         channel.add_copy(deppart)
 
     # UserInfo (Not used?)
@@ -3643,7 +3783,7 @@ class State(object):
     def log_user_info(self, proc_id: int, 
                       start: float, stop: float, name: str
     ) -> None:
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         user = self.create_user_marker(name)
         user.start = start
         user.stop = stop
@@ -3656,8 +3796,8 @@ class State(object):
     def log_task_wait_info(self, op_id: int, task_id: int, variant_id: int, 
                            wait_start: float, wait_ready: float, wait_end: float
     ) -> None:
-        variant = self.find_variant(task_id, variant_id)
-        task = self.find_task(op_id, variant)
+        variant = self.find_or_create_variant(task_id, variant_id)
+        task = self.find_or_create_task(op_id, variant)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
         task.add_wait_interval(wait_start, wait_ready, wait_end)
@@ -3667,8 +3807,8 @@ class State(object):
     def log_meta_wait_info(self, op_id: int, lg_id: int, 
                            wait_start: float, wait_ready: float, wait_end: float
     ) -> None:
-        op = self.find_op(op_id)
-        variant = self.find_meta_variant(lg_id)
+        op = self.find_or_create_op(op_id)
+        variant = self.find_or_create_meta_variant(lg_id)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
         assert op_id in variant.ops
@@ -3699,7 +3839,7 @@ class State(object):
     # OperationInstance
     @typecheck
     def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: str) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         if parent_id == UINT_MAX:
             op.parent_id = None
         else:
@@ -3717,7 +3857,7 @@ class State(object):
     # MultiTask
     @typecheck
     def log_multi(self, op_id: int, task_id: int) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         task_kind = TaskKind(task_id, None)
         if task_id in self.task_kinds:
             task_kind = self.task_kinds[task_id]
@@ -3729,8 +3869,8 @@ class State(object):
     # SliceOwner
     @typecheck
     def log_slice_owner(self, parent_id: int, op_id: int) -> None:
-        parent = self.find_op(parent_id)
-        op = self.find_op(op_id)
+        parent = self.find_or_create_op(parent_id)
+        op = self.find_or_create_op(op_id)
         op.owner = parent
 
     # MetaDesc
@@ -3800,10 +3940,10 @@ class State(object):
         if stop > self.last_time:
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind],
-                          self.find_op(op_id), start, stop)
+                          self.find_or_create_op(op_id), start, stop)
         # update prof_uid map
         self.prof_uid_map[call.prof_uid] = call
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_mapper_call(call)
 
     # RuntimeCallDesc
@@ -3822,7 +3962,7 @@ class State(object):
         if stop > self.last_time:
             self.last_time = stop
         call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_runtime_call(call)
 
     # ProfTaskInfo
@@ -3835,65 +3975,72 @@ class State(object):
         if stop > self.last_time:
             self.last_time = stop
         proftask = ProfTask(op_id, start, start, start, stop)
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(proftask)
 
+    #############################################################
+    # find or create objects
+    #############################################################
+
     @typecheck
-    def find_processor(self, proc_id: int) -> Processor:
+    def find_or_create_processor(self, proc_id: int) -> Processor:
         if proc_id not in self.processors:
             self.processors[proc_id] = Processor(proc_id, None)
         return self.processors[proc_id]
 
     @typecheck
-    def find_memory(self, mem_id: int) -> Memory:
+    def find_or_create_memory(self, mem_id: int) -> Memory:
+        assert mem_id != 0
         if mem_id not in self.memories:
             # use 'No MemKind' as the default kind
-            self.memories[mem_id] = Memory(mem_id, "No MemKind", None)
+            self.memories[mem_id] = Memory(mem_id, "No MemKind", 0)
         return self.memories[mem_id]
 
+    # TODO: not used? 
     @typecheck
-    def find_mem_proc_affinity(self, mem_id: int) -> MemProcAffinity:
+    def find_or_create_mem_proc_affinity(self, mem_id: int) -> MemProcAffinity:
         if mem_id not in self.mem_proc_affinity:
             assert False
         return self.mem_proc_affinity[mem_id]
 
     @typecheck
-    def find_channel(self, 
-                     src: Union[Memory, None], 
-                     dst: Union[Memory, None]
+    def find_or_create_channel(self, 
+                               src: Union[Memory, None], 
+                               dst: Union[Memory, None],
+                               channel_type: str
     ) -> Channel:
-        if src is not None:
-            assert dst is not None
-            key = (src,dst)
-            if key not in self.channels:
-                self.channels[key] = Channel(src,dst)
-            return self.channels[key]
-        elif dst is not None:
-            # This is a fill channel
-            if dst not in self.channels:
-                self.channels[dst] = Channel(None,dst)
-            return self.channels[dst]
+        # src, dst is not None: normal copy
+        # dst is None: scatter
+        # src is None: gather/fill
+        # src,dst are None: deppart
+        if src is not None and dst is not None:
+            assert channel_type == "Copy"
+        elif src is None and dst is not None:
+            assert (channel_type == "Fill") or (channel_type == "Gather")
+        elif src is not None and dst is None:
+            assert channel_type == "Scatter"
         else:
-            # This is the dependent partitioning channel
-            if None not in self.channels:
-                self.channels[None] = Channel(None,None)
-            return self.channels[None]
+            assert channel_type == "DepPart"
+        key = (src, dst, channel_type)
+        if key not in self.channels:
+            self.channels[key] = Channel(src, dst, channel_type)
+        return self.channels[key]
 
     @typecheck
-    def find_variant(self, task_id: int, variant_id: int) -> Variant:
+    def find_or_create_variant(self, task_id: int, variant_id: int) -> Variant:
         key = (task_id, variant_id)
         if key not in self.variants:
             self.variants[key] = Variant(variant_id, None)
         return self.variants[key]
 
     @typecheck
-    def find_meta_variant(self, lg_id: int) -> Variant:
+    def find_or_create_meta_variant(self, lg_id: int) -> Variant:
         if lg_id not in self.meta_variants:
             self.meta_variants[lg_id] = Variant(lg_id, None)
         return self.meta_variants[lg_id]
 
     @typecheck
-    def find_op(self, op_id: int) -> Operation:
+    def find_or_create_op(self, op_id: int) -> Operation:
         if op_id not in self.operations:
             op = Operation(op_id) 
             self.operations[op_id] = op
@@ -3902,25 +4049,11 @@ class State(object):
         return self.operations[op_id]
 
     @typecheck
-    def find_copy(self,fevent: int) -> Copy:
-        key = fevent
-        if key not in self.copy_map:
-            assert False
-        return self.copy_map[key]
-
-    @typecheck
-    def find_fill(self,fevent: int) -> Fill:
-        key = fevent
-        if key not in self.fill_map:
-            assert False
-        return self.fill_map[key]
-
-    @typecheck
-    def find_task(self, op_id: int, variant: Variant, 
-                  create: float =None, ready: float =None, 
-                  start: float =None, stop: float =None
+    def find_or_create_task(self, op_id: int, variant: Variant, 
+                            create: float =None, ready: float =None, 
+                            start: float =None, stop: float =None
     ) -> Task:
-        task = self.find_op(op_id)
+        task = self.find_or_create_op(op_id)
         # Upgrade this operation to a task if necessary
         if not task.is_task:
             assert create is not None
@@ -3935,6 +4068,39 @@ class State(object):
         else:
             assert task.variant == variant
         return task
+
+    @typecheck
+    def find_or_create_copy(self, fevent: int) -> Copy:
+        key = fevent
+        if key not in self.copy_map:
+            copy = Copy(fevent)
+            self.add_copy_map(fevent,copy)
+            # update prof_uid map
+            self.prof_uid_map[copy.prof_uid] = copy
+        return self.copy_map[key]
+
+    @typecheck
+    def find_or_create_fill(self, fevent: int) -> Fill:
+        key = fevent
+        if key not in self.fill_map:
+            fill = Fill(fevent)
+            self.add_fill_map(fevent,fill)
+            # update prof_uid map
+            self.prof_uid_map[fill.prof_uid] = fill
+        return self.fill_map[key]
+
+    @typecheck
+    def find_or_create_instance(self, inst_uid: int) -> Instance:
+        # instance uid is unique
+        key = inst_uid
+        if key not in self.instances:
+            inst = Instance(inst_uid)
+            self.instances[key] = inst
+            # update prof_uid map
+            self.prof_uid_map[inst.prof_uid] = inst
+        else:
+            inst = self.instances[key]
+        return inst
 
     @typecheck
     def create_index_space_point(self, unique_id: int, dim: int, 
@@ -4085,41 +4251,20 @@ class State(object):
       return operation_inst_info  
 
     @typecheck
-    def create_copy(self, src: Memory, dst: Memory, 
-                    op: Operation, size: int, 
-                    create: float, ready: float, 
-                    start: float, stop: float, 
-                    fevent: int, num_requests: int
-    ) -> Copy:
-        copy = Copy(src, dst, op, size, create, ready, start, stop, fevent, num_requests)
-        # update prof_uid map
-        self.prof_uid_map[copy.prof_uid] = copy
-        return copy
-
-    @typecheck
-    def create_copy_inst_info(self, src_inst: int, dst_inst: int, 
-                              fevent: int, num_fields: int, 
-                              request_type: int, num_hops: int
+    def create_copy_inst_info(self, src: Union[Memory, None], 
+                              dst: Union[Memory, None],
+                              src_fid: int, dst_fid: int,
+                              src_inst: int, dst_inst: int, 
+                              fevent: int, indirect: bool
     ) -> CopyInstInfo:
-        copy_inst_info =  CopyInstInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
+        copy_inst_info =  CopyInstInfo(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
         return copy_inst_info
 
     @typecheck
-    def create_fill(self, dst: Memory, op: Operation, 
-                    create: float, ready: float, 
-                    start: float, stop: float,
-                    fevent: int, num_requests: int
-    ) -> Fill:
-        fill = Fill(dst, op, create, ready, start, stop, fevent, num_requests)
-        # update prof_uid map
-        self.prof_uid_map[fill.prof_uid] = fill
-        return fill
-
-    @typecheck
-    def create_fill_inst_info(self, dst_inst: int, 
-                              fevent: int, num_fields: int
+    def create_fill_inst_info(self, dst: Memory, fid: int,
+                              dst_inst: int, fevent: int
     ) -> FillInstInfo:
-        fill_inst_info =  FillInstInfo(dst_inst, fevent, num_fields)
+        fill_inst_info =  FillInstInfo(dst, fid, dst_inst, fevent)
         return fill_inst_info
 
     @typecheck
@@ -4131,27 +4276,6 @@ class State(object):
         # update the prof_uid map
         self.prof_uid_map[deppart.prof_uid] = deppart
         return deppart
-
-    @typecheck
-    def create_instance(self, inst_uid: int) -> Instance:
-        # neither instance uid is unique
-        key = inst_uid
-        if key not in self.instances:
-            inst = Instance(inst_uid)
-            self.instances[key] = inst
-            # update prof_uid map
-            self.prof_uid_map[inst.prof_uid] = inst
-        else:
-            inst = self.instances[key]
-        return inst
-
-    # Not used?
-    @typecheck
-    def find_instance(self, inst_uid: int) -> Union[Instance, None]:
-        key = inst_uid
-        if key not in self.instances:
-            return None
-        return self.instances[key]
 
     @typecheck
     def create_user_marker(self, name: str) -> UserMarker:
@@ -4349,7 +4473,7 @@ class State(object):
                 sum = 0.0
                 cnt = 0
                 bandwidth = 0.0
-                channel = self.find_channel(src, dst)
+                channel = self.find_or_create_channel(src, dst, "Copy")
                 for copy in channel.copies:
                     time = copy.stop - copy.start
                     sum = sum + time * 1e-6
@@ -4831,7 +4955,7 @@ class State(object):
                 def convert_to_tuple(elem: Union[int, Tuple]) -> Tuple:
                     if not isinstance(elem, tuple):
                         # needs to be converted
-                        return self.find_op(elem).get_unique_tuple()
+                        return self.find_or_create_op(elem).get_unique_tuple()
                     else:
                         return elem
                 op_dependencies[op_id][_dir] = set(map(convert_to_tuple, 

@@ -1700,14 +1700,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu " IDFMT " " 
+      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu %u %u " IDFMT " " 
                      IDFMT, copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
+                     copy_info.num_hops, copy_info.request_type,
                      copy_info.fevent.id, copy_info.provenance.id);
 #else
-      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu " IDFMT,
+      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu %u %u " IDFMT,
                      copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
+                     copy_info.num_hops, copy_info.request_type,
                      copy_info.fevent.id);
 #endif
     }
