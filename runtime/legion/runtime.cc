@@ -9600,8 +9600,8 @@ namespace Legion {
         ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(target.spawn(descriptor_id, 
-                    &ctx, sizeof(ctx), requests, pre, priority));
+        return Runtime::ignorefaults(ApEvent(target.spawn(descriptor_id, 
+                    &ctx, sizeof(ctx), requests, pre, priority)));
       }
       else
       {

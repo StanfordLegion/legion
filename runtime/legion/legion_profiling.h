@@ -256,37 +256,35 @@ namespace Legion {
       };
       struct CopyInstInfo {
       public:
-        unsigned num_fields;
-        unsigned num_hops;
-        unsigned request_type;
+        FieldID src_fid, dst_fid;
+        LgEvent src_inst_uid, dst_inst_uid;
+        LgEvent fevent;
+        bool indirect;
       };
       struct CopyInfo {
       public:
         UniqueID op_id;
-        MemID src, dst;
-        LgEvent src_inst_uid, dst_inst_uid;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
+        unsigned num_hops;
+        unsigned request_type;
         LgEvent fevent;
-        unsigned num_requests;
-        std::deque<CopyInstInfo> requests;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif
       };
       struct FillInstInfo {
       public:
-        unsigned num_fields;
+        FieldID fid;
+        LgEvent dst_inst_uid;
+        LgEvent fevent;
       };
       struct FillInfo {
       public:
         UniqueID op_id;
-        MemID dst;
-        LgEvent dst_inst_uid;
+        unsigned long long size;
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
-        unsigned num_requests;
-        std::deque<FillInstInfo> requests;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif
@@ -449,6 +447,12 @@ namespace Legion {
                               timestamp_t stop);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
                                timestamp_t start, timestamp_t stop);
+    public:
+      void record_fill_instance(FieldID fid, LgEvent dst_inst, LgEvent fevent);
+      void record_copy_instances(FieldID src_fid, FieldID dst_fid,
+          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
+      void record_indirect_instances(FieldID src_fid, FieldID dst_fid,
+          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -484,7 +488,9 @@ namespace Legion {
       std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
+      std::deque<CopyInstInfo> copy_inst_infos;
       std::deque<FillInfo> fill_infos;
+      std::deque<FillInstInfo> fill_inst_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
       std::deque<PartitionInfo> partition_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
@@ -558,10 +564,9 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            Operation *op, LgEvent src_inst_uid,
-                            LgEvent dst_inst_uid, unsigned count = 1);
+                            Operation *op, unsigned count = 1);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
-                            Operation *op, LgEvent inst_uid);
+                            Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op, LgEvent unique_event);
       void handle_failed_instance_allocation(void);
@@ -580,10 +585,9 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            UniqueID uid, LgEvent src_inst_uid,
-                            LgEvent dst_inst_uid, unsigned count = 1);
+                            UniqueID uid, unsigned count = 1);
       void add_fill_request(Realm::ProfilingRequestSet &requests,
-                            UniqueID uid, LgEvent inst_uid);
+                            UniqueID uid);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             UniqueID uid, LgEvent unique_event);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
@@ -633,6 +637,12 @@ namespace Legion {
                                      unsigned int num_runtime_call_kinds);
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
+    public:
+      void record_fill_instance(FieldID fid, LgEvent dst_inst, LgEvent fevent);
+      void record_copy_instances(FieldID src_fid, FieldID dst_fid,
+          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
+      void record_indirect_instances(FieldID src_fid, FieldID dst_fid,
+          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
