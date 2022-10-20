@@ -6770,18 +6770,17 @@ namespace Legion {
         assert(((unsigned)preimage) < nonempty_indexes.size());
         assert(src_indirections.empty() != dst_indirections.empty());
 #endif
-        runtime->profiler->record_indirect_instances(
-              src_indirect_field, dst_indirect_field,
-              src_indirect_instance_event, 
-              dst_indirect_instance_event, copy_post);
+        runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
         const unsigned index = nonempty_indexes[preimage];
         if (src_indirections.empty())
         {
           // Scatter
           for (unsigned idx = 0; idx < src_fields.size(); idx++)
-            runtime->profiler->record_copy_instances(
-                src_fields[idx].field_id, dst_fields[idx].field_id,
-                src_unique_events[idx], 
+            runtime->profiler->record_copy_instances(src_fields[idx].field_id,
+                dst_fields[idx].field_id, src_fields[idx].inst,
+                dst_indirections[index].instances[idx], src_unique_events[idx],
                 dst_indirections[index].instance_events[idx], copy_post);
         }
         else
@@ -6790,6 +6789,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < src_fields.size(); idx++)
             runtime->profiler->record_copy_instances(
                 src_fields[idx].field_id, dst_fields[idx].field_id,
+                src_indirections[index].instances[idx], dst_fields[idx].inst,
                 src_indirections[index].instance_events[idx], 
                 dst_unique_events[idx], copy_post);
         }
@@ -6802,20 +6802,21 @@ namespace Legion {
           for (unsigned idx = 0; idx < src_fields.size(); idx++)
             runtime->profiler->record_copy_instances(
                 src_fields[idx].field_id, dst_fields[idx].field_id,
+                src_fields[idx].inst, dst_fields[idx].inst,
                 src_unique_events[idx], dst_unique_events[idx], copy_post);
         }
         else
         {
           // Scatter
-          runtime->profiler->record_indirect_instances(
-              src_indirect_field, dst_indirect_field,
-              src_indirect_instance_event, 
-              dst_indirect_instance_event, copy_post);
+          runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
           for (unsigned idx = 0; idx < src_fields.size(); idx++)
             for (std::vector<IndirectRecord>::const_iterator it =
                   dst_indirections.begin(); it != dst_indirections.end(); it++)
               runtime->profiler->record_copy_instances(
                   src_fields[idx].field_id, dst_fields[idx].field_id,
+                  src_fields[idx].inst, it->instances[idx],
                   src_unique_events[idx], it->instance_events[idx], copy_post);
         }
       }
@@ -6824,33 +6825,33 @@ namespace Legion {
         if (dst_indirections.empty())
         {
           // Gather
-          runtime->profiler->record_indirect_instances(
-              src_indirect_field, dst_indirect_field,
-              src_indirect_instance_event, 
-              dst_indirect_instance_event, copy_post);
+          runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
           for (unsigned idx = 0; idx < src_fields.size(); idx++)
             for (std::vector<IndirectRecord>::const_iterator it =
                   src_indirections.begin(); it != src_indirections.end(); it++)
               runtime->profiler->record_copy_instances(
                   src_fields[idx].field_id, dst_fields[idx].field_id,
+                  it->instances[idx], dst_fields[idx].inst,
                   it->instance_events[idx], dst_unique_events[idx], copy_post);
         }
         else
         {
           // Full indirection
-          runtime->profiler->record_indirect_instances(
-              src_indirect_field, dst_indirect_field,
-              src_indirect_instance_event, 
-              dst_indirect_instance_event, copy_post);
+          runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
           for (unsigned idx = 0; idx < src_fields.size(); idx++)
             for (std::vector<IndirectRecord>::const_iterator src_it =
-                  src_indirections.begin(); src_it != 
+                  src_indirections.begin(); src_it !=
                   src_indirections.end(); src_it++)
               for (std::vector<IndirectRecord>::const_iterator dst_it =
-                    dst_indirections.begin(); dst_it != 
+                    dst_indirections.begin(); dst_it !=
                     dst_indirections.end(); dst_it++)
                 runtime->profiler->record_copy_instances(
                     src_fields[idx].field_id, dst_fields[idx].field_id,
+                    src_it->instances[idx], dst_it->instances[idx],
                     src_it->instance_events[idx], 
                     dst_it->instance_events[idx], copy_post);
         }
