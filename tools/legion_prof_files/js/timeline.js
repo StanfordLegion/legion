@@ -411,7 +411,11 @@ function getMouseOver() {
     var initiation_provenance = "";
     // Insert texts in reverse order
     if ((d.instances != undefined) && d.instances != "") {
-      descTexts.push("Instances: " + d.instances);
+      var instances = [];
+      d.instances.forEach((element) => {
+        instances.push(element[0]);
+      });
+      descTexts.push("Instances: " + instances);
     } 
     if (d.op_id != -1) {
         provenance = state.operations[d.op_id].provenance;
@@ -480,6 +484,8 @@ var sizeHistory = 10;
 var currentPos;
 var nextPos;
 var searchRegex = null;
+var searchInstRegex = null;
+var searchInstRegexLength = 0;
 
 function showSlider() {
     $('#lowerLimit').text($('#node_slider').slider("values", 0));
@@ -1297,9 +1303,28 @@ function timelineElementStrokeCalculator(elem) {
 function timelineEventMouseDown(_timelineEvent) {
   // only the first event of this uid will have information
   var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
+	
+  // draw instances
+  var hasInstances = timelineEvent.instances.length != 0;	
+  if (hasInstances) {
+    if (d3.event.button === 0) { 
+      searchInstRegexLength = timelineEvent.instances.length;
+      state.searchInstEnabled = true;
+      searchInstRegex = new Array(searchInstRegexLength);
+      for (let i = 0; i < searchInstRegexLength; i++) {
+        var re = timelineEvent.instances[i][1];
+        searchInstRegex[i] = new RegExp(re);
+      }
+    } else {
+      state.searchInstEnabled = false;
+      searchInstRegex = null;
+    }
+    redraw();
+  }
+	
+  // draw dependencies
   var hasDependencies = ((timelineEvent.in.length != 0) || 
                          (timelineEvent.out.length != 0));
-
   if (hasDependencies) {
     if (timelineEventsExistAndEqual(timelineEvent, state.dependencyEvent)) {
       if (d3.event.button === 0) {
@@ -1345,10 +1370,19 @@ function drawTimeline() {
     .attr("x", function(d) { return convertToPos(state, d.start); })
     .attr("y", timelineLevelCalculator)
     .style("fill", function(d) {
-      if (!state.searchEnabled ||
-          searchRegex[currentPos].exec(d.title) == null)
-        return d.color;
-      else return "#ff0000";
+      var color = d.color;
+      if (state.searchEnabled && searchRegex[currentPos].exec(d.title) != null) {
+        color = "#ff0000";
+      }
+      if (state.searchInstEnabled) {
+        for (let i = 0; i < searchInstRegexLength; i++) {
+          if (searchInstRegex[i].exec(d.prof_uid) != null) {
+            color = "#ff0000";
+            break;
+          }
+        }
+      }
+      return color;
     })
     .attr("width", function(d) {
       return Math.max(constants.min_feature_width, convertToPos(state, d.end - d.start));
@@ -2687,6 +2721,7 @@ function initializeState() {
   state.height = constants.max_level * state.thickness;
   state.resolution = 10; // time (in us) of the smallest feature we want to load
   state.searchEnabled = false;
+	state.searchInstEnabled = false;
   state.rangeZoom = true;
   state.collapseAll = false;
   state.display_critical_path = false;

@@ -1432,8 +1432,7 @@ class Operation(ProcOperation):
         instances_list = []
         for node in self.operation_inst_infos:
             assert node.instance is not None
-            instances_list.append(hex(node.instance.inst_id))
-            # instances_list.append(str(node.instance.prof_uid))
+            instances_list.append((hex(node.instance.inst_id), node.instance.prof_uid))
         # instances = "|".join(instances_list)
         instances = dump_json(instances_list)
         return instances
@@ -2077,11 +2076,9 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         instances_list = []
         for node in self.copy_inst_infos:
             assert node.src_instance is not None
-            instances_list.append(hex(node.src_instance.inst_id))
-            # instances_list.append(str(node.src_instance.prof_uid))
+            instances_list.append((hex(node.src_instance.inst_id), node.src_instance.prof_uid))
             assert node.dst_instance is not None
-            instances_list.append(hex(node.dst_instance.inst_id))
-            # instances_list.append(str(node.dst_instance.prof_uid))
+            instances_list.append((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
         # instances = "|".join(instances_list)
         instances = dump_json(instances_list)
         return instances
@@ -2202,9 +2199,7 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         instances_list = []
         for node in self.fill_inst_infos:
             assert node.dst_instance is not None
-            #instances_list.append(str(hex(node.dst_instance.inst_id)) + "(" + str(node.dst_instance.prof_uid) + ")")
-            instances_list.append(hex(node.dst_instance.inst_id))
-            # instances_list.append(str(node.dst_instance.prof_uid))
+            instances_list.append((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
         # instances = "|".join(instances_list)
         instances = dump_json(instances_list)
         return instances
