@@ -430,7 +430,8 @@ function getMouseOver() {
     if ((d.instances != undefined) && d.instances != "") {
       var instances = [];
       d.instances.forEach((element) => {
-        instances.push(element[0]);
+        var inst_hex = '0x' + parseInt(element[0]).toString(16);
+        instances.push(inst_hex);
       });
       descTexts.push("Instances: " + instances);
     }
