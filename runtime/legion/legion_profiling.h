@@ -256,6 +256,7 @@ namespace Legion {
       };
       struct CopyInstInfo {
       public:
+        MemID src, dst;
         FieldID src_fid, dst_fid;
         LgEvent src_inst_uid, dst_inst_uid;
         LgEvent fevent;
@@ -275,6 +276,7 @@ namespace Legion {
       };
       struct FillInstInfo {
       public:
+        MemID dst;
         FieldID fid;
         LgEvent dst_inst_uid;
         LgEvent fevent;
@@ -448,11 +450,14 @@ namespace Legion {
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
                                timestamp_t start, timestamp_t stop);
     public:
-      void record_fill_instance(FieldID fid, LgEvent dst_inst, LgEvent fevent);
+      void record_fill_instance(FieldID fid, PhysicalInstance dst_inst,
+                                LgEvent dst_name, LgEvent fevent);
       void record_copy_instances(FieldID src_fid, FieldID dst_fid,
-          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
       void record_indirect_instances(FieldID src_fid, FieldID dst_fid,
-          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -638,11 +643,14 @@ namespace Legion {
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
     public:
-      void record_fill_instance(FieldID fid, LgEvent dst_inst, LgEvent fevent);
+      void record_fill_instance(FieldID fid, PhysicalInstance dst_inst,
+                                LgEvent dst_name, LgEvent fevent);
       void record_copy_instances(FieldID src_fid, FieldID dst_fid,
-          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
       void record_indirect_instances(FieldID src_fid, FieldID dst_fid,
-          LgEvent src_inst, LgEvent dst_inst, LgEvent fevent);
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,

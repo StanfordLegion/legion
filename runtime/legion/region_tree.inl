@@ -158,7 +158,8 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < dst_fields.size(); idx++)
           forest->runtime->profiler->record_fill_instance(
-              dst_fields[idx].field_id, unique_event, fevent);
+              dst_fields[idx].field_id, dst_fields[idx].inst,
+              unique_event, fevent);
       }
 #ifdef LEGION_SPY
       assert(trace_info.op != NULL);
@@ -273,6 +274,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           forest->runtime->profiler->record_copy_instances(
               src_fields[idx].field_id, dst_fields[idx].field_id,
+              src_fields[idx].inst, dst_fields[idx].inst,
               src_unique, dst_unique, fevent);
       }
 #ifdef LEGION_SPY

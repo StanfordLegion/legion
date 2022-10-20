@@ -841,29 +841,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::record_fill_instance(FieldID fid, LgEvent inst,
-                                                  LgEvent fevent)
+    void LegionProfInstance::record_fill_instance(FieldID fid, 
+                            PhysicalInstance inst, LgEvent name, LgEvent fevent)
     //--------------------------------------------------------------------------
     {
       fill_inst_infos.emplace_back(FillInstInfo());
       FillInstInfo &info = fill_inst_infos.back();
+      info.dst = inst.get_location().id;
       info.fid = fid;
-      info.dst_inst_uid = inst;
+      info.dst_inst_uid = name;
       info.fevent = fevent;
       owner->update_footprint(sizeof(info), this);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_copy_instances(FieldID src_fid,
-            FieldID dst_fid, LgEvent src_inst, LgEvent dst_inst, LgEvent fevent)
+          FieldID dst_fid, PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent)
     //--------------------------------------------------------------------------
     {
       copy_inst_infos.emplace_back(CopyInstInfo());
       CopyInstInfo &info = copy_inst_infos.back();
+      info.src = src_inst.get_location().id;
+      info.dst = dst_inst.get_location().id;
       info.src_fid = src_fid;
       info.dst_fid = dst_fid;
-      info.src_inst_uid = src_inst;
-      info.dst_inst_uid = dst_inst;
+      info.src_inst_uid = src_name;
+      info.dst_inst_uid = dst_name;
       info.fevent = fevent;
       info.indirect = false;
       owner->update_footprint(sizeof(info), this);
@@ -871,15 +875,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfInstance::record_indirect_instances(FieldID src_fid, 
-            FieldID dst_fid, LgEvent src_inst, LgEvent dst_inst, LgEvent fevent)
+          FieldID dst_fid, PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent)
     //--------------------------------------------------------------------------
     {
       copy_inst_infos.emplace_back(CopyInstInfo());
       CopyInstInfo &info = copy_inst_infos.back();
+      info.src = src_inst.exists() ? src_inst.get_location().id : 0;
+      info.dst = dst_inst.exists() ? dst_inst.get_location().id : 0;
       info.src_fid = src_fid;
       info.dst_fid = dst_fid;
-      info.src_inst_uid = src_inst;
-      info.dst_inst_uid = dst_inst;
+      info.src_inst_uid = src_name;
+      info.dst_inst_uid = dst_name;
       info.fevent = fevent;
       info.indirect = true;
       owner->update_footprint(sizeof(info), this);
@@ -2433,35 +2440,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::record_fill_instance(FieldID fid, LgEvent inst,
-                                              LgEvent fevent)
+    void LegionProfiler::record_fill_instance(FieldID fid, 
+                            PhysicalInstance inst, LgEvent name, LgEvent fevent)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->record_fill_instance(fid, inst, fevent);
+      thread_local_profiling_instance->record_fill_instance(fid, inst, 
+                                                            name, fevent);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfiler::record_copy_instances(FieldID src_fid, FieldID dst_fid,
-                             LgEvent src_inst, LgEvent dst_inst, LgEvent fevent)
+                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
+                           LgEvent src_name, LgEvent dst_name, LgEvent fevent)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->record_copy_instances(src_fid, dst_fid,
-          src_inst, dst_inst, fevent);
+          src_inst, dst_inst, src_name, dst_name, fevent);
     }
 
     //--------------------------------------------------------------------------
     void LegionProfiler::record_indirect_instances(FieldID src_fid, 
-            FieldID dst_fid, LgEvent src_inst, LgEvent dst_inst, LgEvent fevent)
+          FieldID dst_fid, PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent)
     //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->record_indirect_instances(src_fid,
-          dst_fid, src_inst, dst_inst, fevent);
+          dst_fid, src_inst, dst_inst, src_name, dst_name, fevent);
     }
 
 #ifdef DEBUG_LEGION
