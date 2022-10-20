@@ -334,6 +334,8 @@ namespace Legion {
 
       ss << "CopyInstInfo {"
          << "id:" << COPY_INST_INFO_ID                           << delim
+         << "src:MemID:"                 << sizeof(MemID)        << delim
+         << "dst:MemID:"                 << sizeof(MemID)        << delim
          << "src_fid:unsigned:"          << sizeof(FieldID)      << delim
          << "dst_fid:unsigned:"          << sizeof(FieldID)      << delim
          << "src_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
@@ -359,6 +361,7 @@ namespace Legion {
 
       ss << "FillInstInfo {"
          << "id:" << FILL_INST_INFO_ID                           << delim
+         << "dst:MemID:"                    << sizeof(MemID)     << delim
          << "fid:unsigned:"                 << sizeof(FieldID)   << delim
          << "dst_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)
@@ -913,6 +916,8 @@ namespace Legion {
     {
       int ID = COPY_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(copy_inst.src), sizeof(copy_inst.src));
+      lp_fwrite(f, (char*)&(copy_inst.dst), sizeof(copy_inst.dst));
       lp_fwrite(f, (char*)&(copy_inst.src_fid), sizeof(copy_inst.src_fid));
       lp_fwrite(f, (char*)&(copy_inst.dst_fid), sizeof(copy_inst.dst_fid));
       lp_fwrite(f, (char*)&(copy_inst.src_inst_uid.id),
@@ -949,6 +954,7 @@ namespace Legion {
     {
       int ID = FILL_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(fill_inst.dst), sizeof(fill_inst.dst));
       lp_fwrite(f, (char*)&(fill_inst.fid),    sizeof(fill_inst.fid));
       lp_fwrite(f, (char*)&(fill_inst.dst_inst_uid.id),
           sizeof(fill_inst.dst_inst_uid.id));
@@ -1711,7 +1717,8 @@ namespace Legion {
                               const LegionProfInstance::CopyInstInfo& copy_inst)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Copy Inst Info %d %d " IDFMT " " IDFMT " " IDFMT " %u",
+      log_prof.print("Prof Copy Inst Info " IDFMT " " IDFMT " %d %d " IDFMT " " 
+                     IDFMT " " IDFMT " %u", copy_inst.src, copy_inst.dst,
                      copy_inst.src_fid, copy_inst.dst_fid,
                      copy_inst.src_inst_uid.id, copy_inst.dst_inst_uid.id,
                      copy_inst.fevent.id, copy_inst.indirect ? 1 : 0); 
@@ -1739,8 +1746,9 @@ namespace Legion {
                               const LegionProfInstance::FillInstInfo& fill_inst)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Fill Inst Info %d " IDFMT " " IDFMT,
-          fill_inst.fid, fill_inst.dst_inst_uid.id, fill_inst.fevent.id);
+      log_prof.print("Prof Fill Inst Info " IDFMT " %d " IDFMT " " IDFMT,
+                      fill_inst.dst, fill_inst.fid, fill_inst.dst_inst_uid.id,
+                      fill_inst.fevent.id);
     }
 
     //--------------------------------------------------------------------------
