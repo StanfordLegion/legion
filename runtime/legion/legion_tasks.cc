@@ -8679,8 +8679,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_DEACTIVATE_CALL);
-      MultiTask::deactivate(false/*free*/);
       reduction_instance = NULL; // we don't own this so clear it
+      MultiTask::deactivate(false/*free*/);
       privilege_paths.clear();
       if (!origin_mapped_slices.empty())
       {
