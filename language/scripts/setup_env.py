@@ -429,16 +429,13 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         cmake_install_dir = os.path.join(cmake_dir, cmake_stem)
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
-
-            proc_type = subprocess.check_output(['uname', '-p']).decode('utf-8').strip()
-            if proc_type != 'x86_64' and proc_type != 'i386':
-                raise Exception("Don't know how to download CMake binary for %s" % proc_type)
-
             cmake_tarball = os.path.join(cmake_dir, cmake_basename)
             download(cmake_tarball, cmake_url, cmake_shasum, insecure=insecure)
             extract(cmake_dir, cmake_tarball, 'gz')
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
+        if cmake_system == 'macos':
+            cmake_exe = os.path.join(cmake_install_dir, 'CMake.app', 'Contents', 'bin', 'cmake')
 
     llvm_dir = os.path.realpath(os.path.join(prefix_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
