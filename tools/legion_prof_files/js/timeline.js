@@ -381,6 +381,25 @@ function get_time_str(time_val, convert)
     return time_val.toString() + " us";
 }
 
+function get_provenance(data)
+{
+  var provenance = "";
+  var initiation_provenance = "";
+  if (data.op_id != -1) {
+    provenance = state.operations[data.op_id].provenance;
+  }
+  if ((data.initiation != undefined) && (data.initiation != "")) {
+    initiation_provenance = state.operations[data.initiation].provenance;
+  }
+  if (provenance != "") {
+    return provenance;
+  } else if (initiation_provenance != "") {
+    return initiation_provenance;
+  } else {
+    return "";
+  }
+}
+
 function getMouseOver() {
   var paneWidth = $("#timeline").width();
   var left = paneWidth / 3;
@@ -406,9 +425,7 @@ function getMouseOver() {
     var delay = d.start - d.ready;
     total = parseFloat(total.toFixed(3))
     delay = parseFloat(delay.toFixed(3))
-    var initiation = "";
-    var provenance = "";
-    var initiation_provenance = "";
+    
     // Insert texts in reverse order
     if ((d.instances != undefined) && d.instances != "") {
       var instances = [];
@@ -416,17 +433,10 @@ function getMouseOver() {
         instances.push(element[0]);
       });
       descTexts.push("Instances: " + instances);
-    } 
-    if (d.op_id != -1) {
-        provenance = state.operations[d.op_id].provenance;
     }
-    if ((d.initiation != undefined) && (d.initiation != "")) {
-        initiation_provenance = state.operations[d.initiation].provenance;
-    }
+    var provenance = get_provenance(d);
     if (provenance != "") {
-        descTexts.push("Provenance: " + provenance);
-    } else if (initiation_provenance != "") {
-        descTexts.push("Provenance: " + initiation_provenance);
+      descTexts.push("Provenance: " + provenance);
     }
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
       descTexts.push("Ready State: " + get_time_str(delay,false));
@@ -1371,8 +1381,13 @@ function drawTimeline() {
     .attr("y", timelineLevelCalculator)
     .style("fill", function(d) {
       var color = d.color;
-      if (state.searchEnabled && searchRegex[currentPos].exec(d.title) != null) {
-        color = "#ff0000";
+      if (state.searchEnabled) {
+	var provenance = get_provenance(d);
+	if (searchRegex[currentPos].exec(d.title) != null ||
+	    searchRegex[currentPos].exec(d.initiation) != null ||
+            searchRegex[currentPos].exec(provenance) != null) {
+          color = "#ff0000";
+        }
       }
       if (state.searchInstEnabled) {
         for (let i = 0; i < searchInstRegexLength; i++) {
@@ -1403,10 +1418,18 @@ function drawTimeline() {
     })
     .attr("height", state.thickness)
     .style("opacity", function(d) {
-      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null || searchRegex[currentPos].exec(d.initiation) != null) {
-        return d.opacity;
+      var opacity = d.opacity;
+      if (state.searchEnabled) {
+	var provenance = get_provenance(d);
+        if (searchRegex[currentPos].exec(d.title) != null || 
+	    searchRegex[currentPos].exec(d.initiation) != null ||
+            searchRegex[currentPos].exec(provenance) != null) {
+          opacity = d.opacity;	
+        } else {
+	  opacity = 0.05;
+        }
       }
-      else return 0.05;
+      return opacity;
     })
     .on("mouseout", function(d, i) { 
       if ((d.in.length != 0) || (d.out.length != 0)) {
