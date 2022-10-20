@@ -88,10 +88,8 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::RuntimeCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::GPUTaskInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::CopyInstInfo&,
-                             const LegionProfInstance::CopyInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::FillInstInfo&,
-                             const LegionProfInstance::FillInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::CopyInstInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::FillInstInfo&) = 0;
       virtual void serialize(const LegionProfInstance::ProcDesc&) = 0;
       virtual void serialize(const LegionProfInstance::MemDesc&) = 0;
       virtual void serialize(const LegionProfInstance::ProcMemDesc&) = 0;
@@ -150,10 +148,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
-      void serialize(const LegionProfInstance::CopyInstInfo&,
-                     const LegionProfInstance::CopyInfo&);
-      void serialize(const LegionProfInstance::FillInstInfo&,
-                     const LegionProfInstance::FillInfo&);
+      void serialize(const LegionProfInstance::CopyInstInfo&);
+      void serialize(const LegionProfInstance::FillInstInfo&);
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
       void serialize(const LegionProfInstance::ProcMemDesc&);
@@ -265,10 +261,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
       void serialize(const LegionProfInstance::GPUTaskInfo&);
-      void serialize(const LegionProfInstance::CopyInstInfo&,
-                     const LegionProfInstance::CopyInfo&);
-      void serialize(const LegionProfInstance::FillInstInfo&,
-                     const LegionProfInstance::FillInfo&);
+      void serialize(const LegionProfInstance::CopyInstInfo&);
+      void serialize(const LegionProfInstance::FillInstInfo&);
       void serialize(const LegionProfInstance::ProcDesc&);
       void serialize(const LegionProfInstance::MemDesc&);
       void serialize(const LegionProfInstance::ProcMemDesc&);
