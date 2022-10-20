@@ -2686,13 +2686,6 @@ class Processor(object):
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
 
     @typecheck
-    def link_instances(self, instances: Dict[int, Instance]) -> None:
-        for point in self.time_points:
-            if point.first:
-                if isinstance(point.thing, Operation):
-                    point.thing.link_instance(instances)
-
-    @typecheck
     def emit_tsv(self, tsv_file: io.TextIOWrapper, base_level: int) -> int:
         # iterate over tasks in start/ready time order
         for point in self.time_points:
@@ -3126,13 +3119,6 @@ class Channel(object):
                 # Finishing this instance so restore its point
                 assert point.thing.level is not None
                 free_levels.add(point.thing.level)
-
-    @typecheck
-    def link_instances(self, instances: Dict[int, Instance]) -> None:
-        for point in self.time_points:
-            if point.first:
-                if isinstance(point.thing, (Copy, Fill)):
-                    point.thing.link_instance(instances)
 
     @typecheck
     def emit_tsv(self, 
@@ -4972,6 +4958,18 @@ class State(object):
                 print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
 
     @typecheck
+    def link_instances(self) -> None:
+        for operation in self.operations.values():
+            if len(operation.operation_inst_infos) > 0:
+                operation.link_instance(self.instances)
+
+        for copy in self.copy_map.values():
+            copy.link_instance(self.instances)
+
+        for fill in self.fill_map.values():
+            fill.link_instance(self.instances)
+    
+    @typecheck
     def emit_interactive_visualization(self, 
                                        output_dirname: str, 
                                        show_procs: bool,
@@ -5066,7 +5064,6 @@ class State(object):
                                                  transitive_map)
                     proc_name = slugify("Proc_" + str(hex(p)))
                     proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
-                    proc.link_instances(self.instances)
                     with open(proc_tsv_file_name, "w") as proc_tsv_file:
                         proc_tsv_file.write(data_tsv_header)
                         proc_level = proc.emit_tsv(proc_tsv_file, 0)
@@ -5082,7 +5079,6 @@ class State(object):
         if show_channels:
             for c,chan in sorted(self.channels.items(), key=lambda x: x[1]):
                 if len(chan.copies) > 0:
-                    chan.link_instances(self.instances)
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
                     with open(chan_tsv_file_name, "w") as chan_tsv_file:
@@ -5346,6 +5342,9 @@ def main() -> None:
 
     # sort operations and check parent_id
     state.check_operation_parent_id()
+
+    # link instance with Copy/Fill/Operation
+    state.link_instances()
 
     if print_stats:
         state.print_stats(verbose)
