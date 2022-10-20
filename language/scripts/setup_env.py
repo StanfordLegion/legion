@@ -404,13 +404,25 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         else:
             cmake_exe = 'cmake' # CMake is ok, use it
     if cache or (cmake_exe is None):
-        cmake_stem = 'cmake-3.7.2-%s-x86_64' % platform.system()
+        cmake_system = platform.system()
+        if cmake_system == 'Darwin':
+            cmake_system = 'macos'
+        else:
+            cmake_system = cmake_system.lower()
+        cmake_processor = platform.machine()
+
+        if cmake_system == 'macos':
+            cmake_processor = 'universal'
+
+        cmake_stem = 'cmake-3.23.4-%s-%s' % (cmake_system, cmake_processor)
         cmake_basename = '%s.tar.gz' % cmake_stem
-        cmake_url = 'https://cmake.org/files/v3.7/%s' % cmake_basename
-        if cmake_stem == 'cmake-3.7.2-Linux-x86_64':
-            cmake_shasum = '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406'
-        elif cmake_stem == 'cmake-3.7.2-Darwin-x86_64':
-            cmake_shasum = '0175e97748052dfc15ebd3c0aa65286e5ec20ca22ed606ce88940e699496b03c'
+        cmake_url = 'https://github.com/Kitware/CMake/releases/download/v3.23.4/%s' % cmake_basename
+        if cmake_stem == 'cmake-3.23.4-linux-x86_64':
+            cmake_shasum = '3fbcbff85043d63a8a83c8bdf8bd5b1b2fd5768f922de7dc4443de7805a2670d'
+        elif cmake_stem == 'cmake-3.23.4-macos-universal':
+            cmake_shasum = '98cac043cdf321caa4fd07f27da3316db6c8bc48c39997bf78e27e5c46c4eb68'
+        else:
+            raise Exception("Don't know how to download CMake binary for %s %s" % (cmake_system, cmake_processor))
 
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, cmake_stem)
