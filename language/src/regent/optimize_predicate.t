@@ -227,6 +227,11 @@ local function analyze_is_side_effect_free(cx, node)
 end
 
 local function predicate_call(cx, node)
+  -- If it's already predicated, don't need to do it twice. The
+  -- predicate itself will be predicated on the outer condition.
+  if node.predicate then
+    return node
+  end
   return node {
     predicate = cx.cond,
   }
@@ -469,7 +474,7 @@ local optimize_predicate_stat = ast.make_single_dispatch(
   optimize_predicate_stat_table, {})
 
 function optimize_predicate.stat(cx, node)
-  return optimize_predicate_stat(cx)(node)
+  return ast.map_stat_postorder(optimize_predicate_stat(cx), node)
 end
 
 function optimize_predicate.block(cx, node)
