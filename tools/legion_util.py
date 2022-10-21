@@ -28,6 +28,11 @@ import sys
 import io
 import collections
 import os
+import csv
+from tempfile import TemporaryFile
+
+with TemporaryFile() as t:
+    CSVWriter = type(csv.writer(t))
 
 if sys.version_info >= (3,8):
     from typing import get_origin, get_args
@@ -57,9 +62,10 @@ def typeassert(*ty_args, **ty_kwargs):
             # Enforce type assertions across supplied arguments
             for name, value in bound_values.arguments.items():
                 if name in bound_types:
-                    if not isinstance(value, bound_types[name]):
+                    annotation_type = get_annotation_type(bound_types[name])
+                    if not isinstance(value, annotation_type):
                         raise TypeError(
-                            'Function: {}, argument {} must be {}, but it is {}'.format(func, name, bound_types[name], type(value))
+                            'Function: {}, argument {} must be {}, but it is {}'.format(func, name, annotation_type, type(value))
                             )
             return func(*args, **kwargs)
         return wrapper

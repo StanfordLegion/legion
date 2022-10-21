@@ -127,18 +127,20 @@ pub struct OperationInstInfoDumpInstVec<'a>(pub &'a Vec<OperationInstInfo>, pub 
 
 impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
         for (i, elt) in self.0.iter().enumerate() {
             let inst = self.1.find_inst(elt.inst_uid).unwrap();
             write!(
                 f,
-                "0x{:x}({})",
+                "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
                 inst.base.prof_uid.0
             )?;
             if i < self.0.len() - 1 {
-                write!(f, "|")?;
+                write!(f, ",")?;
             }
         }
+        write!(f, "]")?;
         Ok(())
     }
 }
@@ -459,21 +461,23 @@ pub struct CopyInstInfoDumpInstVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State)
 
 impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
         for (i, elt) in self.0.iter().enumerate() {
             let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
             let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
             write!(
                 f,
-                "0x{:x}({})|0x{:x}({})",
+                "[\"0x{:x}\",{}],[\"0x{:x}\",{}]",
                 src_inst.inst_id.unwrap().0,
                 src_inst.base.prof_uid.0,
                 dst_inst.inst_id.unwrap().0,
                 dst_inst.base.prof_uid.0
             )?;
             if i < self.0.len() - 1 {
-                write!(f, "|")?;
+                write!(f, ",")?;
             }
         }
+        write!(f, "]")?;
         Ok(())
     }
 }
@@ -518,18 +522,20 @@ pub struct FillInstInfoDumpInstVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State)
 
 impl fmt::Display for FillInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
         for (i, elt) in self.0.iter().enumerate() {
             let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
             write!(
                 f,
-                "0x{:x}({})",
+                "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
                 inst.base.prof_uid.0
             )?;
             if i < self.0.len() - 1 {
-                write!(f, "|")?;
+                write!(f, ",")?;
             }
         }
+        write!(f, "]")?;
         Ok(())
     }
 }

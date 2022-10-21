@@ -38,11 +38,12 @@ import heapq
 import time
 import itertools
 import io
+import csv, _csv
 from functools import reduce
 from abc import ABC, abstractmethod
 from typing import Union, Dict, List, Tuple, Type, Set, Optional, NoReturn, ItemsView, KeysView, ValuesView, Any
 
-from legion_util import typeassert, typecheck
+from legion_util import typeassert, typecheck, CSVWriter
 import legion_serializer as serializer
 
 root_dir = os.path.dirname(os.path.realpath(__file__))
@@ -215,21 +216,21 @@ def data_tsv_str(level: int, level_ready: Union[int, None],
                  prof_uid: int,
                  op_id: Union[int, None],
                  instances: Union[str, None]
-    ) -> str:
+    ) -> List:
     # replace None with ''
     def xstr(s: Union[None, float, int, str]) -> str:
         if s is None:
             return ""
         else:
             return str(s)
-    return xstr(level) + "\t" + xstr(level_ready) + "\t" + \
-           xstr('%.3f' % ready if ready else ready) + "\t" + \
-           xstr('%.3f' % start if start else start) + "\t" + \
-           xstr('%.3f' % end if end else end) + "\t" + \
-           xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
-           xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
-           xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\t" + \
-           xstr(op_id) + "\t" + xstr(instances) + "\n"
+    return [xstr(level), xstr(level_ready),
+            xstr('%.3f' % ready if ready else ready),
+            xstr('%.3f' % start if start else start),
+            xstr('%.3f' % end if end else end),
+            xstr(color), xstr(opacity), xstr(title),
+            xstr(initiation), xstr(_in), xstr(out),
+            xstr(children), xstr(parents), xstr(prof_uid),
+            xstr(op_id), xstr(instances)]
 
 def dump_json(value: Union[Set, List]) -> str:
     return json.dumps(value, separators=(',', ':'))
@@ -1156,9 +1157,13 @@ class HasWaiters(ABC):
             active_time += (self.stop - start)
         return active_time
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=int,
+                op_id=Union[int, None],
+                instances=Union[str, None])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1241,9 +1246,9 @@ class HasWaiters(ABC):
                                      op_id = op_id,
                                      instances = instances)
 
-                tsv_file.write(init)
-                tsv_file.write(wait)
-                tsv_file.write(ready)
+                tsv_file.writerow(init)
+                tsv_file.writerow(wait)
+                tsv_file.writerow(ready)
                 start = max(start, wait_interval.end)
             if start < self.stop:
                 end = data_tsv_str(level = cur_level,
@@ -1263,7 +1268,7 @@ class HasWaiters(ABC):
                                    op_id = op_id,
                                    instances = instances)
 
-                tsv_file.write(end)
+                tsv_file.writerow(end)
         else:
             if (level_ready != None):
                 l_ready = base_level + (max_levels_ready - level_ready)
@@ -1286,7 +1291,7 @@ class HasWaiters(ABC):
                                 op_id = op_id,
                                 instances = instances)
 
-            tsv_file.write(line)
+            tsv_file.writerow(line)
 
 class Base(ABC):
     __slots__ = ['prof_uid', 'level', 'level_ready']
@@ -1496,9 +1501,11 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         self.color = self.variant.color
         self.base_op.color = self.color
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=int)
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1595,9 +1602,11 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
     def mapper_time(self) -> float:
         return 0.0
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=int)
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1652,9 +1661,11 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
     def mapper_time(self) -> float:
         return 0.0
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Union[int,None])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1681,7 +1692,7 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
                                 prof_uid = self.prof_uid,
                                 op_id = self.proftask_id,
                                 instances = None)
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1733,9 +1744,11 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
         assert self.kind is not None and self.kind.color is not None
         return self.kind.color
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Union[int,None])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: int,
@@ -1769,7 +1782,7 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
                                 op_id = None,
                                 instances = None)
 
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def active_time(self) -> float:
@@ -1836,9 +1849,11 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
         assert self.kind.color is not None
         return self.kind.color
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Union[int,None])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: int,
@@ -1866,7 +1881,7 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
                                 op_id = None, 
                                 instances = None)
 
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def active_time(self) -> float:
@@ -1920,9 +1935,11 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
     def mapper_time(self) -> float:
         return 0.0
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Union[int,None])
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1949,7 +1966,7 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
                                 prof_uid = self.prof_uid,
                                 op_id = None, 
                                 instances = None)
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def __repr__(self) -> str:
@@ -2114,9 +2131,11 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         instances = dump_json(instances_list)
         return instances
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: None,
@@ -2150,7 +2169,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                                 prof_uid = self.prof_uid,
                                 op_id = None, 
                                 instances = instances)
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
 class FillInstInfo(object):
     __slots__ = [
@@ -2249,9 +2268,11 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         instances = dump_json(instances_list)
         return instances
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: None,
@@ -2281,7 +2302,7 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
                                 prof_uid = self.prof_uid,
                                 op_id = None, 
                                 instances = instances)
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
 class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['part_op']
@@ -2301,9 +2322,11 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
         assert self.part_op in dep_part_kinds
         return dep_part_kinds[self.part_op]
 
-    @typecheck    
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))  
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: None,
@@ -2332,7 +2355,7 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
                                 prof_uid = self.prof_uid,
                                 op_id = None, 
                                 instances = None)
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
 # Operations rendering on Memories
 # Including: Instance
@@ -2390,9 +2413,11 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         self.initiation_op = initiation_op
         self.initiation = initiation_op.op_id
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: None,
@@ -2432,7 +2457,7 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                     prof_uid = self.prof_uid,
                                     op_id = None,
                                     instances = None)
-            tsv_file.write(tsv_line)
+            tsv_file.writerow(tsv_line)
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -2450,7 +2475,7 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                 prof_uid = self.prof_uid,
                                 op_id = None,
                                 instances = None)
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def total_time(self) -> float:
@@ -2730,8 +2755,8 @@ class Processor(object):
             if point.first:
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
 
-    @typecheck
-    def emit_tsv(self, tsv_file: io.TextIOWrapper, base_level: int) -> int:
+    @typeassert(base_level=int)
+    def emit_tsv(self, tsv_file: "_csv._writer", base_level: int) -> int:
         # iterate over tasks in start/ready time order
         for point in self.time_points:
             if point.first:
@@ -2949,9 +2974,9 @@ class Memory(object):
                 assert point.thing.level is not None
                 free_levels.add(point.thing.level)
 
-    @typecheck
+    @typeassert(base_level=int)
     def emit_tsv(self, 
-                 tsv_file: io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int
     ) -> int:
         max_levels = self.max_live_instances + 1
@@ -3173,9 +3198,9 @@ class Channel(object):
                 assert point.thing.level is not None
                 free_levels.add(point.thing.level)
 
-    @typecheck
+    @typeassert(base_level=int)
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int) -> int:
         max_levels = self.max_live_copies + 1
         if max_levels > 1:
@@ -4726,10 +4751,11 @@ class State(object):
 
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
             with open(util_tsv_filename, "w") as util_tsv_file:
-                util_tsv_file.write("time\tcount\n")
-                util_tsv_file.write("0.000\t0.00\n") # initial point
+                util_csvwriter = csv.writer(util_tsv_file, delimiter='\t', lineterminator='\n') 
+                util_csvwriter.writerow(["time", "count"])
+                util_csvwriter.writerow(["0.000", "0.00"]) # initial point
                 for util_point in utilization:
-                    util_tsv_file.write("%.3f\t%.2f\n" % util_point)
+                    util_csvwriter.writerow(["%.3f" % util_point[0], "%.2f" % util_point[1]])
 
     @typecheck
     def simplify_op(self, 
@@ -5137,7 +5163,10 @@ class State(object):
         dep_json_file_name = os.path.join(output_dirname, "json", 
                                           "op_dependencies.json")
 
-        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\top_id\tinstances\n"
+        data_tsv_header = ["level", "level_ready", "ready", "start", "end", 
+                           "color", "opacity", "title", "initiation", 
+                           "in", "out", "children", "parents", 
+                           "prof_uid", "op_id", "instances"]
 
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")
@@ -5189,8 +5218,9 @@ class State(object):
                     proc_name = slugify("Proc_" + str(hex(p)))
                     proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
                     with open(proc_tsv_file_name, "w") as proc_tsv_file:
-                        proc_tsv_file.write(data_tsv_header)
-                        proc_level = proc.emit_tsv(proc_tsv_file, 0)
+                        proc_csvwriter = csv.writer(proc_tsv_file, delimiter='\t', lineterminator='\n') 
+                        proc_csvwriter.writerow(data_tsv_header)
+                        proc_level = proc.emit_tsv(proc_csvwriter, 0)
                     base_level += proc_level
                     processor_levels[proc] = {
                         'levels': proc_level-1, 
@@ -5206,8 +5236,9 @@ class State(object):
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
                     with open(chan_tsv_file_name, "w") as chan_tsv_file:
-                        chan_tsv_file.write(data_tsv_header)
-                        chan_level = chan.emit_tsv(chan_tsv_file, 0)
+                        chan_csvwriter = csv.writer(chan_tsv_file, delimiter='\t', lineterminator='\n') 
+                        chan_csvwriter.writerow(data_tsv_header)
+                        chan_level = chan.emit_tsv(chan_csvwriter, 0)
                     base_level += chan_level
                     channel_levels[chan] = {
                         'levels': chan_level-1, 
@@ -5222,9 +5253,10 @@ class State(object):
                 if len(mem.instances) > 0:
                     mem_name = slugify("Mem_" + str(hex(m)))
                     mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
-                    with open(mem_tsv_file_name, "w") as mem_tsv_file: 
-                        mem_tsv_file.write(data_tsv_header)
-                        mem_level = mem.emit_tsv(mem_tsv_file, 0)
+                    with open(mem_tsv_file_name, "w") as mem_tsv_file:
+                        mem_csvwriter = csv.writer(mem_tsv_file, delimiter='\t', lineterminator='\n')
+                        mem_csvwriter.writerow(data_tsv_header)
+                        mem_level = mem.emit_tsv(mem_csvwriter, 0)
                     base_level += mem_level
                     memory_levels[mem] = {
                         'levels': mem_level-1, 
