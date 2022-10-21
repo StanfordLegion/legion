@@ -1049,7 +1049,9 @@ namespace Legion {
       CopyAcrossUnstructured(Runtime *rt, const bool preimages,
                              const std::map<Reservation,bool> &rsrvs)
         : CopyAcrossExecutor(rt, preimages, rsrvs),
-          src_indirect_field(0), dst_indirect_field(0) { }
+          src_indirect_field(0), dst_indirect_field(0),
+          src_indirect_instance(PhysicalInstance::NO_INST),
+          dst_indirect_instance(PhysicalInstance::NO_INST) { }
       virtual ~CopyAcrossUnstructured(void) { }
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
