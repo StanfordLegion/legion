@@ -26176,6 +26176,7 @@ namespace Legion {
         log_run.error("Unable to find distributed collectable %llx with "
                       "type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
 #endif
+        assert(false);
       }
       // Wait for it to be ready
       ready.wait();
