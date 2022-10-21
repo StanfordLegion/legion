@@ -381,6 +381,25 @@ function get_time_str(time_val, convert)
     return time_val.toString() + " us";
 }
 
+function get_provenance(data)
+{
+  var provenance = "";
+  var initiation_provenance = "";
+  if (data.op_id != -1) {
+    provenance = state.operations[data.op_id].provenance;
+  }
+  if ((data.initiation != undefined) && (data.initiation != "")) {
+    initiation_provenance = state.operations[data.initiation].provenance;
+  }
+  if (provenance != "") {
+    return provenance;
+  } else if (initiation_provenance != "") {
+    return initiation_provenance;
+  } else {
+    return "";
+  }
+}
+
 function getMouseOver() {
   var paneWidth = $("#timeline").width();
   var left = paneWidth / 3;
@@ -406,23 +425,19 @@ function getMouseOver() {
     var delay = d.start - d.ready;
     total = parseFloat(total.toFixed(3))
     delay = parseFloat(delay.toFixed(3))
-    var initiation = "";
-    var provenance = "";
-    var initiation_provenance = "";
+    
     // Insert texts in reverse order
     if ((d.instances != undefined) && d.instances != "") {
-      descTexts.push("Instances: " + d.instances);
-    } 
-    if (d.op_id != -1) {
-        provenance = state.operations[d.op_id].provenance;
+      var instances = [];
+      d.instances.forEach((element) => {
+        var inst_hex = '0x' + parseInt(element[0]).toString(16);
+        instances.push(inst_hex);
+      });
+      descTexts.push("Instances: " + instances);
     }
-    if ((d.initiation != undefined) && (d.initiation != "")) {
-        initiation_provenance = state.operations[d.initiation].provenance;
-    }
+    var provenance = get_provenance(d);
     if (provenance != "") {
-        descTexts.push("Provenance: " + provenance);
-    } else if (initiation_provenance != "") {
-        descTexts.push("Provenance: " + initiation_provenance);
+      descTexts.push("Provenance: " + provenance);
     }
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
       descTexts.push("Ready State: " + get_time_str(delay,false));
@@ -480,6 +495,8 @@ var sizeHistory = 10;
 var currentPos;
 var nextPos;
 var searchRegex = null;
+var searchInstRegex = null;
+var searchInstRegexLength = 0;
 
 function showSlider() {
     $('#lowerLimit').text($('#node_slider').slider("values", 0));
@@ -1297,9 +1314,28 @@ function timelineElementStrokeCalculator(elem) {
 function timelineEventMouseDown(_timelineEvent) {
   // only the first event of this uid will have information
   var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
+	
+  // draw instances
+  var hasInstances = timelineEvent.instances.length != 0;	
+  if (hasInstances) {
+    if (d3.event.button === 0) { 
+      searchInstRegexLength = timelineEvent.instances.length;
+      state.searchInstEnabled = true;
+      searchInstRegex = new Array(searchInstRegexLength);
+      for (let i = 0; i < searchInstRegexLength; i++) {
+        var re = timelineEvent.instances[i][1];
+        searchInstRegex[i] = new RegExp(re);
+      }
+    } else {
+      state.searchInstEnabled = false;
+      searchInstRegex = null;
+    }
+    redraw();
+  }
+	
+  // draw dependencies
   var hasDependencies = ((timelineEvent.in.length != 0) || 
                          (timelineEvent.out.length != 0));
-
   if (hasDependencies) {
     if (timelineEventsExistAndEqual(timelineEvent, state.dependencyEvent)) {
       if (d3.event.button === 0) {
@@ -1345,10 +1381,24 @@ function drawTimeline() {
     .attr("x", function(d) { return convertToPos(state, d.start); })
     .attr("y", timelineLevelCalculator)
     .style("fill", function(d) {
-      if (!state.searchEnabled ||
-          searchRegex[currentPos].exec(d.title) == null)
-        return d.color;
-      else return "#ff0000";
+      var color = d.color;
+      if (state.searchEnabled) {
+	var provenance = get_provenance(d);
+	if (searchRegex[currentPos].exec(d.title) != null ||
+	    searchRegex[currentPos].exec(d.initiation) != null ||
+            searchRegex[currentPos].exec(provenance) != null) {
+          color = "#ff0000";
+        }
+      }
+      if (state.searchInstEnabled) {
+        for (let i = 0; i < searchInstRegexLength; i++) {
+          if (searchInstRegex[i].exec(d.prof_uid) != null) {
+            color = "#ff0000";
+            break;
+          }
+        }
+      }
+      return color;
     })
     .attr("width", function(d) {
       return Math.max(constants.min_feature_width, convertToPos(state, d.end - d.start));
@@ -1369,10 +1419,18 @@ function drawTimeline() {
     })
     .attr("height", state.thickness)
     .style("opacity", function(d) {
-      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null || searchRegex[currentPos].exec(d.initiation) != null) {
-        return d.opacity;
+      var opacity = d.opacity;
+      if (state.searchEnabled) {
+	var provenance = get_provenance(d);
+        if (searchRegex[currentPos].exec(d.title) != null || 
+	    searchRegex[currentPos].exec(d.initiation) != null ||
+            searchRegex[currentPos].exec(provenance) != null) {
+          opacity = d.opacity;	
+        } else {
+	  opacity = 0.05;
+        }
       }
-      else return 0.05;
+      return opacity;
     })
     .on("mouseout", function(d, i) { 
       if ((d.in.length != 0) || (d.out.length != 0)) {
@@ -2320,6 +2378,7 @@ function load_proc_timeline(proc) {
         var parents = d.parents === "" ? [] : JSON.parse(d.parents)
         // if op_id is empty, then we set it to -1
         var op_id = d.op_id == "" ? -1 : parseInt(d.op_id)
+	var instances = d.instances === "" ? [] : JSON.parse(d.instances)
         if (total > state.resolution) {
             return {
                 id: i,
@@ -2339,7 +2398,7 @@ function load_proc_timeline(proc) {
                 prof_uid: d.prof_uid,
                 op_id: op_id,
                 proc: proc,
-		instances: d.instances
+                instances: instances
             };
         }
     },
@@ -2686,6 +2745,7 @@ function initializeState() {
   state.height = constants.max_level * state.thickness;
   state.resolution = 10; // time (in us) of the smallest feature we want to load
   state.searchEnabled = false;
+	state.searchInstEnabled = false;
   state.rangeZoom = true;
   state.collapseAll = false;
   state.display_critical_path = false;
