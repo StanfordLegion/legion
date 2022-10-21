@@ -306,6 +306,7 @@ namespace Legion {
                                          std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(0);
       rez.serialize<size_t>(0);
     }
 
@@ -1055,6 +1056,17 @@ namespace Legion {
       }
       else
         parent_ctx->add_to_task_queue(this, wait_on);
+    }
+
+    //--------------------------------------------------------------------------
+    const std::string& TaskOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
     }
 
     //--------------------------------------------------------------------------
@@ -2078,6 +2090,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const std::string& RemoteTaskOp::get_provenance_string(void) const
+    //--------------------------------------------------------------------------
+    {
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL)
+        return provenance->provenance;
+      else
+        return Provenance::no_provenance;
+    }
+
+    //--------------------------------------------------------------------------
     const char* RemoteTaskOp::get_task_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -2206,6 +2229,7 @@ namespace Legion {
       task_effects_complete = ApEvent::NO_AP_EVENT;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
       selected_variant = 0;
@@ -3341,7 +3365,6 @@ namespace Legion {
         }
       }
 #endif
-
       std::map<FieldID, std::pair<EqualityKind, size_t> > alignments;
       std::map<FieldID, off_t> offsets;
 
@@ -3592,6 +3615,7 @@ namespace Legion {
       Mapper::MapTaskInput input;
       Mapper::MapTaskOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      output.copy_fill_priority = 0;
       // Initialize the mapping input which also does all the traversal
       // down to the target nodes
       std::vector<InstanceSet> valid_instances(regions.size());
@@ -3601,9 +3625,9 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_map_task(this, &input, &output);
+      copy_fill_priority = output.copy_fill_priority;
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner,valid_instances);
-
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
@@ -4488,6 +4512,32 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void SingleTask::check_future_return_bounds(FutureInstance *instance) const
+    //--------------------------------------------------------------------------
+    {
+      VariantImpl *var_impl = 
+        runtime->find_variant_impl(task_id, selected_variant);
+      if (var_impl->has_return_type_size &&
+          (var_impl->return_type_size < instance->size))
+      {
+        Provenance *provenance = get_provenance();
+        if (provenance != NULL)
+          REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+              "Task %s (UID %lld, provenance: %s) used a task "
+              "variant with a maximum return size of %zd but "
+              "returned a result of %zd bytes.",
+              get_task_name(), get_unique_id(), provenance->c_str(),
+              var_impl->return_type_size, instance->size)
+        else
+          REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
+              "Task %s (UID %lld) used a task variant with a maximum "
+              "return size of %zd but returned a result of %zd bytes.",
+              get_task_name(), get_unique_id(),
+              var_impl->return_type_size, instance->size)
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::launch_task(bool inline_task)
     //--------------------------------------------------------------------------
     {
@@ -4833,6 +4883,7 @@ namespace Legion {
                                              std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(copy_fill_priority);
       rez.serialize<size_t>(copy_profiling_requests.size());
       if (!copy_profiling_requests.empty())
       {
@@ -4848,13 +4899,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+    int SingleTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
                 Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
-        return;
+        return copy_fill_priority;
       OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
@@ -4864,6 +4915,7 @@ namespace Legion {
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
       handle_profiling_update(count);
+      return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------
@@ -6495,7 +6547,11 @@ namespace Legion {
             free(metadata);
         }
         else
+        {
+          if ((instance != NULL) && (instance->size > 0))
+            check_future_return_bounds(instance);
           result.impl->set_result(instance, metadata, metasize);
+        }
       }
     }
 
@@ -7370,6 +7426,8 @@ namespace Legion {
                                   Processor future_proc, bool own_functor)
     //--------------------------------------------------------------------------
     {
+      if ((instance != NULL) && (instance->size > 0))
+        check_future_return_bounds(instance);
       slice_owner->handle_future(index_point, instance, metadata, metasize,
                                  functor, future_proc, own_functor); 
     }
@@ -8417,6 +8475,7 @@ namespace Legion {
       need_intra_task_alias_analysis = true;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      copy_fill_priority = 0;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
     }
@@ -9836,6 +9895,7 @@ namespace Legion {
                                             std::set<RtEvent> &applied) const
     //--------------------------------------------------------------------------
     {
+      rez.serialize(copy_fill_priority);
       rez.serialize<size_t>(copy_profiling_requests.size());
       if (!copy_profiling_requests.empty())
       {
@@ -9851,13 +9911,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
+    int IndexTask::add_copy_profiling_request(const PhysicalTraceInfo &info,
                 Realm::ProfilingRequestSet &requests, bool fill, unsigned count)
     //--------------------------------------------------------------------------
     {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
-        return;
+        return copy_fill_priority;
       OpProfilingResponse response(this, info.index, info.dst_index, fill);
       Realm::ProfilingRequest &request = requests.add_request(
         runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
@@ -9867,6 +9927,7 @@ namespace Legion {
             copy_profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
       handle_profiling_update(count);
+      return copy_fill_priority;
     }
 
     //--------------------------------------------------------------------------

@@ -4534,6 +4534,9 @@ namespace Legion {
         sharding_function_ready.wait();
       IndexSpace local_space = sharding_function->find_shard_space(
           local_shard, future_map_domain, shard_domain->handle, provenance);
+      // Handle the case where there are no points for the local shard
+      if (!local_space.exists())
+        return;
       IndexSpaceNode *local_points = runtime->forest->get_node(local_space);
       Domain domain;
       local_points->get_launch_space_domain(domain);
@@ -26130,10 +26133,8 @@ namespace Legion {
       AutoLock d_lock(distributed_collectable_lock);
       std::map<DistributedID,DistributedCollectable*>::iterator finder =
         dist_collectables.find(did);
-#ifdef DEBUG_LEGION
-      assert(finder != dist_collectables.end());
-#endif
-      if (!finder->second->confirm_deletion())
+      if ((finder == dist_collectables.end()) ||
+          !finder->second->confirm_deletion())
         return false;
       dist_collectables.erase(finder);
       return true;

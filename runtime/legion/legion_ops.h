@@ -55,6 +55,8 @@ namespace Legion {
       inline const char* c_str(void) const { return provenance.c_str(); }
     public:
       const std::string provenance;
+      // Useful for cases where interfaces want a string
+      static const std::string no_provenance;
     };
 
     /**
@@ -562,7 +564,7 @@ namespace Legion {
       static ApEvent merge_sync_preconditions(const TraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests, 
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
@@ -1198,12 +1200,13 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
       bool invoke_mapper(InstanceSet &mapped_instances,
                          std::vector<PhysicalManager*> &source_instances);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1236,6 +1239,7 @@ namespace Legion {
       std::vector<MapProfilingInfo>                     profiling_info;
       RtUserEvent                                   profiling_reported;
       int                                           profiling_priority;
+      int                                           copy_fill_priority;
       std::atomic<int>                  outstanding_profiling_requests;
       std::atomic<int>                  outstanding_profiling_reported;
     };
@@ -1375,6 +1379,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     protected:
       void check_copy_privileges(const bool permit_projection) const;
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
@@ -1414,7 +1419,7 @@ namespace Legion {
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -1463,6 +1468,7 @@ namespace Legion {
       std::vector<CopyProfilingInfo>                  profiling_info;
       RtUserEvent                                 profiling_reported;
       int                                         profiling_priority;
+      int                                         copy_fill_priority;
       std::atomic<int>                outstanding_profiling_requests;
       std::atomic<int>                outstanding_profiling_reported;
     public:
@@ -1947,6 +1953,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
       virtual Mappable* get_mappable(void);
     public:
       void activate_close(void);
@@ -2053,7 +2060,7 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
     protected:
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2299,6 +2306,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     public:
@@ -2315,7 +2323,7 @@ namespace Legion {
       void compute_parent_index(void);
       void invoke_mapper(void);
       void log_acquire_requirement(void);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2344,6 +2352,7 @@ namespace Legion {
       std::vector<AcquireProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
+      int                                            copy_fill_priority;
       std::atomic<int>                   outstanding_profiling_requests;
       std::atomic<int>                   outstanding_profiling_reported;
     };
@@ -2415,6 +2424,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
     public:
@@ -2431,7 +2441,7 @@ namespace Legion {
       void compute_parent_index(void);
       void invoke_mapper(std::vector<PhysicalManager*> &source_instances);
       void log_release_requirement(void);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void handle_profiling_response(const ProfilingResponseBase *base,
@@ -2461,6 +2471,7 @@ namespace Legion {
       std::vector<ReleaseProfilingInfo>                  profiling_info;
       RtUserEvent                                    profiling_reported;
       int                                            profiling_priority;
+      int                                            copy_fill_priority;
       std::atomic<int>                   outstanding_profiling_requests;
       std::atomic<int>                   outstanding_profiling_reported;
     };
@@ -2725,6 +2736,7 @@ namespace Legion {
       virtual size_t get_context_index(void) const;
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       FutureMap initialize(InnerContext *ctx,const MustEpochLauncher &launcher,
                            Provenance *provenance);
@@ -3455,6 +3467,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
       virtual Mappable* get_mappable(void);
     public:
       virtual void activate(void);
@@ -3474,7 +3487,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       // Report a profiling result for this operation
@@ -3546,6 +3559,7 @@ namespace Legion {
       std::vector<PartitionProfilingInfo>                  profiling_info;
       RtUserEvent                                      profiling_reported;
       int                                              profiling_priority;
+      int                                              copy_fill_priority;
       std::atomic<int>                     outstanding_profiling_requests;
       std::atomic<int>                     outstanding_profiling_reported;
     };
@@ -3651,9 +3665,10 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
       virtual std::map<PhysicalManager*,unsigned>*
                                        get_acquired_instances_ref(void);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
     public:
@@ -3898,7 +3913,8 @@ namespace Legion {
                                    IndexSpaceNode *launch_bounds,
                                    const IndexAttachLauncher &launcher,
                                    const std::vector<unsigned> &indexes,
-                                   Provenance *provenance);
+                                   Provenance *provenance,
+                                   const bool replicated);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
     public:
@@ -4005,7 +4021,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
@@ -4289,7 +4305,7 @@ namespace Legion {
                                   const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
-      virtual void add_copy_profiling_request(const PhysicalTraceInfo &info,
+      virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
       virtual void report_uninitialized_usage(const unsigned index,
@@ -4323,6 +4339,7 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
+      int                                 copy_fill_priority;
       Processor                           profiling_target;
       RtUserEvent                         profiling_response;
       std::atomic<int>                    profiling_reports;
@@ -4347,6 +4364,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4378,6 +4396,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4409,6 +4428,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4440,6 +4460,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4471,6 +4492,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4502,6 +4524,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
     public:
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -4533,6 +4556,7 @@ namespace Legion {
       virtual void set_context_index(size_t index);
       virtual int get_depth(void) const;
       virtual const Task* get_parent_task(void) const;
+      virtual const std::string& get_provenance_string(void) const;
       virtual PartitionKind get_partition_kind(void) const;
     public:
       virtual const char* get_logging_name(void) const;

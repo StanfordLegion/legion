@@ -4068,6 +4068,8 @@ namespace Legion {
       virtual int get_depth(void) const = 0;
       // Get the parent task associated with this mappable  
       virtual const Task* get_parent_task(void) const = 0;
+      // Get the provenance string for this mappable
+      virtual const std::string& get_provenance_string(void) const = 0;
     public:
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const { return NULL; }

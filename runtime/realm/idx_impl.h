@@ -33,7 +33,8 @@ namespace Realm {
 		       const void *indirects_data,
 		       size_t indirect_len,
 		       const ProfilingRequestSet &requests,
-		       Event wait_on) const = 0;
+		       Event wait_on,
+		       int priority) const = 0;
 
     // given an instance layout, attempts to provide bounds (start relative to
     //  the base of the instance and relative limit - i.e. first nonaccessibly
@@ -57,7 +58,8 @@ namespace Realm {
 		       const void *indirects_data,
 		       size_t indirect_len,
 		       const ProfilingRequestSet &requests,
-		       Event wait_on) const;
+		       Event wait_on,
+		       int priority) const;
 
     virtual bool compute_affine_bounds(const InstanceLayoutGeneric *ilg,
                                        FieldID fid,

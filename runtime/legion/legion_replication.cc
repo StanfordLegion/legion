@@ -651,9 +651,12 @@ namespace Legion {
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
               launch_space, launch_space->handle, get_provenance());
       // Figure out which points to enumerate
-      Domain local_domain;
-      runtime->forest->find_launch_space_domain(local_space, local_domain);
-      enumerate_futures(local_domain);
+      if (local_space.exists())
+      {
+        Domain local_domain;
+        runtime->forest->find_launch_space_domain(local_space, local_domain);
+        enumerate_futures(local_domain);
+      }
     }
 
     //--------------------------------------------------------------------------

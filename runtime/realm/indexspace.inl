@@ -124,21 +124,23 @@ namespace Realm {
   inline Event Rect<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
 				const ProfilingRequestSet &requests,
 				const void *fill_value, size_t fill_value_size,
-				Event wait_on /*= Event::NO_EVENT*/) const
+				Event wait_on /*= Event::NO_EVENT*/,
+				int priority  /*= 0*/) const
   {
     return IndexSpace<N,T>(*this).fill(dsts, requests,
 					fill_value, fill_value_size,
-					wait_on);
+					wait_on, priority);
   }
 
   template <int N, typename T>
   inline Event Rect<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
 				const std::vector<CopySrcDstField> &dsts,
 				const ProfilingRequestSet &requests,
-				Event wait_on /*= Event::NO_EVENT*/) const
+				Event wait_on /*= Event::NO_EVENT*/,
+				int priority  /*= 0*/) const
   {
     return IndexSpace<N,T>(*this).copy(srcs, dsts,
-					requests, wait_on);
+					requests, wait_on, priority);
   }
 
   template <int N, typename T>
@@ -146,10 +148,11 @@ namespace Realm {
 				const std::vector<CopySrcDstField> &dsts,
 				const IndexSpace<N,T> &mask,
 				const ProfilingRequestSet &requests,
-				Event wait_on /*= Event::NO_EVENT*/) const
+				Event wait_on /*= Event::NO_EVENT*/,
+				int priority  /*= 0*/) const
   {
     return IndexSpace<N,T>(*this).copy(srcs, dsts, mask,
-					requests, wait_on);
+					requests, wait_on, priority);
   }
 
 
@@ -866,7 +869,8 @@ namespace Realm {
   inline Event IndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
 				     const Realm::ProfilingRequestSet &requests,
 				     const void *fill_value, size_t fill_value_size,
-				     Event wait_on /*= Event::NO_EVENT*/) const
+				     Event wait_on /*= Event::NO_EVENT*/,
+				     int priority  /*= 0*/) const
   {
     std::vector<CopySrcDstField> srcs;
     srcs.resize(dsts.size());
@@ -882,18 +886,19 @@ namespace Realm {
     }
     return copy(srcs, dsts,
 		std::vector<const typename CopyIndirection<N,T>::Base *>(),
-		requests, wait_on);
+		requests, wait_on, priority);
   }
 
   template <int N, typename T>
   inline Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
 				     const std::vector<CopySrcDstField> &dsts,
 				     const ProfilingRequestSet &requests,
-				     Event wait_on /*= Event::NO_EVENT*/) const
+				     Event wait_on /*= Event::NO_EVENT*/,
+				     int priority  /*=0*/) const
   {
     return copy(srcs, dsts,
 		std::vector<const typename CopyIndirection<N,T>::Base *>(),
-		requests, wait_on);
+		requests, wait_on, priority);
   }
 
   // integer version of weighted subspace is a wrapper around size_t version
