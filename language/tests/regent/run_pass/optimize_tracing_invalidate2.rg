@@ -65,7 +65,6 @@ task toplevel()
   __demand(__trace)
   for i = 0, 10 do
     var x = foo(r)
-    __forbid(__predicate) -- FIXME: conflict between predication and tracing
     if x == 1 then bar(r) end
   end
 end
