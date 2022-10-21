@@ -227,6 +227,31 @@ local function analyze_is_side_effect_free(cx, node)
 end
 
 local function predicate_call(cx, node)
+  local expr_type = std.as_read(node.expr_type)
+  if std.is_future(expr_type) then
+    expr_type = expr_type.result_type
+  end
+
+  if std.type_eq(expr_type, bool) then
+    -- Hack: for nested predication, make sure all bool-typed tasks have an
+    -- else expression
+    if not node.predicate_else_value then
+      node = node {
+        predicate_else_value = ast.typed.expr.Future {
+          value = ast.typed.expr.Constant {
+            value = false,
+            expr_type = bool,
+            annotations = ast.default_annotations(),
+            span = node.span,
+          },
+          expr_type = std.future(bool),
+          annotations = ast.default_annotations(),
+          span = node.span,
+        },
+      }
+    end
+  end
+
   -- If it's already predicated, don't need to do it twice. The
   -- predicate itself will be predicated on the outer condition.
   if node.predicate then
