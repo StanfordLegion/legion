@@ -1406,15 +1406,6 @@ namespace Legion {
     }; 
 
     /**
-     * \class GCHole
-     * A helper class for tracking ranges of instance allocations
-     * for aiding in intelligent garbage collection
-     */
-    class GCHole {
-
-    };
-
-    /**
      * \class MemoryManager
      * The goal of the memory manager is to keep track of all of
      * the physical instances that the runtime knows about in various
@@ -2091,15 +2082,16 @@ namespace Legion {
                   size_t return_type_size, bool has_return_type_size,
                   const CodeDescriptor &realm_desc,
                   const void *user_data = NULL, size_t user_data_size = 0);
-      VariantImpl(const VariantImpl &rhs);
+      VariantImpl(const VariantImpl &rhs) = delete;
       ~VariantImpl(void);
     public:
-      VariantImpl& operator=(const VariantImpl &rhs);
+      VariantImpl& operator=(const VariantImpl &rhs) = delete;
     public:
       inline bool is_leaf(void) const { return leaf_variant; }
       inline bool is_inner(void) const { return inner_variant; }
       inline bool is_idempotent(void) const { return idempotent_variant; }
       inline bool is_replicable(void) const { return replicable_variant; }
+      inline bool is_concurrent(void) const { return concurrent_variant; }
       inline const char* get_name(void) const { return variant_name; }
       inline const ExecutionConstraintSet&
         get_execution_constraints(void) const { return execution_constraints; }
@@ -2138,10 +2130,11 @@ namespace Legion {
       size_t user_data_size;
       ApEvent ready_event;
     private: // properties
-      bool leaf_variant;
-      bool inner_variant;
-      bool idempotent_variant;
-      bool replicable_variant;
+      const bool leaf_variant;
+      const bool inner_variant;
+      const bool idempotent_variant;
+      const bool replicable_variant;
+      const bool concurrent_variant;
     private:
       char *variant_name; 
     };

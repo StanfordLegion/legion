@@ -873,6 +873,7 @@ namespace Legion {
       virtual bool is_reducing_future(void) const;
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_replay(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
     public:
       virtual void resolve_false(bool speculated, bool launched);
@@ -943,6 +944,7 @@ namespace Legion {
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
             std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
+      void perform_concurrent_rendezvous(Processor target_proc);
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;

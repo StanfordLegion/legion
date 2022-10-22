@@ -82,6 +82,7 @@ namespace Legion {
       rez.serialize(args,arglen);
       pack_mappable(*this, rez);
       rez.serialize(is_index_space);
+      rez.serialize(concurrent_task);
       rez.serialize(must_epoch_task);
       rez.serialize(index_domain);
       rez.serialize(index_point);
@@ -165,6 +166,7 @@ namespace Legion {
       }
       unpack_mappable(*this, derez); 
       derez.deserialize(is_index_space);
+      derez.deserialize(concurrent_task);
       derez.deserialize(must_epoch_task);
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
@@ -362,6 +364,7 @@ namespace Legion {
       mapper = NULL;
       must_epoch = NULL;
       must_epoch_task = false;
+      concurrent_task = false;
       local_function = false;
       orig_proc = Processor::NO_PROC; // for is_remote
     }
@@ -420,6 +423,7 @@ namespace Legion {
       Operation::set_must_epoch(epoch, do_registration);
       must_epoch_index = index;
       must_epoch_task = true;
+      concurrent_task = false;
       if (runtime->legion_spy_enabled)
       {
         const TaskKind kind = get_task_kind();
@@ -1422,6 +1426,8 @@ namespace Legion {
         memcpy(this->mapper_data, rhs->mapper_data, this->mapper_data_size);
       }
       this->is_index_space = rhs->is_index_space;
+      this->concurrent_task = rhs->concurrent_task;
+      this->must_epoch_task = rhs->must_epoch_task;
       this->orig_proc = rhs->orig_proc;
       this->current_proc = rhs->current_proc;
       this->steal_count = rhs->steal_count;
@@ -1642,6 +1648,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, VALIDATE_VARIANT_SELECTION_CALL);
+      // Check the concurrent constraints
+      if (impl->is_concurrent() && !concurrent_task && is_index_space)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, "Mapper %s has mapped "
+              "point task %s (UID %lld) a concurrent task variant %s but this "
+              "task was not launched in a concurrent index space task launch. "
+              "Concurrent task variants can only be used in concurrent index "
+              "space task launches or with individual tasks.",
+              local_mapper->get_mapper_name(),
+              get_task_name(), get_unique_id(), impl->get_name())
+      else if (concurrent_task && !impl->is_leaf())
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, "Mapper %s has mapped "
+              "point task %s (UID %lld) to a non-leaf task variant %s despite "
+              "being launched in a concurrent index space task. All point "
+              "tasks in a concurrent index space launch must map to leaf task "
+              "variants.", local_mapper->get_mapper_name(),
+              get_task_name(), get_unique_id(), impl->get_name())
       // Check the layout constraints first
       const TaskLayoutConstraintSet &layout_constraints = 
         impl->get_layout_constraints();
@@ -2751,10 +2773,19 @@ namespace Legion {
                           get_unique_id(), this->target_proc.id);
           output.target_procs.push_back(this->target_proc);
         }
-        else if (runtime->separate_runtime_instances)
+        else if (output.target_procs.size() > 1)
         {
-          // Ignore additional processors in separate runtime instances
-          output.target_procs.resize(1);
+          if (concurrent_task)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                "Mapper %s provided multiple target processors as output "
+                "from 'map_task' for task %s (UID %lld) which was launched "
+                "in a concurrent index space task launch. Mappers are only "
+                "permitted to specify a single target processor for mapping "
+                "tasks in concurrent index space task launches.",
+                mapper->get_mapper_name(), get_task_name(), get_unique_id())
+          else if (runtime->separate_runtime_instances)
+            // Ignore additional processors in separate runtime instances
+            output.target_procs.resize(1);
         }
         if (!runtime->unsafe_mapper)
           validate_target_processors(output.target_procs);
@@ -7034,6 +7065,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::trigger_replay(void)
+    //--------------------------------------------------------------------------
+    {
+      if (concurrent_task)
+        perform_concurrent_rendezvous(Processor::NO_PROC);
+      SingleTask::trigger_replay();
+    }
+
+    //--------------------------------------------------------------------------
     void PointTask::report_interfering_requirements(unsigned idx1,
                                                     unsigned idx2)
     //--------------------------------------------------------------------------
@@ -7209,6 +7249,13 @@ namespace Legion {
       const RtEvent deferred = map_all_regions(must_epoch_owner, args);
       if (deferred.exists())
         return deferred;
+      if (concurrent_task)
+      {
+#ifdef DEBUG_LEGION
+        assert(target_proc.exists());
+#endif
+        perform_concurrent_rendezvous(target_proc);
+      }
       RtEvent applied_condition;
       // If we succeeded in mapping and we're a leaf so we are done mapping
       if (is_leaf() && !is_replicated())
@@ -8419,6 +8466,16 @@ namespace Legion {
         return false;
     }
 
+    //--------------------------------------------------------------------------
+    void PointTask::perform_concurrent_rendezvous(Processor target)
+    //--------------------------------------------------------------------------
+    {
+      // Make two user events one to signal when it is safe to perform
+      // the atomic update to the processor manager to get our concurrent
+      // precondition and another to signal when we have recorded out
+      // termination event with the processor
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Task 
     /////////////////////////////////////////////////////////////
@@ -8777,6 +8834,7 @@ namespace Legion {
           point_futures[idx] = 
             launcher.point_futures[idx].impl->freeze(parent_ctx, provenance);
       }
+      concurrent_task = launcher.concurrent;
       map_id = launcher.map_id;
       tag = launcher.tag;
       mapper_data_size = launcher.map_arg.get_size();
@@ -8903,6 +8961,7 @@ namespace Legion {
           point_futures[idx] = 
             launcher.point_futures[idx].impl->freeze(parent_ctx, provenance);
       }
+      concurrent_task = launcher.concurrent;
       map_id = launcher.map_id;
       tag = launcher.tag;
       mapper_data_size = launcher.map_arg.get_size();

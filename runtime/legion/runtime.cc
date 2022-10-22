@@ -14227,7 +14227,8 @@ namespace Legion {
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant),
-        replicable_variant(registrar.replicable_variant)
+        replicable_variant(registrar.replicable_variant),
+        concurrent_variant(registrar.concurrent_variant)
     //--------------------------------------------------------------------------
     { 
       if (udata != NULL)
@@ -14317,26 +14318,20 @@ namespace Legion {
              "Variant %s requested global registration without "
                          "a portable implementation.", variant_name)
       if (leaf_variant && inner_variant)
-        REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, 
+        REPORT_LEGION_ERROR(ERROR_INVALID_TASK_VARIANT_PROPERTIES,
                       "Task variant %s (ID %d) of task %s (ID %d) is not "
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
                       owner->get_name(), owner->task_id)
+      if (concurrent_variant && !leaf_variant)
+        REPORT_LEGION_ERROR(ERROR_INVALID_TASK_VARIANT_PROPERTIES,
+                      "Task variant %s (ID %d) of task %s (ID %d) must "
+                      "be marked as a leaf variant if it is also marked "
+                      "as a concurrent variant.", variant_name, vid,
+                      owner->get_name(), owner->task_id)
       if (runtime->record_registration)
         log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
               variant_name, owner->get_name(), owner->task_id, descriptor_id);
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl::VariantImpl(const VariantImpl &rhs) 
-      : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), has_return_type_size(rhs.has_return_type_size),
-        return_type_size(rhs.return_type_size),
-        descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -14347,15 +14342,6 @@ namespace Legion {
         free(user_data);
       if (variant_name != NULL)
         free(variant_name);
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl& VariantImpl::operator=(const VariantImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------

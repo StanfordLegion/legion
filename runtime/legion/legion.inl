@@ -20293,6 +20293,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void TaskVariantRegistrar::set_concurrent(bool is_concur/*= true*/)
+    //--------------------------------------------------------------------------
+    {
+      concurrent_variant = is_concur;
+    }
+
+    //--------------------------------------------------------------------------
     inline void TaskVariantRegistrar::add_generator_task(TaskID tid)
     //--------------------------------------------------------------------------
     {
