@@ -16046,14 +16046,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool ProjectionFunction::find_elide_close_result(const ProjectionInfo &info,
                                  const std::set<ProjectionSummary> &projections, 
-                                 RegionTreeNode *node, bool &result,
-                                 std::set<RtEvent> &applied_events) const
+                                 RegionTreeNode *node, bool &result) const
     //--------------------------------------------------------------------------
     {
       // No memoizing if we're not functional
       if (!is_functional)
         return false;
-      ProjectionSummary key(info, applied_events);
+      ProjectionSummary key(info);
       IndexTreeNode *row_source = node->get_row_source();
       AutoLock p_lock(projection_reservation,1,false/*exclusive*/);
       std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
@@ -16076,13 +16075,12 @@ namespace Legion {
     void ProjectionFunction::record_elide_close_result(
                                 const ProjectionInfo &info,
                                 const std::set<ProjectionSummary> &projections,
-                                RegionTreeNode *node, bool result,
-                                std::set<RtEvent> &applied_events)
+                                RegionTreeNode *node, bool result)
     //--------------------------------------------------------------------------
     {
       if (!is_functional)
         return;
-      ProjectionSummary key(info, applied_events);
+      ProjectionSummary key(info);
       IndexTreeNode *row_source = node->get_row_source();
       AutoLock p_lock(projection_reservation);
       std::vector<ElideCloseResult> &close_results = elide_close_results[key];
@@ -21548,7 +21546,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_space_return(AddressSpaceID target,
-                                     Serializer &rez, RtEvent send_precondition)
+                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_INDEX_SPACE_RETURN>(rez,
@@ -21668,7 +21666,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_return(AddressSpaceID target,
-                                     Serializer &rez, RtEvent send_precondition)
+                                     Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_INDEX_PARTITION_RETURN>(rez,

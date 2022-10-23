@@ -880,8 +880,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
       }
     }
 
@@ -1865,7 +1864,7 @@ namespace Legion {
             assert(finder != sharded_region_version_infos.end());
 #endif
             PendingEquivalenceSet *pending = new PendingEquivalenceSet(*rit);
-            pending->record_all(finder->second, map_applied_conditions);
+            pending->record_all(finder->second);
             // Context takes ownership at this point
             parent_ctx->record_pending_disjoint_complete_set(pending, 
                                                              pit->second);
@@ -2376,8 +2375,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -2837,8 +2835,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -2854,8 +2851,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -2871,8 +2867,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
-                                                 refinement_tracker,
-                                                 map_applied_conditions);
+                                                 refinement_tracker);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -2886,8 +2881,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
-                                                 refinement_tracker,
-                                                 map_applied_conditions);
+                                                 refinement_tracker);
         }
       }
     }
@@ -4325,8 +4319,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit(this);
@@ -6946,8 +6939,7 @@ namespace Legion {
       // Add a valid reference to the instances to act as an acquire to keep
       // them valid through the end of mapping them, we'll release the valid
       // references when we are done mapping
-      WrapperReferenceMutator mutator(map_applied_conditions);
-      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       ShardedView *sharded_view = region.impl->get_sharded_view();
       ApEvent detach_event;
       if ((sharded_view != NULL) || (is_owner_shard))
@@ -7166,8 +7158,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -7337,8 +7328,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     /////////////////////////////////////////////////////////////
@@ -13123,16 +13113,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureNameExchange::FutureNameExchange(ReplicateContext *ctx,
-                   CollectiveID id, ReplFutureMapImpl *m, ReferenceMutator *mut)
-      : AllGatherCollective(ctx, id), future_map(m), mutator(mut)
+                   CollectiveID id, ReplFutureMapImpl *m)
+      : AllGatherCollective(ctx, id), future_map(m)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FutureNameExchange::FutureNameExchange(const FutureNameExchange &rhs)
-      : AllGatherCollective(rhs), future_map(rhs.future_map), 
-        mutator(rhs.mutator)
+      : AllGatherCollective(rhs), future_map(rhs.future_map)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -13183,15 +13172,7 @@ namespace Legion {
       {
         DomainPoint point;
         derez.deserialize(point);
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, mutator);
-        if (impl != NULL)
-        {
-          // Add the reference ourselves so we can capture the effects
-          impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
-          results[point] = Future(impl, false/*need referece*/);
-        }
-        else
-          results[point] = Future();
+        results[point] = FutureImpl::unpack_future(runtime, derez);
       }
     }
 
@@ -13324,7 +13305,6 @@ namespace Legion {
       instances.resize(mappings.size());
       // Add valid references to all the physical instances that we will
       // hold until all the must epoch operations are done with the exchange
-      WrapperReferenceMutator mutator(done_events);
       for (unsigned idx1 = 0; idx1 < mappings.size(); idx1++)
       {
         std::vector<DistributedID> &dids = instances[idx1];
@@ -13336,7 +13316,7 @@ namespace Legion {
           dids[idx2] = manager->did;
           if (held_references.find(manager) != held_references.end())
             continue;
-          manager->add_base_valid_ref(REPLICATION_REF, &mutator);
+          manager->add_base_valid_ref(REPLICATION_REF);
           held_references.insert(manager);
         }
       }
@@ -13386,7 +13366,6 @@ namespace Legion {
           ready.wait();
       }
       // Lastly we need to put acquire references on any of local instances
-      WrapperReferenceMutator mutator(done_events);
       for (unsigned idx = 0; idx < constraint_indexes.size(); idx++)
       {
         const unsigned constraint_index = constraint_indexes[idx];
@@ -13402,7 +13381,7 @@ namespace Legion {
           if (acquired.find(manager) != acquired.end())
             continue;
           manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
           acquired[manager] = 1/*count*/; 
         }
       }
@@ -13572,7 +13551,6 @@ namespace Legion {
 #endif
       // Add valid references to all the physical instances that we will
       // hold until all the must epoch operations are done with the exchange
-      WrapperReferenceMutator mutator(done_events);
       for (unsigned idx = 0; idx < mappings.size(); idx++)
       {
         for (std::vector<Mapping::PhysicalInstance>::const_iterator it = 
@@ -13581,7 +13559,7 @@ namespace Legion {
           PhysicalManager *manager = it->impl->as_physical_manager();
           if (held_references.find(manager) != held_references.end())
             continue;
-          manager->add_base_valid_ref(REPLICATION_REF, &mutator);
+          manager->add_base_valid_ref(REPLICATION_REF);
           held_references.insert(manager);
         }
       }
@@ -13686,7 +13664,7 @@ namespace Legion {
           if (acquired.find(manager) != acquired.end())
             continue;
           manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
           acquired[manager] = 1/*count*/;
         }
       }

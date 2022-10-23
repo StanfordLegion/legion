@@ -253,7 +253,7 @@ namespace Legion {
      * of all operations that can be performed in a Legion
      * program.
      */
-    class Operation : public ReferenceMutator, public ProfilingResponseHandler {
+    class Operation : public ProfilingResponseHandler {
     public:
       enum OpKind {
         MAP_OP_KIND,
@@ -472,9 +472,6 @@ namespace Legion {
                                 Provenance *provenance = NULL,
           const std::vector<StaticDependence> *dependences = NULL);
       void set_provenance(Provenance *provenance);
-    public:
-      // Inherited from ReferenceMutator
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       RtEvent execute_prepipeline_stage(GenerationID gen,
                                         bool from_logical_analysis);
@@ -747,14 +744,11 @@ namespace Legion {
     protected:
       static inline void add_launch_space_reference(IndexSpaceNode *node)
       {
-        LocalReferenceMutator mutator;
-        node->add_base_valid_ref(CONTEXT_REF, &mutator);
+        node->add_base_valid_ref(CONTEXT_REF);
       }
       static inline bool remove_launch_space_reference(IndexSpaceNode *node)
       {
-        if (node == NULL)
-          return false;
-        return node->remove_base_valid_ref(CONTEXT_REF);
+        return (node != NULL) && node->remove_base_valid_ref(CONTEXT_REF);
       }
     public:
       Runtime *const runtime;
@@ -1192,7 +1186,6 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
-      virtual void record_reference_mutation_effect(RtEvent event);
       virtual ApEvent get_program_order_event(void) const;
     public:
       virtual UniqueID get_unique_id(void) const;
@@ -1372,7 +1365,6 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
@@ -2058,7 +2050,6 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
     protected:
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
@@ -2158,14 +2149,11 @@ namespace Legion {
     protected:
       void initialize_region(RegionNode *node, const FieldMask &mask,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-                            FieldMaskSet<PartitionNode> &refinement_partitions,
-                            std::set<RtEvent> &map_applied_conditions);
+                            FieldMaskSet<PartitionNode> &refinement_partitions);
       void initialize_partition(PartitionNode *node, const FieldMask &mask,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-                            FieldMaskSet<PartitionNode> &refinement_partitions,
-                            std::set<RtEvent> &map_applied_conditions);
-      void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
-                              std::set<RtEvent> &applied_events);
+                            FieldMaskSet<PartitionNode> &refinement_partitions);
+      void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2299,7 +2287,6 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
@@ -2417,7 +2404,6 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;
@@ -3486,7 +3472,6 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual std::map<PhysicalManager*,unsigned>*
                    get_acquired_instances_ref(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
       virtual int add_copy_profiling_request(const PhysicalTraceInfo &info,
                                Realm::ProfilingRequestSet &requests,
                                bool fill, unsigned count = 1);
@@ -3852,7 +3837,6 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
-      virtual void record_reference_mutation_effect(RtEvent event);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual RtEvent check_for_coregions(void);
@@ -4291,8 +4275,7 @@ namespace Legion {
     public:
       RemoteOp& operator=(const RemoteOp &rhs);
     public:
-      virtual void unpack(Deserializer &derez,
-                          ReferenceMutator &mutator) = 0;
+      virtual void unpack(Deserializer &derez) = 0;
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -4374,7 +4357,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking); 
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4406,7 +4389,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4438,7 +4421,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4470,7 +4453,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4502,7 +4485,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4534,7 +4517,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4567,7 +4550,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     protected:
       PartitionKind part_kind;
     };
@@ -4599,7 +4582,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4629,7 +4612,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4659,7 +4642,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4691,7 +4674,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -4723,7 +4706,7 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
   }; //namespace Internal 

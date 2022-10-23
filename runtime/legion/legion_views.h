@@ -79,10 +79,8 @@ namespace Legion {
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(void) = 0;
+      virtual void notify_inactive(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
@@ -185,10 +183,8 @@ namespace Legion {
 #endif
     public:
       // Reference counting state change functions
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void) { };
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -253,12 +249,12 @@ namespace Legion {
     public:
       virtual ~CollectableView(void) { }
     public:
-      virtual void add_collectable_reference(ReferenceMutator *mutator) = 0;
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator) = 0;
+      virtual void add_collectable_reference(void) = 0;
+      virtual bool remove_collectable_reference(void) = 0;
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
       void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
-                              RtEvent collect,ReferenceMutator *mutator = NULL);
+                              RtEvent collect);
       static void handle_deferred_collect(CollectableView *view,
                                           const std::set<ApEvent> &to_collect);
     };
@@ -290,8 +286,8 @@ namespace Legion {
       inline bool deterministic_pointer_less(const ExprView *rhs) const
         { return view_expr->deterministic_pointer_less(rhs->view_expr); }
     public:
-      virtual void add_collectable_reference(ReferenceMutator *mutator);
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
+      virtual void add_collectable_reference(void);
+      virtual bool remove_collectable_reference(void);
       virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
       void find_user_preconditions(const RegionUsage &usage,
@@ -636,10 +632,8 @@ namespace Legion {
                                  const FieldMask &removal_mask);
 #endif
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     protected:
@@ -828,12 +822,10 @@ namespace Legion {
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void add_collectable_reference(ReferenceMutator *mutator);
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
+      virtual void add_collectable_reference(void);
+      virtual bool remove_collectable_reference(void);
       virtual void collect_users(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
@@ -887,11 +879,8 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-    public:
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      virtual void notify_invalid(void) = 0;
+      virtual void notify_inactive(void) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -899,7 +888,6 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper) = 0;
     };
 
@@ -949,10 +937,8 @@ namespace Legion {
     public:
       FillView& operator=(const FillView &rhs);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void) { }
+      virtual void notify_inactive(void) { }
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -960,7 +946,6 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -1023,10 +1008,8 @@ namespace Legion {
     public:
       PhiView& operator=(const PhiView &rhs);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void) { }
     public:
       virtual void send_view(AddressSpaceID target);
     public:
@@ -1034,13 +1017,10 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracign_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
-      void record_true_view(LogicalView *view, const FieldMask &view_mask,
-                            ReferenceMutator *mutator);
-      void record_false_view(LogicalView *view, const FieldMask &view_mask,
-                             ReferenceMutator *mutator);
+      void record_true_view(LogicalView *view, const FieldMask &view_mask);
+      void record_false_view(LogicalView *view, const FieldMask &view_mask);
     public:
       void pack_phi_view(Serializer &rez);
       void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
@@ -1070,19 +1050,6 @@ namespace Legion {
      */
     class ShardedView : public DeferredView {
     public:
-      class RemoteDecrementFunctor {
-      public:
-        RemoteDecrementFunctor(ShardedView *v, 
-            AddressSpaceID own, ReferenceMutator *m)
-          : view(v), owner(own), mutator(m) { }
-      public:
-        void apply(AddressSpaceID space) const;
-      public:
-        ShardedView *const view;
-        const AddressSpaceID owner;
-        ReferenceMutator *const mutator;
-      };
-    public:
       ShardedView(RegionTreeForest *forest, DistributedID did,
                   AddressSpaceID owner_space, bool register_now);
       ShardedView(const ShardedView &rhs);
@@ -1090,11 +1057,8 @@ namespace Legion {
     public:
       ShardedView& operator=(const ShardedView &rhs);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-    public:
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -1102,7 +1066,6 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr,
                            EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       void initialize(LegionMap<DistributedID,FieldMask> &views,

@@ -88,6 +88,8 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       // Keep the manager from being collected
+      if (is_owner())
+        manager->add_nested_valid_ref(did);
       manager->add_nested_resource_ref(did);
     }
 
@@ -111,6 +113,15 @@ namespace Legion {
         }
         atomic_reservations.clear();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need to check for delete since we still hold a resource reference
+      if (is_owner())
+        manager->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -368,17 +379,9 @@ namespace Legion {
       {
         const RtEvent precondition = Runtime::merge_events(applied_events);
         Runtime::trigger_event(applied_event, precondition);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, NULL, precondition);
       }
       else
-      {
         Runtime::trigger_event(applied_event);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -473,17 +476,9 @@ namespace Legion {
       {
         const RtEvent precondition = Runtime::merge_events(applied_events);
         Runtime::trigger_event(applied_event, precondition);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source, NULL, precondition);
       }
       else
-      {
         Runtime::trigger_event(applied_event);
-        // Send back a response to the source removing the remote valid ref
-        if (inst_view->is_logical_owner())
-          inst_view->send_remote_valid_decrement(source);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -653,7 +648,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectableView::defer_collect_user(PhysicalManager *manager,
-                 ApEvent term_event, RtEvent collect, ReferenceMutator *mutator)
+                                            ApEvent term_event, RtEvent collect)
     //--------------------------------------------------------------------------
     {
       // The runtime will add the gc reference to this view when necessary
@@ -663,10 +658,10 @@ namespace Legion {
       manager->defer_collect_user(this, term_event, collect,
                                   to_collect, add_ref, remove_ref);
       if (add_ref)
-        add_collectable_reference(mutator);
+        add_collectable_reference();
       if (!to_collect.empty())
         collect_users(to_collect); 
-      if (remove_ref && remove_collectable_reference(mutator))
+      if (remove_ref && remove_collectable_reference())
         delete this;
     }
 
@@ -678,7 +673,7 @@ namespace Legion {
     {
       view->collect_users(to_collect);
       // Then remove the gc reference on the object
-      if (view->remove_collectable_reference(NULL))
+      if (view->remove_collectable_reference())
         delete view;
     }
 
@@ -1926,7 +1921,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::add_collectable_reference(ReferenceMutator *mutator)
+    void ExprView::add_collectable_reference(void)
     //--------------------------------------------------------------------------
     {
       add_reference();
@@ -1934,18 +1929,18 @@ namespace Legion {
       // the actual garbage collection algorithm will take place and we know
       // that we have all the valid gc event users
       if (inst_view->is_logical_owner())
-        inst_view->add_base_gc_ref(PENDING_GC_REF, mutator);
+        inst_view->add_base_gc_ref(PENDING_GC_REF);
       else
         inst_view->add_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator)
+    bool ExprView::remove_collectable_reference(void)
     //--------------------------------------------------------------------------
     {
       if (inst_view->is_logical_owner())
       {
-        if (inst_view->remove_base_gc_ref(PENDING_GC_REF, mutator))
+        if (inst_view->remove_base_gc_ref(PENDING_GC_REF))
           delete inst_view;
       }
       else
@@ -2761,10 +2756,6 @@ namespace Legion {
             rez.serialize(applied_event);
             trace_info.pack_trace_info(rez, applied_events);
           }
-          // Add a remote valid reference that will be removed by 
-          // the receiver once the changes have been applied
-          WrapperReferenceMutator mutator(applied_events);
-          add_base_valid_ref(REMOTE_DID_REF, &mutator);
           runtime->send_view_register_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
@@ -3123,10 +3114,6 @@ namespace Legion {
             rez.serialize(applied_event);
             rez.serialize<bool>(trace_recording);
           }
-          // Add a remote valid reference that will be removed by 
-          // the receiver once the changes have been applied
-          WrapperReferenceMutator mutator(applied_events);
-          add_base_valid_ref(REMOTE_DID_REF, &mutator);
           runtime->send_view_add_copy_user(logical_owner, rez);
           applied_events.insert(applied_event);
         }
@@ -3449,55 +3436,6 @@ namespace Legion {
     }
 #endif // ENABLE_VIEW_REPLICATION
  
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      manager->add_nested_gc_ref(did, mutator);
-      // If we're the logical owner, but not the original owner
-      // then we use a gc reference on the original owner to 
-      // keep all the views allive until we're done
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // we have a resource reference on the manager so no need to check
-      manager->remove_nested_gc_ref(did, mutator);
-      // If we're the logical owner but not the original owner
-      // then we remove the gc reference that we added
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // The logical owner is where complete set of users is and is therefore
-      // where garbage collection will take place so we need to send our 
-      // valid update there if we're not the owner, otherwise we send it 
-      // down to the manager
-      if (is_logical_owner())
-        manager->add_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_increment(logical_owner, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_logical_owner())
-        // we have a resource reference on the manager so no need to check
-        manager->remove_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_decrement(logical_owner, mutator);
-    }
-
     //--------------------------------------------------------------------------
     void MaterializedView::add_internal_task_user(const RegionUsage &usage,
                                             IndexSpaceExpression *user_expr,
@@ -4055,36 +3993,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void FillView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-    
-    //--------------------------------------------------------------------------
-    void FillView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
-    void FillView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
     void FillView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -4111,11 +4019,11 @@ namespace Legion {
     void FillView::flatten(CopyFillAggregator &aggregator,
                          InstanceView *dst_view, const FieldMask &src_mask,
                          IndexSpaceExpression *expr, EquivalenceSet *tracing_eq, 
-                         std::set<RtEvent> &applied, CopyAcrossHelper *helper)
+                         CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       aggregator.record_fill(dst_view, this, src_mask, expr, 
-                             tracing_eq, applied, helper);
+                             tracing_eq, helper);
     }
 
     //--------------------------------------------------------------------------
@@ -4219,48 +4127,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::notify_valid(ReferenceMutator *mutator)
+    void PhiView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
-        it->first->add_nested_valid_ref(did, mutator);
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
+        it->first->remove_nested_valid_ref(did);
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
-        it->first->add_nested_valid_ref(did, mutator);
+        it->first->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
-            true_views.begin(); it != true_views.end(); it++)
-        it->first->remove_nested_valid_ref(did, mutator);
-      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
-            false_views.begin(); it != false_views.end(); it++)
-        it->first->remove_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhiView::record_true_view(LogicalView *view, const FieldMask &mask,
-                                   ReferenceMutator *mutator)
+    void PhiView::record_true_view(LogicalView *view, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4274,8 +4153,8 @@ namespace Legion {
         if (view->is_deferred_view())
         {
           // Deferred views need valid and gc references
-          view->add_nested_gc_ref(did, mutator);
-          view->add_nested_valid_ref(did, mutator);
+          view->add_nested_gc_ref(did);
+          view->add_nested_valid_ref(did);
         }
         else // Otherwise we just need the valid reference
           view->add_nested_resource_ref(did);
@@ -4285,8 +4164,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::record_false_view(LogicalView *view, const FieldMask &mask,
-                                    ReferenceMutator *mutator)
+    void PhiView::record_false_view(LogicalView *view, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4300,8 +4178,8 @@ namespace Legion {
         if (view->is_deferred_view())
         {
           // Deferred views need valid and gc references
-          view->add_nested_gc_ref(did, mutator);
-          view->add_nested_valid_ref(did, mutator);
+          view->add_nested_gc_ref(did);
+          view->add_nested_valid_ref(did);
         }
         else // Otherwise we just need the valid reference
           view->add_nested_resource_ref(did);
@@ -4399,7 +4277,7 @@ namespace Legion {
     void PhiView::flatten(CopyFillAggregator &aggregator,
                          InstanceView *dst_view, const FieldMask &src_mask,
                          IndexSpaceExpression *expr, EquivalenceSet *tracing_eq,
-                         std::set<RtEvent> &applied, CopyAcrossHelper *helper)
+                         CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this
@@ -4480,10 +4358,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       valid = true;
 #endif
-      // If we're not the owner add a reference that will be removed
-      // by the owner when no one is valid any longer
-      if (!is_owner())
-        add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Sharded View %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
@@ -4519,17 +4393,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedView::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(valid);
-#endif
-      // Do nothing
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedView::notify_inactive(ReferenceMutator *mutator)
+    void ShardedView::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -4541,33 +4405,13 @@ namespace Legion {
         // Remove our valid references
         for (std::set<PhysicalManager*>::const_iterator it =
               local_instances.begin(); it != local_instances.end(); it++)
-          if ((*it)->remove_nested_valid_ref(did, mutator))
+          if ((*it)->remove_nested_valid_ref(did))
             delete (*it);
       }
     }
 
     //--------------------------------------------------------------------------
-    void ShardedView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(valid);
-#endif
-      if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedView::RemoteDecrementFunctor::apply(AddressSpaceID target) const
-    //--------------------------------------------------------------------------
-    {
-      if (target == owner)
-        return;
-      view->send_remote_gc_decrement(target, mutator); 
-    }
-    
-    //--------------------------------------------------------------------------
-    void ShardedView::notify_invalid(ReferenceMutator *mutator)
+    void ShardedView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4578,20 +4422,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         valid = false;
 #endif
-        if (has_remote_instances())
-        {
-          // Send out messages to any remote copies to move the GC reference 
-          RemoteDecrementFunctor functor(this, local_space, mutator);
-          map_over_remote_instances(functor);
-        }
         // Remove our valid references
         for (std::set<PhysicalManager*>::const_iterator it =
               local_instances.begin(); it != local_instances.end(); it++)
-          if ((*it)->remove_nested_valid_ref(did, mutator))
+          if ((*it)->remove_nested_valid_ref(did))
             delete (*it);
       }
-      else
-        send_remote_valid_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4623,7 +4459,6 @@ namespace Legion {
                               InstanceView *dst_view, const FieldMask &src_mask,
                               IndexSpaceExpression *expr,
                               EquivalenceSet *tracing_eq,
-                              std::set<RtEvent> &applied,
                               CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
@@ -4662,7 +4497,7 @@ namespace Legion {
       }
       if (!src_views.empty())
         aggregator.record_updates(dst_view, src_views, copy_mask, expr,
-                                  tracing_eq, applied, 0/*redop*/, helper);
+                                  tracing_eq, 0/*redop*/, helper);
     }
 
     //--------------------------------------------------------------------------
@@ -4671,7 +4506,6 @@ namespace Legion {
               const InstanceSet &local_insts, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     { 
-      WrapperReferenceMutator mutator(applied_events);
       for (unsigned idx = 0; idx < local_insts.size(); idx++)
       {
         const InstanceRef &inst = local_insts[idx];
@@ -4680,7 +4514,7 @@ namespace Legion {
           local_instances.insert(manager);
         if (result.second)
         {
-          manager->add_nested_valid_ref(did, &mutator);
+          manager->add_nested_valid_ref(did);
           manager->add_nested_resource_ref(did);
         }
       }
@@ -4864,10 +4698,6 @@ namespace Legion {
           rez.serialize(applied_event);
           trace_info.pack_trace_info(rez, applied_events);
         }
-        // Add a remote valid reference that will be removed by 
-        // the receiver once the changes have been applied
-        WrapperReferenceMutator mutator(applied_events);
-        add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_register_user(logical_owner, rez);
         applied_events.insert(applied_event);
         return ready_event;
@@ -4896,10 +4726,7 @@ namespace Legion {
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(get_manager(), term_event, collect_event,&mutator);
-        }
+          defer_collect_user(get_manager(), term_event, collect_event);
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
         else
@@ -5005,10 +4832,6 @@ namespace Legion {
           rez.serialize(applied_event);
           rez.serialize<bool>(trace_recording);
         }
-        // Add a remote valid reference that will be removed by 
-        // the receiver once the changes have been applied
-        WrapperReferenceMutator mutator(applied_events);
-        add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_add_copy_user(logical_owner, rez);
         applied_events.insert(applied_event);
       }
@@ -5023,10 +4846,7 @@ namespace Legion {
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(get_manager(), term_event, collect_event,&mutator);
-        }
+          defer_collect_user(get_manager(), term_event, collect_event);
       }
     }
 
@@ -5489,75 +5309,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::notify_active(ReferenceMutator *mutator)
+    void ReductionView::add_collectable_reference(void)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_gc_ref(did, mutator);
-      // If we're the logical owner, but not the original owner
-      // then we use a gc reference on the original owner to 
-      // keep all the views allive until we're done
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      manager->remove_nested_gc_ref(did, mutator);
-      // If we're the logical owner but not the original owner
-      // then we remove the gc reference that we added
-      if (is_logical_owner() && !is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // The logical owner is where complete set of users is and is therefore
-      // where garbage collection will take place so we need to send our 
-      // valid update there if we're not the owner, otherwise we send it 
-      // down to the manager
-      if (is_logical_owner())
-        manager->add_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_increment(logical_owner, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_logical_owner())
-        // we have a resource reference on the manager so no need to check
-        manager->remove_nested_valid_ref(did, mutator);
-      else
-        send_remote_valid_decrement(logical_owner, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::add_collectable_reference(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mutator != NULL);
-#endif
       // Only the logical owner adds the full GC reference as this is where
       // the actual garbage collection algorithm will take place and we know
       // that we have all the valid gc event users
       if (is_logical_owner())
-        add_base_gc_ref(PENDING_GC_REF, mutator);
+        add_base_gc_ref(PENDING_GC_REF);
       else
         add_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator)
+    bool ReductionView::remove_collectable_reference(void)
     //--------------------------------------------------------------------------
     {
       if (is_logical_owner())
-        return remove_base_gc_ref(PENDING_GC_REF, mutator);
+        return remove_base_gc_ref(PENDING_GC_REF);
       else
         return remove_base_resource_ref(PENDING_GC_REF);
     }

@@ -1224,7 +1224,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
                          DistributedID did, RtEvent initialized, 
-                         Provenance *provenance, std::set<RtEvent> *applied,
+                         Provenance *provenance,
                          CollectiveMapping *collective_mapping,
                          IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
@@ -1236,12 +1236,12 @@ namespace Legion {
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
-                          collective_mapping, applied, true/*add root ref*/);
+                          collective_mapping, true/*add root ref*/);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
-                          collective_mapping, applied, true/*add root ref*/);
+                          collective_mapping, true/*add root ref*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2135,9 +2135,9 @@ namespace Legion {
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
-        Provenance *prov, CollectiveMapping *mapping, bool is_root)
+        Provenance *prov, CollectiveMapping *mapping)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
-          dep, prov, mapping, is_root), linearization_ready(false)
+          dep, prov, mapping), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -2467,7 +2467,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
                          DistributedID did, RtEvent initialized, 
-                         Provenance *provenance, std::set<RtEvent> *applied,
+                         Provenance *provenance,
                          CollectiveMapping *collective_mapping,
                          IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
@@ -2481,8 +2481,8 @@ namespace Legion {
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
                               NULL/*parent*/, 0/*color*/, did, initialized,
-                              provenance, ready, new_expr_id,collective_mapping,
-                              applied, true/*add root reference*/);
+                              provenance, ready, new_expr_id,
+                              collective_mapping, true/*add root reference*/);
     }
 
     //--------------------------------------------------------------------------

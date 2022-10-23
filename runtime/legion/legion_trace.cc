@@ -2236,8 +2236,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceViewSet::TraceViewSet(RegionTreeForest *f, TraceViewSet &source,
-                               DistributedID own_did, RegionNode *r,
-                               std::set<RtEvent> &applied_events)
+                               DistributedID own_did, RegionNode *r)
       : forest(f), region(r), owner_did(own_did)
     //--------------------------------------------------------------------------
     {
@@ -2245,14 +2244,13 @@ namespace Legion {
       conditions.swap(source.conditions);
       if (owner_did > 0)
       {
-        WrapperReferenceMutator mutator(applied_events);
         for (ViewExprs::const_iterator vit = 
               conditions.begin(); vit != conditions.end(); ++vit)
         {
-          vit->first->add_nested_valid_ref(owner_did, &mutator);
+          vit->first->add_nested_valid_ref(owner_did);
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 vit->second.begin(); it != vit->second.end(); ++it)
-            it->first->add_nested_expression_reference(owner_did, &mutator);
+            it->first->add_nested_expression_reference(owner_did);
         }
       }
     }
@@ -2281,7 +2279,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::insert(LogicalView *view, IndexSpaceExpression *expr, 
-                              const FieldMask &mask, ReferenceMutator &mutator)
+                              const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
@@ -2310,7 +2308,7 @@ namespace Legion {
             // Handle the difference fields first before we mutate set_overlap
             FieldMask diff = mask - set_overlap;
             if (finder->second.insert(expr, mask) && (owner_did > 0))
-                expr->add_nested_expression_reference(owner_did, &mutator);
+              expr->add_nested_expression_reference(owner_did);
           }
           FieldMaskSet<IndexSpaceExpression> to_add;
           std::vector<IndexSpaceExpression*> to_delete;
@@ -2352,7 +2350,7 @@ namespace Legion {
                 to_add.begin(); it != to_add.end(); it++)
             if (finder->second.insert(it->first, it->second) && 
                 (owner_did > 0))
-              it->first->add_nested_expression_reference(owner_did, &mutator);
+              it->first->add_nested_expression_reference(owner_did);
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
           {
@@ -2365,14 +2363,14 @@ namespace Legion {
           }
         }
         else if (finder->second.insert(expr, mask) && (owner_did > 0))
-          expr->add_nested_expression_reference(owner_did, &mutator);
+          expr->add_nested_expression_reference(owner_did);
       }
       else
       {
         if (owner_did > 0)
         {
-          view->add_nested_valid_ref(owner_did, &mutator);
-          expr->add_nested_expression_reference(owner_did, &mutator);
+          view->add_nested_valid_ref(owner_did);
+          expr->add_nested_expression_reference(owner_did);
         }
         conditions[view].insert(expr, mask);
       }
@@ -2882,8 +2880,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TraceViewSet::transpose_uniquely(
             LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > &target,
-            std::set<IndexSpaceExpression*> &unique_exprs,
-            ReferenceMutator &mutator) const
+            std::set<IndexSpaceExpression*> &unique_exprs) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2897,7 +2894,7 @@ namespace Legion {
           target[it->first].insert(vit->first, it->second);
           // Track the unique expressions
           if (unique_exprs.insert(it->first).second)
-            it->first->add_base_expression_reference(TRACE_REF, &mutator);
+            it->first->add_base_expression_reference(TRACE_REF);
         }
       if (target.size() == 1)
         return;
@@ -3052,8 +3049,7 @@ namespace Legion {
     void TraceViewSet::find_overlaps(TraceViewSet &target, 
                                      IndexSpaceExpression *expr, 
                                      const bool expr_covers, 
-                                     const FieldMask &mask,
-                                     ReferenceMutator &mutator) const
+                                     const FieldMask &mask) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3069,7 +3065,7 @@ namespace Legion {
             // sending everything
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                   vit->second.begin(); it != vit->second.end(); it++)
-              target.insert(vit->first, it->first, it->second, mutator);
+              target.insert(vit->first, it->first, it->second);
           }
           else
           {
@@ -3080,7 +3076,7 @@ namespace Legion {
               const FieldMask overlap = mask & it->second;
               if (!overlap)
                 continue;
-              target.insert(vit->first, it->first, overlap, mutator);
+              target.insert(vit->first, it->first, overlap);
             }
           }
         }
@@ -3105,11 +3101,11 @@ namespace Legion {
             if (volume > 0)
             {
               if (volume == expr->get_volume())
-                target.insert(vit->first, expr, overlap, mutator);
+                target.insert(vit->first, expr, overlap);
               else if (volume == it->first->get_volume())
-                target.insert(vit->first, it->first, overlap, mutator);
+                target.insert(vit->first, it->first, overlap);
               else
-                target.insert(vit->first, expr_overlap, overlap, mutator);
+                target.insert(vit->first, expr_overlap, overlap);
             }
             view_overlap -= overlap;
             if (!view_overlap)
@@ -3127,16 +3123,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::merge(TraceViewSet &target, 
-                             std::set<RtEvent> &applied_events) const
+    void TraceViewSet::merge(TraceViewSet &target) const
     //--------------------------------------------------------------------------
     {
-      WrapperReferenceMutator mutator(applied_events);
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); it++)
-          target.insert(vit->first, it->first, it->second, mutator);
+          target.insert(vit->first, it->first, it->second);
     }
 
     //--------------------------------------------------------------------------
@@ -3227,8 +3221,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
-                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask,
-                   std::vector<RtEvent> &ready_events)
+                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask)
       : context(trace->logical_trace->ctx), forest(f),
         region(node), condition_expr(region->row_source), condition_mask(mask),
         invalid_mask(mask), precondition_views(NULL), anticondition_views(NULL),
@@ -3236,11 +3229,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
-      LocalReferenceMutator mutator;
-      region->add_base_valid_ref(TRACE_REF, &mutator);
-      const RtEvent done = mutator.get_done_event();
-      if (done.exists())
-        ready_events.push_back(done);
+      region->add_base_valid_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3442,47 +3431,46 @@ namespace Legion {
       precondition_views = pre;
       anticondition_views = anti;
       postcondition_views = post;
-      WrapperReferenceMutator mutator(ready);
       if (precondition_views != NULL)
       {
         precondition_views->transpose_uniquely(preconditions,
-                            unique_view_expressions, mutator);
+                                               unique_view_expressions);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::const_iterator 
               eit = preconditions.begin(); eit != preconditions.end(); eit++)
         {
-          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
+          eit->first->add_base_expression_reference(TRACE_REF);
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+            it->first->add_base_valid_ref(TRACE_REF);
         }
       }
       if (anticondition_views != NULL)
       {
         anticondition_views->transpose_uniquely(anticonditions,
-                              unique_view_expressions, mutator);
+                                                unique_view_expressions);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::const_iterator 
               eit = anticonditions.begin(); eit != anticonditions.end(); eit++)
         {
-          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
+          eit->first->add_base_expression_reference(TRACE_REF);
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+            it->first->add_base_valid_ref(TRACE_REF);
         }
       }
       if (postcondition_views != NULL)
       {
         postcondition_views->transpose_uniquely(postconditions,
-                              unique_view_expressions, mutator);
+                                                unique_view_expressions);
         for (LegionMap<IndexSpaceExpression*,
                        FieldMaskSet<LogicalView> >::const_iterator 
               eit = postconditions.begin(); eit != postconditions.end(); eit++)
         {
-          eit->first->add_base_expression_reference(TRACE_REF, &mutator);
+          eit->first->add_base_expression_reference(TRACE_REF);
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 eit->second.begin(); it != eit->second.end(); it++)
-            it->first->add_base_valid_ref(TRACE_REF, &mutator);
+            it->first->add_base_valid_ref(TRACE_REF);
         }
       }
     }
@@ -3549,12 +3537,11 @@ namespace Legion {
     {
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
-      LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second, mutator);
+          dump_view_set.insert(it->first, eit->first, it->second);
       dump_view_set.dump();
     }
 
@@ -3564,12 +3551,11 @@ namespace Legion {
     {
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
-      LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second, mutator);
+          dump_view_set.insert(it->first, eit->first, it->second);
       dump_view_set.dump();
     }
 
@@ -3579,12 +3565,11 @@ namespace Legion {
     {
       TraceViewSet dump_view_set(forest, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
-      LocalReferenceMutator mutator;
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
               eit->second.begin(); it != eit->second.end(); it++)
-          dump_view_set.insert(it->first, eit->first, it->second, mutator);
+          dump_view_set.insert(it->first, eit->first, it->second);
       dump_view_set.dump();
     }
 
@@ -3894,7 +3879,7 @@ namespace Legion {
             {
               const InstanceRef &ref = (*pit)[idx];
               if (!ref.is_virtual_ref())
-                ref.remove_valid_reference(MAPPING_ACQUIRE_REF,NULL/*mutator*/);
+                ref.remove_valid_reference(MAPPING_ACQUIRE_REF);
             }
             pit->clear();
           }
@@ -4070,7 +4055,7 @@ namespace Legion {
       {
         TraceConditionSet *condition =
           new TraceConditionSet(trace, forest, 
-              it->first->region_node, it->second, ready_events);
+              it->first->region_node, it->second);
         condition->add_reference();
         // This looks redundant because it is a bit since we're just going
         // to compute the single equivalence set we already have here but
@@ -6017,7 +6002,6 @@ namespace Legion {
         mapping.future_size_bounds[idx] = SIZE_MAX;
       }
       mapping.physical_instances = physical_instances;
-      WrapperReferenceMutator mutator(applied_events);
       for (std::deque<InstanceSet>::iterator it =
            mapping.physical_instances.begin(); it !=
            mapping.physical_instances.end(); ++it)
@@ -6028,7 +6012,7 @@ namespace Legion {
           if (ref.is_virtual_ref())
             has_virtual_mapping = true;
           else
-            ref.add_valid_reference(MAPPING_ACQUIRE_REF, &mutator);
+            ref.add_valid_reference(MAPPING_ACQUIRE_REF);
         }
       }
     }
@@ -6410,16 +6394,12 @@ namespace Legion {
             trace->runtime->find_or_request_logical_view(
                                 instance.view_did, ready));
         recorded_views[instance.view_did] = view;
-        WrapperReferenceMutator mutator(applied);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        view->add_base_valid_ref(TRACE_REF, &mutator);
+        view->add_base_valid_ref(TRACE_REF);
       }
       if (recorded_expressions.insert(expr).second)
-      {
-        WrapperReferenceMutator mutator(applied);
-        expr->add_base_expression_reference(TRACE_REF, &mutator);
-      }
+        expr->add_base_expression_reference(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -6436,16 +6416,12 @@ namespace Legion {
         InstanceView *view = static_cast<InstanceView*>(
             trace->runtime->find_or_request_logical_view(inst.view_did, ready));
         recorded_views[inst.view_did] = view;
-        WrapperReferenceMutator mutator(applied_events);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
-        view->add_base_valid_ref(TRACE_REF, &mutator);
+        view->add_base_valid_ref(TRACE_REF);
       }
       if (insts.insert(expr,mask) && recorded_expressions.insert(expr).second)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        expr->add_base_expression_reference(TRACE_REF, &mutator);
-      }
+        expr->add_base_expression_reference(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------

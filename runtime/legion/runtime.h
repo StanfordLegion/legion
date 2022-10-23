@@ -335,21 +335,18 @@ namespace Legion {
       size_t get_upper_bound_size(void);
       void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
       void pack_future(Serializer &rez) const;
-      static FutureImpl* unpack_future(Runtime *runtime, 
-          Deserializer &derez, ReferenceMutator *mutator, 
-          Operation *op = NULL, GenerationID op_gen = 0, 
+      static Future unpack_future(Runtime *runtime, 
+          Deserializer &derez, Operation *op = NULL, GenerationID op_gen = 0,
 #ifdef LEGION_SPY
           UniqueID op_uid = 0,
 #endif
           int op_depth = 0);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
     public:
       void register_dependence(Operation *consumer_op);
-      void register_remote(AddressSpaceID sid, ReferenceMutator *mutator);
+      void register_remote(AddressSpaceID sid);
       void set_future_result_size(size_t size, AddressSpaceID source);
     protected:
       void finish_set_future(void); // must be holding lock
@@ -369,7 +366,7 @@ namespace Legion {
       void perform_broadcast(void);
       void pack_future_result(Serializer &rez) const; // must be holding lock
     public:
-      void record_future_registered(ReferenceMutator *mutator);
+      void record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_result_size(Deserializer &derez,
                                   Runtime *runtime, AddressSpaceID source);
@@ -594,17 +591,14 @@ namespace Legion {
     public:
       virtual bool is_replicate_future_map(void) const { return false; }
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
     public:
       Domain get_domain(void) const;
       virtual Future get_future(const DomainPoint &point, 
                                 bool internal_only,
                                 RtEvent *wait_on = NULL); 
-      void set_future(const DomainPoint &point, FutureImpl *impl,
-                      ReferenceMutator *mutator);
+      void set_future(const DomainPoint &point, FutureImpl *impl);
       void get_void_result(const DomainPoint &point, 
                             bool silence_warnings = true,
                             const char *warning_string = NULL);
@@ -616,8 +610,8 @@ namespace Legion {
       virtual void argument_map_wrap(void) { }
     public:
       void pack_future_map(Serializer &rez) const;
-      static FutureMapImpl* unpack_future_map(Runtime *runtime,
-          Deserializer &derez, ReferenceMutator *mutator, TaskContext *ctx);
+      static FutureMap unpack_future_map(Runtime *runtime,
+          Deserializer &derez, TaskContext *ctx);
     public:
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
@@ -632,7 +626,7 @@ namespace Legion {
     public:
       void register_dependence(Operation *consumer_op);
     public:
-      void record_future_map_registered(ReferenceMutator *creator);
+      void record_future_map_registered(void);
       static void handle_future_map_future_request(Deserializer &derez,
                               Runtime *runtime, AddressSpaceID source);
       static void handle_future_map_future_response(Deserializer &derez,
@@ -652,7 +646,7 @@ namespace Legion {
       const ApEvent completion_event;
     protected:
       mutable LocalLock future_map_lock;
-      std::map<DomainPoint,Future> futures;
+      std::map<DomainPoint,FutureImpl*> futures;
     };
 
     /**
@@ -749,7 +743,7 @@ namespace Legion {
       virtual bool is_replicate_future_map(void) const { return true; }
     public:
       // Override this so we can trigger our deletion barrier
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_inactive(void);
     public:
       virtual Future get_future(const DomainPoint &point,
                                 bool internal, RtEvent *wait_on = NULL);
@@ -2173,10 +2167,8 @@ namespace Legion {
       bool operator==(const LayoutConstraints &rhs) const;
       bool operator==(const LayoutConstraintSet &rhs) const;
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
     public:
       inline FieldSpace get_field_space(void) const { return handle; }
       inline const char* get_name(void) const { return constraints_name; }
@@ -2346,12 +2338,10 @@ namespace Legion {
     public:
       bool find_elide_close_result(const ProjectionInfo &info, 
                   const std::set<ProjectionSummary> &projections, 
-                  RegionTreeNode *node, bool &result,
-                  std::set<RtEvent> &applied_events) const;
+                  RegionTreeNode *node, bool &result) const;
       void record_elide_close_result(const ProjectionInfo &info,
                   const std::set<ProjectionSummary> &projections,
-                  RegionTreeNode *node, bool result,
-                  std::set<RtEvent> &applied_events);
+                  RegionTreeNode *node, bool result);
       // From scratch
       ProjectionTree* construct_projection_tree(Operation *op, unsigned index,
                   RegionTreeNode *root, IndexSpaceNode *launch_domain, 
@@ -3072,8 +3062,8 @@ namespace Legion {
       void send_remote_task_profiling_response(Processor tar, Serializer &rez);
       void send_shared_ownership(AddressSpaceID target, Serializer &rez);
       void send_index_space_request(AddressSpaceID target, Serializer &rez);
-      void send_index_space_return(AddressSpaceID target, Serializer &rez,
-                                   RtEvent precondition);
+      void send_index_space_response(AddressSpaceID target, Serializer &rez);
+      void send_index_space_return(AddressSpaceID target, Serializer &rez);
       void send_index_space_set(AddressSpaceID target, Serializer &rez);
       void send_index_space_child_request(AddressSpaceID target, 
                                           Serializer &rez);
@@ -3096,8 +3086,8 @@ namespace Legion {
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_request(AddressSpaceID target, Serializer &rez);
-      void send_index_partition_return(AddressSpaceID target, Serializer &rez,
-                                       RtEvent precondition);
+      void send_index_partition_response(AddressSpaceID target,Serializer &rez);
+      void send_index_partition_return(AddressSpaceID target, Serializer &rez);
       void send_index_partition_child_request(AddressSpaceID target,
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
@@ -3821,7 +3811,6 @@ namespace Legion {
                                             DistributedID did, RtEvent &ready);
     public:
       FutureImpl* find_or_create_future(DistributedID did, UniqueID ctx_uid,
-                                        ReferenceMutator *mutator,
                                         size_t op_ctx_index,
                                         const DomainPoint &point,
                                         Provenance *provenance,
@@ -3833,8 +3822,7 @@ namespace Legion {
                                         int op_depth = 0);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, size_t index, IndexSpace domain,
-                          ApEvent completion, ReferenceMutator *mutator,
-                          Provenance *provenance);
+                          ApEvent completion, Provenance *provenance);
       IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
                                     TypeTag type_tag, Provenance *provenance);
     public:

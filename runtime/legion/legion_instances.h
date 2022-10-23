@@ -295,12 +295,10 @@ namespace Legion {
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_inactive(void);
     public:
-      bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
+      bool acquire_instance(ReferenceSource source);
       bool can_collect(AddressSpaceID source, bool &already_collected);
       bool collect(RtEvent &collected);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
@@ -784,11 +782,6 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
     public: 
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;

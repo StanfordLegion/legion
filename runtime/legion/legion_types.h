@@ -381,7 +381,6 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
-      LG_DEFER_RELEASE_REF_TASK_ID,
       LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
@@ -405,7 +404,6 @@ namespace Legion {
       LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
-      LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
@@ -505,7 +503,6 @@ namespace Legion {
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \
         "Defer Equivalence Set Apply State",                      \
-        "Defer Equivalence Set Remove References",                \
         "Defer Remote Reference Update",                          \
         "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
@@ -529,7 +526,6 @@ namespace Legion {
         "Defer Instance Manager Deletion",                        \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
-        "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Disjoint Complete Response",                       \
@@ -711,6 +707,7 @@ namespace Legion {
       // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1, 
       TASK_VIRTUAL_CHANNEL = 2,
+      INDEX_SPACE_VIRTUAL_CHANNEL = 3,
       FIELD_SPACE_VIRTUAL_CHANNEL = 4,
       REFERENCE_VIRTUAL_CHANNEL = 6,
       UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority

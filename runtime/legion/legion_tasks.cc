@@ -99,7 +99,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ExternalTask::unpack_external_task(Deserializer &derez,
-                                    Runtime *runtime, ReferenceMutator *mutator)
+                                            Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -123,13 +123,7 @@ namespace Legion {
       derez.deserialize(num_futures);
       futures.resize(num_futures);
       for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, mutator);
-        if (impl == NULL)
-          continue;
-        impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
-        futures[idx] = Future(impl, false/*need reference*/);
-      }
+        futures[idx] = FutureImpl::unpack_future(runtime, derez);
       size_t num_grants;
       derez.deserialize(num_grants);
       grants.resize(num_grants);
@@ -480,7 +474,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
       // unpack all the user facing data
-      unpack_external_task(derez, runtime, this); 
+      unpack_external_task(derez, runtime); 
       DerezCheck z(derez);
       size_t num_indexes;
       derez.deserialize(num_indexes);
@@ -2195,11 +2189,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTaskOp::unpack(Deserializer &derez,
-                              ReferenceMutator &mutator)
+    void RemoteTaskOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      unpack_external_task(derez, runtime, &mutator);
+      unpack_external_task(derez, runtime);
       unpack_profiling_requests(derez);
     }
 
@@ -5665,8 +5658,7 @@ namespace Legion {
       assert(launch_space == NULL);
 #endif
       launch_space = runtime->forest->get_node(launch_handle);
-      WrapperReferenceMutator mutator(ready_events);
-      launch_space->add_base_valid_ref(CONTEXT_REF, &mutator);
+      launch_space->add_base_valid_ref(CONTEXT_REF);
       derez.deserialize(sliced);
       derez.deserialize(redop);
       if (redop > 0)
@@ -6127,8 +6119,7 @@ namespace Legion {
                                                      logical_regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -6635,13 +6626,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -6727,17 +6711,9 @@ namespace Legion {
       }
       if (!elide_future_return)
       {
-        WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
-        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-        result = Future(impl, false/*need reference*/);
+        result = FutureImpl::unpack_future(runtime, derez);
         // Unpack the predicate false infos
-        impl = FutureImpl::unpack_future(runtime, derez, &mutator);
-        if (impl != NULL)
-        {
-          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-          predicate_false_future = Future(impl, false/*need reference*/);
-        }
+        predicate_false_future = FutureImpl::unpack_future(runtime, derez);
         derez.deserialize(predicate_false_size);
         if (predicate_false_size > 0)
         {
@@ -7484,13 +7460,6 @@ namespace Legion {
       FutureInstance *instance = elide_future_return ? NULL : 
         slice_owner->get_predicate_false_result(current_proc,metadata,metasize);
       execution_context->end_misspeculation(instance, metadata, metasize);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -9082,8 +9051,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
       }
     }
 
@@ -10047,14 +10015,6 @@ namespace Legion {
       }
       else
         intra_space_dependences[point] = point_mapped;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -11237,17 +11197,11 @@ namespace Legion {
         parent_ctx = index_owner->parent_ctx;
       if (!elide_future_return)
       {
-        WrapperReferenceMutator mutator(ready_events);
         if (redop == 0)
-          future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
-                                              derez, &mutator, parent_ctx));
+          future_map = FutureMapImpl::unpack_future_map(runtime, derez, 
+                                                        parent_ctx);
         // Unpack the predicate false infos
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
-        if (impl != NULL)
-        {
-          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-          predicate_false_future = Future(impl, false/*need reference*/);
-        }
+        predicate_false_future = FutureImpl::unpack_future(runtime, derez);
         derez.deserialize(predicate_false_size);
         if (predicate_false_size > 0)
         {
@@ -11275,31 +11229,16 @@ namespace Legion {
       }
       if (num_points == 0)
       {
-        WrapperReferenceMutator mutator(ready_events);
-        {
-          FutureMapImpl *impl = FutureMapImpl::unpack_future_map(runtime,
-              derez, &mutator, parent_ctx);
-          if (impl != NULL)
-          {
-            impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-            point_arguments = FutureMap(impl, false/*need reference*/);
-          }
-        }
+        point_arguments = FutureMapImpl::unpack_future_map(runtime, derez, 
+                                                           parent_ctx);
         size_t num_point_futures;
         derez.deserialize(num_point_futures);
         if (num_point_futures > 0)
         {
           point_futures.resize(num_point_futures);
           for (unsigned idx = 0; idx < num_point_futures; idx++)
-          {
-            FutureMapImpl *impl = FutureMapImpl::unpack_future_map(
-                runtime, derez, &mutator, parent_ctx);
-            if (impl != NULL)
-            {
-              impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-              point_futures[idx] = FutureMap(impl, false/*need reference*/);
-            }
-          }
+            point_futures[idx] = FutureMapImpl::unpack_future_map(runtime, 
+                                                        derez, parent_ctx);
         }
       }
       else // Set the first mapping to false since we know things are mapped
@@ -11497,9 +11436,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != future_handles->handles.end());
 #endif
-        LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->get_context_uid(), &mutator, context_index, point,
+            parent_ctx->get_context_uid(), context_index, point,
             get_provenance());
         if (functor != NULL)
         {
@@ -11513,12 +11451,6 @@ namespace Legion {
         {
           impl->set_result(instance, metadata, metasize);
           metadata = NULL; // no longer own the allocation
-        }
-        const RtEvent applied = mutator.get_done_event();
-        if (applied.exists() && !applied.has_triggered())
-        {
-          AutoLock o_lock(op_lock);
-          complete_preconditions.insert(applied);
         }
       }
       if (metadata != NULL)
@@ -11678,13 +11610,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::return_privileges(TaskContext *point_context,
                                       std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -11805,10 +11730,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != handles.end());
 #endif
-      WrapperReferenceMutator mutator(applied_conditions);
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->get_context_uid(), &mutator, context_index, point,
-        get_provenance());
+        parent_ctx->get_context_uid(), context_index, point, get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 

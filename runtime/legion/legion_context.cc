@@ -3898,7 +3898,7 @@ namespace Legion {
         EquivalenceSet *new_set = 
           it->first->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
-        target->record_refinement(new_set,overlap,dummy_parent,applied_events);
+        target->record_refinement(new_set, overlap, dummy_parent);
         it.filter(overlap);
         // Filter the valid mask too
         finder->second.filter_valid_mask(overlap);
@@ -6577,7 +6577,6 @@ namespace Legion {
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
           total_children_count++, runtime->address_space, ApEvent::NO_AP_EVENT,
           provenance);
-      LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -6591,7 +6590,7 @@ namespace Legion {
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT, provenance, &future_size);
         future->set_local(it->second.get_ptr(), future_size);
-        impl->set_future(it->first, future, &mutator);
+        impl->set_future(it->first, future);
       }
       return FutureMap(impl);
     }
@@ -10368,7 +10367,7 @@ namespace Legion {
           const bool restricted = 
             IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
           eq_set->initialize_set(usage, user_mask, restricted, sources,
-                                 corresponding, applied_events);
+                                 corresponding);
         }
         else
         {
@@ -10643,28 +10642,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::remove_remote_references(
-                          const std::vector<DistributedCollectable*> &to_remove)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<DistributedCollectable*>::const_iterator it = 
-            to_remove.begin(); it != to_remove.end(); it++)
-        if ((*it)->remove_base_valid_ref(REMOTE_DID_REF))
-          delete (*it);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_remove_remote_references(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferRemoveRemoteReferenceArgs *dargs = 
-        (const DeferRemoveRemoteReferenceArgs*)args;
-      InnerContext::remove_remote_references(*(dargs->to_remove));
-      delete dargs->to_remove;
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::convert_target_views(const InstanceSet &targets,
            std::vector<InstanceView*> &target_views, CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
@@ -10790,7 +10767,6 @@ namespace Legion {
       // Two versions of this method depending on whether we are doing 
       // Legion Spy or not, Legion Spy wants to know exactly which op
       // made each fill view so we can't cache them
-      WrapperReferenceMutator mutator(map_applied_events);
 #ifndef LEGION_SPY
       // See if we can find this in the cache first
       AutoLock f_lock(fill_view_lock);
@@ -10804,7 +10780,7 @@ namespace Legion {
         // Move it back to the front of the list
         fill_view_cache.erase(it);
         fill_view_cache.push_front(result);
-        result->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        result->add_base_valid_ref(MAPPING_ACQUIRE_REF);
         took_ownership = false;
         return result;
       }
@@ -10821,10 +10797,10 @@ namespace Legion {
 
 #endif
                      );
-      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF);
 #ifndef LEGION_SPY
       // Add it to the cache since we're not doing Legion Spy
-      fill_view->add_base_valid_ref(CONTEXT_REF, &mutator);
+      fill_view->add_base_valid_ref(CONTEXT_REF);
       fill_view_cache.push_front(fill_view);
       if (fill_view_cache.size() > MAX_FILL_VIEW_CACHE_SIZE)
       {
@@ -12886,38 +12862,18 @@ namespace Legion {
       rez.serialize(runtime->address_space);
       rez.serialize<size_t>(num_shards);
       rez.serialize<size_t>(created_state.size());
-      std::vector<DistributedCollectable*> remove_remote_references;
       for (std::vector<RegionNode*>::const_iterator it = 
             created_state.begin(); it != created_state.end(); it++)
       {
         rez.serialize((*it)->handle);
-        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/, 
-                                  remove_remote_references);
+        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/); 
         (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/,
-                                applied_events, remove_remote_references);
+                                  applied_events);
       }
       std::set<RtEvent> broadcast_events;
       shard_manager->broadcast_created_region_contexts(owner_shard, rez,
                                                        broadcast_events);
-      if (!remove_remote_references.empty())
-      {
-        RtEvent precondition;
-        if (!broadcast_events.empty())
-          precondition = Runtime::merge_events(broadcast_events);
-        if (precondition.exists() && !precondition.has_triggered())
-        {
-          std::vector<DistributedCollectable*> *to_remove =
-            new std::vector<DistributedCollectable*>();
-          to_remove->swap(remove_remote_references);
-          DeferRemoveRemoteReferenceArgs args(context_uid, to_remove);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, precondition);
-          applied_events.insert(precondition);
-        }
-        else
-          InnerContext::remove_remote_references(remove_remote_references);
-      }
-      else if (!broadcast_events.empty())
+      if (!broadcast_events.empty())
         applied_events.insert(broadcast_events.begin(), broadcast_events.end());
       receive_replicate_created_region_contexts(ctx, created_state,
                                                 applied_events, num_shards);
@@ -12973,16 +12929,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did, 
             provenance, &collective_mapping, value.expr_id,
-            ApEvent::NO_AP_EVENT, creation_barrier, &applied);
-        // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+            ApEvent::NO_AP_EVENT, creation_barrier);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13007,16 +12957,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did,
             provenance, &collective_mapping, value.expr_id,
-            ApEvent::NO_AP_EVENT, creation_barrier, &applied);
+            ApEvent::NO_AP_EVENT, creation_barrier);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -13126,16 +13071,11 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did, 
                                 provenance, &collective_mapping, value.expr_id,
-                                ready, creation_barrier, &applied);
+                                ready, creation_barrier);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13160,16 +13100,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
                                 provenance, &collective_mapping, value.expr_id,
-                                ready, creation_barrier, &applied);
+                                ready, creation_barrier);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       creator_op->initialize_index_space(this, node, future, provenance,
           shard_manager->is_first_local_shard(owner_shard), 
@@ -13317,15 +13252,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces,creation_barrier, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13350,15 +13280,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces,creation_barrier, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -13423,15 +13348,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces,creation_barrier, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13456,15 +13376,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces,creation_barrier, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -13519,16 +13434,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, provenance,
-            left, right, creation_barrier, &collective_mapping,
-            value.expr_id, &applied);
+            left, right, creation_barrier, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13553,16 +13462,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, provenance,
-            left, right, creation_barrier, &collective_mapping,
-            value.expr_id, &applied);
+            left, right, creation_barrier, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -15928,15 +15831,10 @@ namespace Legion {
         space = FieldSpace(value.space_id);
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
-        std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_barrier, &applied);
+            &collective_mapping, &shard_mapping, creation_barrier);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/); 
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -15961,15 +15859,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(space.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_barrier, &applied);
+            &collective_mapping, &shard_mapping, creation_barrier);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_field_spaces.pop_front();
@@ -16958,16 +16851,11 @@ namespace Legion {
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
         runtime->forest->create_logical_region(handle, value.did, provenance,
-            &collective_mapping, creation_barrier, &applied);
+            &collective_mapping, creation_barrier);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -16994,15 +16882,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_logical_region(handle, value.did, provenance,
-            &collective_mapping, creation_barrier, &applied);
+            &collective_mapping, creation_barrier);
         // Signal that we are done our creation
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
       delete collective.first;
       pending_region_trees.pop_front();
@@ -17825,7 +17708,6 @@ namespace Legion {
               total_children_count++, runtime->address_space,
               ApEvent::NO_AP_EVENT, provenance));
       }
-      LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -17839,7 +17721,7 @@ namespace Legion {
             runtime->get_available_distributed_id(), runtime->address_space,
             ApEvent::NO_AP_EVENT, provenance, &future_size);
         future->set_local(it->second.get_ptr(), future_size);
-        result.impl->set_future(it->first, future, &mutator);
+        result.impl->set_future(it->first, future);
       }
       return result;
     }
@@ -19735,13 +19617,11 @@ namespace Legion {
       {
         // local case
         FieldMask dummy_parent, covered_mask;
-        std::set<RtEvent> applied_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               result_sets.begin(); it != result_sets.end(); it++)
         {
           covered_mask |= it->second;
-          target->record_refinement(it->first, it->second, 
-                                    dummy_parent, applied_events);
+          target->record_refinement(it->first, it->second, dummy_parent);
         }
         if (covered_mask != result_sets.get_valid_mask())
         {
@@ -19753,11 +19633,7 @@ namespace Legion {
           FieldMask empty_mask = result_sets.get_valid_mask() - covered_mask;
           target->record_empty_refinement(empty_mask);
         }
-        if (!applied_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(applied_events));
-        else
-          Runtime::trigger_event(done_event);
+        Runtime::trigger_event(done_event);
       }
       else
       {
@@ -21705,7 +21581,6 @@ namespace Legion {
                            std::set<RtEvent> &applied_events, size_t num_shards)
     //--------------------------------------------------------------------------
     {
-      std::vector<DistributedCollectable*> remove_remote_references;
       const RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
@@ -21717,30 +21592,15 @@ namespace Legion {
               created_state.begin(); it != created_state.end(); it++)
         {
           rez.serialize((*it)->handle);
-          (*it)->pack_logical_state(ctx.get_id(), rez, true/*invalidate*/, 
-                                    remove_remote_references);
+          (*it)->pack_logical_state(ctx.get_id(), rez, true/*invalidate*/); 
           (*it)->pack_version_state(ctx.get_id(), rez, true/*invalidate*/,
-                                applied_events, remove_remote_references);
+                                    applied_events);
         }
         rez.serialize(done_event);
       }
       const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
       runtime->send_created_region_contexts(target, rez);
       applied_events.insert(done_event);
-      if (!remove_remote_references.empty())
-      { 
-        if (!done_event.has_triggered())
-        {
-          std::vector<DistributedCollectable*> *to_remove = 
-            new std::vector<DistributedCollectable*>();
-          to_remove->swap(remove_remote_references);
-          DeferRemoveRemoteReferenceArgs args(context_uid, to_remove);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, done_event); 
-        }
-        else
-          InnerContext::remove_remote_references(remove_remote_references);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -21800,8 +21660,7 @@ namespace Legion {
       // If we're the top-level context then we're already done
       if (top_level_context)
         return;
-      WrapperReferenceMutator mutator(preconditions);
-      remote_task.unpack_external_task(derez, runtime, &mutator);
+      remote_task.unpack_external_task(derez, runtime);
       local_parent_req_indexes.resize(remote_task.regions.size()); 
       for (unsigned idx = 0; idx < local_parent_req_indexes.size(); idx++)
         derez.deserialize(local_parent_req_indexes[idx]);

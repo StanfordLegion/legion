@@ -737,7 +737,7 @@ namespace Legion {
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
-        remaining_collection_guards(0), currently_active(false),
+        remaining_collection_guards(0), currently_active(true),
         min_gc_priority(0)
     //--------------------------------------------------------------------------
     {
@@ -1135,21 +1135,7 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(!currently_active);
-      assert((gc_state == COLLECTABLE_GC_STATE) ||
-              (gc_state == ACQUIRED_GC_STATE));
-      assert(!deferred_deletion.exists());
-#endif
-      currently_active = true;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalManager::notify_inactive(ReferenceMutator *mutator)
+    void PhysicalManager::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
@@ -1166,6 +1152,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalManager::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
@@ -1287,6 +1274,7 @@ namespace Legion {
       assert(false); // should never get this in release mode
 #endif
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_garbage_collection_debug_response(
@@ -1308,11 +1296,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_invalid(ReferenceMutator *mutator)
+    void PhysicalManager::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
-        send_remote_valid_decrement(owner_space, mutator);
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
       assert(gc_state == VALID_GC_STATE);
@@ -1327,8 +1313,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::acquire_instance(ReferenceSource source,
-                                           ReferenceMutator *mutator)
+    bool PhysicalManager::acquire_instance(ReferenceSource source)
     //--------------------------------------------------------------------------
     {
       // Do an atomic operation to check to see if we are already valid
@@ -1385,7 +1370,7 @@ namespace Legion {
       }
       if (success)
       {
-        add_base_valid_ref(source, mutator);
+        add_base_valid_ref(source);
         AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
         assert(pending_changes > 0);
@@ -1407,7 +1392,6 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(this);
           rez.serialize(source);
-          rez.serialize(mutator);
           rez.serialize(&result);
           rez.serialize(ready);
         }
@@ -1427,6 +1411,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_acquire_request(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source) 
@@ -1503,6 +1488,7 @@ namespace Legion {
       result->store(true);
       Runtime::trigger_event(ready);
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::can_collect(AddressSpaceID source,
@@ -1869,6 +1855,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RtEvent PhysicalManager::set_garbage_collection_priority(MapperID mapper_id,
                                                Processor p, GCPriority priority)
@@ -2019,6 +2006,7 @@ namespace Legion {
       Runtime::trigger_event(done_event, mutator.get_done_event());
       return done_event;
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_garbage_collection_priority_update(
@@ -4081,38 +4069,6 @@ namespace Legion {
       return LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
 	(PhysicalInstance::NO_INST);
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void VirtualManager::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
