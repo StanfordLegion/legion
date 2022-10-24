@@ -2379,7 +2379,7 @@ namespace Legion {
                                                             bounding_box))    \
           start->report_incompatible_accessor("AffineAccessor",instance,fid); \
         accessor =                                                            \
-          Realm::AffineAccessor<FT,DIM,T>(instance, fid, bounds, offset);     \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, bounding_box,offset);\
         DomainT<DIM,T> is;                                                    \
         /* The bounds are the union of the ises (need to be precise) */       \
         const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
@@ -2406,7 +2406,6 @@ namespace Legion {
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
         if (start == stop)                                                    \
           PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
-        Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -2455,7 +2454,6 @@ namespace Legion {
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
         if (start == stop)                                                    \
           PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
-        Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -2505,7 +2503,6 @@ namespace Legion {
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
         if (start == stop)                                                    \
           PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
-        Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
