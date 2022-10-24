@@ -796,7 +796,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -830,7 +831,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -909,7 +911,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -953,7 +956,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -2104,7 +2108,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Rect<DIM,T> bounding_box;                                             \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -2144,7 +2149,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -2179,7 +2185,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -2215,7 +2222,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -2343,7 +2351,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
@@ -2395,7 +2404,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
@@ -2443,7 +2453,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
@@ -2492,7 +2503,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
         Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
@@ -4526,7 +4538,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         Rect<DIM,T> bounding_box;                                             \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -4543,7 +4556,7 @@ namespace Legion {
             bounding_box = bounding_box.union_bbox(is.bounds);                \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
         }                                                                     \
@@ -4567,7 +4580,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -4579,7 +4593,7 @@ namespace Legion {
                 check_field_size, redop);                                     \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
         }                                                                     \
@@ -4603,7 +4617,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -4615,7 +4630,7 @@ namespace Legion {
               check_field_size, redop);                                       \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
         }                                                                     \
@@ -4640,7 +4655,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -4652,7 +4668,7 @@ namespace Legion {
                 check_field_size, redop);                                     \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
         }                                                                     \
@@ -4773,7 +4789,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         Rect<DIM,T> bounding_box;                                             \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
@@ -4791,7 +4808,7 @@ namespace Legion {
             bounding_box = bounding_box.union_bbox(is.bounds);                \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           ises.push_back(is);                                                 \
@@ -4826,7 +4843,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -4839,7 +4857,7 @@ namespace Legion {
                 check_field_size, redop);                                     \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           ises.push_back(is);                                                 \
@@ -4874,7 +4892,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -4887,7 +4906,7 @@ namespace Legion {
                 check_field_size, redop);                                     \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           ises.push_back(is);                                                 \
@@ -4923,7 +4942,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -4936,7 +4956,7 @@ namespace Legion {
                 check_field_size, redop);                                     \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("AffineAccessor",                 \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           ises.push_back(is);                                                 \
@@ -5714,7 +5734,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -5749,7 +5770,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -5830,7 +5852,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -5877,7 +5900,8 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
             typename std::iterator_traits<InputIterator>::value_type>::value, \
             "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -7933,7 +7957,9 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -7945,7 +7971,7 @@ namespace Legion {
               check_field_size, redop);                                       \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("MultiAffineAccessor",            \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
@@ -7970,7 +7996,9 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
         {                                                                     \
@@ -7982,7 +8010,7 @@ namespace Legion {
               check_field_size, redop);                                       \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("MultiAffineAccessor",            \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
@@ -8055,7 +8083,9 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -8068,7 +8098,7 @@ namespace Legion {
               check_field_size, redop);                                       \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("MultiAffineAccessor",            \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
@@ -8103,7 +8133,9 @@ namespace Legion {
         static_assert(std::is_same<PhysicalRegion,                            \
          typename std::iterator_traits<InputIterator>::value_type>::value,    \
          "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
-        assert(start != stop);                                                \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
         std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
         Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
         for (InputIterator it = start; it != stop; it++)                      \
@@ -8116,7 +8148,7 @@ namespace Legion {
                 check_field_size, redop);                                     \
           if (instance.exists() && (inst != instance))                        \
             it->report_colocation_violation("MultiAffineAccessor",            \
-                fid, instance, inst, *start);                                 \
+                fid, instance, inst, *start, true);                           \
           else                                                                \
             instance = inst;                                                  \
           if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \

@@ -2497,7 +2497,10 @@ namespace Legion {
       void report_colocation_violation(const char *accessor_kind, FieldID fid,
                              Realm::RegionInstance inst1,
                              Realm::RegionInstance inst2,
-                             const PhysicalRegion &other) const;
+                             const PhysicalRegion &other,
+                             bool reduction = false) const;
+      static void empty_colocation_regions(const char *accessor_kind, 
+                                           FieldID fid, bool reduction = false);
       static void fail_bounds_check(DomainPoint p, FieldID fid,
                                     PrivilegeMode mode, bool multi = false);
       static void fail_bounds_check(Domain d, FieldID fid,

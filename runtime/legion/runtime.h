@@ -463,7 +463,10 @@ namespace Legion {
                            PhysicalInstance inst1, PhysicalInstance inst2);
       void report_colocation_violation(const char *accessor_kind,
                            FieldID fid, PhysicalInstance inst1,
-                           PhysicalInstance ins2, const PhysicalRegion &other);
+                           PhysicalInstance ins2, const PhysicalRegion &other,
+                           bool reduction);
+      static void empty_colocation_regions(const char *accessor_kind,
+                                           FieldID fid, bool reduction);
       static void fail_bounds_check(DomainPoint p, FieldID fid, 
                                     PrivilegeMode mode, bool multi);
       static void fail_bounds_check(Domain d, FieldID fid, 
