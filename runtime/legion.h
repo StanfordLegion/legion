@@ -3089,6 +3089,11 @@ namespace Legion {
       static const int dim = N;
     };
 
+#ifdef LEGION_MULTI_REGION_ACCESSOR
+    // Multi-Region Accessors are a provisional feature now and are likely
+    // to be deprecated and removed in the near future. Instead of multi-region
+    // accessors you should be able to use the new colocation constructors
+    // on the traditional Field Accessors.
     /**
      * \class MultiRegionAccessor
      * A multi-region accessor is a generalization of the field accessor class
@@ -3264,6 +3269,7 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = N;
     };
+#endif // LEGION_MULTI_REGION_ACCESSOR
 
     /**
      * \class PieceIterator

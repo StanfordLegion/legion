@@ -8621,7 +8621,7 @@ namespace Legion {
     ////////////////////////////////////////////////////////////
     // Multi Region Accessor with Generic Accessors
     ////////////////////////////////////////////////////////////
-
+#ifdef LEGION_MULTI_REGION_ACCESSOR
     // Multi-Accessor, generic, N, bounds checks and/or privilege checks
     template<typename FT, int N, typename T, bool CB, bool CP, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,CB,CP,MR> {
@@ -13865,6 +13865,7 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = 1;
     };
+#endif // LEGION_MULTI_REGION_ACCESSOR
 
     // A hidden class for users that really know what they are doing
     /**
