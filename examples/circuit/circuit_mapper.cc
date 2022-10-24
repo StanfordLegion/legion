@@ -66,9 +66,18 @@ void CircuitMapper::map_task(const MapperContext      ctx,
       else
         target_memory = fbmem;
       const RegionRequirement &req = task.regions[idx];
-      map_circuit_region(ctx, req.region, task.target_proc, 
-                         target_memory, output.chosen_instances[idx], 
-                         req.privilege_fields, req.redop);
+      // Handle the case where we need to colocate fields
+      if (req.tag == COLOCATION_NEXT_TAG)
+        map_circuit_region(ctx, req.region, task.target_proc, 
+                           target_memory, output.chosen_instances[idx], 
+                           req.privilege_fields, req.redop,
+                           task.regions[idx+1].region);
+      else if (req.tag == COLOCATION_PREV_TAG)
+        output.chosen_instances[idx] = output.chosen_instances[idx-1];
+      else
+        map_circuit_region(ctx, req.region, task.target_proc, 
+                           target_memory, output.chosen_instances[idx], 
+                           req.privilege_fields, req.redop);
     }
     runtime->acquire_instances(ctx, output.chosen_instances);
   }
@@ -121,7 +130,7 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
                                        Processor target_proc, Memory target,
                                        std::vector<PhysicalInstance> &instances,
                                        const std::set<FieldID> &privilege_fields,
-                                       ReductionOpID redop)
+                                       ReductionOpID redop, LogicalRegion colocation)
 {
   const std::pair<LogicalRegion,Memory> key(region, target);
   if (redop > 0) {
@@ -142,6 +151,8 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
   }
   // First time through, then we make an instance
   std::vector<LogicalRegion> regions(1, region);  
+  if (colocation.exists())
+    regions.push_back(colocation);
   LayoutConstraintSet layout_constraints;
   // No specialization
   if (redop > 0)
@@ -193,6 +204,14 @@ void CircuitMapper::map_circuit_region(const MapperContext ctx, LogicalRegion re
     reduction_instances[key] = result;
   else
     local_instances[key] = result;
+  if (colocation.exists())
+  {
+    const std::pair<LogicalRegion,Memory> key(colocation, target); 
+    if (redop > 0)
+      reduction_instances[key] = result;
+    else
+      local_instances[key] = result;
+  }
 }
 
 void update_mappers(Machine machine, Runtime *runtime,

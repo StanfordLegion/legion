@@ -600,30 +600,37 @@ UpdateVoltagesTask::UpdateVoltagesTask(LogicalPartition lp_pvt_nodes,
                                READ_WRITE, EXCLUSIVE, lr_all_nodes);
   rr_private_out.add_field(FID_NODE_VOLTAGE);
   rr_private_out.add_field(FID_CHARGE);
+  rr_private_out.tag = COLOCATION_NEXT_TAG;
   add_region_requirement(rr_private_out);
 
   RegionRequirement rr_shared_out(lp_shr_nodes, 0/*identity*/,
                                   READ_WRITE, EXCLUSIVE, lr_all_nodes);
   rr_shared_out.add_field(FID_NODE_VOLTAGE);
   rr_shared_out.add_field(FID_CHARGE);
+  rr_shared_out.tag = COLOCATION_PREV_TAG;
   add_region_requirement(rr_shared_out);
 
   RegionRequirement rr_private_in(lp_pvt_nodes, 0/*identity*/,
                                   READ_ONLY, EXCLUSIVE, lr_all_nodes);
   rr_private_in.add_field(FID_NODE_CAP);
   rr_private_in.add_field(FID_LEAKAGE);
+  rr_private_in.tag = COLOCATION_NEXT_TAG;
   add_region_requirement(rr_private_in);
 
   RegionRequirement rr_shared_in(lp_shr_nodes, 0/*identity*/,
                                  READ_ONLY, EXCLUSIVE, lr_all_nodes);
   rr_shared_in.add_field(FID_NODE_CAP);
   rr_shared_in.add_field(FID_LEAKAGE);
+  rr_shared_in.tag = COLOCATION_PREV_TAG;
   add_region_requirement(rr_shared_in);
 
+#if 0
+  // Don't need this now that we have colocation regions
   RegionRequirement rr_locator(lp_node_locations, 0/*identity*/,
                                READ_ONLY, EXCLUSIVE, lr_node_locator);
   rr_locator.add_field(FID_LOCATOR);
   add_region_requirement(rr_locator);
+#endif
 }
 
 /*static*/
@@ -644,52 +651,31 @@ bool UpdateVoltagesTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-static inline void update_voltages(LogicalRegion lr,
-                                   const AccessorRWfloat &fa_voltage,
-                                   const AccessorRWfloat &fa_charge,
-                                   const AccessorROfloat &fa_cap,
-                                   const AccessorROfloat &fa_leakage,
-                                   Context ctx, Runtime* rt)
-{
-  for (PointInDomainIterator<1> itr(
-        rt->get_index_space_domain(lr.get_index_space())); itr(); itr++)
-  {
-    float voltage = fa_voltage[*itr];
-    float charge = fa_charge[*itr];
-    float capacitance = fa_cap[*itr];
-    float leakage = fa_leakage[*itr];
-    voltage += charge / capacitance;
-    voltage *= (1.f - leakage);
-    fa_voltage[*itr] = voltage;
-    // Reset the charge for the next iteration
-    fa_charge[*itr] = 0.f;
-  }
-}
-
 /*static*/
-void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &p,
+void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &piece,
                                        const std::vector<PhysicalRegion> &regions,
                                        Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
-  const AccessorRWfloat fa_pvt_voltage(regions[0], FID_NODE_VOLTAGE);
-  const AccessorRWfloat fa_pvt_charge(regions[0], FID_CHARGE);
+  const AccessorRWfloat fa_voltage(regions.begin(), regions.begin()+2, FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_charge(regions.begin(), regions.begin()+2, FID_CHARGE);
 
-  const AccessorRWfloat fa_shr_voltage(regions[1], FID_NODE_VOLTAGE);
-  const AccessorRWfloat fa_shr_charge(regions[1], FID_CHARGE);
+  const AccessorROfloat fa_cap(regions.begin()+2, regions.end(), FID_NODE_CAP);
+  const AccessorROfloat fa_leakage(regions.begin()+2, regions.end(), FID_LEAKAGE);
 
-  const AccessorROfloat fa_pvt_cap(regions[2], FID_NODE_CAP);
-  const AccessorROfloat fa_pvt_leakage(regions[2], FID_LEAKAGE);
-
-  const AccessorROfloat fa_shr_cap(regions[3], FID_NODE_CAP);
-  const AccessorROfloat fa_shr_leakage(regions[3], FID_LEAKAGE);
-  // Don't need this for the CPU version
-  // const AccessorROloc fa_location(regions[4], FID_LOCATOR);
-
-  update_voltages(p.pvt_nodes, fa_pvt_voltage, fa_pvt_charge, 
-                  fa_pvt_cap, fa_pvt_leakage, ctx, rt);
-  update_voltages(p.shr_nodes, fa_shr_voltage, fa_shr_charge, 
-                  fa_shr_cap, fa_shr_leakage, ctx, rt);
+  for (unsigned idx = 0; idx < piece.num_wires; idx++)
+  {
+    const Point<1> node_ptr = piece.first_wire + idx;
+    float voltage = fa_voltage[node_ptr];
+    float charge = fa_charge[node_ptr];
+    float capacitance = fa_cap[node_ptr];
+    float leakage = fa_leakage[node_ptr];
+    voltage += charge / capacitance;
+    voltage *= (1.f - leakage);
+    fa_voltage[node_ptr] = voltage;
+    // Reset the charge for the next iteration
+    fa_charge[node_ptr] = 0.f; 
+  }
 #endif
 }
 

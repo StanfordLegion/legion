@@ -47,7 +47,8 @@ protected:
                           Processor target_proc, Memory target,
                           std::vector<PhysicalInstance> &instanes,
                           const std::set<FieldID> &privilege_fields,
-                          ReductionOpID redop);
+                          ReductionOpID redop,
+                          LogicalRegion colocation = LogicalRegion::NO_REGION);
 protected:
   std::vector<Processor>& procs_list;
   std::vector<Memory>& sysmems_list;
