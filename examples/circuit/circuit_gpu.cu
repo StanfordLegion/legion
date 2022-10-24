@@ -316,7 +316,7 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
                                        const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
-  const AccessorRWfloat fa_voltate(regions.begin(), regions.begin()+2, FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_voltage(regions.begin(), regions.begin()+2, FID_NODE_VOLTAGE);
   const AccessorRWfloat fa_charge(regions.begin(), regions.begin()+2, FID_CHARGE);
 
   const AccessorROfloat fa_cap(regions.begin()+2, regions.end(), FID_NODE_CAP);
