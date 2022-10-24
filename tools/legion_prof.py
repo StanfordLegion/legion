@@ -43,7 +43,7 @@ from functools import reduce
 from abc import ABC, abstractmethod
 from typing import Union, Dict, List, Tuple, Type, Set, Optional, NoReturn, ItemsView, KeysView, ValuesView, Any
 
-from legion_util import typeassert, typecheck, CSVWriter
+from legion_util import typeassert, typecheck
 import legion_serializer as serializer
 
 root_dir = os.path.dirname(os.path.realpath(__file__))
@@ -2105,8 +2105,19 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         return self.initiation_op.get_color()
 
     @typecheck
+    def __copy_type_to_str(self) -> str:
+        if self.copy_type == 0:
+            return "Copy:"
+        elif self.copy_type == 1:
+            return "Gather:"
+        elif self.copy_type == 2:
+            return "Scatter:"
+        else:
+            assert 0
+
+    @typecheck
     def __repr__(self) -> str:
-        val = 'Copy: size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ' type=' + str(self.copy_type)
+        val = self.__copy_type_to_str() + ' size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ' type=' + str(self.copy_type)
         cnt = 0
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -2288,7 +2299,7 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
-                                ready = None,
+                                ready = self.ready,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -3139,16 +3150,16 @@ class Channel(object):
         elif self.src is None:
             assert self.dst is not None
             if self.dst.affinity is not None:
-                return self.dst.affinity.get_short_text()
+                return self.channel_type + " " + self.dst.affinity.get_short_text()
             else:
-                return self.channel_type + "Channel"
+                return self.channel_type + " Channel"
         # scatter channel
         elif self.dst is None:
             assert self.src is not None
             if self.src.affinity is not None:
-                return self.src.affinity.get_short_text()
+                return self.channel_type + " " + self.src.affinity.get_short_text()
             else:
-                return self.channel_type + "Channel"
+                return self.channel_type + " Channel"
         # normal channels
         elif self.src is not None and self.dst is not None:
             return self.mem_str(self.src) + " to " + self.mem_str(self.dst)

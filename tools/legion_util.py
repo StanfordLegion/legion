@@ -28,11 +28,6 @@ import sys
 import io
 import collections
 import os
-import csv
-from tempfile import TemporaryFile
-
-with TemporaryFile() as t:
-    CSVWriter = type(csv.writer(t))
 
 if sys.version_info >= (3,8):
     from typing import get_origin, get_args
