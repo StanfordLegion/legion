@@ -8482,9 +8482,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(single_task_termination.exists());
       assert(!concurrent_fence_event.exists());
 #endif
+      if (!single_task_termination.exists())
+        single_task_termination = Runtime::create_ap_user_event(NULL);
       // Get the precondition event for performing the concurrent analysis
       const RtEvent precondition = slice_owner->get_concurrent_precondition();
       // Find the concurrent fence event

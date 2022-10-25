@@ -2488,6 +2488,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhaseBarrier TaskContext::advance_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      PhaseBarrier result = pb;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::initialize_overhead_tracker(void)
     //--------------------------------------------------------------------------
     {
@@ -9966,20 +9979,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       // Can only be called from user land so no need to hold the lock
       context_barriers.push_back(pb.phase_barrier);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier pb)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      PhaseBarrier result = pb;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
-#endif
-      return result;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     DynamicCollective InnerContext::create_dynamic_collective(
@@ -23766,16 +23766,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
           "Illegal destroy phase barrier performed in leaf task %s (UID %lld)",
           get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier LeafContext::advance_phase_barrier(PhaseBarrier pb)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal advance phase barrier performed in leaf task %s (UID %lld)",
-          get_task_name(), get_unique_id())
-      return PhaseBarrier();
     }
 
     //--------------------------------------------------------------------------

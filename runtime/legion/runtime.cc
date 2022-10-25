@@ -26116,6 +26116,8 @@ namespace Legion {
         Reservation fresh = Reservation::create_reservation();
         if (!concurrent_reservation.compare_exchange_strong(r, fresh))
           fresh.destroy_reservation();
+        else
+          r = concurrent_reservation.load();
       }
 #ifdef DEBUG_LEGION
       assert(r.exists());

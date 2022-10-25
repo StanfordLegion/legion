@@ -621,7 +621,7 @@ namespace Legion {
     public:
       virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
       virtual void destroy_phase_barrier(PhaseBarrier pb) = 0;
-      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb) = 0;
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
@@ -1721,7 +1721,6 @@ namespace Legion {
       virtual void release_grant(Grant grant);
     public:
       virtual void destroy_phase_barrier(PhaseBarrier pb);
-      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
       void perform_barrier_dependence_analysis(Operation *op,
             const std::vector<PhaseBarrier> &wait_barriers,
@@ -3763,7 +3762,6 @@ namespace Legion {
       virtual void release_grant(Grant grant);
     public:
       virtual void destroy_phase_barrier(PhaseBarrier pb);
-      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
