@@ -8610,9 +8610,9 @@ namespace Legion {
         profiling_info.clear();
       }
       all_output_sizes.clear();
-#ifdef DEBUG_LEGION
       interfering_requirements.clear();
       point_requirements.clear();
+#ifdef DEBUG_LEGION
       assert(pending_intra_space_dependences.empty());
 #endif
     }
