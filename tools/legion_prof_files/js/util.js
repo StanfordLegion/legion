@@ -246,7 +246,7 @@ function redoData(proc) {
 }
 
 function readyData(proc) {
-    redoData(proc);
+  redoData(proc);
 }
 
 function filterAndMergeBlocks(state) {
@@ -264,10 +264,10 @@ function filterAndMergeBlocks(state) {
       var items = state.processorData[timelineElement.full_text];
       var memoryRegex = /Memory/;
       var isMemory = memoryRegex.exec(timelineElement.text);
-	if (state.ready_selected) {
-	    readyData(timelineElement);
-	    items = dataReady;
-	}
+      if (state.ready_selected) {
+        readyData(timelineElement);
+        items = dataReady;
+      }
 
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
@@ -327,7 +327,8 @@ function filterAndMergeBlocks(state) {
                 out: [],
                 children: [],
                 parents: [],
-                instances: d.instances
+                instances: d.instances,
+                is_highlighted: false
               });
               i += (count - 1);
             } else {
@@ -347,7 +348,8 @@ function filterAndMergeBlocks(state) {
                 out: d.out,
                 children: d.children,
                 parents: d.parents,
-                instances: d.instances
+                instances: d.instances,
+                is_highlighted: false
               }
               state.dataToDraw.push(elem);
               if (isMemory) {
@@ -372,7 +374,8 @@ function filterAndMergeBlocks(state) {
               out: d.out,
               children: d.children,
               parents: d.parents,
-              instances: d.instances
+              instances: d.instances,
+              is_highlighted: false
             }
             state.dataToDraw.push(elem);
             if (isMemory) {
