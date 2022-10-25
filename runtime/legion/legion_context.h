@@ -3053,7 +3053,7 @@ namespace Legion {
       RtReplBar attach_resource_barrier;
       RtLogicalBar detach_resource_barrier;
       RtLogicalBar mapping_fence_barrier;
-      RtLogicalBar resource_return_barrier;
+      RtReplBar resource_return_barrier;
       RtLogicalBar trace_recording_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
