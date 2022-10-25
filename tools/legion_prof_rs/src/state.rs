@@ -1516,45 +1516,44 @@ impl From<spy::serialize::EventID> for EventID {
 
 #[derive(Debug)]
 pub struct CopyInstInfo {
+    _src: MemID,
+    _dst: MemID,
+    pub src_fid: FieldID,
+    pub dst_fid: FieldID,
     pub src_inst_uid: InstUID,
     pub dst_inst_uid: InstUID,
     _fevent: EventID,
-    pub num_fields: u32,
-    pub request_type: u32,
-    pub num_hops: u32,
+    pub indirect: bool,
 }
 
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    _src: MemID,
-    _dst: MemID,
     pub size: u64,
     time_range: TimeRange,
+    pub num_hops: u32,
+    pub request_type: u32,
     _fevent: EventID,
-    _num_requests: u32,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
 impl Copy {
     fn new(
         base: Base,
-        src: MemID,
-        dst: MemID,
         size: u64,
         time_range: TimeRange,
+        num_hops: u32,
+        request_type: u32,
         fevent: EventID,
-        num_requests: u32,
         copy_inst_infos: Vec<CopyInstInfo>,
     ) -> Self {
         Copy {
             base,
-            _src: src,
-            _dst: dst,
             size,
             time_range,
+            num_hops,
+            request_type,
             _fevent: fevent,
-            _num_requests: num_requests,
             copy_inst_infos,
         }
     }
@@ -1565,36 +1564,34 @@ impl Copy {
 
 #[derive(Debug)]
 pub struct FillInstInfo {
+    _dst: MemID,
+    pub fid: FieldID,
     pub dst_inst_uid: InstUID,
     _fevent: EventID,
-    pub num_fields: u32,
 }
 
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    _dst: MemID,
+    pub size: u64,
     time_range: TimeRange,
     _fevent: EventID,
-    _num_requests: u32,
     pub fill_inst_infos: Vec<FillInstInfo>,
 }
 
 impl Fill {
     fn new(
         base: Base,
-        dst: MemID,
+        size: u64,
         time_range: TimeRange,
         fevent: EventID,
-        num_requests: u32,
         fill_inst_infos: Vec<FillInstInfo>,
     ) -> Self {
         Fill {
             base,
-            _dst: dst,
+            size,
             time_range,
             _fevent: fevent,
-            _num_requests: num_requests,
             fill_inst_infos,
         }
     }
@@ -1901,36 +1898,34 @@ impl State {
     fn create_copy(
         &mut self,
         op_id: OpID,
-        src: MemID,
-        dst: MemID,
         size: u64,
         time_range: TimeRange,
+        num_hops: u32,
+        request_type: u32,
         fevent: EventID,
-        num_requests: u32,
     ) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
 
-        let chan_id = ChanID::new_copy(src, dst);
-        let chan = self.find_chan_mut(chan_id);
+        // let chan_id = ChanID::new_copy(src, dst);
+        // let chan = self.find_chan_mut(chan_id);
 
-        let copies = chan.copies.entry(op_id).or_insert_with(|| Vec::new());
+        // let copies = chan.copies.entry(op_id).or_insert_with(|| Vec::new());
 
-        let copy_id = copies.len();
-        copies.push(Copy::new(
-            base,
-            src,
-            dst,
-            size,
-            time_range,
-            fevent,
-            num_requests,
-            Vec::new(),
-        ));
+        // let copy_id = copies.len();
+        // copies.push(Copy::new(
+        //     base,
+        //     size,
+        //     time_range,
+        //     num_hops,
+        //     request_type,
+        //     fevent,
+        //     Vec::new(),
+        // ));
 
-        self.copy_map
-            .entry(fevent)
-            .or_insert_with(|| (chan_id, op_id, copy_id));
+        // self.copy_map
+        //     .entry(fevent)
+        //     .or_insert_with(|| (chan_id, op_id, copy_id));
     }
 
     fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
@@ -1943,34 +1938,26 @@ impl State {
         Some(&mut self.find_chan_mut(chan_id).fills.get_mut(&op_id).unwrap()[fill_idx])
     }
 
-    fn create_fill(
-        &mut self,
-        op_id: OpID,
-        dst: MemID,
-        time_range: TimeRange,
-        fevent: EventID,
-        num_requests: u32,
-    ) {
+    fn create_fill(&mut self, op_id: OpID, size: u64, time_range: TimeRange, fevent: EventID) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan_id = ChanID::new_fill(dst);
-        let chan = self.find_chan_mut(chan_id);
+                                                            // let chan_id = ChanID::new_fill(dst);
+                                                            // let chan = self.find_chan_mut(chan_id);
 
-        let fills = chan.fills.entry(op_id).or_insert_with(|| Vec::new());
+        // let fills = chan.fills.entry(op_id).or_insert_with(|| Vec::new());
 
-        let fill_id = fills.len();
-        fills.push(Fill::new(
-            base,
-            dst,
-            time_range,
-            fevent,
-            num_requests,
-            Vec::new(),
-        ));
+        // let fill_id = fills.len();
+        // fills.push(Fill::new(
+        //     base,
+        //     size,
+        //     time_range,
+        //     fevent,
+        //     Vec::new(),
+        // ));
 
-        self.fill_map
-            .entry(fevent)
-            .or_insert_with(|| (chan_id, op_id, fill_id));
+        // self.fill_map
+        //     .entry(fevent)
+        //     .or_insert_with(|| (chan_id, op_id, fill_id));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
@@ -2907,44 +2894,39 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<InstU
         }
         Record::CopyInfo {
             op_id,
-            src,
-            dst,
             size,
             create,
             ready,
             start,
             stop,
+            num_hops,
+            request_type,
             fevent,
-            num_requests,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_copy(
-                *op_id,
-                *src,
-                *dst,
-                *size,
-                time_range,
-                *fevent,
-                *num_requests,
-            );
+            state.create_copy(*op_id, *size, time_range, *num_hops, *request_type, *fevent);
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
+            src,
+            dst,
+            src_fid,
+            dst_fid,
             src_inst,
             dst_inst,
             fevent,
-            num_fields,
-            request_type,
-            num_hops,
+            indirect,
             ..
         } => {
             let copy_inst_info = CopyInstInfo {
+                _src: *src,
+                _dst: *dst,
+                src_fid: *src_fid,
+                dst_fid: *dst_fid,
                 src_inst_uid: *src_inst,
                 dst_inst_uid: *dst_inst,
                 _fevent: *fevent,
-                num_fields: *num_fields,
-                request_type: *request_type,
-                num_hops: *num_hops,
+                indirect: *indirect,
             };
             state
                 .find_copy_mut(*fevent)
@@ -2954,28 +2936,29 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<InstU
         }
         Record::FillInfo {
             op_id,
-            dst,
+            size,
             create,
             ready,
             start,
             stop,
             fevent,
-            num_requests,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_fill(*op_id, *dst, time_range, *fevent, *num_requests);
+            state.create_fill(*op_id, *size, time_range, *fevent);
             state.update_last_time(*stop);
         }
         Record::FillInstInfo {
+            dst,
+            fid,
             dst_inst,
             fevent,
-            num_fields,
             ..
         } => {
             let fill_inst_info = FillInstInfo {
+                _dst: *dst,
+                fid: *fid,
                 dst_inst_uid: *dst_inst,
                 _fevent: *fevent,
-                num_fields: *num_fields,
             };
             state
                 .find_fill_mut(*fevent)
