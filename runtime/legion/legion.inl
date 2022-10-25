@@ -758,6 +758,256 @@ namespace Legion {
     };
 
     ////////////////////////////////////////////////////////////
+    // Constructors for Generic Accessors
+    ////////////////////////////////////////////////////////////
+
+#define PHYSICAL_REGION_CONSTRUCTORS(PRIVILEGE, DIM, FIELD_CHECK)             \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, true/*generic accessor*/, check_field_size);  \
+        if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(instance, fid,   \
+                                                             is.bounds))      \
+          region.report_incompatible_accessor("GenericAccessor",instance,fid);\
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance, fid, is.bounds, offset); \
+      }                                                                       \
+      /* with source bounds */                                                \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, true/*generic accessor*/, check_field_size);  \
+        if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(instance, fid,   \
+                                                             source_bounds))  \
+          region.report_incompatible_accessor("GenericAccessor",instance,fid);\
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, true/*generic accessor*/,   \
+                check_field_size);                                            \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               is.bounds))    \
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        accessor = Realm::GenericAccessor<FT,DIM,T>(instance, fid, offset);   \
+      }                                                                       \
+      /* colocation regions with source bounds */                             \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              PRIVILEGE, fid, actual_field_size, &is,                         \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, true/*generic accessor*/,     \
+              check_field_size);                                              \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               source_bounds))\
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
+      }
+      
+
+#define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(PRIVILEGE, DIM, FIELD_CHECK) \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size,         \
+              &bounds, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),      \
+              warning_string, silence_warnings, true/*generic accessor*/,     \
+              check_field_size);                                              \
+        if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(instance, fid,   \
+                                                             bounds.bounds))  \
+          region.report_incompatible_accessor("GenericAccessor",instance,fid);\
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,bounds.bounds,offset);\
+      }                                                                       \
+      /* with source bounds */                                                \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid), bounds(source_bounds)                                   \
+      {                                                                       \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size,         \
+              &bounds, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),      \
+              warning_string, silence_warnings, true/*generic accessor*/,     \
+              check_field_size);                                              \
+        if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(instance, fid,   \
+                                                             source_bounds))  \
+          region.report_incompatible_accessor("GenericAccessor",instance,fid);\
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
+        bounds.bounds = source_bounds.intersection(bounds.bounds);            \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, true/*generic accessor*/,   \
+                check_field_size);                                            \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               is.bounds))    \
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        accessor = Realm::GenericAccessor<FT,DIM,T>(instance, fid, offset);   \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, bounds, Realm::ProfilingRequestSet()));                   \
+        /* Defer delete the bounds when the task is done */                   \
+        bounds.destroy(Processor::get_current_finish_event());                \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+      }                                                                       \
+      /* colocation regions with source bounds */                             \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid), bounds(source_bounds)                                   \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("GenericAccessor", fid);   \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),        \
+                warning_string, silence_warnings, true/*generic accessor*/,   \
+                check_field_size);                                            \
+          if (!Realm::GenericAccessor<FT,DIM,T>::is_compatible(inst, fid,     \
+                                                               source_bounds))\
+            it->report_incompatible_accessor("GenericAccessor", inst, fid);   \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("GenericAccessor",                \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::GenericAccessor<FT,DIM,T>(instance,fid,source_bounds,offset);\
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, bounds, Realm::ProfilingRequestSet()));                   \
+        /* Defer delete the bounds when the task is done */                   \
+        bounds.destroy(Processor::get_current_finish_event());                \
+        /* Update the bounding box of the bounds with source bounds */        \
+        bounds.bounds = source_bounds.intersection(bounds.bounds);            \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+      }
+
+    ////////////////////////////////////////////////////////////
     // Specializations for Generic Accessors
     ////////////////////////////////////////////////////////////
 
@@ -770,51 +1020,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline FT read(const Point<N,T>& p) const 
         { 
@@ -855,54 +1065,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size, 
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid), bounds(source_bounds)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline FT read(const Point<N,T>& p) const 
         { 
@@ -950,51 +1117,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline FT read(const Point<1,T>& p) const 
         { 
@@ -1025,54 +1152,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size, 
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline FT read(const Point<1,T>& p) const 
         { 
@@ -1110,51 +1194,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline FT read(const Point<N,T>& p) const
         { 
@@ -1200,54 +1244,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline FT read(const Point<N,T>& p) const
         { 
@@ -1303,51 +1304,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline FT read(const Point<1,T>& p) const
         { 
@@ -1382,54 +1343,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid, actual_field_size, 
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline FT read(const Point<1,T>& p) const
         { 
@@ -1475,51 +1393,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline FT read(const Point<N,T>& p) const
         { 
@@ -1565,54 +1443,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline FT read(const Point<N,T>& p) const
         { 
@@ -1667,51 +1502,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline FT read(const Point<1,T>& p) const
         { 
@@ -1745,54 +1540,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid,actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline FT read(const Point<1,T>& p) const
         { 
@@ -1837,51 +1589,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline void write(const Point<N,T>& p, FT val) const
         { 
@@ -1923,54 +1635,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_ONLY, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_ONLY, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bound);
-      }
     public:
       inline void write(const Point<N,T>& p, FT val) const
         { 
@@ -2018,51 +1687,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_ONLY, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_ONLY, 1, false) 
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           is.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, true/*generic accessor*/, check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
     public:
       inline void write(const Point<1,T>& p, FT val) const
         { 
@@ -2092,54 +1721,11 @@ namespace Legion {
       static_assert(std::is_integral<T>::value, "must be integral type");
     public:
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_ONLY, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_ONLY, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           bounds.bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, bounds.bounds, offset);
-      }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &bounds, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, true/*generic accessor*/, 
-              check_field_size);
-        if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                           source_bounds))
-          region.report_incompatible_accessor("GenericAccessor", instance, fid);
-        accessor = 
-          Realm::GenericAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds.bounds = source_bounds.intersection(bounds.bounds);
-      }
     public:
       inline void write(const Point<1,T>& p, FT val) const
         { 
@@ -2167,6 +1753,9 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = 1;
     };
+
+#undef PHYSICAL_REGION_CONSTRUCTORS
+#undef PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS
 
     // Special namespace for providing bounds check help for affine accessors
     namespace AffineBounds {
@@ -2436,6 +2025,534 @@ namespace Legion {
         return true;
       }
     }
+
+    ////////////////////////////////////////////////////////////
+    // Macros for PhysicalRegion Constructors with Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+#define PHYSICAL_REGION_CONSTRUCTORS(PRIVILEGE, DIM, FIELD_CHECK)             \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size,         \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size);                                              \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            is.bounds))       \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, is.bounds, offset);  \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings,                               \
+              false/*generic accessor*/, check_field_size);                   \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            source_bounds))   \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance,fid,source_bounds,offset); \
+      }                                                                       \
+      /* With explicit transform */                                           \
+      template<int M>                                                         \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, \
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid))                    \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, offset);              \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<int M>                                                         \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, \
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid, source_bounds))     \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        Rect<DIM,T> bounding_box;                                             \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (it == start)                                                    \
+            bounding_box = is.bounds;                                         \
+          else                                                                \
+            bounding_box = bounding_box.union_bbox(is.bounds);                \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            bounding_box))    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, bounding_box,offset);\
+      }                                                                       \
+      /* colocation regions ith explicit bounds */                            \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings,                             \
+                false/*generic accessor*/, check_field_size);                 \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            source_bounds))   \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance,fid,source_bounds,offset); \
+      }                                                                       \
+      /* colocation regions with explicit transform */                        \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid))                    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, offset);              \
+      }                                                                       \
+      /* colocation regions with explicit transform and bounds */             \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid, source_bounds))     \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+      }
+
+#define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(PRIVILEGE, DIM, FIELD_CHECK) \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size);                                              \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            is.bounds))       \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, is.bounds, offset);  \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size);                                              \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            source_bounds))   \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance,fid,source_bounds,offset); \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* With explicit transform */                                           \
+      template<int M>                                                         \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, \
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid))                    \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, offset);              \
+        bounds = AffineBounds::Tester<DIM,T>(is, transform);                  \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<int M>                                                         \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, \
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid, source_bounds))     \
+          region.report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        Rect<DIM,T> bounding_box;                                             \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (it == start)                                                    \
+            bounding_box = is.bounds;                                         \
+          else                                                                \
+            bounding_box = bounding_box.union_bbox(is.bounds);                \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            bounding_box))    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance, fid, bounding_box,offset);\
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* colocation regions with explicit bounds */                           \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance, fid,    \
+                                                            source_bounds))   \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor =                                                            \
+          Realm::AffineAccessor<FT,DIM,T>(instance,fid,source_bounds,offset); \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* colocation regions with explicit transform */                        \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid))                    \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, offset);              \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, transform);                  \
+      }                                                                       \
+      /* colocation regions with explicit transform and bounds */             \
+      template<typename InputIterator, int M>                                 \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const AffineTransform<M,DIM,T> transform,                 \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor", fid);    \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<FT,DIM,T>::is_compatible(instance,         \
+              transform.transform, transform.offset, fid, source_bounds))     \
+          start->report_incompatible_accessor("AffineAccessor",instance,fid); \
+        accessor = Realm::AffineAccessor<FT,DIM,T>(instance,                  \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
+      }
 
     ////////////////////////////////////////////////////////////
     // Macros UntypedDeferredValue/UntypedDeferredBuffer 
@@ -2770,103 +2887,13 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, N, true)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true) 
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, N, false)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
       // Future accessor
       FieldAccessor(const Future &future,
                     Memory::Kind memkind = Memory::NO_MEMKIND,
@@ -2932,12 +2959,6 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform, origin,
                                         0/*field id*/, source_bounds, offset);
       }
-    public:
-#ifdef DEBUG_LEGION
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true) 
-#else
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
-#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -3013,111 +3034,13 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, N, true)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, N, false)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<N,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
-      }
       // Future accessor
       FieldAccessor(const Future &future,
                     Memory::Kind memkind = Memory::NO_MEMKIND,
@@ -3195,12 +3118,6 @@ namespace Legion {
         AffineTransform<1,N,T> affine(transform, origin);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds, affine);
       }
-    public:
-#ifdef DEBUG_LEGION
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
-#else
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
-#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -3309,103 +3226,13 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, 1, true)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, 1, false)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
       // Future accessor
       FieldAccessor(const Future &future,
                     Memory::Kind memkind = Memory::NO_MEMKIND,
@@ -3466,12 +3293,6 @@ namespace Legion {
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform, origin,
                                         0/*field id*/, source_bounds, offset);
       }
-    public:
-#ifdef DEBUG_LEGION
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
-#else
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
-#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
@@ -3534,111 +3355,13 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, 1, true)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, 1, false)
+      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid) 
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid) 
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid) 
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<1,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid) 
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
-      }
       // Future accessor
       FieldAccessor(const Future &future,
                     Memory::Kind memkind = Memory::NO_MEMKIND,
@@ -3711,12 +3434,6 @@ namespace Legion {
         AffineTransform<1,1,T> affine(transform, origin);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds, affine);
       }
-    public:
-#ifdef DEBUG_LEGION
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
-#else
-      DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
-#endif
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
@@ -3813,107 +3530,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, N, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true) 
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, N, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
 #endif
     public:
@@ -4001,115 +3622,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform, 
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<N,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform, 
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, N, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, N, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
 #endif
     public:
@@ -4244,107 +3761,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, 1, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, 1, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
 #endif
     public:
@@ -4419,115 +3840,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<1,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, 1, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, 1, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
 #endif
     public:
@@ -4650,107 +3967,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
 #endif
     public:
@@ -4832,115 +4053,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<N,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
 #endif
     public:
@@ -5062,107 +4179,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
 #endif
     public:
@@ -5231,115 +4252,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<1,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
 #endif
     public:
@@ -5449,107 +4366,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(N, false)
 #endif
     public:
@@ -5626,112 +4447,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<N,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,N,T> transform,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(N, false)
 #endif
     public:
@@ -5841,107 +4561,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS(1, false)
 #endif
     public:
@@ -6005,115 +4629,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                          source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = 
-          Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<1,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const AffineTransform<M,1,T> transform,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<M,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, 
-              transform.transform, transform.offset, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
-            transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, true)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, false)
       DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS(1, false)
 #endif
     public:
@@ -6201,8 +4721,550 @@ namespace Legion {
       static const int dim = 1;
     };
 
+#undef PHYSICAL_REGION_CONSTRUCTORS
+#undef PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS
 #undef DEFERRED_VALUE_BUFFER_CONSTRUCTORS
 #undef DEFERRED_VALUE_BUFFER_CONSTRUCTORS_WITH_BOUNDS
+
+#define PHYSICAL_REGION_CONSTRUCTORS(DIM, FIELD_CHECK)                        \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, is.bounds))                                      \
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, is.bounds, offset);                                \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, source_bounds))                                  \
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, source_bounds, offset);                            \
+      }                                                                       \
+      /* With explicit transform */                                           \
+      template<int M>                                                         \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(),            \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, transform.transform, transform.offset, fid))          \
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(instance, \
+            transform.transform, transform.offset, fid, offset);              \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<int M>                                                         \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(),            \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+             instance,transform.transform,transform.offset,fid,source_bounds))\
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(instance, \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        Rect<DIM,T> bounding_box;                                             \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (it == start)                                                    \
+            bounding_box = is.bounds;                                         \
+          else                                                                \
+            bounding_box = bounding_box.union_bbox(is.bounds);                \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, bounding_box))                                   \
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, bounding_box, offset);                             \
+      }                                                                       \
+      /* colocation regions with explicit bounds */                           \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, source_bounds))                                  \
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, source_bounds, offset);                            \
+      }                                                                       \
+      /* colocation regions with explicit transform */                        \
+      template<typename InputIterator, int M>                                 \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              LEGION_REDUCE, fid, actual_field_size, &is,                     \
+              Internal::NT_TemplateHelper::encode_tag<M,T>(),                 \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, transform.transform, transform.offset, fid))          \
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(instance, \
+            transform.transform, transform.offset, fid, offset);              \
+      }                                                                       \
+      /* colocation regions with explicit transform and bounds */             \
+      template<typename InputIterator, int M>                                 \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+             instance,transform.transform,transform.offset,fid,source_bounds))\
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(instance, \
+            transform.transform, transform.offset, fid, source_bounds,offset);\
+      }
+
+#define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(DIM, FIELD_CHECK)            \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, is.bounds))                                      \
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, is.bounds, offset);                                \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, source_bounds))                                  \
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, source_bounds, offset);                            \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* With explicit transform */                                           \
+      template<int M>                                                         \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(),            \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, transform.transform, transform.offset, fid))          \
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, transform.transform, transform.offset, fid, offset);    \
+        bounds = AffineBounds::Tester<DIM,T>(is, transform);                  \
+      }                                                                       \
+      /* With explicit transform and bounds */                                \
+      template<int M>                                                         \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<M,T> is;                                                      \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(),            \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+             instance,transform.transform,transform.offset,fid,source_bounds))\
+          region.report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(instance, \
+           transform.transform, transform.offset, fid, source_bounds, offset);\
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
+      }                                                                       \
+      /* colocation regions*/                                                 \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        Rect<DIM,T> bounding_box;                                             \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (it == start)                                                    \
+            bounding_box = is.bounds;                                         \
+          else                                                                \
+            bounding_box = bounding_box.union_bbox(is.bounds);                \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, bounding_box))                                   \
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, bounding_box, offset);                             \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* colocation regions with explicit bounds */                           \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, fid, source_bounds))                                  \
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, fid, source_bounds, offset);                            \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* colocation regions with explicit transform */                        \
+      template<typename InputIterator, int M>                                 \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+              instance, transform.transform, transform.offset, fid))          \
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(          \
+            instance, transform.transform, transform.offset, fid, offset);    \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, transform);                  \
+      }                                                                       \
+      /* colocation regions with explicit transform and bounds */             \
+      template<typename InputIterator, int M>                                 \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const AffineTransform<M,DIM,T> transform,             \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("AffineAccessor",fid,true);\
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<M,T> is;                                                    \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<M,T>(),               \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("AffineAccessor",                 \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+        }                                                                     \
+        if (!Realm::AffineAccessor<typename REDOP::RHS,DIM,T>::is_compatible( \
+             instance,transform.transform,transform.offset,fid,source_bounds))\
+          start->report_incompatible_accessor("AffineAccessor", instance,fid);\
+        accessor = Realm::AffineAccessor<typename REDOP::RHS,DIM,T>(instance, \
+           transform.transform, transform.offset, fid, source_bounds, offset);\
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds, transform);   \
+      }
 
 #define DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(DIM, FIELD_CHECK)        \
       ReductionAccessor(const UntypedDeferredValue &value,                    \
@@ -6532,118 +5594,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
 #ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<N,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,N,T> transform,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
-            transform.transform, transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,N,T> transform,
-                        const Rect<N,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance,transform.transform,transform.offset,fid,source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
-            transform.transform, transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(N, true)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(N, false)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(N, false)
 #endif
     public:
@@ -6726,126 +5681,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
 #ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<N,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,N,T> transform,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
-            instance, transform.transform, transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<N,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,N,T> transform,
-                        const Rect<N,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance,transform.transform,transform.offset,fid,source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance,
-            transform.transform, transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(N, true)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(N, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(N, false)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(N, false)
 #endif
     public:
@@ -6956,118 +5796,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
 #ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<1,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, source_bounds, offset);
-      }
-      // With explicit transform
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,1,T> transform,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE,fid,sizeof(typename REDOP::RHS),
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              false/*check field size*/, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, transform.transform, transform.offset, fid, offset);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,1,T> transform,
-                        const Rect<1,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance,transform.transform,transform.offset,fid,source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
-            transform.transform, transform.offset, fid, source_bounds, offset);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(1, true)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS(1, false)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS(1, false)
 #endif
     public:
@@ -7139,126 +5872,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
 #ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<1,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
-              instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
-      // With explicit transform
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,1,T> transform,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, transform.transform, transform.offset, fid))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance,
-            transform.transform, transform.offset, fid, offset);
-        bounds = AffineBounds::Tester<1,T>(is, transform);
-      }
-      // With explicit transform and bounds
-      template<int M>
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const AffineTransform<M,1,T> transform,
-                        const Rect<1,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-#ifdef DEBUG_LEGION
-                        bool check_field_size = true
-#else
-                        bool check_field_size = false
-#endif
-                       )
-        : field(fid)
-      {
-        DomainT<M,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::AffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance,transform.transform,transform.offset,fid,source_bounds))
-          region.report_incompatible_accessor("AffineAccessor", instance, fid);
-        accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
-            transform.transform, transform.offset, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds, transform);
-      }
-    public:
-#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(1, true)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(1, true)
 #else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(1, false)
       DEFERRED_VALUE_BUFFER_REDUCTION_CONSTRUCTORS_WITH_BOUNDS(1, false)
 #endif
     public:
@@ -7345,9 +5963,267 @@ namespace Legion {
       static const int dim = 1;
     };
 
+#undef PHYSICAL_REGION_CONSTRUCTORS
+#undef PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS
+
     ////////////////////////////////////////////////////////////
     // Specializations for Multi Affine Accessors
     ////////////////////////////////////////////////////////////
+
+#define PHYSICAL_REGION_CONSTRUCTORS(PRIVILEGE, DIM, FIELD_CHECK)             \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,fid,\
+                                                               is.bounds))    \
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor =                                                            \
+          Realm::MultiAffineAccessor<FT,DIM,T>(instance,fid,is.bounds,offset);\
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,fid,\
+                                                               source_bounds))\
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor = Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid,        \
+                                              source_bounds, offset);         \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              PRIVILEGE, fid, actual_field_size, &is,                         \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,  \
+                                                          fid, is.bounds))    \
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                              instance, fid);                 \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid, offset);        \
+      }                                                                       \
+      /* colocation regions with explicit bounds */                           \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              PRIVILEGE, fid, actual_field_size, &is,                         \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,  \
+                                                          fid, source_bounds))\
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                              instance, fid);                 \
+        }                                                                     \
+        accessor = Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid,        \
+                                              source_bounds, offset);         \
+      }
+
+#define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(PRIVILEGE, DIM, FIELD_CHECK) \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,fid,\
+                                                                 is.bounds))  \
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor =                                                            \
+          Realm::MultiAffineAccessor<FT,DIM,T>(instance,fid,is.bounds,offset);\
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,                \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+          region.get_instance_info(PRIVILEGE, fid, actual_field_size, &is,    \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+        if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,fid,\
+                                                               source_bounds))\
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor = Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid,        \
+                                              source_bounds, offset);         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              PRIVILEGE, fid, actual_field_size, &is,                         \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),warning_string,\
+              silence_warnings, false/*generic accessor*/, check_field_size); \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+          if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,  \
+                                                            fid, is.bounds))  \
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                              instance, fid);                 \
+        }                                                                     \
+        accessor =                                                            \
+          Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid, offset);        \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        bounds.destroy(Processor::get_current_finish_event());                \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* colocation with explicit bounds */                                   \
+      template<typename InputIterator>                                        \
+      FieldAccessor(InputIterator start, InputIterator stop, FieldID fid,     \
+                    const Rect<DIM,T> source_bounds,                          \
+                    size_t actual_field_size = sizeof(FT),                    \
+                    bool check_field_size = FIELD_CHECK,                      \
+                    bool silence_warnings = false,                            \
+                    const char *warning_string = NULL,                        \
+                    size_t offset = 0)                                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+            typename std::iterator_traits<InputIterator>::value_type>::value, \
+            "Input Iterators to FieldAccessors must be for PhysicalRegions"); \
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",fid);\
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                PRIVILEGE, fid, actual_field_size, &is,                       \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size);                                            \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start);                                 \
+          else                                                                \
+            instance = inst;                                                  \
+          ises.push_back(is);                                                 \
+          if (!Realm::MultiAffineAccessor<FT,DIM,T>::is_compatible(instance,  \
+                                                          fid, source_bounds))\
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                              instance, fid);                 \
+        }                                                                     \
+        accessor = Realm::MultiAffineAccessor<FT,DIM,T>(instance, fid,        \
+                                              source_bounds, offset);         \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        bounds.destroy(Processor::get_current_finish_event());                \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }
 
     // Read-only FieldAccessor specialization
     template<typename FT, int N, typename T, bool CB>
@@ -7359,54 +6235,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -7510,58 +6343,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const 
@@ -7695,54 +6481,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_ONLY, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
@@ -7833,58 +6576,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_ONLY, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid) 
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid) 
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_ONLY, fid, actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const 
@@ -8006,54 +6702,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -8167,58 +6820,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -8376,54 +6982,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_READ_WRITE, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -8524,58 +7087,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_READ_WRITE, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_READ_WRITE, fid,actual_field_size,&is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -8721,54 +7237,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size, 
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -8876,58 +7349,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
@@ -9072,54 +7498,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -9214,58 +7597,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                               instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
@@ -9398,54 +7734,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
@@ -9548,58 +7841,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, N, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,N,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<N,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<N,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,N,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,N,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
@@ -9732,54 +7978,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS(LEGION_WRITE_DISCARD, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-      }
     public:
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
@@ -9869,58 +8072,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    size_t actual_field_size = sizeof(FT),
 #ifdef DEBUG_LEGION
-                    bool check_field_size = true,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, true)
 #else
-                    bool check_field_size = false,
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(LEGION_WRITE_DISCARD, 1, false)
 #endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string,
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = 
-          Realm::MultiAffineAccessor<FT,1,T>(instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    const Rect<1,T> source_bounds,
-                    size_t actual_field_size = sizeof(FT),
-#ifdef DEBUG_LEGION
-                    bool check_field_size = true,
-#else
-                    bool check_field_size = false,
-#endif
-                    bool silence_warnings = false,
-                    const char *warning_string = NULL,
-                    size_t offset = 0)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(LEGION_WRITE_DISCARD, fid, actual_field_size,
-              &is,Internal::NT_TemplateHelper::encode_tag<1,T>(),warning_string, 
-              silence_warnings, false/*generic accessor*/, check_field_size);
-        if (!Realm::MultiAffineAccessor<FT,1,T>::is_compatible(instance, fid, 
-                                                               source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<FT,1,T>(instance, fid, 
-                                              source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
     public:
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
@@ -10031,6 +8187,277 @@ namespace Legion {
       static const int dim = 1;
     };
 
+#undef PHYSICAL_REGION_CONSTRUCTORS
+#undef PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS
+
+#define PHYSICAL_REGION_CONSTRUCTORS(DIM, FIELD_CHECK)                        \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::          \
+              is_compatible(instance, fid, is.bounds))                        \
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, is.bounds, offset);                                \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::          \
+              is_compatible(instance, fid, source_bounds))                    \
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, source_bounds, offset);                            \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              LEGION_REDUCE, fid, actual_field_size, &is,                     \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
+                is_compatible(instance, fid, is.bounds))                      \
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                                instance, fid);               \
+        }                                                                     \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, offset);                                           \
+      }                                                                       \
+      /* colocation with explicit bounds */                                   \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              LEGION_REDUCE, fid, actual_field_size, &is,                     \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
+                is_compatible(instance, fid, source_bounds))                  \
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                                instance, fid);               \
+        }                                                                     \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, source_bounds, offset);                            \
+      }
+
+#define PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(DIM, FIELD_CHECK)            \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = false)                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::          \
+              is_compatible(instance, fid, is.bounds))                        \
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, is.bounds, offset);                                \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* With explicit bounds */                                              \
+      ReductionAccessor(const PhysicalRegion &region, FieldID fid,            \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        DomainT<DIM,T> is;                                                    \
+        const Realm::RegionInstance instance =                                \
+         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,      \
+              &is, Internal::NT_TemplateHelper::encode_tag<DIM,T>(),          \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::          \
+              is_compatible(instance, fid, source_bounds))                    \
+          region.report_incompatible_accessor("MultiAffineAccessor",          \
+                                              instance, fid);                 \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, source_bounds, offset);                            \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }                                                                       \
+      /* colocation regions */                                                \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop, bool silence_warnings = false,   \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = false)                        \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+              LEGION_REDUCE, fid, actual_field_size, &is,                     \
+              Internal::NT_TemplateHelper::encode_tag<DIM,T>(),               \
+              warning_string, silence_warnings, false/*generic accessor*/,    \
+              check_field_size, redop);                                       \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
+                is_compatible(instance, fid, is.bounds))                      \
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                              instance, fid);                 \
+        }                                                                     \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, offset);                                           \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is);                             \
+      }                                                                       \
+      /* colocation regions with explicit bounds */                           \
+      template<typename InputIterator>                                        \
+      ReductionAccessor(InputIterator start, InputIterator stop, FieldID fid, \
+                        ReductionOpID redop,                                  \
+                        const Rect<DIM,T> source_bounds,                      \
+                        bool silence_warnings = false,                        \
+                        const char *warning_string = NULL,                    \
+                        size_t offset = 0,                                    \
+                        size_t actual_field_size=sizeof(typename REDOP::RHS), \
+                        bool check_field_size = FIELD_CHECK)                  \
+        : field(fid)                                                          \
+      {                                                                       \
+        static_assert(std::is_same<PhysicalRegion,                            \
+         typename std::iterator_traits<InputIterator>::value_type>::value,    \
+         "Input Iterators to ReductionAccessors must be for PhysicalRegions");\
+        if (start == stop)                                                    \
+          PhysicalRegion::empty_colocation_regions("MultiAffineAccessor",     \
+                                                    fid, true);               \
+        std::vector<Realm::IndexSpace<DIM,T> > ises;                          \
+        Realm::RegionInstance instance = Realm::RegionInstance::NO_INST;      \
+        for (InputIterator it = start; it != stop; it++)                      \
+        {                                                                     \
+          DomainT<DIM,T> is;                                                  \
+          const Realm::RegionInstance inst = it->get_instance_info(           \
+                LEGION_REDUCE, fid, actual_field_size, &is,                   \
+                Internal::NT_TemplateHelper::encode_tag<DIM,T>(),             \
+                warning_string, silence_warnings, false/*generic accessor*/,  \
+                check_field_size, redop);                                     \
+          if (instance.exists() && (inst != instance))                        \
+            it->report_colocation_violation("MultiAffineAccessor",            \
+                fid, instance, inst, *start, true);                           \
+          else                                                                \
+            instance = inst;                                                  \
+          if (!Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>::        \
+                is_compatible(instance, fid, source_bounds))                  \
+            it->report_incompatible_accessor("MultiAffineAccessor",           \
+                                                instance, fid);               \
+        }                                                                     \
+        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,DIM,T>(     \
+            instance, fid, source_bounds, offset);                            \
+        DomainT<DIM,T> is;                                                    \
+        /* The bounds are the union of the ises (need to be precise) */       \
+        const Internal::LgEvent ready(Realm::IndexSpace<DIM,T>::compute_union(\
+              ises, is, Realm::ProfilingRequestSet()));                       \
+        /* Defer delete the bounds when the task is done */                   \
+        is.destroy(Processor::get_current_finish_event());                    \
+        /* Make sure the bounds are ready before we return */                 \
+        ready.wait();                                                         \
+        bounds = AffineBounds::Tester<DIM,T>(is, source_bounds);              \
+      }
+
     // Reduce FieldAccessor specialization
     template<typename REDOP, bool EXCLUSIVE, int N, typename T, bool CB>
     class ReductionAccessor<REDOP,EXCLUSIVE,N,T,
@@ -10041,49 +8468,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<N,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, source_bounds, offset);
-      }
+#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(N, true)
+#else
+      PHYSICAL_REGION_CONSTRUCTORS(N, false)
+#endif
     public:
       __CUDA_HD__
       inline void reduce(const Point<N,T>& p, 
@@ -10193,53 +8582,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<N,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-        : field(fid)
-      {
-        DomainT<N,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,N,T>(
-            instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<N,T>(is, source_bounds);
-      }
+#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(N, true)
+#else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(N, false)
+#endif
     public:
       __CUDA_HD__ 
       inline void reduce(const Point<N,T>& p, 
@@ -10373,49 +8720,11 @@ namespace Legion {
     public:
       __CUDA_HD__
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, is.bounds, offset);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<1,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, source_bounds, offset);
-      }
+#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS(1, true)
+#else
+      PHYSICAL_REGION_CONSTRUCTORS(1, false)
+#endif
     public:
       __CUDA_HD__
       inline void reduce(const Point<1,T>& p, 
@@ -10513,53 +8822,11 @@ namespace Legion {
     public:
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, is.bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
-            instance, fid, is.bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is);
-      }
-      // With explicit bounds
-      ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, 
-                        const Rect<1,T> source_bounds,
-                        bool silence_warnings = false,
-                        const char *warning_string = NULL,
-                        size_t offset = 0,
-                        size_t actual_field_size = sizeof(typename REDOP::RHS),
-                        bool check_field_size = false)
-        : field(fid)
-      {
-        DomainT<1,T> is;
-        const Realm::RegionInstance instance = 
-         region.get_instance_info(LEGION_REDUCE, fid, actual_field_size,
-              &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              warning_string, silence_warnings, false/*generic accessor*/, 
-              check_field_size, redop);
-        if (!Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>::is_compatible(
-              instance, fid, source_bounds))
-          region.report_incompatible_accessor("MultiAffineAccessor", 
-                                              instance, fid);
-        accessor = Realm::MultiAffineAccessor<typename REDOP::RHS,1,T>(
-              instance, fid, source_bounds, offset);
-        bounds = AffineBounds::Tester<1,T>(is, source_bounds);
-      }
+#ifdef DEBUG_LEGION
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(1, true)
+#else
+      PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS(1, false)
+#endif
     public:
       __CUDA_HD__
       inline void reduce(const Point<1,T>& p, 
@@ -10669,10 +8936,13 @@ namespace Legion {
       static const int dim = 1;
     };
 
+#undef PHYSICAL_REGION_CONSTRUCTORS
+#undef PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS
+
     ////////////////////////////////////////////////////////////
     // Multi Region Accessor with Generic Accessors
     ////////////////////////////////////////////////////////////
-
+#ifdef LEGION_MULTI_REGION_ACCESSOR
     // Multi-Accessor, generic, N, bounds checks and/or privilege checks
     template<typename FT, int N, typename T, bool CB, bool CP, int MR>
     class MultiRegionAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,CB,CP,MR> {
@@ -15916,6 +14186,7 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = 1;
     };
+#endif // LEGION_MULTI_REGION_ACCESSOR
 
     // A hidden class for users that really know what they are doing
     /**

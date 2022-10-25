@@ -2843,6 +2843,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegion::report_colocation_violation(const char *accessor_kind,
+                 FieldID fid, Realm::RegionInstance inst1, 
+                 Realm::RegionInstance inst2, 
+                 const PhysicalRegion &other, bool reduction) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_colocation_violation(accessor_kind, fid, inst1, inst2,
+                                        other, reduction);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::empty_colocation_regions(
+                         const char *accessor_kind, FieldID fid, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::empty_colocation_regions(accessor_kind,
+                                                             fid, reduction);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegion::fail_bounds_check(DomainPoint p,FieldID fid,
                                                  PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------

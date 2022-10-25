@@ -5386,6 +5386,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_colocation_violation(
+            const char *accessor_kind, FieldID fid, PhysicalInstance inst1,
+            PhysicalInstance inst2, const PhysicalRegion &other, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Unable to create co-location %s<%s> from multiple physical regions "
+          "for field %d in task %s because regions have different physical "
+          "instances " IDFMT " and  " IDFMT, reduction ? "ReductionAccessor" :
+            "FieldAccessor", accessor_kind, fid, context->get_task_name(),
+            inst1.id, inst2.id)
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::empty_colocation_regions(
+                         const char *accessor_kind, FieldID fid, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Attempt to create colocation %s<%s> with no physical regions for "
+          "field %d task %s. Must provide a non-empty set of regions.",
+          reduction ? "ReductionAccessor" : "FieldAccessor", accessor_kind,
+          fid, implicit_context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
                                     FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
