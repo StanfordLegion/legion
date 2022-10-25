@@ -419,6 +419,7 @@ namespace Legion {
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
+      LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -543,6 +544,7 @@ namespace Legion {
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \
+        "Defer Concurrent Analysis",                              \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
         "Yield",                                                  \
@@ -784,6 +786,7 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
+      SLICE_VERIFY_CONCURRENT_EXECUTION,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_COLLECTIVE_REQUEST,
@@ -940,6 +943,8 @@ namespace Legion {
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
+      SEND_CONCURRENT_RESERVATION_CREATION,
+      SEND_CONCURRENT_EXECUTION_ANALYSIS,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1007,6 +1012,7 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
+        "Slice Verify Concurrent Execution",                          \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Collective Instance Request",                          \
@@ -1163,6 +1169,8 @@ namespace Legion {
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
+        "Send Concurrent Reservation Creation",                       \
+        "Send Concurrent Execution Analysis",                         \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1600,6 +1608,7 @@ namespace Legion {
       COLLECTIVE_LOC_101 = 101,
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
+      COLLECTIVE_LOC_104 = 104,
     };
 
     // legion_types.h

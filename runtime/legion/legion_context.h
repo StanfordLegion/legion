@@ -2902,7 +2902,10 @@ namespace Legion {
         { return attach_broadcast_barrier.next(this); }
       inline ApBarrier get_next_attach_reduce_barrier(void)
         { return attach_reduce_barrier.next(this); }
-
+      inline RtBarrier get_next_concurrent_precondition_barrier(void)
+        { return concurrent_precondition_barrier.next(this); }
+      inline RtBarrier get_next_concurrent_postcondition_barrier(void)
+        { return concurrent_postcondition_barrier.next(this); }
       inline RtBarrier get_next_close_mapped_barrier(void)
         {
           const RtBarrier result =
@@ -3012,6 +3015,7 @@ namespace Legion {
       typedef ReplBarrier<RtBarrier,false> RtReplBar;
       typedef ReplBarrier<ApBarrier,false> ApReplBar;
       typedef ReplBarrier<ApBarrier,false,true> ApReplSingleBar;
+      typedef ReplBarrier<RtBarrier,false,true> RtReplSingleBar;
       typedef ReplBarrier<RtBarrier,true> RtLogicalBar;
       typedef ReplBarrier<ApBarrier,true> ApLogicalBar;
       // These barriers are used to identify when close operations are mapped
@@ -3063,6 +3067,8 @@ namespace Legion {
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;
+      RtReplSingleBar concurrent_precondition_barrier;
+      RtReplBar concurrent_postcondition_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtReplBar collective_check_barrier;

@@ -548,6 +548,8 @@ namespace Legion {
       // It does NOT encapsulate the 'effects_complete' of this task
       // Only the actual operation completion event captures that
       ApUserEvent                           single_task_termination;
+      // An event describing the fence event for concurrent execution
+      ApEvent                               concurrent_fence_event;
       // Event recording when all "effects" are complete
       // The effects of the task include the following:
       // 1. the execution of the task
@@ -623,7 +625,7 @@ namespace Legion {
       void slice_index_space(void);
       void trigger_slices(void);
       void clone_multi_from(MultiTask *task, IndexSpace is, Processor p,
-                            bool recurse, bool stealable);
+                            bool recurse, bool stealable); 
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -671,6 +673,10 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped) = 0;
     public:
+      // Support for concurrent execution of index tasks
+      inline RtEvent get_concurrent_precondition(void) const
+        { return concurrent_precondition; }
+    public:
       void pack_multi_task(Serializer &rez, AddressSpaceID target);
       void unpack_multi_task(Deserializer &derez,
                              std::set<RtEvent> &ready_events);
@@ -708,6 +714,11 @@ namespace Legion {
       // used for detecting cases where we've already mapped a mutli task
       // on the same node but moved it to a different processor
       bool first_mapping;
+    protected:
+      // Precondition for performing concurrent analyses across the points
+      RtEvent concurrent_precondition;
+      RtUserEvent concurrent_verified;
+      std::map<DomainPoint,Processor> concurrent_processors;
     protected:
       bool children_complete_invoked;
       bool children_commit_invoked;
@@ -944,7 +955,7 @@ namespace Legion {
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
             std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
-      void perform_concurrent_rendezvous(Processor target_proc);
+      void perform_concurrent_analysis(Processor target_proc);
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;
@@ -1201,6 +1212,10 @@ namespace Legion {
       // create a different type of future map for the task
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
+      // Also virtual for control replication override
+      virtual void initialize_concurrent_analysis(void);
+      virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
+                                                  Processor target);
     public:
       // Methods for supporting intra-index-space mapping dependences
       virtual RtEvent find_intra_space_dependence(const DomainPoint &point);
@@ -1388,6 +1403,8 @@ namespace Legion {
                               std::set<RtEvent> &applied_conditions);
       void record_output_sizes(const DomainPoint &point,
                                const std::vector<OutputRegion> &output_regions);
+      RtEvent verify_concurrent_execution(const DomainPoint &point,
+                                          Processor target);
     protected:
       void trigger_slice_mapped(void);
       void trigger_slice_complete(void);
@@ -1441,6 +1458,7 @@ namespace Legion {
                                        AddressSpaceID source, Runtime *rutime);
       static void handle_collective_instance_response(Deserializer &derez,
                                                       Runtime *runtime);
+      static void handle_verify_concurrent_execution(Deserializer &derez);
     protected:
       friend class IndexTask;
       friend class PointTask;
