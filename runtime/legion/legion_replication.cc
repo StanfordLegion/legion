@@ -3254,9 +3254,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx,
-                          std::vector<ApBarrier> &indirection_bars, 
-                          unsigned &next_indirection_index)
+    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     { 
       if (!src_indirect_requirements.empty() && collective_src_indirect_points)
@@ -3290,13 +3288,9 @@ namespace Legion {
         post_indirection_barriers.resize(pre_indirection_barriers.size());
         for (unsigned idx = 0; idx < pre_indirection_barriers.size(); idx++)
         {
-          ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
-          pre_indirection_barriers[idx] = next_bar;
-          ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
-          post_indirection_barriers[idx] = next_bar;
-          ctx->advance_replicate_barrier(next_bar, ctx->total_shards);
-          if (next_indirection_index == indirection_bars.size())
-            next_indirection_index = 0;
+          pre_indirection_barriers[idx] = ctx->get_next_indirection_barriers();;
+          post_indirection_barriers[idx] = pre_indirection_barriers[idx];
+          Runtime::advance_barrier(post_indirection_barriers[idx]);
         }
       }
     }
@@ -3944,7 +3938,6 @@ namespace Legion {
                                                        MapperID id, 
                                                        MappingTagID t,
                                                        const UntypedBuffer &arg,
-                                                       RtBarrier &deppart_bar,
                                                        Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -3970,8 +3963,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByFieldThunk(ctx, target, pid);
-      mapping_barrier = deppart_bar;
-      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      mapping_barrier = ctx->get_next_dependent_partition_barrier();;
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -3992,7 +3984,6 @@ namespace Legion {
                                                    MapperID id, MappingTagID t,
                                                    const UntypedBuffer &marg,
                                                    ShardID shard, size_t total,
-                                                        RtBarrier &deppart_bar,
                                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -4027,8 +4018,7 @@ namespace Legion {
                                    projection.get_index_partition(),
                                    shard, total);
 #endif
-      mapping_barrier = deppart_bar;
-      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      mapping_barrier = ctx->get_next_dependent_partition_barrier();
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -4052,7 +4042,6 @@ namespace Legion {
                                                 const UntypedBuffer &marg,
                                                 ShardID shard, 
                                                 size_t total_shards,
-                                                RtBarrier &deppart_bar,
                                                 Provenance *provenance) 
     //--------------------------------------------------------------------------
     {
@@ -4088,8 +4077,7 @@ namespace Legion {
                                         projection.get_index_partition(),
                                         shard, total_shards);
 #endif
-      mapping_barrier = deppart_bar;
-      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      mapping_barrier = ctx->get_next_dependent_partition_barrier();;
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -4103,8 +4091,7 @@ namespace Legion {
                               IndexPartition pid, IndexPartition proj,
                               LogicalRegion handle, LogicalRegion parent,
                               FieldID fid, MapperID id, MappingTagID t,
-                              const UntypedBuffer &marg, RtBarrier &deppart_bar,
-                              Provenance *provenance)
+                              const UntypedBuffer &marg, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -4129,8 +4116,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
-      mapping_barrier = deppart_bar;
-      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      mapping_barrier = ctx->get_next_dependent_partition_barrier();
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -4145,8 +4131,7 @@ namespace Legion {
                               IndexPartition pid, IndexPartition proj,
                               LogicalRegion handle, LogicalRegion parent,
                               FieldID fid, MapperID id, MappingTagID t,
-                              const UntypedBuffer &marg, RtBarrier &deppart_bar,
-                              Provenance *provenance)
+                              const UntypedBuffer &marg, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -4171,8 +4156,7 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
-      mapping_barrier = deppart_bar;
-      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      mapping_barrier = ctx->get_next_dependent_partition_barrier();
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -4185,12 +4169,10 @@ namespace Legion {
                               ReplicateContext *ctx, LogicalRegion domain,
                               LogicalRegion domain_parent, FieldID fid,
                               IndexSpace range, MapperID id, MappingTagID tag,
-                              const UntypedBuffer &marg, RtBarrier &deppart_bar,
-                              Provenance *provenance)
+                              const UntypedBuffer &marg, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      mapping_barrier = deppart_bar;
-      ctx->advance_replicate_barrier(deppart_bar, ctx->total_shards);
+      mapping_barrier = ctx->get_next_dependent_partition_barrier();
       DependentPartitionOp::initialize_by_association(ctx, domain, 
                           domain_parent, fid, range, id, tag, marg, provenance);
     }
@@ -6050,7 +6032,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::initialize_replication(ReplicateContext *ctx,RtBarrier &bar)
+    void ReplMapOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6058,8 +6040,7 @@ namespace Legion {
       assert(view_did_broadcast == NULL);
       assert(sharded_view == NULL);
 #endif
-      inline_barrier = bar;
-      ctx->advance_replicate_barrier(bar, ctx->total_shards);
+      inline_barrier = ctx->get_next_inline_mapping_barrier();
       // We only check the results of the mapping if the runtime requests it
       // We can skip the check though if this is a read-only requirement
       if (!IS_READ_ONLY(requirement))
@@ -6068,12 +6049,12 @@ namespace Legion {
       if (IS_WRITE(requirement))
       {
         // We need a second generation of the barrier for writes
-        ctx->advance_replicate_barrier(bar, ctx->total_shards);
+        ctx->get_next_inline_mapping_barrier();
         // We need a third generation of the barrirer if we're not discarding
         // the previous version of the barrier so we can make sure all the
         // updates have been performed before we register our users
         if (!IS_DISCARD(requirement))
-          ctx->advance_replicate_barrier(bar, ctx->total_shards);
+          ctx->get_next_inline_mapping_barrier();
         view_did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx, 0/*owner*/, COLLECTIVE_LOC_75);
         // if we're shard 0 then get the distributed id and send it out
@@ -6504,22 +6485,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
-                                              RtBarrier &resource_bar,
-                                              ApBarrier &broadcast_bar,
-                                              ApBarrier &reduce_bar)
+    void ReplAttachOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(resource_bar.exists());
       assert(exchange == NULL);
       assert(did_broadcast == NULL);
       assert(sharded_view == NULL);
 #endif
-      resource_barrier = resource_bar;
-      ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
-      broadcast_barrier = broadcast_bar;
-      ctx->advance_replicate_barrier(broadcast_bar, 1/*arrivals*/);
+      resource_barrier = ctx->get_next_attach_resource_barrier();
+      broadcast_barrier = ctx->get_next_attach_broadcast_barrier();;
       // No matter what we're going to need a view broadcast either to make
       // an instance which everyone has the name of or a sharded view
       did_broadcast = 
@@ -6527,7 +6502,7 @@ namespace Legion {
       if ((resource == LEGION_EXTERNAL_INSTANCE) || local_files)
       {
         // In this case we need a second generation of the resource_bar
-        ctx->advance_replicate_barrier(resource_bar, ctx->total_shards);
+        ctx->get_next_attach_resource_barrier();
         exchange = new ShardedMappingExchange(COLLECTIVE_LOC_78, ctx,
                            ctx->owner_shard->shard_id, false/*perform checks*/);
         
@@ -6543,10 +6518,7 @@ namespace Legion {
         }
       }
       else
-      {
-        reduce_barrier = reduce_bar;
-        ctx->advance_replicate_barrier(reduce_bar, ctx->total_shards);
-      }
+        reduce_barrier = ctx->get_next_attach_reduce_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -8713,77 +8685,9 @@ namespace Legion {
 #endif
         shard_task_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        pending_partition_barrier = 
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
-        // Only need shards-1 for arrivals here since it is used
-        // to signal from all the non-creator shards to the creator shard
-        creation_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // Same thing as above for deletion barriers
-        deletion_ready_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        deletion_mapping_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        deletion_execution_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // Inline mapping barrier for synchronizing inline mappings
-        // across all the shards
-        inline_mapping_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // External resource barrier for synchronizing attach/detach ops
-        attach_resource_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        detach_resource_barrier =
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        // Fence barriers need arrivals from everyone
-        mapping_fence_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        resource_return_barrier =
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        trace_recording_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        summary_fence_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        execution_fence_barrier = 
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
-        attach_broadcast_barrier = 
-          ApBarrier(Realm::Barrier::create_barrier(1));
-        attach_reduce_barrier = 
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
-        dependent_partition_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        semantic_attach_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards));
-        future_map_wait_barrier = 
-          ApBarrier(Realm::Barrier::create_barrier(total_shards));
-        if (runtime->program_order_execution)
-          inorder_barrier = 
-            ApBarrier(Realm::Barrier::create_barrier(total_shards));
         // callback barrier can't be made until we know how many
         // unique address spaces we'll actually have so see
         // ShardManager::launch
-#ifdef DEBUG_LEGION_COLLECTIVES
-        collective_check_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
-                CollectiveCheckReduction::REDOP,
-                &CollectiveCheckReduction::IDENTITY, 
-                sizeof(CollectiveCheckReduction::IDENTITY)));
-        logical_check_barrier =
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
-                CollectiveCheckReduction::REDOP,
-                &CollectiveCheckReduction::IDENTITY, 
-                sizeof(CollectiveCheckReduction::IDENTITY)));
-        close_check_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
-                CloseCheckReduction::REDOP,
-                &CloseCheckReduction::IDENTITY,
-                sizeof(CloseCheckReduction::IDENTITY)));
-        refinement_check_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(total_shards,
-                CloseCheckReduction::REDOP,
-                &CloseCheckReduction::IDENTITY,
-                sizeof(CloseCheckReduction::IDENTITY)));
-#endif
       }
 #ifdef DEBUG_LEGION
       else if (control_replicated)
@@ -8812,33 +8716,7 @@ namespace Legion {
         if (control_replicated)
         {
           shard_task_barrier.destroy_barrier();
-          pending_partition_barrier.destroy_barrier();
-          creation_barrier.destroy_barrier();
-          deletion_ready_barrier.destroy_barrier();
-          deletion_mapping_barrier.destroy_barrier();
-          deletion_execution_barrier.destroy_barrier();
-          inline_mapping_barrier.destroy_barrier();
-          attach_resource_barrier.destroy_barrier();
-          detach_resource_barrier.destroy_barrier();
-          mapping_fence_barrier.destroy_barrier();
-          resource_return_barrier.destroy_barrier();
-          trace_recording_barrier.destroy_barrier();
-          summary_fence_barrier.destroy_barrier();
-          execution_fence_barrier.destroy_barrier();
-          attach_broadcast_barrier.destroy_barrier();
-          attach_reduce_barrier.destroy_barrier();
-          dependent_partition_barrier.destroy_barrier();
-          semantic_attach_barrier.destroy_barrier();
-          future_map_wait_barrier.destroy_barrier();
-          if (inorder_barrier.exists())
-            inorder_barrier.destroy_barrier();
           callback_barrier.destroy_barrier();
-#ifdef DEBUG_LEGION_COLLECTIVES
-          collective_check_barrier.destroy_barrier();
-          logical_check_barrier.destroy_barrier();
-          close_check_barrier.destroy_barrier();
-          refinement_check_barrier.destroy_barrier();
-#endif
         }
         // Send messages to all the remote spaces to remove the manager
         std::set<AddressSpaceID> sent_spaces;
@@ -9053,56 +8931,10 @@ namespace Legion {
         if (control_replicated)
         {
 #ifdef DEBUG_LEGION
-          assert(pending_partition_barrier.exists());
-          assert(creation_barrier.exists());
-          assert(deletion_ready_barrier.exists());
-          assert(deletion_mapping_barrier.exists());
-          assert(deletion_execution_barrier.exists());
-          assert(inline_mapping_barrier.exists());
-          assert(attach_resource_barrier.exists());
-          assert(detach_resource_barrier.exists());
-          assert(mapping_fence_barrier.exists());
-          assert(resource_return_barrier.exists());
-          assert(trace_recording_barrier.exists());
-          assert(summary_fence_barrier.exists());
-          assert(execution_fence_barrier.exists());
-          assert(attach_broadcast_barrier.exists());
-          assert(attach_reduce_barrier.exists());
-          assert(dependent_partition_barrier.exists());
-          assert(semantic_attach_barrier.exists());
           assert(callback_barrier.exists());
           assert(shard_mapping.size() == total_shards);
 #endif
-          rez.serialize(pending_partition_barrier);
-          rez.serialize(creation_barrier);
-          rez.serialize(deletion_ready_barrier);
-          rez.serialize(deletion_mapping_barrier);
-          rez.serialize(deletion_execution_barrier);
-          rez.serialize(inline_mapping_barrier);
-          rez.serialize(attach_resource_barrier);
-          rez.serialize(detach_resource_barrier);
-          rez.serialize(mapping_fence_barrier);
-          rez.serialize(resource_return_barrier);
-          rez.serialize(trace_recording_barrier);
-          rez.serialize(summary_fence_barrier);
-          rez.serialize(execution_fence_barrier);
-          rez.serialize(attach_broadcast_barrier);
-          rez.serialize(attach_reduce_barrier);
-          rez.serialize(dependent_partition_barrier);
-          rez.serialize(semantic_attach_barrier);
-          rez.serialize(future_map_wait_barrier);
-          rez.serialize(inorder_barrier);
           rez.serialize(callback_barrier);
-#ifdef DEBUG_LEGION_COLLECTIVES
-          assert(collective_check_barrier.exists());
-          rez.serialize(collective_check_barrier);
-          assert(logical_check_barrier.exists());
-          rez.serialize(logical_check_barrier);
-          assert(close_check_barrier.exists());
-          rez.serialize(close_check_barrier);
-          assert(refinement_check_barrier.exists());
-          rez.serialize(refinement_check_barrier);
-#endif
           for (std::vector<Processor>::const_iterator it = 
                 shard_mapping.begin(); it != shard_mapping.end(); it++)
             rez.serialize(*it);
@@ -9164,32 +8996,7 @@ namespace Legion {
       }
       if (control_replicated)
       {
-        derez.deserialize(pending_partition_barrier);
-        derez.deserialize(creation_barrier);
-        derez.deserialize(deletion_ready_barrier);
-        derez.deserialize(deletion_mapping_barrier);
-        derez.deserialize(deletion_execution_barrier);
-        derez.deserialize(inline_mapping_barrier);
-        derez.deserialize(attach_resource_barrier);
-        derez.deserialize(detach_resource_barrier);
-        derez.deserialize(mapping_fence_barrier);
-        derez.deserialize(resource_return_barrier);
-        derez.deserialize(trace_recording_barrier);
-        derez.deserialize(summary_fence_barrier);
-        derez.deserialize(execution_fence_barrier);
-        derez.deserialize(attach_broadcast_barrier);
-        derez.deserialize(attach_reduce_barrier);
-        derez.deserialize(dependent_partition_barrier);
-        derez.deserialize(semantic_attach_barrier);
-        derez.deserialize(future_map_wait_barrier);
-        derez.deserialize(inorder_barrier);
         derez.deserialize(callback_barrier);
-#ifdef DEBUG_LEGION_COLLECTIVES
-        derez.deserialize(collective_check_barrier);
-        derez.deserialize(logical_check_barrier);
-        derez.deserialize(close_check_barrier);
-        derez.deserialize(refinement_check_barrier);
-#endif
         shard_mapping.resize(total_shards);
         for (unsigned idx = 0; idx < total_shards; idx++)
           derez.deserialize(shard_mapping[idx]);
@@ -11958,138 +11765,6 @@ namespace Legion {
       }
       return result;
     }
-
-    /////////////////////////////////////////////////////////////
-    // Barrier Exchange Collective 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    BarrierExchangeCollective<BAR>::BarrierExchangeCollective(
-        ReplicateContext *ctx, size_t win_size, 
-        typename std::vector<BAR> &bars, CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx), window_size(win_size), barriers(bars)
-    //--------------------------------------------------------------------------
-    { 
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    BarrierExchangeCollective<BAR>::BarrierExchangeCollective(
-                                           const BarrierExchangeCollective &rhs)
-      : AllGatherCollective(rhs), window_size(0), barriers(rhs.barriers)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    BarrierExchangeCollective<BAR>::~BarrierExchangeCollective(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    BarrierExchangeCollective<BAR>& BarrierExchangeCollective<BAR>::operator=(
-                                           const BarrierExchangeCollective &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    void BarrierExchangeCollective<BAR>::exchange_barriers_async(void)
-    //--------------------------------------------------------------------------
-    {
-      // First make our local barriers and put them in the data structure
-      {
-        AutoLock c_lock(collective_lock);
-        for (unsigned index = local_shard; 
-              index < window_size; index += manager->total_shards)
-        {
-#ifdef DEBUG_LEGION
-          assert(local_barriers.find(index) == local_barriers.end());
-#endif
-          local_barriers[index] = 
-              BAR(Realm::Barrier::create_barrier(manager->total_shards));
-        }
-      }
-      // Now we can start the exchange from this shard 
-      perform_collective_async();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    void BarrierExchangeCollective<BAR>::wait_for_barrier_exchange(void)
-    //--------------------------------------------------------------------------
-    {
-      // Wait for everything to be done
-      perform_collective_wait();
-#ifdef DEBUG_LEGION
-      assert(local_barriers.size() == window_size);
-#endif
-      // Fill in the barrier vector with the barriers we've got from everyone
-      barriers.resize(window_size);
-      for (typename std::map<unsigned,BAR>::const_iterator it = 
-            local_barriers.begin(); it != local_barriers.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->first < window_size);
-#endif
-        barriers[it->first] = it->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    void BarrierExchangeCollective<BAR>::pack_collective_stage(Serializer &rez, 
-                                                               int stage)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize(window_size);
-      rez.serialize<size_t>(local_barriers.size());
-      for (typename std::map<unsigned,BAR>::const_iterator it = 
-            local_barriers.begin(); it != local_barriers.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename BAR>
-    void BarrierExchangeCollective<BAR>::unpack_collective_stage(
-                                                 Deserializer &derez, int stage)
-    //--------------------------------------------------------------------------
-    {
-      size_t other_window_size;
-      derez.deserialize(other_window_size);
-      if (other_window_size != window_size)
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Context configurations for control replicated "
-                      "task %s were assigned different maximum window sizes "
-                      "of %zd and %zd by the mapper which is illegal.",
-                      context->owner_task->get_task_name(), window_size,
-                      other_window_size)
-      size_t num_bars;
-      derez.deserialize(num_bars);
-      for (unsigned idx = 0; idx < num_bars; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        derez.deserialize(local_barriers[index]);
-      }
-    } 
-
-    // Explicit instantiation of our two kinds of barriers
-    template class BarrierExchangeCollective<RtBarrier>;
-    template class BarrierExchangeCollective<ApBarrier>;
 
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast
