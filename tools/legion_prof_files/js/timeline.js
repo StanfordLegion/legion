@@ -450,11 +450,19 @@ function getMouseOver() {
 
     // Add instances
     if ((d.instances != undefined) && d.instances != "") {
-      var instances = [];
-      d.instances.forEach((element) => {
-        instances.push(element[0]);
-      });
-      descTexts.push("Instances: " + instances);
+      for (var i = 0; i < d.instances.length; i+=3) {
+        var instances = [];
+        // to limit the space, we only show 3 instances per row
+        var end_idx = i+3 > d.instances.length ? d.instances.length : i+3;
+        for (var j = i; j < end_idx; j++) {
+          instances.push(d.instances[j][0]);
+        }
+        if (j == d.instances.length) {
+          descTexts.push("Instances: " + instances);
+        } else {
+          descTexts.push("           " + instances);
+        }
+      }
     }
 
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
@@ -470,9 +478,9 @@ function getMouseOver() {
    // split d.title
     var titles =  d.title.split("$");
       if (titles.length > 0) {
-	  for (var i = titles.length-1; i >= 0; --i) {
-	      descTexts.push(titles[i]);
-	  }
+	for (var i = titles.length-1; i >= 0; --i) {
+	  descTexts.push(titles[i]);
+	}
       }
     var title = text.append("tspan")
       .attr("x", x)
