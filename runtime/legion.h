@@ -2479,11 +2479,28 @@ namespace Legion {
                                               bool generic_accessor,
                                               bool check_field_size,
                                               ReductionOpID redop = 0) const;
+      Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
+                              const std::vector<PhysicalRegion> &other_regions,
+                                              FieldID fid, size_t field_size,
+                                              void *realm_is, TypeTag type_tag,
+                                              const char *warning_string,
+                                              bool silence_warnings,
+                                              bool generic_accessor,
+                                              bool check_field_size,
+                                              bool need_bounds,
+                                              ReductionOpID redop = 0) const;
       void report_incompatible_accessor(const char *accessor_kind,
                              Realm::RegionInstance instance, FieldID fid) const;
       void report_incompatible_multi_accessor(unsigned index, FieldID fid,
                              Realm::RegionInstance inst1, 
                              Realm::RegionInstance inst2) const;
+      void report_colocation_violation(const char *accessor_kind, FieldID fid,
+                             Realm::RegionInstance inst1,
+                             Realm::RegionInstance inst2,
+                             const PhysicalRegion &other,
+                             bool reduction = false) const;
+      static void empty_colocation_regions(const char *accessor_kind, 
+                                           FieldID fid, bool reduction = false);
       static void fail_bounds_check(DomainPoint p, FieldID fid,
                                     PrivilegeMode mode, bool multi = false);
       static void fail_bounds_check(Domain d, FieldID fid,
@@ -2625,6 +2642,81 @@ namespace Legion {
       // Not avalable for Realm::MultiAffineAccessor specializations
       template<int M>
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    const AffineTransform<M,N,COORD_T> transform,
+                    const Rect<N,COORD_T> bounds,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+    public:
+      // Variations of the above four methods but with multiple physical
+      // regions specified using input iterators for colocation regions
+      // Colocation regions from [start, stop)
+      template<typename InputIterator>
+      FieldAccessor(InputIterator start_region, 
+                    InputIterator stop_region, FieldID fid,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // For Realm::AffineAccessor specializations there are additional
+      // methods for creating accessors with limited bounding boxes and
+      // affine transformations for using alternative coordinates spaces
+      // Specify a specific bounds rectangle to use for the accessor
+      // Colocation regions from [start, stop)
+      template<typename InputIterator>
+      FieldAccessor(InputIterator start_region,
+                    InputIterator stop_region, FieldID fid,
+                    const Rect<N,COORD_T> bounds,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // Specify a specific Affine transform to use for interpreting points
+      // Not avalable for Realm::MultiAffineAccessor specializations
+      // Colocation regions from [start, stop)
+      template<typename InputIterator, int M>
+      FieldAccessor(InputIterator start_region,
+                    InputIterator stop_region, FieldID fid,
+                    const AffineTransform<M,N,COORD_T> transform,
+                    // The actual field size in case it is different from the 
+                    // one being used in FT and we still want to check it
+                    size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL,
+                    size_t subfield_offset = 0) { }
+      // Specify both a transform and a bounds to use
+      // Not avalable for Realm::MultiAffineAccessor specializations
+      // Colocation regions from [start, stop)
+      template<typename InputIterator, int M>
+      FieldAccessor(InputIterator start_region, 
+                    InputIterator stop_region, FieldID fid,
                     const AffineTransform<M,N,COORD_T> transform,
                     const Rect<N,COORD_T> bounds,
                     // The actual field size in case it is different from the 
@@ -2829,6 +2921,80 @@ namespace Legion {
 #endif
                        ) { }
     public:
+      // Variations of the same four methods above but with multiple 
+      // physical regions specified using input iterators for colocation regions
+      // Colocation regions from [start, stop)
+      template<typename InputIterator>
+      ReductionAccessor(InputIterator start_region,
+                        InputIterator stop_region, FieldID fid,
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
+      // For Realm::AffineAccessor specializations there are additional
+      // methods for creating accessors with limited bounding boxes and
+      // affine transformations for using alternative coordinates spaces
+      // Specify a specific bounds rectangle to use for the accessor
+      // Colocation regions from [start, stop)
+      template<typename InputIterator>
+      ReductionAccessor(InputIterator start_region,
+                        InputIterator stop_region, FieldID fid,
+                        ReductionOpID redop, 
+                        const Rect<N,COORD_T> bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
+      // Specify a specific Affine transform to use for interpreting points
+      // Not available for Realm::MultiAffineAccessor specializations
+      // Colocation regions from [start, stop)
+      template<typename InputIterator, int M>
+      ReductionAccessor(InputIterator start_region,
+                        InputIterator stop_region, FieldID fid,
+                        ReductionOpID redop,
+                        const AffineTransform<M,N,COORD_T> transform,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
+      // Specify both a transform and a bounds to use
+      // Not available for Realm::MultiAffineAccessor specializations
+      // Colocation regions from [start, stop)
+      template<typename InputIterator, int M>
+      ReductionAccessor(InputIterator start_region,
+                        InputIterator stop_region, FieldID fid,
+                        ReductionOpID redop,
+                        const AffineTransform<M,N,COORD_T> transform,
+                        const Rect<N,COORD_T> bounds,
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL,
+                        size_t subfield_offset = 0,
+                        size_t actual_field_size = sizeof(typename REDOP::RHS),
+#ifdef DEBUG_LEGION
+                        bool check_field_size = true
+#else
+                        bool check_field_size = false
+#endif
+                       ) { }
+    public:
       // Create a ReductionAccessor for an UntypedDeferredValue
       // (only with AffineAccessors)
       ReductionAccessor(const UntypedDeferredValue &value,
@@ -2926,6 +3092,11 @@ namespace Legion {
       static const int dim = N;
     };
 
+#ifdef LEGION_MULTI_REGION_ACCESSOR
+    // Multi-Region Accessors are a provisional feature now and are likely
+    // to be deprecated and removed in the near future. Instead of multi-region
+    // accessors you should be able to use the new colocation constructors
+    // on the traditional Field Accessors.
     /**
      * \class MultiRegionAccessor
      * A multi-region accessor is a generalization of the field accessor class
@@ -3101,6 +3272,7 @@ namespace Legion {
       typedef const FT& const_reference;
       static const int dim = N;
     };
+#endif // LEGION_MULTI_REGION_ACCESSOR
 
     /**
      * \class PieceIterator

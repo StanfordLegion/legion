@@ -157,8 +157,10 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+#ifdef LEGION_MULTI_REGION_ACCESSOR
   template<typename, int,typename,typename,bool,bool,int>
     class MultiRegionAccessor;
+#endif
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
   namespace ArraySyntax {

@@ -245,9 +245,20 @@ int main(int argc, char **argv)
 #else
   const LayoutConstraintID id = 0;
 #endif
-  TaskHelper::register_hybrid_variants<CalcNewCurrentsTask>(id);
-  TaskHelper::register_hybrid_variants<DistributeChargeTask>(0/*no need for alignments on this task*/);
-  TaskHelper::register_hybrid_variants<UpdateVoltagesTask>(0/*no need for alignments on this task*/);
+  std::vector<ColocationConstraint> colocation_constraints;
+  TaskHelper::register_hybrid_variants<CalcNewCurrentsTask>(id, colocation_constraints);
+  TaskHelper::register_hybrid_variants<DistributeChargeTask>(0/*no need for alignments on this task*/,
+                                                             colocation_constraints);
+  // For update voltates we want the region requirements 0 and 1 to be colocated and
+  // we want region requirements 2 and 3 to be colocated
+  colocation_constraints.emplace_back(ColocationConstraint(0, 1));
+  colocation_constraints.emplace_back(ColocationConstraint(2, 3));
+  colocation_constraints[0].fields.insert(FID_NODE_VOLTAGE);
+  colocation_constraints[0].fields.insert(FID_CHARGE);
+  colocation_constraints[1].fields.insert(FID_NODE_CAP);
+  colocation_constraints[1].fields.insert(FID_LEAKAGE);
+  TaskHelper::register_hybrid_variants<UpdateVoltagesTask>(0/*no need for alignments on this task*/,
+                                                          colocation_constraints);
   CheckTask::register_task();
 #ifndef SEQUENTIAL_LOAD_CIRCUIT
   InitNodesTask::register_task();
