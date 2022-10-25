@@ -1434,12 +1434,11 @@ class Operation(ProcOperation):
     @typecheck
     def _dump_instances(self) -> Union[str, None]:
         instances = ""
-        instances_list = []
+        instances_set = set()
         for node in self.operation_inst_infos:
             assert node.instance is not None
-            instances_list.append((hex(node.instance.inst_id), node.instance.prof_uid))
-        # instances = "|".join(instances_list)
-        instances = dump_json(instances_list)
+            instances_set.add((hex(node.instance.inst_id), node.instance.prof_uid))
+        instances = dump_json(list(instances_set))
         return instances
 
     @typecheck
@@ -2132,14 +2131,13 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     @typecheck
     def _dump_instances(self) -> str:
         instances = ""
-        instances_list = []
+        instances_set = set()
         for node in self.copy_inst_infos:
             if node.src_instance is not None:
-                instances_list.append((hex(node.src_instance.inst_id), node.src_instance.prof_uid))
+                instances_set.add((hex(node.src_instance.inst_id), node.src_instance.prof_uid))
             if node.dst_instance is not None:
-                instances_list.append((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
-        # instances = "|".join(instances_list)
-        instances = dump_json(instances_list)
+                instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
+        instances = dump_json(list(instances_set))
         return instances
 
     @typeassert(base_level=int, max_levels=int,
@@ -2271,12 +2269,11 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
     @typecheck
     def _dump_instances(self) -> str:
         instances = ""
-        instances_list = []
+        instances_set = set()
         for node in self.fill_inst_infos:
             assert node.dst_instance is not None
-            instances_list.append((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
-        # instances = "|".join(instances_list)
-        instances = dump_json(instances_list)
+            instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
+        instances = dump_json(list(instances_set))
         return instances
 
     @typeassert(base_level=int, max_levels=int,
