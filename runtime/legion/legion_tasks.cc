@@ -1615,12 +1615,12 @@ namespace Legion {
             DependenceType dtype = check_dependence_type<false>(usage1, usage2);
             // We can only reporting interfering requirements precisely
             // if at least one of these is not a projection requireemnts
-            if (((dtype == LEGION_TRUE_DEPENDENCE) || 
-                 (dtype == LEGION_ANTI_DEPENDENCE)) &&
-                ((logical_regions[indexes[i]].handle_type == 
-                  LEGION_SINGULAR_PROJECTION) ||
-                 (logical_regions[indexes[j]].handle_type == 
-                  LEGION_SINGULAR_PROJECTION)))
+            // There is a special case here for concurrent tasks with both
+            // read-only or reduction requirements, those can still lead to 
+            // hangs so we'll report them as interfering
+            if ((dtype == LEGION_TRUE_DEPENDENCE) || 
+                (dtype == LEGION_ANTI_DEPENDENCE) ||
+                (concurrent_task && IS_ATOMIC(usage1) && (usage1 == usage2)))
               report_interfering_requirements(indexes[j], indexes[i]);
             // Special case, if the parents are not the same,
             // then we don't have to do anything cause their
@@ -6227,7 +6227,6 @@ namespace Legion {
                                                          unsigned idx2)
     //--------------------------------------------------------------------------
     {
-#if 1
       REPORT_LEGION_ERROR(ERROR_ALIASED_INTERFERING_REGION,
                     "Aliased and interfering region requirements for "
                     "individual tasks are not permitted. Region requirements "
@@ -6235,16 +6234,6 @@ namespace Legion {
                     "(UID %lld) are interfering.", idx1, idx2, get_task_name(),
                     get_unique_id(), parent_ctx->get_task_name(),
                     parent_ctx->get_unique_id())
-#else
-      REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDIVIDUAL,
-                      "Region requirements %d and %d of individual task "
-                      "%s (UID %lld) in parent task %s (UID %lld) are "
-                      "interfering.  This behavior is currently "
-                      "undefined. You better really know what you are "
-                      "doing.", idx1, idx2, get_task_name(), 
-                      get_unique_id(), parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id())
-#endif
     } 
 
     //--------------------------------------------------------------------------
@@ -9342,32 +9331,18 @@ namespace Legion {
     void IndexTask::report_interfering_requirements(unsigned idx1,unsigned idx2)
     //--------------------------------------------------------------------------
     {
-#if 0
-      REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+      // For now we only issue this warning in debug mode, eventually we'll
+      // turn this on only when users request it when we do our debug refactor
+      if ((logical_regions[idx1].handle_type == LEGION_SINGULAR_PROJECTION) &&
+          (logical_regions[idx2].handle_type == LEGION_SINGULAR_PROJECTION))
+        REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
                           "Aliased region requirements for index tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
-#endif
-#ifdef DEBUG_LEGION
-      // For now we only issue this warning in debug mode, eventually we'll
-      // turn this on only when users request it when we do our debug refactor
-      REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDEX,
-                      "Region requirements %d and %d of index task %s "
-                      "(UID %lld) in parent task %s (UID %lld) are potentially "
-                      "interfering.  It's possible that this is a false "
-                      "positive if there are projection region requirements "
-                      "and each of the point tasks are non-interfering. "
-                      "If the runtime is built in debug mode then it will "
-                      "check that the region requirements of all points are "
-                      "actually non-interfering. If you see no further error "
-                      "messages for this index task launch then everything "
-                      "is good.", idx1, idx2, get_task_name(), get_unique_id(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10734,6 +10709,11 @@ namespace Legion {
             const std::map<DomainPoint,std::vector<LogicalRegion> > &point_reqs)
     //--------------------------------------------------------------------------
     {
+      // Need to run this if we haven't run it yet in order to populate
+      // the interfering_requirements data structure
+      if (!need_intra_task_alias_analysis)
+        perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
+                                          privilege_paths);
       std::set<std::pair<unsigned,unsigned> > local_interfering = 
         interfering_requirements;
       // Handle any region requirements that interfere with itself
@@ -10741,7 +10721,13 @@ namespace Legion {
       {
         const RegionRequirement &req = regions[idx];
         if (!IS_WRITE(req))
+        {
+          // Special case here for concurrent index task launches where
+          // atomic coherence can get us into trouble
+          if (concurrent_task && IS_ATOMIC(req))
+            local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
           continue;
+        }
         // If the projection functions are invertible then we don't have to 
         // worry about interference because the runtime knows how to hook
         // up those kinds of dependences
