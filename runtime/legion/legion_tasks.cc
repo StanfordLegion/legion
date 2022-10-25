@@ -8128,8 +8128,6 @@ namespace Legion {
         // Hold a reference during this to prevent collectives 
         // from deleting the context prematurely
         repl_ctx->add_reference();
-        // The replicate contexts all need to sync up to exchange resources 
-        repl_ctx->exchange_common_resources();
         // Remove our reference, DO NOT CHECK FOR DELETION
         repl_ctx->remove_reference();
         return repl_ctx;
@@ -8165,8 +8163,6 @@ namespace Legion {
       // Hold a reference during this to prevent collectives 
       // from deleting the context prematurely
       repl_ctx->add_reference();
-      // The replicate contexts all need to sync up to exchange resources 
-      repl_ctx->exchange_common_resources();
       return repl_ctx;
     }
 
