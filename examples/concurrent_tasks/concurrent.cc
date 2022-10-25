@@ -34,37 +34,44 @@ void top_level_task(const Task *task,
   // See how many points to run
   const InputArgs &command_args = Runtime::get_input_args();
   for (int i = 1; i < command_args.argc; i++) {
-    if (command_args.argv[i][0] == '-') {
-      i++;
-      continue;
-    }
-
-    num_points = atoi(command_args.argv[i]);
-    assert(num_points > 0);
-    break;
+    if (!strcmp(command_args.argv[i],"-p"))
+      num_points = atoi(command_args.argv[++i]);
   }
+  assert(num_points > 0);
   printf("Running concurrent for %d points...\n", num_points);
 
-  Rect<1> launch_bounds(0,num_points-1);
+  // Create some phase barriers for each number of points
+  std::vector<PhaseBarrier> barriers(num_points);
+  for (unsigned idx = 0; idx < num_points; idx++)
+    barriers[idx] = runtime->create_phase_barrier(ctx, idx+1);
 
-  // Create a phase barrier that we'll use to synchronize 
-  // between all the point tasks. If we don't do this with a 
-  // concurrent index space launch then we could hang
-  PhaseBarrier pb = runtime->create_phase_barrier(ctx, num_points);
-
-  ArgumentMap arg_map;
-  IndexLauncher concurrent_launcher(CONCURRENT_TASK_ID,
-                                    launch_bounds,
-                                    TaskArgument(&pb, sizeof(pb)),
-                                    arg_map);
-  // Indicate that this index space task launch must be executed concurrently
+  IndexLauncher concurrent_launcher;
+  concurrent_launcher.task_id = CONCURRENT_TASK_ID;
   concurrent_launcher.concurrent = true;
-  FutureMap fm = runtime->execute_index_space(ctx, concurrent_launcher);
-  // Here we wait for all the futures to be ready
-  fm.wait_all_results();
 
-  // Now we can delete our phase barrier
-  runtime->destroy_phase_barrier(ctx, pb);
+  // Do three iterations so we can replay the trace twice
+  for (unsigned iter = 0; iter < 3; iter++)
+  {
+    runtime->begin_trace(ctx, 0);
+    // Launch an index space for each number of points from 1 up to num_points 
+    for (unsigned idx = 0; idx < num_points; idx++)
+    {
+      // Update the argument and the launch bounds
+      concurrent_launcher.launch_domain = Rect<1>(0,idx);
+      concurrent_launcher.global_arg = 
+        UntypedBuffer(&barriers[idx], sizeof(barriers[idx]));
+      runtime->execute_index_space(ctx, concurrent_launcher);
+      // Advance the phase barrier at this level too
+      barriers[idx] = runtime->advance_phase_barrier(ctx, barriers[idx]);
+    }
+    runtime->end_trace(ctx, 0);
+  }
+  // Execution fence to make sure we're done
+  runtime->issue_execution_fence(ctx).wait();
+
+  // Now we can delete our phase barriers
+  for (unsigned idx = 0; idx < num_points; idx++)
+    runtime->destroy_phase_barrier(ctx, barriers[idx]);
   printf("Success because we didn't hang!\n");
 }
 
@@ -90,6 +97,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_replicable();
     Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
   }
 
