@@ -513,6 +513,7 @@ namespace Legion {
       void handle_remote_profiling_response(Deserializer &derez);
       static void process_remote_profiling_response(Deserializer &derez);
     public:
+      void perform_concurrent_analysis(Processor target, RtEvent precondition);
       void trigger_children_complete(ApEvent all_children_complete);
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v,
@@ -955,7 +956,6 @@ namespace Legion {
       bool has_remaining_inlining_dependences(
             std::map<PointTask*,unsigned> &remaining,
             std::map<RtEvent,std::vector<PointTask*> > &event_deps) const;
-      void perform_concurrent_analysis(Processor target_proc);
     protected:
       friend class SliceTask;
       PointTask                   *orig_task;

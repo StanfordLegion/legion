@@ -4067,7 +4067,7 @@ namespace Legion {
         // We might also have made this event already if we have output regions
 #ifdef DEBUG_LEGION
         assert(!single_task_termination.exists() || !output_regions.empty() ||
-                is_remote());
+                is_remote() || (must_epoch_op != NULL));
 #endif
         if (!single_task_termination.exists())
           single_task_termination = Runtime::create_ap_user_event(NULL); 
@@ -5161,6 +5161,23 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
       return inner_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::perform_concurrent_analysis(Processor target,
+                                                 RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!concurrent_fence_event.exists());
+#endif
+      if (!single_task_termination.exists())
+        single_task_termination = Runtime::create_ap_user_event(NULL);
+      // Find the concurrent fence event
+      const RtEvent postcondition = runtime->find_concurrent_fence_event(target,
+          single_task_termination, concurrent_fence_event, precondition);
+      if (postcondition.exists())
+        map_applied_conditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7062,7 +7079,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(target_processors.size() == 1);
 #endif
-        perform_concurrent_analysis(target_processors.back());
+        perform_concurrent_analysis(target_processors.back(),
+                  slice_owner->get_concurrent_precondition());
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -7251,7 +7269,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(target_proc.exists());
 #endif
-        perform_concurrent_analysis(target_proc);
+        // If we're doing mapper checks then we need to do that now
+        if (!runtime->unsafe_mapper)
+        {
+          const RtEvent checked = 
+            slice_owner->verify_concurrent_execution(index_point, target_proc);
+          if (checked.exists())
+            map_applied_conditions.insert(checked);
+        }
+        perform_concurrent_analysis(target_proc,
+            slice_owner->get_concurrent_precondition());
       }
       RtEvent applied_condition;
       // If we succeeded in mapping and we're a leaf so we are done mapping
@@ -8464,32 +8491,6 @@ namespace Legion {
       }
       else
         return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::perform_concurrent_analysis(Processor target)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!concurrent_fence_event.exists());
-#endif
-      if (!single_task_termination.exists())
-        single_task_termination = Runtime::create_ap_user_event(NULL);
-      // Get the precondition event for performing the concurrent analysis
-      const RtEvent precondition = slice_owner->get_concurrent_precondition();
-      // Find the concurrent fence event
-      const RtEvent postcondition = runtime->find_concurrent_fence_event(target,
-          single_task_termination, concurrent_fence_event, precondition);
-      if (postcondition.exists())
-        map_applied_conditions.insert(postcondition);
-      // If we're doing mapper checks then we need to do that now
-      if (!runtime->unsafe_mapper)
-      {
-        const RtEvent checked = 
-          slice_owner->verify_concurrent_execution(index_point, target);
-        if (checked.exists())
-          map_applied_conditions.insert(checked);
-      }
     }
 
     /////////////////////////////////////////////////////////////

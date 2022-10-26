@@ -1887,6 +1887,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                       IndexSpace domain, IndexSpace shard_space);
+      virtual RtEvent get_concurrent_analysis_precondition(void);
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
@@ -1925,6 +1926,7 @@ namespace Legion {
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
       RtBarrier resource_return_barrier;
+      RtBarrier concurrent_prebar, concurrent_postbar;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

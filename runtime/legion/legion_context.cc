@@ -17526,14 +17526,19 @@ namespace Legion {
                                         std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      if (launcher.must_parallelism)
-        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-            "Task %s (UID %lld) requested an index space launch with must "
-            "parallelism (aka a MustEpochLaunch) that needs a reduction of "
-            "all future values. This feature is not currently implemented.",
-            get_task_name(), get_unique_id())
-      AutoRuntimeCall call(this);
       AutoProvenance provenance(launcher.provenance);
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        epoch_launcher.provenance = launcher.provenance;
+        FutureMap result = execute_must_epoch(epoch_launcher);
+        // Reduce the future map down to a future
+        return reduce_future_map(result, redop, deterministic,
+                                 launcher.map_id, launcher.tag, provenance);
+      }
+      AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {

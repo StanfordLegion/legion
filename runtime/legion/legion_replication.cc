@@ -4786,6 +4786,8 @@ namespace Legion {
       dependence_exchange = NULL;
       completion_exchange = NULL;
       resource_return_barrier = RtBarrier::NO_RT_BARRIER;
+      concurrent_prebar = RtBarrier::NO_RT_BARRIER;
+      concurrent_postbar = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -4881,6 +4883,31 @@ namespace Legion {
       return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
           runtime, runtime->get_available_distributed_id(),
           runtime->address_space, get_provenance());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplMustEpochOp::get_concurrent_analysis_precondition(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // See if we are the first local shard on the lowest address space
+      const CollectiveMapping &mapping = 
+        repl_ctx->shard_manager->get_collective_mapping();
+      const AddressSpace lowest = mapping[0];
+      if ((lowest == runtime->address_space) && 
+          repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+      {
+        Runtime::phase_barrier_arrive(concurrent_prebar, 1/*arrivals*/,
+          runtime->acquire_concurrent_reservation(concurrent_postbar));
+      }
+      Runtime::phase_barrier_arrive(concurrent_postbar, 
+          1/*arrivals*/, mapped_event);
+      return concurrent_prebar;
     }
 
     //--------------------------------------------------------------------------
@@ -5367,6 +5394,8 @@ namespace Legion {
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
       resource_return_barrier = ctx->get_next_resource_return_barrier();
+      concurrent_prebar = ctx->get_next_concurrent_precondition_barrier();
+      concurrent_postbar = ctx->get_next_concurrent_postcondition_barrier();
     }
 
     //--------------------------------------------------------------------------
