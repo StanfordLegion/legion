@@ -2940,11 +2940,25 @@ namespace Legion {
       // Note this method always returns two barrier generations
       inline ApBarrier get_next_indirection_barriers(void)
         {
-          // Assuming realm barriers always have even numbers of generations
-          const ApBarrier result = 
+          // Realm phase barriers do not have an even number of maximum
+          // phases so we need to handle the case where the names for the
+          // two barriers are not the same. If that occurs then we need
+          // finish off the old barrier and use the next one
+          ApBarrier result =
             indirection_barriers[next_indirection_bar_index].next(this);
-          indirection_barriers[next_indirection_bar_index++].next(this);
-          if (next_indirection_bar_index == indirection_barriers.size())
+          ApBarrier next =
+            indirection_barriers[next_indirection_bar_index].next(this);
+          if (result != Runtime::get_previous_phase(next))
+          {
+            // Finish off the old barrier
+            Runtime::phase_barrier_arrive(result, 1);
+            result = next;
+            next = indirection_barriers[next_indirection_bar_index].next(this);
+#ifdef DEBUG_LEGION
+            assert(result == Runtime::get_previous_phase(next));
+#endif
+          }
+          if (++next_indirection_bar_index == indirection_barriers.size())
             next_indirection_bar_index = 0;
           return result;
         }
