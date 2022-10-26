@@ -384,7 +384,7 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
     }
 
   elseif expr:is(ast.typed.expr.FieldAccess) then
-    local id = expr.value
+    local id = strip_casts(expr.value)
     if cx:is_loop_index(id.value) and field_name == expr.field_name then
       return result.node.Variant {
         coefficient = 1,
