@@ -2986,28 +2986,51 @@ namespace Legion {
       // Note this method always returns two barrier generations
       inline RtBarrier get_next_collective_map_barriers(void)
         {
-#ifdef DEBUG_LEGION
-          // Assuming realm barriers always have even numbers of generations
-          assert((Realm::Barrier::MAX_PHASES % 2) == 0);
-#endif
-          const RtBarrier result = collective_map_barriers[
+          // Realm phase barriers do not have an even number of maximum
+          // phases so we need to handle the case where the names for the
+          // two barriers are not the same. If that occurs then we need
+          // finish off the old barrier and use the next one
+          RtBarrier result = collective_map_barriers[
             next_collective_map_bar_index].next(this);
-          collective_map_barriers[next_collective_map_bar_index++].next(this);
-          if (next_collective_map_bar_index == collective_map_barriers.size())
+          RtBarrier next = collective_map_barriers[
+            next_collective_map_bar_index].next(this);
+          if (result != Runtime::get_previous_phase(next))
+          {
+            // Finish off the old barrier
+            Runtime::phase_barrier_arrive(result, 1);
+            result = next;
+            next = collective_map_barriers[
+              next_collective_map_bar_index].next(this);
+#ifdef DEBUG_LEGION
+            assert(result == Runtime::get_previous_phase(next));
+#endif
+          }
+          if (++next_collective_map_bar_index == collective_map_barriers.size())
             next_collective_map_bar_index = 0;
           return result;
         }
       // Note this method always returns two barrier generations
       inline ApBarrier get_next_indirection_barriers(void)
         {
-#ifdef DEBUG_LEGION
-          // Assuming realm barriers always have even numbers of generations
-          assert((Realm::Barrier::MAX_PHASES % 2) == 0);
-#endif
-          const ApBarrier result = 
+          // Realm phase barriers do not have an even number of maximum
+          // phases so we need to handle the case where the names for the
+          // two barriers are not the same. If that occurs then we need
+          // finish off the old barrier and use the next one
+          ApBarrier result =
             indirection_barriers[next_indirection_bar_index].next(this);
-          indirection_barriers[next_indirection_bar_index++].next(this);
-          if (next_indirection_bar_index == indirection_barriers.size())
+          ApBarrier next =
+            indirection_barriers[next_indirection_bar_index].next(this);
+          if (result != Runtime::get_previous_phase(next))
+          {
+            // Finish off the old barrier
+            Runtime::phase_barrier_arrive(result, 1);
+            result = next;
+            next = indirection_barriers[next_indirection_bar_index].next(this);
+#ifdef DEBUG_LEGION
+            assert(result == Runtime::get_previous_phase(next));
+#endif
+          }
+          if (++next_indirection_bar_index == indirection_barriers.size())
             next_indirection_bar_index = 0;
           return result;
         }
