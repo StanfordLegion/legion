@@ -2172,6 +2172,57 @@ namespace Legion {
         const AddressSpaceID target_space;
       };
     public:
+      template<typename T, bool LOGICAL, bool SINGLE=false>
+      class ReplBarrier {
+      public:
+        ReplBarrier(void) : owner(false) { }
+        ReplBarrier(const ReplBarrier &rhs) = delete;
+        ReplBarrier(ReplBarrier &&rhs)
+          : barrier(rhs.barrier), owner(rhs.owner) { rhs.owner = false; }
+        ~ReplBarrier(void) 
+          { if (owner && barrier.exists()) barrier.destroy_barrier(); }
+      public:
+        ReplBarrier& operator=(const ReplBarrier &rhs) = delete;
+        inline ReplBarrier& operator=(ReplBarrier &&rhs)
+          {
+            if (owner && barrier.exists()) barrier.destroy_barrier();
+            barrier = rhs.barrier;
+            owner = rhs.owner;
+            rhs.owner = false;
+            return *this;
+          }
+      public:
+#ifdef DEBUG_LEGION_COLLECTIVES
+        inline T next(ReplicateContext *ctx, ReductionOpID redop = 0,
+            const void *init_value = NULL, size_t init_size = 0)
+#else
+        inline T next(ReplicateContext *ctx)
+#endif
+        {
+          if (!barrier.exists())
+          {
+            if (LOGICAL)
+              owner = ctx->create_new_logical_barrier(barrier,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                  redop, init_value, init_size,
+#endif
+                  SINGLE ? 1 : ctx->total_shards);
+            else
+              owner = ctx->create_new_replicate_barrier(barrier,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                  redop, init_value, init_size,
+#endif
+                  SINGLE ? 1 : ctx->total_shards);
+          }
+          const T result = barrier;
+          Runtime::advance_barrier(barrier);
+          return result;
+        }
+      private:
+        T barrier;
+        bool owner;
+      };
+    public:
       enum ReplicateAPICall {
         REPLICATE_PERFORM_REGISTRATION_CALLBACK,
         REPLICATE_CONSENSUS_MATCH,
@@ -2814,7 +2865,6 @@ namespace Legion {
                                        AddressSpaceID target,
                                        bool replicate = false);
     public:
-      void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
       void handle_disjoint_complete_request(Deserializer &derez);
@@ -2843,11 +2893,11 @@ namespace Legion {
       void increase_pending_field_spaces(unsigned count, bool double_buffer);
       void increase_pending_fields(unsigned count, bool double_buffer);
       void increase_pending_region_trees(unsigned count, bool double_buffer);
-      bool create_shard_partition(IndexPartition &pid,
+      bool create_shard_partition(Operation *op, IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
           PartitionKind part_kind, LegionColor partition_color,
-          bool color_generated, ValueBroadcast<bool> *disjoint_result = NULL,
-          ApBarrier partition_ready = ApBarrier::NO_AP_BARRIER);
+          bool color_generated, ApBarrier partition_ready,
+          ValueBroadcast<bool> *disjoint_result = NULL);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
@@ -2858,7 +2908,6 @@ namespace Legion {
     public:
       // Future map methods
       unsigned peek_next_future_map_barrier_index(void) const;
-      RtBarrier get_next_future_map_barrier(void);
       void register_future_map(ReplFutureMapImpl *map);
       ReplFutureMapImpl* find_or_buffer_future_map_request(Deserializer &derez);
       void unregister_future_map(ReplFutureMapImpl *map);
@@ -2877,50 +2926,113 @@ namespace Legion {
           const AddressSpaceID source, RtUserEvent ready_event);
     public:
       // Fence barrier methods
-      RtBarrier get_next_mapping_fence_barrier(void);
-      ApBarrier get_next_execution_fence_barrier(void);
-      RtBarrier get_next_resource_return_barrier(void);
-      RtBarrier get_next_refinement_barrier(void);
-      RtBarrier get_next_collective_map_barriers(void);
-      RtBarrier get_next_trace_recording_barrier(void);
-      RtBarrier get_next_summary_fence_barrier(void);
-      RtBarrier get_next_deletion_ready_barrier(void);
-      RtBarrier get_next_deletion_mapping_barrier(void);
-      RtBarrier get_next_deletion_execution_barrier(void);
-      ApBarrier get_next_future_map_wait_barrier(void);
-      inline void advance_replicate_barrier(RtBarrier &bar, size_t arrivals)
+      inline RtBarrier get_next_mapping_fence_barrier(void)
+        { return mapping_fence_barrier.next(this); }
+      inline ApBarrier get_next_execution_fence_barrier(void)
+        { return execution_fence_barrier.next(this); }
+      inline RtBarrier get_next_resource_return_barrier(void)
+        { return resource_return_barrier.next(this); }
+      inline RtBarrier get_next_trace_recording_barrier(void)
+        { return trace_recording_barrier.next(this); }
+      inline RtBarrier get_next_summary_fence_barrier(void)
+        { return summary_fence_barrier.next(this); }
+      inline RtBarrier get_next_deletion_ready_barrier(void)
+        { return deletion_ready_barrier.next(this); }
+      inline RtBarrier get_next_deletion_mapping_barrier(void)
+        { return deletion_mapping_barrier.next(this); }
+      inline RtBarrier get_next_deletion_execution_barrier(void)
+        { return deletion_execution_barrier.next(this); }
+      inline ApBarrier get_next_future_map_wait_barrier(void)
+        { return future_map_wait_barrier.next(this); }
+      inline RtBarrier get_next_dependent_partition_barrier(void)
+        { return dependent_partition_barrier.next(this); }
+      inline RtBarrier get_next_attach_resource_barrier(void)
+        { return attach_resource_barrier.next(this); }
+
+      inline RtBarrier get_next_close_mapped_barrier(void)
         {
-          Runtime::advance_barrier(bar);
-          if (!bar.exists())
-            create_new_replicate_barrier(bar, arrivals);
+          const RtBarrier result =
+            close_mapped_barriers[next_close_mapped_bar_index++].next(this);
+          if (next_close_mapped_bar_index == close_mapped_barriers.size())
+            next_close_mapped_bar_index = 0;
+          return result;
         }
-      inline void advance_replicate_barrier(ApBarrier &bar, size_t arrivals)
+      inline RtBarrier get_next_refinement_mapped_barrier(void)
         {
-          Runtime::advance_barrier(bar);
-          if (!bar.exists())
-            create_new_replicate_barrier(bar, arrivals);
+          const RtBarrier result = refinement_mapped_barriers[
+            next_refinement_mapped_bar_index++].next(this);
+          if (next_refinement_mapped_bar_index == 
+              refinement_mapped_barriers.size())
+            next_refinement_mapped_bar_index = 0;
+          return result;
         }
-      inline void advance_logical_barrier(RtBarrier &bar, size_t arrivals)
+      inline RtBarrier get_next_refinement_barrier(void)
         {
-          Runtime::advance_barrier(bar);
-          if (!bar.exists())
-            create_new_logical_barrier(bar, arrivals);
+          const RtBarrier result = refinement_ready_barriers[
+            next_refinement_ready_bar_index++].next(this);
+          if (next_refinement_ready_bar_index ==
+              refinement_ready_barriers.size())
+            next_refinement_ready_bar_index = 0;
+          return result;
         }
-      inline void advance_logical_barrier(ApBarrier &bar, size_t arrivals)
+      inline RtBarrier get_next_future_map_barrier(void)
         {
-          Runtime::advance_barrier(bar);
-          if (!bar.exists())
-            create_new_logical_barrier(bar, arrivals);
+          const RtBarrier result = future_map_barriers[
+            next_future_map_bar_index++].next(this);
+          if (next_future_map_bar_index == future_map_barriers.size())
+            next_future_map_bar_index = 0;
+          return result;
+        }
+      // Note this method always returns two barrier generations
+      inline RtBarrier get_next_collective_map_barriers(void)
+        {
+#ifdef DEBUG_LEGION
+          // Assuming realm barriers always have even numbers of generations
+          assert((Realm::Barrier::MAX_PHASES % 2) == 0);
+#endif
+          const RtBarrier result = collective_map_barriers[
+            next_collective_map_bar_index].next(this);
+          collective_map_barriers[next_collective_map_bar_index++].next(this);
+          if (next_collective_map_bar_index == collective_map_barriers.size())
+            next_collective_map_bar_index = 0;
+          return result;
+        }
+      // Note this method always returns two barrier generations
+      inline ApBarrier get_next_indirection_barriers(void)
+        {
+#ifdef DEBUG_LEGION
+          // Assuming realm barriers always have even numbers of generations
+          assert((Realm::Barrier::MAX_PHASES % 2) == 0);
+#endif
+          const ApBarrier result = 
+            indirection_barriers[next_indirection_bar_index].next(this);
+          indirection_barriers[next_indirection_bar_index++].next(this);
+          if (next_indirection_bar_index == indirection_barriers.size())
+            next_indirection_bar_index = 0;
+          return result;
         }
     protected:
+#ifdef DEBUG_LEGION_COLLECTIVES
+      // Versions of the methods below but with reduction initialization
+      bool create_new_replicate_barrier(RtBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+      bool create_new_replicate_barrier(ApBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+      // This one can only be called inside the logical dependence analysis
+      bool create_new_logical_barrier(RtBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+      bool create_new_logical_barrier(ApBarrier &bar, ReductionOpID redop,
+          const void *init, size_t init_size, size_t arrivals);
+#else
       // These can only be called inside the task for this context
       // since they assume that all the shards are aligned and doing
       // the same calls for the same operations in the same order
-      void create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
-      void create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
+      bool create_new_replicate_barrier(RtBarrier &bar, size_t arrivals);
+      bool create_new_replicate_barrier(ApBarrier &bar, size_t arrivals);
       // This one can only be called inside the logical dependence analysis
-      void create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
-      void create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
+      bool create_new_logical_barrier(RtBarrier &bar, size_t arrivals);
+      bool create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
+#endif
     public:
       IndexSpace find_sharding_launch_space(Provenance *provenance);
       const DomainPoint& get_shard_point(void) const; 
@@ -2971,26 +3083,31 @@ namespace Legion {
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
       const size_t total_shards;
-    protected:
+    protected: 
+      typedef ReplBarrier<RtBarrier,false> RtReplBar;
+      typedef ReplBarrier<ApBarrier,false> ApReplBar;
+      typedef ReplBarrier<ApBarrier,false,true> ApReplSingleBar;
+      typedef ReplBarrier<RtBarrier,true> RtLogicalBar;
+      typedef ReplBarrier<ApBarrier,true> ApLogicalBar;
       // These barriers are used to identify when close operations are mapped
-      std::vector<RtBarrier>  close_mapped_barriers;
-      unsigned                next_close_mapped_bar_index;
+      std::vector<RtLogicalBar>  close_mapped_barriers;
+      unsigned                   next_close_mapped_bar_index;
       // These barriers are used to identify when refinement ops are ready
-      std::vector<RtBarrier>  refinement_ready_barriers;
-      unsigned                next_refinement_ready_bar_index;
+      std::vector<RtLogicalBar>  refinement_ready_barriers;
+      unsigned                   next_refinement_ready_bar_index;
       // These barriers are used to identify when refinement ops are mapped
-      std::vector<RtBarrier>  refinement_mapped_barriers;
-      unsigned                next_refinement_mapped_bar_index; 
+      std::vector<RtLogicalBar>  refinement_mapped_barriers;
+      unsigned                   next_refinement_mapped_bar_index; 
       // These barriers are for signaling when indirect copies are done
-      std::vector<ApBarrier>  indirection_barriers;
-      unsigned                next_indirection_bar_index;
+      std::vector<ApReplBar>     indirection_barriers;
+      unsigned                   next_indirection_bar_index;
       // These barriers are used for signaling when future maps can be reclaimed
-      std::vector<RtBarrier>  future_map_barriers;
-      unsigned                next_future_map_bar_index;
+      std::vector<RtReplBar>     future_map_barriers;
+      unsigned                   next_future_map_bar_index;
       // These barriers are used to identify pre and post conditions for
       // exclusive collective mapping operations 
-      std::vector<RtBarrier>  collective_map_barriers;
-      unsigned                next_collective_map_bar_index;
+      std::vector<RtLogicalBar>  collective_map_barriers;
+      unsigned                   next_collective_map_bar_index;
     protected:
       std::map<std::pair<size_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
     protected:
@@ -3007,27 +3124,27 @@ namespace Legion {
       ShardID equivalence_set_allocator_shard;
       ShardID fill_view_allocator_shard;
     protected:
-      ApBarrier pending_partition_barrier;
-      RtBarrier creation_barrier;
-      RtBarrier deletion_ready_barrier;
-      RtBarrier deletion_mapping_barrier;
-      RtBarrier deletion_execution_barrier;
-      RtBarrier attach_resource_barrier;
-      RtBarrier mapping_fence_barrier;
-      RtBarrier resource_return_barrier;
-      RtBarrier trace_recording_barrier;
-      RtBarrier summary_fence_barrier;
-      ApBarrier execution_fence_barrier;
-      RtBarrier dependent_partition_barrier;
-      RtBarrier semantic_attach_barrier;
-      ApBarrier future_map_wait_barrier;
-      ApBarrier inorder_barrier;
+      ApReplBar pending_partition_barrier;
+      RtReplBar creation_barrier;
+      RtLogicalBar deletion_ready_barrier;
+      RtLogicalBar deletion_mapping_barrier;
+      RtLogicalBar deletion_execution_barrier;
+      RtReplBar attach_resource_barrier;
+      RtLogicalBar mapping_fence_barrier;
+      RtReplBar resource_return_barrier;
+      RtLogicalBar trace_recording_barrier;
+      RtLogicalBar summary_fence_barrier;
+      ApLogicalBar execution_fence_barrier;
+      RtReplBar dependent_partition_barrier;
+      RtReplBar semantic_attach_barrier;
+      ApReplBar future_map_wait_barrier;
+      ApReplBar inorder_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
-      RtBarrier collective_check_barrier;
-      RtBarrier logical_check_barrier;
-      RtBarrier close_check_barrier;
-      RtBarrier refinement_check_barrier;
+      RtReplBar collective_check_barrier;
+      RtLogicalBar logical_check_barrier;
+      RtLogicalBar close_check_barrier;
+      RtLogicalBar refinement_check_barrier;
       bool collective_guard_reentrant;
       bool logical_guard_reentrant;
 #endif

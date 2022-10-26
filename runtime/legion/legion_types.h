@@ -159,8 +159,10 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+#ifdef LEGION_MULTI_REGION_ACCESSOR
   template<typename, int,typename,typename,bool,bool,int>
     class MultiRegionAccessor;
+#endif
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
   namespace ArraySyntax {
@@ -1576,11 +1578,11 @@ namespace Legion {
       COLLECTIVE_LOC_16 = 16,
       COLLECTIVE_LOC_17 = 17, 
       COLLECTIVE_LOC_18 = 18, 
-      COLLECTIVE_LOC_19 = 19,
+      //COLLECTIVE_LOC_19 = 19,
       COLLECTIVE_LOC_20 = 20,
       COLLECTIVE_LOC_21 = 21, 
       COLLECTIVE_LOC_22 = 22, 
-      COLLECTIVE_LOC_23 = 23,
+      //COLLECTIVE_LOC_23 = 23,
       COLLECTIVE_LOC_24 = 24,
       COLLECTIVE_LOC_25 = 25,
       COLLECTIVE_LOC_26 = 26,
@@ -1607,7 +1609,7 @@ namespace Legion {
       COLLECTIVE_LOC_47 = 47,
       COLLECTIVE_LOC_48 = 48,
       COLLECTIVE_LOC_49 = 49,
-      COLLECTIVE_LOC_50 = 50,
+      //COLLECTIVE_LOC_50 = 50,
       COLLECTIVE_LOC_51 = 51,
       COLLECTIVE_LOC_52 = 52,
       COLLECTIVE_LOC_53 = 53,
@@ -1636,7 +1638,7 @@ namespace Legion {
       COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
-      COLLECTIVE_LOC_79 = 79,
+      //COLLECTIVE_LOC_79 = 79,
       COLLECTIVE_LOC_80 = 80,
       COLLECTIVE_LOC_81 = 81,
       COLLECTIVE_LOC_82 = 82,
@@ -1647,7 +1649,7 @@ namespace Legion {
       COLLECTIVE_LOC_87 = 87,
       COLLECTIVE_LOC_88 = 88,
       COLLECTIVE_LOC_89 = 89,
-      COLLECTIVE_LOC_90 = 90,
+      //COLLECTIVE_LOC_90 = 90,
       COLLECTIVE_LOC_91 = 91,
       COLLECTIVE_LOC_92 = 92,
       COLLECTIVE_LOC_93 = 93,

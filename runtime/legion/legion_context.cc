@@ -12220,30 +12220,17 @@ namespace Legion {
         unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
     {
-      // Get our allocation barriers
-      pending_partition_barrier = manager->get_pending_partition_barrier();
-      creation_barrier = manager->get_creation_barrier();
-      deletion_ready_barrier = manager->get_deletion_ready_barrier();
-      deletion_mapping_barrier = manager->get_deletion_mapping_barrier();
-      deletion_execution_barrier = manager->get_deletion_execution_barrier();
-      attach_resource_barrier = manager->get_attach_resource_barrier();
-      mapping_fence_barrier = manager->get_mapping_fence_barrier();
-      resource_return_barrier = manager->get_resource_return_barrier();
-      trace_recording_barrier = manager->get_trace_recording_barrier();
-      summary_fence_barrier = manager->get_summary_fence_barrier();
-      execution_fence_barrier = manager->get_execution_fence_barrier();
-      dependent_partition_barrier = manager->get_dependent_partition_barrier();
-      semantic_attach_barrier = manager->get_semantic_attach_barrier();
-      future_map_wait_barrier = manager->get_future_map_wait_barrier();
-      inorder_barrier = manager->get_inorder_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
-      collective_check_barrier = manager->get_collective_check_barrier();
-      logical_check_barrier = manager->get_logical_check_barrier();
-      close_check_barrier = manager->get_close_check_barrier();
-      refinement_check_barrier = manager->get_refinement_check_barrier();
       collective_guard_reentrant = false;
       logical_guard_reentrant = false;
 #endif
+      size_t num_barriers = LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS;
+      close_mapped_barriers.resize(num_barriers);
+      refinement_ready_barriers.resize(num_barriers);
+      refinement_mapped_barriers.resize(num_barriers);
+      indirection_barriers.resize(num_barriers);
+      future_map_barriers.resize(num_barriers);
+      collective_map_barriers.resize(num_barriers);
       // Configure our collective settings
       shard_collective_radix = runtime->legion_collective_radix;
       configure_collective_settings(total_shards, owner->shard_id,
@@ -12266,43 +12253,6 @@ namespace Legion {
     ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
-      // We delete the barriers that we created
-      for (unsigned idx = owner_shard->shard_id; 
-            idx < close_mapped_barriers.size(); idx += total_shards)
-      {
-        Realm::Barrier bar = close_mapped_barriers[idx];
-        bar.destroy_barrier();
-      }
-      for (unsigned idx = owner_shard->shard_id; 
-            idx < refinement_ready_barriers.size(); idx += total_shards)
-      {
-        Realm::Barrier bar = refinement_ready_barriers[idx];
-        bar.destroy_barrier();
-      }
-      for (unsigned idx = owner_shard->shard_id; 
-            idx < refinement_mapped_barriers.size(); idx += total_shards)
-      {
-        Realm::Barrier bar = refinement_mapped_barriers[idx];
-        bar.destroy_barrier();
-      }
-      for (unsigned idx = owner_shard->shard_id;
-            idx < indirection_barriers.size(); idx += total_shards)
-      {
-        Realm::Barrier bar = indirection_barriers[idx];
-        bar.destroy_barrier();
-      }
-      for (unsigned idx = owner_shard->shard_id;
-            idx < future_map_barriers.size(); idx += total_shards)
-      {
-        Realm::Barrier bar = future_map_barriers[idx];
-        bar.destroy_barrier();
-      }
-      for (unsigned idx = owner_shard->shard_id;
-            idx < collective_map_barriers.size(); idx += total_shards)
-      {
-        Realm::Barrier bar = future_map_barriers[idx];
-        bar.destroy_barrier();
-      }
       while (!pending_index_spaces.empty())
       {
         std::pair<ValueBroadcast<ISBroadcast>*,bool> &collective = 
@@ -12984,15 +12934,14 @@ namespace Legion {
       }
       // Before we do anything else here, we need to make sure that all
       // the shards are done reading before we attempt to mutate the value
-      Runtime::phase_barrier_arrive(semantic_attach_barrier, 1/*count*/);
-      const RtEvent wait_on = semantic_attach_barrier;
-      advance_replicate_barrier(semantic_attach_barrier, total_shards);
+      const RtBarrier bar = semantic_attach_barrier.next(this);
+      Runtime::phase_barrier_arrive(bar, 1/*count*/);
       // Check to see if we can downgrade this to a local_only update
       if (global && shard_manager->is_total_sharding())
         global = false;
       // Wait until all the reads of the semantic info are done 
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
+      if (!bar.has_triggered())
+        bar.wait();
       if (global)
       {
         // If we're still global then just have shard 0 do this for now
@@ -13017,11 +12966,10 @@ namespace Legion {
     {
       if (inside_registration_callback)
         return;
-      Runtime::phase_barrier_arrive(semantic_attach_barrier, 1/*count*/);
-      const RtEvent wait_on = semantic_attach_barrier;
-      advance_replicate_barrier(semantic_attach_barrier, total_shards);
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
+      const RtBarrier bar = semantic_attach_barrier.next(this);
+      Runtime::phase_barrier_arrive(bar, 1/*count*/);
+      if (!bar.has_triggered())
+        bar.wait();
     }
 
 #ifdef NO_EXPLICIT_COLLECTIVES
@@ -13567,6 +13515,7 @@ namespace Legion {
         pending_index_spaces.front();
       CollectiveMapping &collective_mapping =
         shard_manager->get_collective_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this); 
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
@@ -13575,13 +13524,13 @@ namespace Legion {
         std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did, 
             provenance, &collective_mapping, value.expr_id,
-            ApEvent::NO_AP_EVENT, creation_barrier, &applied);
+            ApEvent::NO_AP_EVENT, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13609,18 +13558,16 @@ namespace Legion {
         std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did,
             provenance, &collective_mapping, value.expr_id,
-            ApEvent::NO_AP_EVENT, creation_barrier, &applied);
+            ApEvent::NO_AP_EVENT, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -13720,6 +13667,7 @@ namespace Legion {
       const ApEvent ready = creator_op->get_completion_event();
       CollectiveMapping &collective_mapping =
         shard_manager->get_collective_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
@@ -13728,13 +13676,13 @@ namespace Legion {
         std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did, 
                                 provenance, &collective_mapping, value.expr_id,
-                                ready, creation_barrier, &applied);
+                                ready, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13762,13 +13710,13 @@ namespace Legion {
         std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
                                 provenance, &collective_mapping, value.expr_id,
-                                ready, creation_barrier, &applied);
+                                ready, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       creator_op->initialize_index_space(this, node, future, provenance,
           shard_manager->is_first_local_shard(owner_shard), 
@@ -13776,8 +13724,6 @@ namespace Legion {
       add_to_dependence_queue(creator_op);
       delete collective.first;
       pending_index_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -13911,6 +13857,7 @@ namespace Legion {
         pending_index_spaces.front();
       CollectiveMapping &collective_mapping =
         shard_manager->get_collective_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
@@ -13918,13 +13865,13 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13951,18 +13898,16 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -14017,6 +13962,7 @@ namespace Legion {
         pending_index_spaces.front();
       CollectiveMapping &collective_mapping =
         shard_manager->get_collective_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
@@ -14024,13 +13970,13 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -14057,18 +14003,16 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
-            spaces,creation_barrier,&collective_mapping,value.expr_id,&applied);
+            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -14113,6 +14057,7 @@ namespace Legion {
         pending_index_spaces.front();
       CollectiveMapping &collective_mapping =
         shard_manager->get_collective_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
         const ISBroadcast value = collective.first->get_value(false);
@@ -14120,14 +14065,14 @@ namespace Legion {
         double_buffer = value.double_buffer;
         std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, provenance,
-            left, right, creation_barrier, &collective_mapping,
+            left, right, creation_bar, &collective_mapping,
             value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -14154,19 +14099,17 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, provenance,
-            left, right, creation_barrier, &collective_mapping,
+            left, right, creation_bar, &collective_mapping,
             value.expr_id, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_index_space_creation(handle);
       // Get new handles in flight for the next time we need them
@@ -14476,11 +14419,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReplicateContext::create_shard_partition(IndexPartition &pid,
-           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
+    bool ReplicateContext::create_shard_partition(Operation *op, 
+           IndexPartition &pid, IndexSpace parent, 
+           IndexSpace color_space, Provenance *provenance,
            PartitionKind part_kind, LegionColor partition_color,
-           bool color_generated, ValueBroadcast<bool> *disjoint_result/*=NULL*/,
-           ApBarrier partition_ready /*=ApBarrier::NO_AP_BARRIER*/)
+           bool color_generated, ApBarrier partition_ready,
+           ValueBroadcast<bool> *disjoint_result/*=NULL*/)
     //--------------------------------------------------------------------------
     {
       if (pending_index_partitions.empty())
@@ -14493,6 +14437,7 @@ namespace Legion {
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
       ShardMapping &shard_mapping = shard_manager->get_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (is_owner)
       {
         const IPBroadcast value = collective.first->get_value(false);
@@ -14503,12 +14448,11 @@ namespace Legion {
                                            collective.second, this, pid, parent,
                                            color_space, partition_color, 
                                            part_kind,value.did, provenance,
-                                           disjoint_result,
-                                           partition_ready.exists() ? 
-                                             partition_ready :
-                                             pending_partition_barrier,
+                                           disjoint_result, partition_ready,
                                            &collective_mapping, &shard_mapping,
-                                           creation_barrier, partition_ready);
+                                           creation_bar, (op == NULL) ? 
+                                            partition_ready : 
+                                            ApBarrier::NO_AP_BARRIER);
         // Broadcast the color if we have to generate it
         if (color_generated)
         {
@@ -14519,7 +14463,7 @@ namespace Legion {
           color_collective.broadcast(partition_color);
         }
         // Signal that we're done our creation
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, safe_event);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
         runtime->forest->revoke_pending_partition(value.pid);
         runtime->revoke_pending_distributed_collectable(value.did);
       }
@@ -14552,25 +14496,27 @@ namespace Legion {
                                          collective.second, this, pid, parent, 
                                          color_space, partition_color, 
                                          part_kind, value.did, provenance,
-                                         disjoint_result,
-                                         partition_ready.exists() ?
-                                           partition_ready :
-                                           pending_partition_barrier,
+                                         disjoint_result, partition_ready,
                                          &collective_mapping, &shard_mapping,
-                                         creation_barrier, partition_ready);
+                                         creation_bar, (op == NULL) ?
+                                          partition_ready :
+                                          ApBarrier::NO_AP_BARRIER);
         // Signal that we're done our creation
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, safe_event);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       }
       // Clean up the collective
       delete collective.first;
       pending_index_partitions.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Get new handles in flight for the next time we need them
       // Always add a new one to replace the old one, but double the number
       // in flight if we're not hiding the latency
       increase_pending_partitions(double_buffer ? 
         pending_index_partitions.size() + 1 : 1, double_next && !double_buffer);
+      // If we have an operation arrive on the partition ready barrier 
+      // once the operation is completed
+      if (op != NULL)
+        Runtime::phase_barrier_arrive(partition_ready, 1/*count*/,
+            op->get_completion_event());
       return is_owner;
     }
 
@@ -14604,21 +14550,18 @@ namespace Legion {
         partition_color = color;
       else
         color_generated = true;
-      if (create_shard_partition(pid, parent, color_space, provenance,
-            LEGION_DISJOINT_COMPLETE_KIND, partition_color, color_generated))
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            LEGION_DISJOINT_COMPLETE_KIND, partition_color, 
+            color_generated, pending_part_bar))
         log_index.debug("Creating equal partition %d with parent index space %x"
                         " in task %s (ID %lld)", pid.id, parent.id,
                         get_task_name(), get_unique_id());
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_equal_partition(this, pid, granularity, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Trigger the pending partition barrier and advance it
-      Runtime::phase_barrier_arrive(pending_partition_barrier, 
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       return pid;
     }
 
@@ -14653,22 +14596,19 @@ namespace Legion {
         partition_color = color;
       else
         color_generated = true;
-      if (create_shard_partition(pid, parent, color_space, provenance,
-            LEGION_DISJOINT_COMPLETE_KIND, partition_color, color_generated))
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            LEGION_DISJOINT_COMPLETE_KIND, partition_color, color_generated,
+            pending_part_bar))
         log_index.debug("Creating equal partition %d with parent index space %x"
                         " in task %s (ID %lld)", pid.id, parent.id,
                         get_task_name(), get_unique_id());
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_weight_partition(this, pid, weights, 
                                            granularity, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Trigger the pending partition barrier and advance it
-      Runtime::phase_barrier_arrive(pending_partition_barrier, 
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       return pid;
     }
 
@@ -14757,22 +14697,19 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_61);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance, kind,
-              partition_color, color_generated, disjoint_result))
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            kind, partition_color, color_generated, pending_part_bar,
+            disjoint_result))
         log_index.debug("Creating union partition %d with parent index "
                         "space %x in task %s (ID %lld)", pid.id, parent.id,
                         get_task_name(), get_unique_id());
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_union_partition(this, pid, handle1, 
                                           handle2, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier, 
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
@@ -14862,22 +14799,19 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_62);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance, kind,
-              partition_color, color_generated, disjoint_result))
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            kind, partition_color, color_generated, pending_part_bar,
+            disjoint_result))
         log_index.debug("Creating intersection partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
                         parent.id, get_task_name(), get_unique_id());
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_intersection_partition(this, pid, handle1,
                                                  handle2, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier, 
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards); 
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
@@ -14947,22 +14881,19 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_62);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, part_node->color_space->handle,
-           provenance, kind, partition_color, color_generated, disjoint_result))
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent,
+            part_node->color_space->handle, provenance, kind, partition_color,
+            color_generated, pending_part_bar, disjoint_result))
         log_index.debug("Creating intersection partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
                         parent.id, get_task_name(), get_unique_id());
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_intersection_partition(this, pid, partition,
                                                  dominates, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier, 
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards); 
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
@@ -15042,22 +14973,19 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_63);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance, kind,
-              partition_color, color_generated, disjoint_result))
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            kind, partition_color, color_generated, pending_part_bar,
+            disjoint_result))
         log_index.debug("Creating difference partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
                         parent.id, get_task_name(), get_unique_id());
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
       part_op->initialize_difference_partition(this, pid, handle1, 
                                                handle2, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
@@ -15106,6 +15034,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       ApEvent term_event = part_op->get_completion_event();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       // We need an owner node to decide which color everyone is going to use
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -15127,9 +15056,9 @@ namespace Legion {
         // Now broadcast the chosen color to all the other shards
         ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         // Wait for the creation to be done
-        creation_barrier.wait();
+        creation_bar.wait();
       }
       else
       {
@@ -15151,12 +15080,11 @@ namespace Legion {
         RtEvent safe_event;
         if (!safe_events.empty())
           safe_event = Runtime::merge_events(safe_events);
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, safe_event);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
         // Also have to wait for creation to finish on all shards because
         // any shard can handle requests for any cross-product partition
-        creation_barrier.wait();
+        creation_bar.wait();
       }
-      advance_replicate_barrier(creation_barrier, total_shards);
       part_op->initialize_cross_product(this, handle1, handle2,
                                         partition_color, provenance);
       // Now we can add the operation to the queue
@@ -15252,8 +15180,7 @@ namespace Legion {
                                     0/*owner shard*/, COLLECTIVE_LOC_37));
 #endif
       part_op->initialize_by_association(this, domain, domain_parent, 
-          domain_fid, range, id, tag, marg, 
-          dependent_partition_barrier, provenance);
+          domain_fid, range, id, tag, marg, provenance);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!runtime->unsafe_launch)
@@ -15320,21 +15247,18 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_64);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance, 
-            part_kind, part_color, color_generated, disjoint_result))
-        log_index.debug("Creating restricted partition in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            part_kind, part_color, color_generated, pending_part_bar,
+            disjoint_result))
+        log_index.debug("Creating restricted partition in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
       part_op->initialize_restricted_partition(this, pid, transform, 
                     transform_size, extent, extent_size, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Now update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
@@ -15442,21 +15366,18 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_76);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance,
-            part_kind, part_color, color_generated, disjoint_result))
-        log_index.debug("Creating partition by domain in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            part_kind, part_color, color_generated, pending_part_bar,
+            disjoint_result))
+        log_index.debug("Creating partition by domain in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
       part_op->initialize_by_domain(this, pid, domains, 
                                     perform_intersections, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // Now update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       if (runtime->verify_partitions)
         verify_partition(pid, verify_kind, __func__);
       return pid;
@@ -15506,18 +15427,17 @@ namespace Legion {
       else
         color_generated = true;
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance,
-            part_kind, part_color, color_generated))
-        log_index.debug("Creating partition by field in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
-      // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, parent, color_space, provenance,
+            part_kind, part_color, color_generated, pending_part_bar))
+        log_index.debug("Creating partition by field in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
       part_op->initialize_by_field(this, index_partition_allocator_shard,
-                                   pending_partition_barrier, pid, handle, 
+                                   pending_part_bar, pid, handle, 
                                    parent_priv, color_space, fid, id, tag,
-                                   marg,dependent_partition_barrier,provenance);
+                                   marg, provenance);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -15537,10 +15457,6 @@ namespace Legion {
       }
       // Issue the copy operation
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -15601,22 +15517,22 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_65);
       IndexPartition pid(0/*temp*/, handle.get_tree_id(),handle.get_type_tag());
-      if (create_shard_partition(pid, handle, color_space, provenance,
-            part_kind, part_color, color_generated, disjoint_result))
-        log_index.debug("Creating partition by image in task %s (ID %lld)", 
-                        get_task_name(), get_unique_id());
-      // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, handle, color_space, provenance,
+            part_kind, part_color, color_generated, pending_part_bar,
+            disjoint_result))
+        log_index.debug("Creating partition by image in task %s (ID %lld)", 
+                        get_task_name(), get_unique_id());
       part_op->initialize_by_image(this, 
 #ifndef SHARD_BY_IMAGE
                                    index_partition_allocator_shard,
 #endif
-                                   pending_partition_barrier, pid, handle, 
+                                   pending_part_bar, pid, handle, 
                                    projection, parent, fid, id, tag, marg,
                                    owner_shard->shard_id, total_shards,
-                                   dependent_partition_barrier, provenance);
+                                   provenance);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_39));
@@ -15636,10 +15552,6 @@ namespace Legion {
       }
       // Issue the copy operation
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -15700,22 +15612,21 @@ namespace Legion {
             pending_index_partitions.empty() ? index_partition_allocator_shard :
             pending_index_partitions.front().second, COLLECTIVE_LOC_66);
       IndexPartition pid(0/*temp*/, handle.get_tree_id(),handle.get_type_tag());
-      if (create_shard_partition(pid, handle, color_space, provenance,
-            part_kind, part_color, color_generated, disjoint_result))
-        log_index.debug("Creating partition by image range in task %s "
-                        "(ID %lld)", get_task_name(), get_unique_id());
-      // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, handle, color_space, provenance,
+            part_kind, part_color, color_generated, pending_part_bar,
+            disjoint_result))
+        log_index.debug("Creating partition by image range in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
       part_op->initialize_by_image_range(this, 
 #ifndef SHARD_BY_IMAGE
                                          index_partition_allocator_shard,
 #endif
-                                         pending_partition_barrier, pid, handle,
+                                         pending_part_bar, pid, handle,
                                          projection, parent, fid, id, tag, marg,
                                          owner_shard->shard_id, total_shards,
-                                         dependent_partition_barrier,
                                          provenance);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
@@ -15736,10 +15647,6 @@ namespace Legion {
       }
       // Issue the copy operation
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -15817,19 +15724,18 @@ namespace Legion {
             pending_index_partitions.front().second, COLLECTIVE_LOC_67);
       IndexPartition pid(0/*temp*/,
           handle.get_index_space().get_tree_id(), handle.get_type_tag());
-      if (create_shard_partition(pid, handle.get_index_space(), color_space,
-           provenance, part_kind, part_color, color_generated, disjoint_result))
-        log_index.debug("Creating partition by preimage in task %s (ID %lld)",
-                        get_task_name(), get_unique_id());
-      // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, handle.get_index_space(),
+            color_space, provenance, part_kind, part_color,
+            color_generated, pending_part_bar, disjoint_result))
+        log_index.debug("Creating partition by preimage in task %s (ID %lld)",
+                        get_task_name(), get_unique_id());
       part_op->initialize_by_preimage(this, index_partition_allocator_shard,
-                                      pending_partition_barrier,
-                                      pid, projection, handle,
-                                      parent, fid, id, tag, marg,
-                                      dependent_partition_barrier, provenance);
+                                      pending_part_bar, pid, projection,
+                                      handle, parent, fid, id, tag, marg,
+                                      provenance);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_41));
@@ -15849,10 +15755,6 @@ namespace Legion {
       }
       // Issue the copy operation
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -15913,20 +15815,18 @@ namespace Legion {
             pending_index_partitions.front().second, COLLECTIVE_LOC_68);
       IndexPartition pid(0/*temp*/,
           handle.get_index_space().get_tree_id(), handle.get_type_tag());
-      if (create_shard_partition(pid, handle.get_index_space(), color_space,
-           provenance, part_kind, part_color, color_generated, disjoint_result))
-        log_index.debug("Creating partition by preimage range in task %s "
-                        "(ID %lld)", get_task_name(), get_unique_id());
-      // Allocate the partition operation
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApEvent term_event = part_op->get_completion_event();
+      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
+      if (create_shard_partition(part_op, pid, handle.get_index_space(),
+            color_space, provenance, part_kind, part_color,
+            color_generated, pending_part_bar, disjoint_result))
+        log_index.debug("Creating partition by preimage range in task %s "
+                        "(ID %lld)", get_task_name(), get_unique_id());
       part_op->initialize_by_preimage_range(this, 
                                             index_partition_allocator_shard, 
-                                            pending_partition_barrier,
-                                            pid, projection, handle,
-                                            parent, fid, id, tag, marg,
-                                            dependent_partition_barrier,
+                                            pending_part_bar, pid, projection,
+                                            handle, parent, fid, id, tag, marg,
                                             provenance);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
@@ -15947,10 +15847,6 @@ namespace Legion {
       }
       // Issue the copy operation
       add_to_dependence_queue(part_op);
-      // Update the pending partition barrier
-      Runtime::phase_barrier_arrive(pending_partition_barrier,
-                                    1/*count*/, term_event);
-      advance_replicate_barrier(pending_partition_barrier, total_shards);
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
@@ -16021,8 +15917,9 @@ namespace Legion {
       if (index_partition_allocator_shard == total_shards)
         index_partition_allocator_shard = 0;
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
-      if (create_shard_partition(pid, parent, color_space, provenance,part_kind,
-            part_color, color_generated, disjoint_result, partition_ready))
+      if (create_shard_partition(NULL/*op*/, pid, parent, color_space,
+            provenance,part_kind, part_color, color_generated,
+            partition_ready, disjoint_result))
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
       if (runtime->verify_partitions && !trust)
@@ -16521,6 +16418,7 @@ namespace Legion {
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
       ShardMapping &shard_mapping = shard_manager->get_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
         const FSBroadcast value = collective.first->get_value(false);
@@ -16529,13 +16427,13 @@ namespace Legion {
         // Need to register this before broadcasting
         std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_barrier, &applied);
+            &collective_mapping, &shard_mapping, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/); 
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -16562,18 +16460,16 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_barrier, &applied);
+            &collective_mapping, &shard_mapping, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_field_spaces.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Record this in our context
       register_field_space_creation(space);
       // Get new handles in flight for the next time we need them
@@ -16672,15 +16568,14 @@ namespace Legion {
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
                 sizes[idx], (provenance == NULL) ? NULL : provenance->c_str());
       }
-      Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+      const RtBarrier creation_bar = creation_barrier.next(this);
+      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       CreationOp *creator_op = runtime->get_available_creation_op();
-      creator_op->initialize_fence(this, creation_barrier, provenance);
+      creator_op->initialize_fence(this, creation_bar, provenance);
       add_to_dependence_queue(creator_op);
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       register_all_field_creations(space, false/*loca*/, resulting_fields);
       return space;
     }
@@ -16769,6 +16664,7 @@ namespace Legion {
         shard_manager->is_first_local_shard(owner_shard);
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       // This deduplicates multiple shards on the same node
       if (local_shard)
       {
@@ -16777,22 +16673,20 @@ namespace Legion {
         FieldSpaceNode *node = runtime->forest->get_node(space);
         node->initialize_fields(ready, resulting_fields, serdez_id,
                                 provenance, true/*collective*/);
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, RtEvent::NO_RT_EVENT,
                                       provenance, owner);
       }
       else
       {
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        creator_op->initialize_fence(this, creation_barrier, provenance);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        creator_op->initialize_fence(this, creation_bar, provenance);
       }
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       add_to_dependence_queue(creator_op);
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       register_all_field_creations(space, false/*local*/, resulting_fields);
       return space;
     }
@@ -17030,15 +16924,14 @@ namespace Legion {
           LegionSpy::log_field_creation(space.id, fid, field_size,
               (provenance == NULL) ? NULL : provenance->c_str());
       }
-      Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, precondition);
+      const RtBarrier creation_bar = creation_barrier.next(this);
+      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       CreationOp *creator_op = runtime->get_available_creation_op();
-      creator_op->initialize_fence(this, creation_barrier, provenance);
+      creator_op->initialize_fence(this, creation_bar, provenance);
       add_to_dependence_queue(creator_op);
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       register_field_creation(space, fid, local);
       return fid;
     }
@@ -17153,6 +17046,7 @@ namespace Legion {
 #endif
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       // This deduplicates multiple shards on the same node
       if (finder->second.second)
       {
@@ -17161,21 +17055,19 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_field(space, ready,
             fid, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_barrier,1/*count*/,precondition);
+        Runtime::phase_barrier_arrive(creation_bar,1/*count*/,precondition);
         creator_op->initialize_field(this, node, fid, field_size, 
                                      precondition, provenance, owner);
       }
       else
       {
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        creator_op->initialize_fence(this, creation_barrier, provenance);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        creator_op->initialize_fence(this, creation_bar, provenance);
       }
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       add_to_dependence_queue(creator_op);
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       register_field_creation(space, fid, local);
       return fid;
     }
@@ -17327,15 +17219,14 @@ namespace Legion {
             LegionSpy::log_field_creation(space.id, resulting_fields[idx],
                 sizes[idx], (provenance == NULL) ? NULL : provenance->c_str());
       }
-      Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/, precondition);
+      const RtBarrier creation_bar = creation_barrier.next(this);
+      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, precondition);
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       CreationOp *creator_op = runtime->get_available_creation_op();
-      creator_op->initialize_fence(this, creation_barrier, provenance);
+      creator_op->initialize_fence(this, creation_bar, provenance);
       add_to_dependence_queue(creator_op);
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       register_all_field_creations(space, local, resulting_fields);
     }
 
@@ -17426,6 +17317,7 @@ namespace Legion {
 #endif
       // Get a new creation operation
       CreationOp *creator_op = runtime->get_available_creation_op();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       // This deduplicates multiple shards on the same node
       if (finder->second.second)
       {
@@ -17434,21 +17326,19 @@ namespace Legion {
         RtEvent precondition;
         FieldSpaceNode *node = runtime->forest->allocate_fields(space, ready,
                 resulting_fields, serdez_id, provenance, precondition, !owner);
-        Runtime::phase_barrier_arrive(creation_barrier,1/*count*/,precondition);
+        Runtime::phase_barrier_arrive(creation_bar,1/*count*/,precondition);
         creator_op->initialize_fields(this, node, resulting_fields, 
                                       sizes, precondition, provenance, owner);
       }
       else
       {
-        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
-        creator_op->initialize_fence(this, creation_barrier, provenance);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        creator_op->initialize_fence(this, creation_bar, provenance);
       }
       // Launch the creation op in this context to act as a fence to ensure
       // that the allocations are done on all shard nodes before anyone else
       // tries to use them or their meta-data
       add_to_dependence_queue(creator_op);
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       register_all_field_creations(space, local, resulting_fields);
     }
 
@@ -17552,6 +17442,7 @@ namespace Legion {
         pending_region_trees.front();
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
+      const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
         const LRBroadcast value = collective.first->get_value(false);
@@ -17560,13 +17451,13 @@ namespace Legion {
         std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
         runtime->forest->create_logical_region(handle, value.did, provenance,
-            &collective_mapping, creation_barrier, &applied);
+            &collective_mapping, creation_bar, &applied);
         // Arrive on the creation barrier
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -17595,18 +17486,16 @@ namespace Legion {
 #endif
         std::set<RtEvent> applied;
         runtime->forest->create_logical_region(handle, value.did, provenance,
-            &collective_mapping, creation_barrier, &applied);
+            &collective_mapping, creation_bar, &applied);
         // Signal that we are done our creation
         if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/,
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
               Runtime::merge_events(applied));
         else
-          Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_region_trees.pop_front();
-      // Advance the creation barrier so that we know when it is ready
-      advance_replicate_barrier(creation_barrier, total_shards);
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local, output_region);
       // Get new handles in flight for the next time we need them
@@ -18984,8 +18873,7 @@ namespace Legion {
       copy_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                        0/*owner shard*/, COLLECTIVE_LOC_48));
 #endif
-      copy_op->initialize_replication(this, indirection_barriers,
-                                      next_indirection_bar_index);
+      copy_op->initialize_replication(this);
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
@@ -19196,10 +19084,9 @@ namespace Legion {
             get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
       PhysicalRegion result = attach_op->initialize(this, launcher, provenance);
-      attach_op->initialize_replication(this, attach_resource_barrier,
-          launcher.collective, launcher.deduplicate_across_shards,
+      attach_op->initialize_replication(this, launcher.collective, 
+          launcher.deduplicate_across_shards,
           shard_manager->is_first_local_shard(owner_shard));
-
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_regions(attach_op, 
                                           parent_conflict, inline_conflict);
@@ -19951,14 +19838,11 @@ namespace Legion {
       if (runtime->program_order_execution && !unordered &&
           !is_replaying_physical_trace())
       {
-#ifdef DEBUG_LEGION
-        assert(inorder_barrier.exists());
-#endif
         ApEvent term_event = op->get_program_order_event();
         InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
-        Runtime::phase_barrier_arrive(inorder_barrier, 1/*count*/, term_event); 
-        term_event = inorder_barrier;
-        advance_replicate_barrier(inorder_barrier, total_shards);
+        const ApBarrier inorder_bar = inorder_barrier.next(this);
+        Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
+        term_event = inorder_bar;
         if (outermost)
         {
           begin_task_wait(true/*from runtime*/);
@@ -20230,26 +20114,23 @@ namespace Legion {
     {
       ReplMergeCloseOp *result = runtime->get_available_repl_merge_close_op();
       // Get the mapped barrier for the close operation
-      const unsigned close_index = next_close_mapped_bar_index++;
-      if (next_close_mapped_bar_index == close_mapped_barriers.size())
-        next_close_mapped_bar_index = 0;
-      RtBarrier &mapped_bar = close_mapped_barriers[close_index];
+      const RtBarrier mapped_bar = get_next_close_mapped_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       CloseCheckReduction::RHS barrier(user, mapped_bar, 
                                        node, false/*read only*/);
-      Runtime::phase_barrier_arrive(close_check_barrier, 1/*count*/,
+      const RtBarrier close_check_bar = close_check_barrier.next(this,
+          CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY,
+          sizeof(CloseCheckReduction::IDENTITY));
+      Runtime::phase_barrier_arrive(close_check_bar, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
-      close_check_barrier.wait();
+      close_check_bar.wait();
       CloseCheckReduction::RHS actual_barrier;
-      bool ready = Runtime::get_barrier_result(close_check_barrier,
+      bool ready = Runtime::get_barrier_result(close_check_bar,
                                       &actual_barrier, sizeof(actual_barrier));
       assert(ready);
       assert(actual_barrier == barrier);
-      advance_logical_barrier(close_check_barrier, total_shards);
 #endif
       result->set_repl_close_info(mapped_bar);
-      // Advance the phase for the next time through
-      advance_logical_barrier(mapped_bar, total_shards);
       return result;
     }
 
@@ -20264,27 +20145,24 @@ namespace Legion {
     {
       ReplRefinementOp *result = runtime->get_available_repl_refinement_op();
       // Get the mapped barrier for the refinement operation
-      const unsigned refinement_index = next_refinement_mapped_bar_index++;
-      if (next_refinement_mapped_bar_index == refinement_mapped_barriers.size())
-        next_refinement_mapped_bar_index = 0;
-      RtBarrier &mapped_bar = refinement_mapped_barriers[refinement_index];
+      RtBarrier mapped_bar = get_next_refinement_mapped_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       CloseCheckReduction::RHS barrier(user, mapped_bar,
                                        node, false/*read only*/);
-      Runtime::phase_barrier_arrive(refinement_check_barrier, 1/*count*/,
+      const RtBarrier refinement_check_bar = refinement_check_barrier.next(this,
+          CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY, 
+          sizeof(CloseCheckReduction::IDENTITY));
+      Runtime::phase_barrier_arrive(refinement_check_bar, 1/*count*/,
                               RtEvent::NO_RT_EVENT, &barrier, sizeof(barrier));
-      refinement_check_barrier.wait();
+      refinement_check_bar.wait();
       CloseCheckReduction::RHS actual_barrier;
-      bool ready = Runtime::get_barrier_result(refinement_check_barrier,
+      bool ready = Runtime::get_barrier_result(refinement_check_bar,
                                       &actual_barrier, sizeof(actual_barrier));
       assert(ready);
       assert(actual_barrier == barrier);
-      advance_logical_barrier(refinement_check_barrier, total_shards);
 #endif
       const RtBarrier next_refinement_bar = get_next_refinement_barrier();
       result->set_repl_refinement_info(mapped_bar, next_refinement_bar);
-      // Advance the phase for the next time through
-      advance_logical_barrier(mapped_bar, total_shards);
       return result;
     }
 
@@ -20301,41 +20179,6 @@ namespace Legion {
       rez.serialize(shard_manager->shard_points[owner_shard->shard_id]);
       rez.serialize(shard_manager->shard_domain);
       rez.serialize(shard_manager->repl_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::exchange_common_resources(void)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_barriers = LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS;
-      if (shard_manager->total_shards > num_barriers)
-        num_barriers = shard_manager->total_shards;
-      // Exchange close map barriers across all the shards
-      BarrierExchangeCollective<RtBarrier> mapped_collective(this,
-          num_barriers, close_mapped_barriers, COLLECTIVE_LOC_50);
-      mapped_collective.exchange_barriers_async();
-      BarrierExchangeCollective<RtBarrier> refinement_ready_collective(this,
-          num_barriers, refinement_ready_barriers, COLLECTIVE_LOC_23);
-      refinement_ready_collective.exchange_barriers_async();
-      BarrierExchangeCollective<RtBarrier> refinement_collective(this,
-          num_barriers, refinement_mapped_barriers, COLLECTIVE_LOC_19);
-      refinement_collective.exchange_barriers_async();
-      BarrierExchangeCollective<ApBarrier> indirect_collective(this,
-          num_barriers, indirection_barriers, COLLECTIVE_LOC_79);
-      indirect_collective.exchange_barriers_async();
-      BarrierExchangeCollective<RtBarrier> future_map_collective(this,
-          num_barriers, future_map_barriers, COLLECTIVE_LOC_90);
-      future_map_collective.exchange_barriers_async();
-      BarrierExchangeCollective<RtBarrier> collective_map_collective(this,
-          num_barriers, collective_map_barriers, COLLECTIVE_LOC_51);
-      collective_map_collective.exchange_barriers_async();
-      // Wait for everything to be done
-      mapped_collective.wait_for_barrier_exchange();
-      refinement_ready_collective.wait_for_barrier_exchange();
-      refinement_collective.wait_for_barrier_exchange();
-      indirect_collective.wait_for_barrier_exchange();
-      future_map_collective.wait_for_barrier_exchange();
-      collective_map_collective.wait_for_barrier_exchange();
     }
 
     //--------------------------------------------------------------------------
@@ -21437,18 +21280,21 @@ namespace Legion {
         if (!logical_guard_reentrant)
         {
           CollectiveCheckReduction::RHS location = loc;
-          Runtime::phase_barrier_arrive(logical_check_barrier, 1/*count*/,
+          // Guard against coming back in here when advancing the barrier
+          logical_guard_reentrant = true;
+          const RtBarrier logical_check_bar = logical_check_barrier.next(this,
+              CollectiveCheckReduction::REDOP, 
+              &CollectiveCheckReduction::IDENTITY,
+              sizeof(CollectiveCheckReduction::IDENTITY));
+          logical_guard_reentrant = false;
+          Runtime::phase_barrier_arrive(logical_check_bar, 1/*count*/,
                              RtEvent::NO_RT_EVENT, &location, sizeof(location));
-          logical_check_barrier.wait();
+          logical_check_bar.wait();
           CollectiveCheckReduction::RHS actual_location;
-          bool ready = Runtime::get_barrier_result(logical_check_barrier,
+          bool ready = Runtime::get_barrier_result(logical_check_bar,
                                      &actual_location, sizeof(actual_location));
           assert(ready);
           assert(location == actual_location);
-          // Guard against coming back in here when advancing the barrier
-          logical_guard_reentrant = true;
-          advance_logical_barrier(logical_check_barrier, total_shards);
-          logical_guard_reentrant = false;
         }
 #endif
         const CollectiveID result = next_logical_collective_index;
@@ -21461,18 +21307,21 @@ namespace Legion {
         if (!collective_guard_reentrant)
         {
           CollectiveCheckReduction::RHS location = loc;
-          Runtime::phase_barrier_arrive(collective_check_barrier, 1/*count*/,
+          // Guard against coming back in here when advancing the barrier
+          collective_guard_reentrant = true;
+          const RtBarrier collective_check_bar = collective_check_barrier.next(
+              this, CollectiveCheckReduction::REDOP, 
+              &CollectiveCheckReduction::IDENTITY,
+              sizeof(CollectiveCheckReduction::IDENTITY));
+          collective_guard_reentrant = false;
+          Runtime::phase_barrier_arrive(collective_check_bar, 1/*count*/,
                              RtEvent::NO_RT_EVENT, &location, sizeof(location));
-          collective_check_barrier.wait();
+          collective_check_bar.wait();
           CollectiveCheckReduction::RHS actual_location;
-          bool ready = Runtime::get_barrier_result(collective_check_barrier,
+          bool ready = Runtime::get_barrier_result(collective_check_bar,
                                      &actual_location, sizeof(actual_location));
           assert(ready);
           assert(location == actual_location);
-          // Guard against coming back in here when advancing the barrier
-          collective_guard_reentrant = true;
-          advance_replicate_barrier(collective_check_barrier, total_shards);
-          collective_guard_reentrant = false;
         }
 #endif
         const CollectiveID result = next_available_collective_index;
@@ -21571,18 +21420,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return next_future_map_bar_index;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_future_map_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      RtBarrier &next = future_map_barriers[next_future_map_bar_index++];
-      if (next_future_map_bar_index == future_map_barriers.size())
-        next_future_map_bar_index = 0;
-      RtBarrier result = next;
-      advance_replicate_barrier(next, total_shards);
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -21810,118 +21647,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_mapping_fence_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      RtBarrier result = mapping_fence_barrier;
-      advance_logical_barrier(mapping_fence_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier ReplicateContext::get_next_execution_fence_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      ApBarrier result = execution_fence_barrier;
-      advance_logical_barrier(execution_fence_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_resource_return_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      RtBarrier result = resource_return_barrier;
-      advance_replicate_barrier(resource_return_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_refinement_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const unsigned refinement_index = next_refinement_ready_bar_index++;
-      if (next_refinement_ready_bar_index == refinement_ready_barriers.size())
-        next_refinement_ready_bar_index = 0;
-      RtBarrier &refinement_bar = refinement_ready_barriers[refinement_index];
-      const RtBarrier result = refinement_bar;
-      advance_logical_barrier(refinement_bar, total_shards);
-      return result;
-    } 
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_collective_map_barriers(void)
-    //--------------------------------------------------------------------------
-    {
-      const unsigned collective_index = next_collective_map_bar_index++;
-      if (next_collective_map_bar_index == collective_map_barriers.size())
-        next_collective_map_bar_index = 0;
-      RtBarrier &collective_map_bar = collective_map_barriers[collective_index];
-      const RtBarrier result = collective_map_bar;
-      // Need to advance this twice since we're giving back two generations
-      // There is an implicit assumption here the number of generations in 
-      // the barrier is a multiple of 2, but that seems to be a safe bet :)
-      advance_logical_barrier(collective_map_bar, total_shards);
-      advance_logical_barrier(collective_map_bar, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_trace_recording_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtBarrier result = trace_recording_barrier;
-      advance_logical_barrier(trace_recording_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_summary_fence_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtBarrier result = summary_fence_barrier;
-      advance_logical_barrier(summary_fence_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_deletion_ready_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtBarrier result = deletion_ready_barrier;
-      advance_logical_barrier(deletion_ready_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_deletion_mapping_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtBarrier result = deletion_mapping_barrier;
-      advance_logical_barrier(deletion_mapping_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    RtBarrier ReplicateContext::get_next_deletion_execution_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const RtBarrier result = deletion_execution_barrier;
-      advance_logical_barrier(deletion_execution_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier ReplicateContext::get_next_future_map_wait_barrier(void)
-    //--------------------------------------------------------------------------
-    {
-      const ApBarrier result = future_map_wait_barrier;
-      advance_replicate_barrier(future_map_wait_barrier, total_shards);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 
+    bool ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
                                                         size_t arrivals)
     //--------------------------------------------------------------------------
     {
@@ -21929,22 +21658,33 @@ namespace Legion {
       assert(!bar.exists());
       assert(next_replicate_bar_index < total_shards);
 #endif
+      bool created = false;
       ValueBroadcast<RtBarrier> 
         collective(this, next_replicate_bar_index, COLLECTIVE_LOC_83);
       if (owner_shard->shard_id == next_replicate_bar_index++)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
         collective.broadcast(bar);
+        created = true;
       }
       else
         bar = collective.get_value();
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_replicate_bar_index == total_shards)
-        next_replicate_bar_index = 0;
+       next_replicate_bar_index = 0;
+      return created;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::create_new_replicate_barrier(ApBarrier &bar,
+    bool ReplicateContext::create_new_replicate_barrier(ApBarrier &bar,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
                                                         size_t arrivals)
     //--------------------------------------------------------------------------
     {
@@ -21952,22 +21692,33 @@ namespace Legion {
       assert(!bar.exists());
       assert(next_replicate_bar_index < total_shards);
 #endif
+      bool created = false;
       ValueBroadcast<ApBarrier> 
         collective(this, next_replicate_bar_index, COLLECTIVE_LOC_84);
       if (owner_shard->shard_id == next_replicate_bar_index++)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
         bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
         collective.broadcast(bar);
+        created = true;
       }
       else
         bar = collective.get_value();
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_replicate_bar_index == total_shards)
         next_replicate_bar_index = 0;
+      return created;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::create_new_logical_barrier(RtBarrier &bar, 
+    bool ReplicateContext::create_new_logical_barrier(RtBarrier &bar, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
                                                       size_t arrivals)
     //--------------------------------------------------------------------------
     {
@@ -21975,23 +21726,34 @@ namespace Legion {
       assert(!bar.exists());
       assert(next_logical_bar_index < total_shards);
 #endif
+      bool created = false;
       const CollectiveID cid =
         get_next_collective_index(COLLECTIVE_LOC_18, true/*logical*/);
       ValueBroadcast<RtBarrier> collective(cid, this, next_logical_bar_index);
       if (owner_shard->shard_id == next_logical_bar_index++)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = RtBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
         bar = RtBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
         collective.broadcast(bar);
+        created = true;
       }
       else
         bar = collective.get_value();
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_logical_bar_index == total_shards)
         next_logical_bar_index = 0;
+      return created;
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::create_new_logical_barrier(ApBarrier &bar, 
+    bool ReplicateContext::create_new_logical_barrier(ApBarrier &bar, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                ReductionOpID redop, const void *init, size_t init_size,
+#endif
                                                       size_t arrivals)
     //--------------------------------------------------------------------------
     {
@@ -21999,19 +21761,27 @@ namespace Legion {
       assert(!bar.exists());
       assert(next_logical_bar_index < total_shards);
 #endif
+      bool created = false;
       const CollectiveID cid =
         get_next_collective_index(COLLECTIVE_LOC_24, true/*logical*/);
       ValueBroadcast<ApBarrier> collective(cid, this, next_logical_bar_index);
       if (owner_shard->shard_id == next_logical_bar_index++)
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        bar = ApBarrier(Realm::Barrier::create_barrier(arrivals, redop,
+                                                       init, init_size));
+#else
         bar = ApBarrier(Realm::Barrier::create_barrier(arrivals));
+#endif
         collective.broadcast(bar);
+        created = true;
       }
       else
         bar = collective.get_value();
       // Check to see if we need to reset the next_replicate_bar_index
       if (next_logical_bar_index == total_shards)
         next_logical_bar_index = 0;
+      return created;
     }
 
     //--------------------------------------------------------------------------

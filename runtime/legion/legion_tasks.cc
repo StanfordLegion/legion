@@ -8265,8 +8265,6 @@ namespace Legion {
         execution_context = repl_ctx;
         // Wait until all the other shards are ready too
         complete_startup_initialization();
-        // The replicate contexts all need to sync up to exchange resources 
-        repl_ctx->exchange_common_resources();
         return repl_ctx;
       }
       else // No control replication so do the normal thing
@@ -8291,8 +8289,6 @@ namespace Legion {
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
       complete_startup_initialization();
-      // The replicate contexts all need to sync up to exchange resources 
-      repl_ctx->exchange_common_resources();
       return repl_ctx;
     }
 
