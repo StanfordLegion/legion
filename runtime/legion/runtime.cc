@@ -10880,7 +10880,7 @@ namespace Legion {
           collector = new GarbageCollector(collection_lock, manager_lock, 
               runtime->address_space, memory, size, 
               collectable_instances, current_instances);
-        else if (collector->collection_complete())
+        if (collector->collection_complete())
           break;
         RtEvent ready = collector->perform_collection();
         if (ready.exists() && !ready.has_triggered())
