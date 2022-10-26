@@ -1079,7 +1079,8 @@ namespace Legion {
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped, UniqueID context_uid, 
                    ApEvent execution_fence, bool remote = false, 
-                   bool inline_task = false, bool implicit_task = false);
+                   bool inline_task = false, bool implicit_task = false,
+                   bool concurrent_task = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:
@@ -1090,6 +1091,8 @@ namespace Legion {
       void record_physical_trace_replay(RtEvent ready, bool replay);
       bool is_replaying_physical_trace(void);
       virtual ReplicationID get_replication_id(void) const { return 0; }
+      inline bool is_concurrent_context(void) const
+        { return concurrent_context; }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -1813,6 +1816,9 @@ namespace Legion {
       const bool remote_context;
       const bool full_inner_context;
     protected:
+      // This is immutable except for remote contexts which unpack it 
+      // after the object has already been created
+      bool concurrent_context;
       bool finished_execution;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
@@ -2278,7 +2284,7 @@ namespace Legion {
                        const std::vector<bool> &virt_mapped,
                        UniqueID context_uid, ApEvent execution_fence_event,
                        ShardManager *manager, bool inline_task, 
-                       bool implicit_task = false);
+                       bool implicit_task = false, bool concurrent = false);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:

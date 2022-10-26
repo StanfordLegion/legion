@@ -2840,12 +2840,14 @@ namespace Legion {
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote,
-                               bool inline_task, bool implicit_task)
+                               bool inline_task, bool implicit_task, 
+                               bool concurrent)
       : TaskContext(rt, owner, d, reqs, out_reqs, inline_task, implicit_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(finner),
-        finished_execution(false), parent_req_indexes(parent_indexes),
-        virtual_mapped(virt_mapped), total_children_count(0),
+        concurrent_context(concurrent), finished_execution(false),
+        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
+        total_children_count(0),
         total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
@@ -4110,6 +4112,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->second.size(); idx++)
           rez.serialize(it->second[idx]);
       }
+      rez.serialize<bool>(concurrent_context);
       rez.serialize<bool>(replicate);
     }
 
@@ -11715,10 +11718,10 @@ namespace Legion {
                                  const std::vector<bool> &virt_mapped,
                                  UniqueID ctx_uid, ApEvent exec_fence,
                                  ShardManager *manager, bool inline_task,
-                                 bool implicit_task)
+                                 bool implicit_task, bool concurrent)
       : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
          virt_mapped, ctx_uid, exec_fence, false/*remote*/,
-         inline_task, implicit_task),
+         inline_task, implicit_task, concurrent),
         owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
@@ -21613,6 +21616,7 @@ namespace Legion {
         provenance->add_reference();
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
+      derez.deserialize(concurrent_context);
       bool replicate;
       derez.deserialize(replicate);
       if (replicate)

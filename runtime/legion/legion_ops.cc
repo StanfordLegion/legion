@@ -14827,6 +14827,12 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
       parent_task = ctx->get_task();
+      if (ctx->is_concurrent_context())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
+            "Illegal nested must epoch launch inside task %s (UID %lld) "
+            "which has a concurrent ancesstor (must epoch or index task). "
+            "Nested concurrency is not supported.", 
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;

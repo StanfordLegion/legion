@@ -720,8 +720,18 @@ namespace Legion {
       stealable = options.stealable;
       map_origin = options.map_locally;
       replicate = options.replicate;
-      if (replicate && !runtime->unsafe_mapper)
+      if (replicate)
       {
+        if (concurrent_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s requested to replicate concurrent task %s (UID %lld). "
+              "Replication of concurrent tasks are not supported.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        if (must_epoch_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s requested to replicate must epoch task %s (UID %lld). "
+              "Replication of must epoch tasks are not supported.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
         if (!output_regions.empty())
           REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
               "Mapper %s requested to replicate task %s (UID %lld) "
@@ -768,7 +778,22 @@ namespace Legion {
                                 parent_ctx->get_unique_id(), 
                                 get_task_name(), get_unique_id())
       }
-      return options.inline_task;
+      if (options.inline_task)
+      {
+        if (concurrent_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s requested to inline concurrent task %s (UID %lld). "
+              "Inlining of concurrent tasks are not supported.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        if (must_epoch_task)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s requested to inline must epoch task %s (UID %lld). "
+              "Inlining of must epoch tasks are not supported.",
+              mapper->get_mapper_name(), get_task_name(), get_unique_id())
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1649,20 +1674,13 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, VALIDATE_VARIANT_SELECTION_CALL);
       // Check the concurrent constraints
-      if (impl->is_concurrent() && !concurrent_task && is_index_space)
+      if (impl->is_concurrent() && !concurrent_task && !must_epoch_task)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, "Mapper %s has mapped "
-              "point task %s (UID %lld) a concurrent task variant %s but this "
-              "task was not launched in a concurrent index space task launch. "
-              "Concurrent task variants can only be used in concurrent index "
-              "space task launches or with individual tasks.",
+              "task %s (UID %lld) to a concurrent task variant %s but this "
+              "task was not launched in a concurrent index space task launch "
+              "or must epoch launch. Concurrent task variants can only be used "
+              "in concurrent index space task launches or must epoch launches.",
               local_mapper->get_mapper_name(),
-              get_task_name(), get_unique_id(), impl->get_name())
-      else if (concurrent_task && !impl->is_leaf())
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, "Mapper %s has mapped "
-              "point task %s (UID %lld) to a non-leaf task variant %s despite "
-              "being launched in a concurrent index space task. All point "
-              "tasks in a concurrent index space launch must map to leaf task "
-              "variants.", local_mapper->get_mapper_name(),
               get_task_name(), get_unique_id(), impl->get_name())
       // Check the layout constraints first
       const TaskLayoutConstraintSet &layout_constraints = 
@@ -3313,7 +3331,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!target_processors.empty());
 #endif
-        validate_variant_selection(mapper, variant_impl, 
+        validate_variant_selection(mapper, variant_impl,
             target_processors.front().kind(), physical_instances, "map_task");
       }
       // Record anything else that needs to be recorded 
@@ -5156,7 +5174,8 @@ namespace Legion {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), v->is_inner(), regions, output_regions,
           parent_req_indexes, virtual_mapped, unique_op_id,
-          execution_fence_event, false/*remote*/, inline_task);
+          execution_fence_event, false/*remote*/, inline_task,
+          concurrent_task || parent_ctx->is_concurrent_context());
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
@@ -8148,7 +8167,8 @@ namespace Legion {
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
             parent_req_indexes, virtual_mapped, unique_op_id,
-            execution_fence_event, shard_manager, inline_task);
+            execution_fence_event, shard_manager, inline_task,
+            parent_ctx->is_concurrent_context());
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         repl_ctx->configure_context(mapper, task_priority);
@@ -8907,7 +8927,13 @@ namespace Legion {
       else
         elide_future_return = true;
       check_empty_field_requirements(); 
- 
+      if (concurrent_task && parent_ctx->is_concurrent_context())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
+            "Illegal nested concurrent index space task launch %s (UID %lld) "
+            "inside task %s (UID %lld) which has a concurrent ancesstor (must "
+            "epoch or index task). Nested concurrency is not supported.", 
+            get_task_name(), get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled)
       {
         // Don't log this yet if we're part of a must epoch operation
@@ -9040,6 +9066,13 @@ namespace Legion {
           runtime->address_space, get_completion_event(), provenance,
           (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
+      if (concurrent_task && parent_ctx->is_concurrent_context())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
+            "Illegal nested concurrent index space task launch %s (UID %lld) "
+            "inside task %s (UID %lld) which has a concurrent ancesstor (must "
+            "epoch or index task). Nested concurrency is not supported.", 
+            get_task_name(), get_unique_id(), parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled && track)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),

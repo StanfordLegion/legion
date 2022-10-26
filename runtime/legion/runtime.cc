@@ -14377,12 +14377,6 @@ namespace Legion {
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
                       owner->get_name(), owner->task_id)
-      if (concurrent_variant && !leaf_variant)
-        REPORT_LEGION_ERROR(ERROR_INVALID_TASK_VARIANT_PROPERTIES,
-                      "Task variant %s (ID %d) of task %s (ID %d) must "
-                      "be marked as a leaf variant if it is also marked "
-                      "as a concurrent variant.", variant_name, vid,
-                      owner->get_name(), owner->task_id)
       if (runtime->record_registration)
         log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
               variant_name, owner->get_name(), owner->task_id, descriptor_id);
