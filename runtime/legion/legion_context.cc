@@ -7484,18 +7484,6 @@ namespace Legion {
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-#ifdef SAFE_MUST_EPOCH_LAUNCHES
-      // Must epoch launches can sometimes block on external resources which
-      // Realm does not know about. In theory this can lead to deadlock, so
-      // we provide this mechanism for ordering must epoch launches. By 
-      // inserting an execution fence before every must epoch launche we
-      // guarantee that it is ordered with respect to every other one. This
-      // is heavy-handed for sure, but it is effective and sound and gives
-      // us the property that we want until someone comes up with a use
-      // case that proves that they need something better.
-      // See github issue #659
-      issue_execution_fence();
-#endif
       AutoRuntimeCall call(this);
       MustEpochOp *epoch_op = runtime->get_available_epoch_op();
 #ifdef DEBUG_LEGION
@@ -18640,14 +18628,8 @@ namespace Legion {
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      AutoProvenance provenance(launcher.provenance);
-#ifdef SAFE_MUST_EPOCH_LAUNCHES
-      // See the comment in InnerContext::execute_must_epoch for why this
-      // particular call is here for safe must epoch launches
-      // Also see github issue #659
-      issue_execution_fence(provenance); 
-#endif
       AutoRuntimeCall call(this);
+      AutoProvenance provenance(launcher.provenance);
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
