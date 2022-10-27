@@ -4164,9 +4164,9 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       end
     end)
 
-  -- We don't need to register tasks that are only inlined
+  -- We don't need to register tasks that are inline or local
   local variants = data.filter(function(variant)
-    return not variant.task.is_inline
+    return not (variant.task.is_inline or variant.task.is_local)
   end, variants)
 
   local task_registrations = variants:map(
