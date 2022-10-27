@@ -3443,6 +3443,13 @@ extern "C" {
   legion_index_launcher_set_provenance(legion_index_launcher_t launcher,
                                        const char *provenance);
 
+  /**
+   * @see Legion::IndexTaskLauncher::concurrent
+   */
+  void
+  legion_index_launcher_set_concurrent(legion_index_launcher_t launcher,
+                                       bool concurrent);
+
   // -----------------------------------------------------------------------
   // Inline Mapping Operations
   // -----------------------------------------------------------------------

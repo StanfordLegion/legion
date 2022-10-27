@@ -1,4 +1,5 @@
 /* Copyright 2022 Stanford University, NVIDIA Corporation
+
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -7804,6 +7805,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent ProcessorManager::find_concurrent_fence_event(ApEvent next)
+    //--------------------------------------------------------------------------
+    {
+      // This might look racy but it's not because there is synchronization
+      // provided by the runtime in the form of the concurrent_reservation
+      const ApEvent result = previous_concurrent_execution;
+      previous_concurrent_execution = next;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void ProcessorManager::perform_mapping_operations(void)
     //--------------------------------------------------------------------------
     {
@@ -12259,6 +12271,11 @@ namespace Legion {
               runtime->handle_slice_remote_commit(derez);
               break;
             }
+          case SLICE_VERIFY_CONCURRENT_EXECUTION:
+            {
+              runtime->handle_slice_verify_concurrent_execution(derez);
+              break;
+            }
           case SLICE_FIND_INTRA_DEP:
             {
               runtime->handle_slice_find_intra_dependence(derez);
@@ -13098,6 +13115,17 @@ namespace Legion {
           case SEND_FREE_FUTURE_INSTANCE:
             {
               runtime->handle_free_future_instance(derez);
+              break;
+            }
+          case SEND_CONCURRENT_RESERVATION_CREATION:
+            {
+              runtime->handle_concurrent_reservation_creation(derez,
+                                                remote_address_space);
+              break;
+            }
+          case SEND_CONCURRENT_EXECUTION_ANALYSIS:
+            {
+              runtime->handle_concurrent_execution_analysis(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -14253,7 +14281,8 @@ namespace Legion {
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant),
-        replicable_variant(registrar.replicable_variant)
+        replicable_variant(registrar.replicable_variant),
+        concurrent_variant(registrar.concurrent_variant)
     //--------------------------------------------------------------------------
     { 
       if (udata != NULL)
@@ -14343,7 +14372,7 @@ namespace Legion {
              "Variant %s requested global registration without "
                          "a portable implementation.", variant_name)
       if (leaf_variant && inner_variant)
-        REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, 
+        REPORT_LEGION_ERROR(ERROR_INVALID_TASK_VARIANT_PROPERTIES,
                       "Task variant %s (ID %d) of task %s (ID %d) is not "
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
@@ -14354,18 +14383,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl::VariantImpl(const VariantImpl &rhs) 
-      : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), has_return_type_size(rhs.has_return_type_size),
-        return_type_size(rhs.return_type_size),
-        descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     VariantImpl::~VariantImpl(void)
     //--------------------------------------------------------------------------
     {
@@ -14373,15 +14390,6 @@ namespace Legion {
         free(user_data);
       if (variant_name != NULL)
         free(variant_name);
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl& VariantImpl::operator=(const VariantImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -16580,6 +16588,7 @@ namespace Legion {
         // call from each node before we start trying to perform a shutdown
         outstanding_top_level_tasks(
             ((unique == 0) && background) ? total_address_spaces : 0),
+        concurrent_reservation(Reservation::NO_RESERVATION),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
@@ -17363,6 +17372,12 @@ namespace Legion {
         delete it->second;
       }
       memory_managers.clear();
+      if (address_space == 0)
+      {
+        Reservation r = concurrent_reservation.load();
+        if (r.exists())
+          r.destroy_reservation();
+      }
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
 	delete tree_state_logger;
@@ -22095,6 +22110,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_slice_verify_concurrent_execution(Processor target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SLICE_VERIFY_CONCURRENT_EXECUTION>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_slice_find_intra_space_dependence(Processor target,
                                                          Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24175,6 +24199,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_verify_concurrent_execution(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_verify_concurrent_execution(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_slice_find_intra_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -26067,6 +26098,168 @@ namespace Legion {
         result.set_bit(next_index);
       }
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Runtime::acquire_concurrent_reservation(RtEvent release_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!release_event.has_triggered());
+#endif
+      const Reservation r = find_or_create_concurrent_reservation(); 
+      Runtime::release_reservation(r, release_event);
+      return Runtime::acquire_rt_reservation(r, true/*exclusive*/);
+    }
+
+    //--------------------------------------------------------------------------
+    Reservation Runtime::find_or_create_concurrent_reservation(void)
+    //--------------------------------------------------------------------------
+    {
+      Reservation r = concurrent_reservation.load();
+      if (r.exists())
+        return r;
+      if (address_space > 0)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        rez.serialize<bool>(true/*request*/);
+        rez.serialize(&concurrent_reservation);
+        rez.serialize(done);
+        find_messenger(0/*target*/)->send_message<
+          SEND_CONCURRENT_RESERVATION_CREATION>(rez, true/*flush*/);
+        done.wait();
+        r = concurrent_reservation.load();
+      }
+      else
+      {
+        Reservation fresh = Reservation::create_reservation();
+        if (!concurrent_reservation.compare_exchange_strong(r, fresh))
+          fresh.destroy_reservation();
+        else
+          r = concurrent_reservation.load();
+      }
+#ifdef DEBUG_LEGION
+      assert(r.exists());
+#endif
+      return r;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_concurrent_reservation_creation(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      bool request;
+      derez.deserialize(request);
+      std::atomic<Reservation>* target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (request)
+      {
+        const Reservation r = find_or_create_concurrent_reservation();
+        Serializer rez;
+        rez.serialize<bool>(false/*request*/);
+        rez.serialize(target);
+        rez.serialize(done);
+        rez.serialize(r);
+        find_messenger(source)->send_message<
+          SEND_CONCURRENT_RESERVATION_CREATION>(rez, true/*flush*/, 
+                                                true/*response*/);
+      }
+      else
+      {
+        Reservation r;
+        derez.deserialize(r);
+        target->store(r);
+        Runtime::trigger_event(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Runtime::find_concurrent_fence_event(Processor target, ApEvent next,
+                                        ApEvent &previous, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder =
+        proc_managers.find(target);
+      if (finder == proc_managers.end())
+      {
+        // Send this to a remote node
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        const ApUserEvent result = Runtime::create_ap_user_event(NULL);
+        Serializer rez;
+        rez.serialize(target);
+        rez.serialize(next);
+        rez.serialize(result);
+        rez.serialize(precondition);
+        rez.serialize(done);
+        find_messenger(target)->send_message<
+          SEND_CONCURRENT_EXECUTION_ANALYSIS>(rez, true/*flush*/);
+        previous = result;
+        return done;
+      }
+      else
+      {
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          const ApUserEvent result = Runtime::create_ap_user_event(NULL);
+          previous = result;
+          DeferConcurrentAnalysisArgs args(finder->second, next, result);
+          return issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, precondition);
+        }
+        else
+        {
+          previous = finder->second->find_concurrent_fence_event(next);
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_concurrent_execution_analysis(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Processor target;
+      derez.deserialize(target);
+      ApEvent next;
+      derez.deserialize(next);
+      ApUserEvent result;
+      derez.deserialize(result);
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::map<Processor,ProcessorManager*>::const_iterator finder =
+        proc_managers.find(target);
+#ifdef DEBUG_LEGION
+      assert(finder != proc_managers.end());
+#endif
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferConcurrentAnalysisArgs args(finder->second, next, result);
+        Runtime::trigger_event(done, issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, precondition));
+      }
+      else
+      {
+        Runtime::trigger_event(NULL, result,
+            finder->second->find_concurrent_fence_event(next));
+        Runtime::trigger_event(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::handle_concurrent_analysis(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferConcurrentAnalysisArgs *dargs = 
+        (const DeferConcurrentAnalysisArgs*)args;
+      Runtime::trigger_event(NULL, dargs->result,
+          dargs->manager->find_concurrent_fence_event(dargs->next));
     }
 
     //--------------------------------------------------------------------------
@@ -31977,6 +32170,11 @@ namespace Legion {
         case LG_DEFER_TRACE_UPDATE_TASK_ID:
           {
             ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
+            break;
+          }
+        case LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID:
+          {
+            handle_concurrent_analysis(args);
             break;
           }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:
