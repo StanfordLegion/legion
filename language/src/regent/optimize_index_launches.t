@@ -1425,8 +1425,14 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
 
       local privileges, _, _, _, _ = std.find_task_privileges(param_region_types[arg], task)
-      assert(#privileges == 1)
-      if privileges[1] ~= "reads" then
+      local is_read_only = true
+      for _, privilege in ipairs(privileges) do
+        if privilege ~= "reads" then
+          is_read_only = false
+        end
+      end
+
+      if not is_read_only then
         then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(arg, uint8)))
       end
 
