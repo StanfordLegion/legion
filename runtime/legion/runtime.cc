@@ -2908,17 +2908,7 @@ namespace Legion {
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
-        if (!read_events.empty())
-        {
-          // Make sure we don't overwrite any readers
-          read_events.push_back(precondition);
-          read_events.push_back(source->get_ready(check_source_ready));
-          result = ApEvent(rect.copy(srcs, dsts, requests,
-            Runtime::merge_events(NULL, read_events)));
-          read_events.pop_back();
-          read_events.pop_back();
-        }
-        else if (precondition.exists())
+        if (precondition.exists())
           result = ApEvent(rect.copy(srcs, dsts, requests,
             Runtime::merge_events(NULL, precondition,
               source->get_ready(check_source_ready))));
@@ -2989,21 +2979,12 @@ namespace Legion {
         const Point<1,coord_t> zero(0);
         const Rect<1,coord_t> rect(zero, zero);
         ApEvent result;
-        if (!read_events.empty())
-        {
-          // Make sure we don't overwrite any readers
-          read_events.push_back(precondition);
-          read_events.push_back(source->get_ready());
+        ApEvent src_ready = source->get_ready(false/*check ready*/);
+        if (precondition.exists())
           result = ApEvent(rect.copy(srcs, dsts, requests,
-                  Runtime::merge_events(NULL, read_events)));
-          read_events.pop_back();
-          read_events.pop_back();
-        }
-        else if (precondition.exists())
-          result = ApEvent(rect.copy(srcs, dsts, requests,
-              Runtime::merge_events(NULL, source->get_ready(), precondition)));
+              Runtime::merge_events(NULL, src_ready, precondition)));
         else
-          result = ApEvent(rect.copy(srcs, dsts, requests,source->get_ready()));
+          result = ApEvent(rect.copy(srcs, dsts, requests, src_ready));
         source->record_read_event(result);
         RtEvent protect;
         if (own_src)
@@ -3107,6 +3088,20 @@ namespace Legion {
         return ready_event;
       else
         return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureInstance::collapse_reads(void)
+    //--------------------------------------------------------------------------
+    {
+      if (read_events.empty())
+        return ApEvent::NO_AP_EVENT;
+      if (read_events.size() == 1)
+        return read_events.back();
+      const ApEvent result = Runtime::merge_events(NULL, read_events);
+      read_events.resize(1);
+      read_events.back() = result;
+      return result;
     }
 
     //--------------------------------------------------------------------------

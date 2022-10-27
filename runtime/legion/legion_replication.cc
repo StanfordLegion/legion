@@ -11530,12 +11530,15 @@ namespace Legion {
                 // do this in-place without support from Realm
                 if (shadow_instance == NULL)
                   create_shadow_instance();
+                else // Handle WAR dependences which dominate previous write
+                  shadow_ready = shadow_instance->collapse_reads();
                 // Copy to the shadow instance, note this incorporates
                 // any of the read postconditions from the previous stage
                 // so we know it's safe to write here
                 shadow_ready =
                   shadow_instance->copy_from(instance, op,
-                      new_instance_ready, false/*check source ready*/);
+                      Runtime::merge_events(NULL, shadow_ready,
+                        new_instance_ready), false/*check source ready*/);
                 instance_ready = shadow_ready;
                 pack_shadow = true;
               }
@@ -11572,8 +11575,11 @@ namespace Legion {
             // Have to make a copy in this case
             if (shadow_instance == NULL)
               create_shadow_instance();
+            else // Handle WAR dependences which dominate previous write
+              shadow_ready = shadow_instance->collapse_reads();
             shadow_ready = shadow_instance->copy_from(instance, op,
-                          instance_ready, false/*check src ready*/);
+                Runtime::merge_events(NULL, shadow_ready,
+                  instance_ready), false/*check src ready*/);
             instance_ready = shadow_ready;
             pack_shadow = true;
           }
