@@ -786,6 +786,10 @@ namespace Legion {
       }
       if (!options.check_collective_regions.empty() && is_index_space)
       {
+        // We might already have added some region requirements in here
+        // from IndexTask::trigger_prepipeline stage, if so we'll need to
+        // resort and remove duplicates afterwards
+        const bool need_uniquify = !check_collective_regions.empty();
         for (std::set<unsigned>::const_iterator it =
               options.check_collective_regions.begin(); it !=
               options.check_collective_regions.end(); it++)
@@ -803,6 +807,14 @@ namespace Legion {
           }
           else
             check_collective_regions.push_back(*it);
+        }
+        if (need_uniquify)
+        {
+          std::sort(check_collective_regions.begin(), 
+              check_collective_regions.end());
+          std::vector<unsigned>::iterator last = std::unique(
+              check_collective_regions.begin(), check_collective_regions.end());
+          check_collective_regions.erase(last, check_collective_regions.end());
         }
       }
       if (options.inline_task)
@@ -9330,7 +9342,15 @@ namespace Legion {
         {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
+          // If we're reading or reducing then make a collective view
+          if (IS_READ_ONLY(req) || IS_REDUCE(req))
+            check_collective_regions.push_back(idx);
         }
+        // If all the points are using the same logical region then
+        // record that we should do a collective rendezvous
+        else if ((req.handle_type == LEGION_REGION_PROJECTION) &&
+            (req.projection == 0) && (IS_READ_ONLY(req) || IS_REDUCE(req)))
+          check_collective_regions.push_back(idx);
       }
       // Initialize the privilege paths
       privilege_paths.resize(get_region_count());
