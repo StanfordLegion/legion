@@ -1835,17 +1835,43 @@ namespace Legion {
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
                                    const RegionRequirement &req, 
                                    IndexSpaceNode *launch_space, 
-                                   ShardingFunction *f/*=NULL*/,
+                                   ShardingFunction *func/*=NULL*/,
                                    IndexSpace shard_space/*=NO_SPACE*/)
-      : projection((req.handle_type != LEGION_SINGULAR_PROJECTION) ? 
-          runtime->find_projection_function(req.projection) : NULL),
-        projection_type(req.handle_type), projection_space(
-         (req.handle_type != LEGION_SINGULAR_PROJECTION) ? launch_space : NULL),
-        sharding_function(f), sharding_space(shard_space.exists() ? 
+      : sharding_function(func), sharding_space(shard_space.exists() ? 
             runtime->forest->get_node(shard_space) : 
-              (f == NULL) ? NULL : projection_space)
+              (func == NULL) ? NULL : launch_space)
     //--------------------------------------------------------------------------
     {
+      // There is special logic here to handle the case of singular region 
+      // requirements with sharding functions which we still want to treat as
+      // projection region requirements for the logical analysis
+#ifdef DEBUG_LEGION
+      // Shoudl always have a launch space with a sharding function
+      assert((func == NULL) || (launch_space != NULL));
+#endif
+      if (req.handle_type == LEGION_SINGULAR_PROJECTION)
+      {
+        if (func != NULL)
+        {
+          // Treat single region requirements with sharding functions
+          // as projections with the identity functor
+          projection = runtime->find_projection_function(0/*identity*/);
+          projection_type = LEGION_REGION_PROJECTION;
+          projection_space = launch_space;
+        }
+        else
+        {
+          projection = NULL;
+          projection_type = req.handle_type;
+          projection_space = NULL;
+        }
+      }
+      else
+      {
+        projection = runtime->find_projection_function(req.projection);
+        projection_type = req.handle_type;
+        projection_space = launch_space;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3138,6 +3164,8 @@ namespace Legion {
           }
           if (it->sharding != info.sharding_function)
           {
+            if (elide_singular_same_shard(node, *it, info))
+              continue;
             elide = false;
             // No need to check expensive here since we know
             // that we need the close operation no matter what
@@ -3147,6 +3175,8 @@ namespace Legion {
           if ((it->domain != info.projection_space) && 
               !it->domain->dominates(info.projection_space))
           {
+            if (elide_singular_same_shard(node, *it, info))
+              continue;
             elide = false;
             break;
           }
@@ -3175,6 +3205,50 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       projections.insert(ProjectionSummary(info, applied_events));
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldState::elide_singular_same_shard(RegionTreeNode *node,
+                const ProjectionSummary &prev, const ProjectionInfo &next) const
+    //--------------------------------------------------------------------------
+    {
+      // Do a quick check for the special case where they are both
+      // single point projections from this region and we can actually 
+      // evaluate the sharding functions directly to see if the two points
+      // are on the same shard and can elide the close operation
+      if (!node->is_region())
+        return false;
+      if (prev.projection->projection_id != 0)
+        return false;
+#ifdef DEBUG_LEGION
+      // Should have the same projeciton function if we're here
+      assert(next.projection->projection_id == 0);
+#endif
+      if (prev.domain->get_volume() != 1)
+        return false;
+      if (next.projection_space->get_volume() != 1)
+        return false;
+      Domain prev_domain, next_domain;
+      prev.domain->get_launch_space_domain(prev_domain);
+      next.projection_space->get_launch_space_domain(next_domain);
+#ifdef DEBUG_LEGION
+      assert(prev_domain.lo() == prev_domain.hi());
+      assert(next_domain.lo() == next_domain.hi());
+#endif
+      Domain prev_sharding, next_sharding;
+      if (prev.domain != prev.sharding_domain)
+        prev.sharding_domain->get_launch_space_domain(prev_sharding);
+      else
+        prev_sharding = prev_domain;
+      if (next.sharding_space != next.projection_space)
+        next.sharding_space->get_launch_space_domain(next_sharding);
+      else
+        next_sharding = next_domain;
+      const ShardID prev_shard =
+        prev.sharding->find_owner(prev_domain.lo(), prev_sharding);
+      const ShardID next_shard =
+        next.sharding_function->find_owner(next_domain.lo(), next_sharding);
+      return (prev_shard == next_shard);
     }
 
     //--------------------------------------------------------------------------

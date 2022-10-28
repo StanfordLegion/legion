@@ -1334,7 +1334,7 @@ namespace Legion {
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
-      void perform_base_dependence_analysis(void);
+      void perform_base_dependence_analysis(bool permit_projection);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -3651,6 +3651,7 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx, const FillLauncher &launcher,
                       Provenance *provenance);
+      void perform_base_dependence_analysis(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
       void activate_fill(void);
@@ -3755,7 +3756,6 @@ namespace Legion {
       virtual IndexSpaceNode* get_collective_space(void) const 
         { return launch_space; }
     public:
-      void perform_base_dependence_analysis(void);
       void enumerate_points(bool replaying);
       void handle_point_commit(void);
       void check_point_requirements(void);

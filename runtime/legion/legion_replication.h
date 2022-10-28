@@ -1296,13 +1296,12 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual void prepare_map_must_epoch(void);
-      virtual void handle_future_size(size_t return_type_size,
-          bool has_return_type_size, std::set<RtEvent> &applied_events);
     public:
       // Override these so we can broadcast the future result
       virtual void trigger_task_complete(void);
@@ -1311,11 +1310,10 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
     protected:
       ShardID owner_shard;
+      IndexSpaceNode *launch_space;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      CollectiveID mapped_collective_id; // id for mapped event broadcast
       CollectiveID future_collective_id; // id for the future broadcast 
-      SingleTaskTree *mapped_collective;
       FutureBroadcast *future_collective;
 #ifdef DEBUG_LEGION
     public:
@@ -1489,16 +1487,15 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     protected:
+      IndexSpaceNode *launch_space;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       MapperManager *mapper;
-    public:
-      CollectiveID mapped_collective_id;
-      ShardEventTree *mapped_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -1563,15 +1560,14 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
       virtual void resolve_false(bool speculated, bool launched);
     protected:
+      IndexSpaceNode *launch_space;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-    public:
-      CollectiveID mapped_collective_id;
-      ShardEventTree *mapped_collective; 
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

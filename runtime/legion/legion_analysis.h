@@ -909,6 +909,9 @@ namespace Legion {
                                      RegionTreeNode *node,
                                      std::set<RtEvent> &applied_events);
     protected:
+      bool elide_singular_same_shard(RegionTreeNode *node,
+                                     const ProjectionSummary &prev,
+                                     const ProjectionInfo &info) const;
       bool expensive_elide_test(Operation *op, unsigned index,
                                 const ProjectionInfo &info,
                                 RegionTreeNode *node, bool reduction) const;
