@@ -621,7 +621,7 @@ namespace Legion {
     public:
       virtual PhaseBarrier create_phase_barrier(unsigned arrivals);
       virtual void destroy_phase_barrier(PhaseBarrier pb) = 0;
-      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb) = 0;
+      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,
@@ -1080,7 +1080,8 @@ namespace Legion {
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped, UniqueID context_uid, 
                    ApEvent execution_fence, bool remote = false, 
-                   bool inline_task = false, bool implicit_task = false);
+                   bool inline_task = false, bool implicit_task = false,
+                   bool concurrent_task = false);
       InnerContext(const InnerContext &rhs);
       virtual ~InnerContext(void);
     public:
@@ -1091,6 +1092,8 @@ namespace Legion {
       void record_physical_trace_replay(RtEvent ready, bool replay);
       bool is_replaying_physical_trace(void);
       virtual ReplicationID get_replication_id(void) const { return 0; }
+      inline bool is_concurrent_context(void) const
+        { return concurrent_context; }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -1732,7 +1735,6 @@ namespace Legion {
       virtual void release_grant(Grant grant);
     public:
       virtual void destroy_phase_barrier(PhaseBarrier pb);
-      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
       void perform_barrier_dependence_analysis(Operation *op,
             const std::vector<PhaseBarrier> &wait_barriers,
@@ -1852,6 +1854,9 @@ namespace Legion {
       const bool remote_context;
       const bool full_inner_context;
     protected:
+      // This is immutable except for remote contexts which unpack it 
+      // after the object has already been created
+      bool concurrent_context;
       bool finished_execution;
     protected:
       Mapper::ContextConfigOutput           context_configuration;
@@ -2326,7 +2331,7 @@ namespace Legion {
                        const std::vector<bool> &virt_mapped,
                        UniqueID context_uid, ApEvent execution_fence_event,
                        ShardManager *manager, bool inline_task, 
-                       bool implicit_task = false);
+                       bool implicit_task = false, bool concurrent = false);
       ReplicateContext(const ReplicateContext &rhs);
       virtual ~ReplicateContext(void);
     public:
@@ -2948,7 +2953,10 @@ namespace Legion {
         { return dependent_partition_barrier.next(this); }
       inline RtBarrier get_next_attach_resource_barrier(void)
         { return attach_resource_barrier.next(this); }
-
+      inline RtBarrier get_next_concurrent_precondition_barrier(void)
+        { return concurrent_precondition_barrier.next(this); }
+      inline RtBarrier get_next_concurrent_postcondition_barrier(void)
+        { return concurrent_postcondition_barrier.next(this); }
       inline RtBarrier get_next_close_mapped_barrier(void)
         {
           const RtBarrier result =
@@ -3110,6 +3118,7 @@ namespace Legion {
       typedef ReplBarrier<RtBarrier,false> RtReplBar;
       typedef ReplBarrier<ApBarrier,false> ApReplBar;
       typedef ReplBarrier<ApBarrier,false,true> ApReplSingleBar;
+      typedef ReplBarrier<RtBarrier,false,true> RtReplSingleBar;
       typedef ReplBarrier<RtBarrier,true> RtLogicalBar;
       typedef ReplBarrier<ApBarrier,true> ApLogicalBar;
       // These barriers are used to identify when close operations are mapped
@@ -3162,6 +3171,8 @@ namespace Legion {
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;
+      RtReplSingleBar concurrent_precondition_barrier;
+      RtReplBar concurrent_postcondition_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtReplBar collective_check_barrier;
@@ -3889,7 +3900,6 @@ namespace Legion {
       virtual void release_grant(Grant grant);
     public:
       virtual void destroy_phase_barrier(PhaseBarrier pb);
-      virtual PhaseBarrier advance_phase_barrier(PhaseBarrier pb);
     public:
       virtual DynamicCollective create_dynamic_collective(
                                                   unsigned arrivals,

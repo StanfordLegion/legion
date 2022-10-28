@@ -4290,6 +4290,15 @@ legion_index_launcher_set_provenance(legion_index_launcher_t launcher_,
   launcher->provenance = provenance;
 }
 
+void
+legion_index_launcher_set_concurrent(legion_index_launcher_t launcher_,
+                                     bool concurrent)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->concurrent = concurrent;
+}
+
 // -----------------------------------------------------------------------
 // Inline Mapping Operations
 // -----------------------------------------------------------------------

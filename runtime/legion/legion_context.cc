@@ -2488,6 +2488,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhaseBarrier TaskContext::advance_phase_barrier(PhaseBarrier pb)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      PhaseBarrier result = pb;
+      Runtime::advance_barrier(result);
+#ifdef LEGION_SPY
+      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::initialize_overhead_tracker(void)
     //--------------------------------------------------------------------------
     {
@@ -2827,12 +2840,14 @@ namespace Legion {
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, ApEvent exec_fence, bool remote,
-                               bool inline_task, bool implicit_task)
+                               bool inline_task, bool implicit_task, 
+                               bool concurrent)
       : TaskContext(rt, owner, d, reqs, out_reqs, inline_task, implicit_task),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(finner),
-        finished_execution(false), parent_req_indexes(parent_indexes),
-        virtual_mapped(virt_mapped), total_children_count(0),
+        concurrent_context(concurrent), finished_execution(false),
+        parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
+        total_children_count(0),
         total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
@@ -4113,6 +4128,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->second.size(); idx++)
           rez.serialize(it->second[idx]);
       }
+      rez.serialize<bool>(concurrent_context);
       rez.serialize<bool>(replicate);
     }
 
@@ -7485,18 +7501,6 @@ namespace Legion {
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-#ifdef SAFE_MUST_EPOCH_LAUNCHES
-      // Must epoch launches can sometimes block on external resources which
-      // Realm does not know about. In theory this can lead to deadlock, so
-      // we provide this mechanism for ordering must epoch launches. By 
-      // inserting an execution fence before every must epoch launche we
-      // guarantee that it is ordered with respect to every other one. This
-      // is heavy-handed for sure, but it is effective and sound and gives
-      // us the property that we want until someone comes up with a use
-      // case that proves that they need something better.
-      // See github issue #659
-      issue_execution_fence();
-#endif
       AutoRuntimeCall call(this);
       MustEpochOp *epoch_op = runtime->get_available_epoch_op();
 #ifdef DEBUG_LEGION
@@ -9984,20 +9988,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       // Can only be called from user land so no need to hold the lock
       context_barriers.push_back(pb.phase_barrier);
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier InnerContext::advance_phase_barrier(PhaseBarrier pb)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      PhaseBarrier result = pb;
-      Runtime::advance_barrier(result);
-#ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(pb.phase_barrier, result.phase_barrier);
-#endif
-      return result;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     DynamicCollective InnerContext::create_dynamic_collective(
@@ -12199,10 +12190,10 @@ namespace Legion {
                                  const std::vector<bool> &virt_mapped,
                                  UniqueID ctx_uid, ApEvent exec_fence,
                                  ShardManager *manager, bool inline_task,
-                                 bool implicit_task)
+                                 bool implicit_task, bool concurrent)
       : InnerContext(rt, owner, d, full, reqs, out_reqs, parent_indexes,
          virt_mapped, ctx_uid, exec_fence, false/*remote*/,
-         inline_task, implicit_task),
+         inline_task, implicit_task, concurrent),
         owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
@@ -18123,14 +18114,19 @@ namespace Legion {
                                         std::vector<OutputRequirement> *outputs)
     //--------------------------------------------------------------------------
     {
-      if (launcher.must_parallelism)
-        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
-            "Task %s (UID %lld) requested an index space launch with must "
-            "parallelism (aka a MustEpochLaunch) that needs a reduction of "
-            "all future values. This feature is not currently implemented.",
-            get_task_name(), get_unique_id())
-      AutoRuntimeCall call(this);
       AutoProvenance provenance(launcher.provenance);
+      if (launcher.must_parallelism)
+      {
+        // Turn around and use a must epoch launcher
+        MustEpochLauncher epoch_launcher(launcher.map_id, launcher.tag);
+        epoch_launcher.add_index_task(launcher);
+        epoch_launcher.provenance = launcher.provenance;
+        FutureMap result = execute_must_epoch(epoch_launcher);
+        // Reduce the future map down to a future
+        return reduce_future_map(result, redop, deterministic,
+                                 launcher.map_id, launcher.tag, provenance);
+      }
+      AutoRuntimeCall call(this);
       for (int i = 0; runtime->safe_control_replication && (i < 2) &&
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
@@ -19353,14 +19349,8 @@ namespace Legion {
                                               const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      AutoProvenance provenance(launcher.provenance);
-#ifdef SAFE_MUST_EPOCH_LAUNCHES
-      // See the comment in InnerContext::execute_must_epoch for why this
-      // particular call is here for safe must epoch launches
-      // Also see github issue #659
-      issue_execution_fence(provenance); 
-#endif
       AutoRuntimeCall call(this);
+      AutoProvenance provenance(launcher.provenance);
       for (int i = 0; runtime->safe_control_replication && (i < 2) && 
             ((current_trace == NULL) || !current_trace->is_fixed()); i++)
       {
@@ -22415,6 +22405,7 @@ namespace Legion {
         provenance->add_reference();
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
+      derez.deserialize(concurrent_context);
       bool replicate;
       derez.deserialize(replicate);
       if (replicate)
@@ -24637,16 +24628,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
           "Illegal destroy phase barrier performed in leaf task %s (UID %lld)",
           get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    PhaseBarrier LeafContext::advance_phase_barrier(PhaseBarrier pb)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
-          "Illegal advance phase barrier performed in leaf task %s (UID %lld)",
-          get_task_name(), get_unique_id())
-      return PhaseBarrier();
     }
 
     //--------------------------------------------------------------------------

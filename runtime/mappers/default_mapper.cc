@@ -1586,7 +1586,8 @@ namespace Legion {
                                     std::vector<Processor> &target_procs)
     //--------------------------------------------------------------------------
     {
-      if (task.target_proc.address_space() == node_id)
+      if ((task.target_proc.address_space() == node_id) && 
+          !task.concurrent_task)
       {
         switch (task.target_proc.kind())
         {

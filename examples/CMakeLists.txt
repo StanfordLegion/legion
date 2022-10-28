@@ -43,6 +43,7 @@ add_subdirectory(layout_constraints)
 add_subdirectory(provenance)
 add_subdirectory(implicit_top_task)
 add_subdirectory(future_map_transforms)
+add_subdirectory(concurrent_tasks)
 add_subdirectory(tree_collectives)
 
 if(Legion_MPI_INTEROP)

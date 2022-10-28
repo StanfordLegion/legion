@@ -1296,6 +1296,29 @@ namespace Legion {
     };
 
     /**
+     * \class ConcurrentExecutionValidator
+     * This collective helps to validate the safety of the execution of
+     * concurrent index space task launches to ensure that all the point
+     * tasks have been mapped to different processors.
+     */
+    class ConcurrentExecutionValidator : public GatherCollective {
+    public:
+      ConcurrentExecutionValidator(ReplIndexTask *owner,
+          CollectiveIndexLocation loc, ReplicateContext *ctx, ShardID target);
+      virtual ~ConcurrentExecutionValidator(void) { }
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+      virtual RtEvent post_gather(void);
+    public:
+      void perform_validation(std::map<DomainPoint,Processor> &processors);
+    public:
+      ReplIndexTask *const owner;
+    protected:
+      std::map<DomainPoint,Processor> concurrent_processors;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1607,6 +1630,9 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
+      virtual void initialize_concurrent_analysis(void);
+      virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
+                                                  Processor target);
       void select_sharding_function(ReplicateContext *repl_ctx);
     public:
       // Methods for supporting intra-index-space mapping dependences
@@ -1631,6 +1657,10 @@ namespace Legion {
       std::map<unsigned,SizeMap> local_output_sizes;
     protected:
       std::set<std::pair<DomainPoint,ShardID> > unique_intra_space_deps;
+    protected:
+      // For setting up concurrent execution
+      RtBarrier concurrent_prebar, concurrent_postbar;
+      ConcurrentExecutionValidator *concurrent_validator;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -2155,6 +2185,7 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                       IndexSpace domain, IndexSpace shard_space);
+      virtual RtEvent get_concurrent_analysis_precondition(void);
       virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
@@ -2196,6 +2227,7 @@ namespace Legion {
       MustEpochCompletionExchange *completion_exchange;
       std::set<SingleTask*> shard_single_tasks;
       RtBarrier resource_return_barrier;
+      RtBarrier concurrent_prebar, concurrent_postbar;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

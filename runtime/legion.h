@@ -1793,6 +1793,17 @@ namespace Legion {
       UntypedBuffer                      global_arg;
       ArgumentMap                        argument_map;
       Predicate                          predicate;
+      // Specify that all the point tasks in this index launch be 
+      // able to run concurrently, meaning they all must map to
+      // different processors and they cannot have interfering region
+      // requirements that might lead to dependences. Note that the
+      // runtime guarantees that concurrent index launches will not
+      // deadlock with other concurrent index launches which requires 
+      // additional analysis. Currently concurrent index space launches
+      // will only be allowed to map to leaf task variants currently.
+      bool                               concurrent;
+      // This will convert this index space launch into a must
+      // epoch launch which supports interfering region requirements
       bool                               must_parallelism;
       MapperID                           map_id;
       MappingTagID                       tag;
@@ -2511,6 +2522,7 @@ namespace Legion {
       inline void set_inner(bool is_inner = true);
       inline void set_idempotent(bool is_idempotent = true);
       inline void set_replicable(bool is_replicable = true);
+      inline void set_concurrent(bool is_concurrent = true);
     public: // Generator Task IDs
       inline void add_generator_task(TaskID tid);
     public:
@@ -2528,6 +2540,7 @@ namespace Legion {
       bool                              inner_variant;
       bool                              idempotent_variant;
       bool                              replicable_variant;
+      bool                              concurrent_variant;
     };
 
     //==========================================================================
@@ -4351,6 +4364,7 @@ namespace Legion {
     public:
       // Index task argument information
       bool                                is_index_space;
+      bool                                concurrent_task;
       bool                                must_epoch_task; 
       Domain                              index_domain;
       DomainPoint                         index_point;

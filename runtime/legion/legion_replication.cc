@@ -453,7 +453,7 @@ namespace Legion {
       // This should always be in the dependence analysis stage of the pipeline
       // so we need to make sure we make the right kind of collective ID
       const CollectiveID id =
-        repl_ctx->get_next_collective_index(COLLECTIVE_LOC_106,true/*logical*/);
+        repl_ctx->get_next_collective_index(COLLECTIVE_LOC_19, true/*logical*/);
       collective_view_rendezvous[key] = 
         new CollectiveViewRendezvous(id, repl_ctx, this, this, key, tid);
     }
@@ -1875,6 +1875,10 @@ namespace Legion {
       all_reduce_collective = NULL;
       output_size_collective = NULL;
       collective_check_id = 0;
+      slice_sharding_output = false;
+      concurrent_prebar = RtBarrier::NO_RT_BARRIER;
+      concurrent_postbar = RtBarrier::NO_RT_BARRIER;
+      concurrent_validator = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1886,20 +1890,13 @@ namespace Legion {
     {
       ReplCollectiveViewCreator<IndexTask>::deactivate(false/*free*/);
       if (serdez_redop_collective != NULL)
-      {
         delete serdez_redop_collective;
-        serdez_redop_collective = NULL;
-      }
       if (all_reduce_collective != NULL)
-      {
         delete all_reduce_collective;
-        all_reduce_collective = NULL;
-      }
       if (output_size_collective != NULL)
-      {
         delete output_size_collective;
-        output_size_collective = NULL;
-      }
+      if (concurrent_validator != NULL)
+        delete concurrent_validator;
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -2087,6 +2084,9 @@ namespace Legion {
         if (redop == 0)
           tpl->record_sharding_function(trace_local_id, sharding_function);
       }
+      // Prepare any setup for performing the concurrent analysis
+      if (concurrent_task)
+        initialize_concurrent_analysis();
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
@@ -2179,6 +2179,9 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
+        // Still need to do any rendezvous for concurrent analysis
+        if (concurrent_task)
+          initialize_concurrent_analysis();
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
           complete_mapping();
@@ -2422,9 +2425,17 @@ namespace Legion {
         }
       if (has_output_region)
         output_size_collective =
-          new OutputSizeExchange(ctx, COLLECTIVE_LOC_107, all_output_sizes);
+          new OutputSizeExchange(ctx, COLLECTIVE_LOC_29, all_output_sizes);
       if (!runtime->unsafe_mapper)
         collective_check_id = ctx->get_next_collective_index(COLLECTIVE_LOC_29);
+      if (concurrent_task)
+      {
+        concurrent_prebar = ctx->get_next_concurrent_precondition_barrier();
+        concurrent_postbar = ctx->get_next_concurrent_postcondition_barrier();
+        if (!runtime->unsafe_mapper)
+          concurrent_validator = new ConcurrentExecutionValidator(this,
+              COLLECTIVE_LOC_104, ctx, 0/*owner shard*/);
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -2460,6 +2471,65 @@ namespace Legion {
           runtime, runtime->get_available_distributed_id(),
           runtime->address_space, get_provenance());
     } 
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::initialize_concurrent_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // See if we are the first local shard on the lowest address space
+      const CollectiveMapping &mapping = 
+        repl_ctx->shard_manager->get_collective_mapping();
+      const AddressSpace lowest = mapping[0];
+      if ((lowest == runtime->address_space) && 
+          repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+      {
+        Runtime::phase_barrier_arrive(concurrent_prebar, 1/*arrivals*/,
+          runtime->acquire_concurrent_reservation(concurrent_postbar));
+      }
+      concurrent_precondition = concurrent_prebar;
+      Runtime::phase_barrier_arrive(concurrent_postbar, 
+          1/*arrivals*/, mapped_event);
+      // If we are doing concurrent validation and we don't have any local
+      // points then we need to kick that off now. Save an event to make
+      // sure we don't delete the collective until we are done running
+      if ((concurrent_validator != NULL) && !internal_space.exists())
+      {
+        map_applied_conditions.insert(concurrent_validator->get_done_event());
+        concurrent_validator->perform_validation(concurrent_processors);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndexTask::verify_concurrent_execution(const DomainPoint &point,
+                                                       Processor target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(concurrent_task);
+      assert(concurrent_validator != NULL);
+#endif
+      bool done = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(concurrent_processors.find(point) == 
+                concurrent_processors.end());
+        assert(concurrent_processors.size() < total_points);
+#endif
+        concurrent_processors[point] = target;
+        done = (concurrent_processors.size() == total_points);
+      }
+      const RtEvent result = concurrent_validator->get_done_event();
+      if (done)
+        concurrent_validator->perform_validation(concurrent_processors);
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     RtEvent ReplIndexTask::find_intra_space_dependence(const DomainPoint &point)
@@ -6079,6 +6149,8 @@ namespace Legion {
       dependence_exchange = NULL;
       completion_exchange = NULL;
       resource_return_barrier = RtBarrier::NO_RT_BARRIER;
+      concurrent_prebar = RtBarrier::NO_RT_BARRIER;
+      concurrent_postbar = RtBarrier::NO_RT_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -6175,6 +6247,31 @@ namespace Legion {
       return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
           runtime, runtime->get_available_distributed_id(),
           runtime->address_space, get_provenance());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplMustEpochOp::get_concurrent_analysis_precondition(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // See if we are the first local shard on the lowest address space
+      const CollectiveMapping &mapping = 
+        repl_ctx->shard_manager->get_collective_mapping();
+      const AddressSpace lowest = mapping[0];
+      if ((lowest == runtime->address_space) && 
+          repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+      {
+        Runtime::phase_barrier_arrive(concurrent_prebar, 1/*arrivals*/,
+          runtime->acquire_concurrent_reservation(concurrent_postbar));
+      }
+      Runtime::phase_barrier_arrive(concurrent_postbar, 
+          1/*arrivals*/, mapped_event);
+      return concurrent_prebar;
     }
 
     //--------------------------------------------------------------------------
@@ -6684,6 +6781,8 @@ namespace Legion {
       completion_exchange = 
         new MustEpochCompletionExchange(ctx, COLLECTIVE_LOC_73);
       resource_return_barrier = ctx->get_next_resource_return_barrier();
+      concurrent_prebar = ctx->get_next_concurrent_precondition_barrier();
+      concurrent_postbar = ctx->get_next_concurrent_postcondition_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -8908,7 +9007,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!runtime->unsafe_mapper)
-        sources_check = context->get_next_collective_index(COLLECTIVE_LOC_105);
+        sources_check = context->get_next_collective_index(COLLECTIVE_LOC_23);
       is_first_local_shard = first_local_shard;
       if (restricted_region.impl == NULL)
         REPORT_LEGION_ERROR(ERROR_CONTROL_REPLICATION_VIOLATION,
@@ -17133,6 +17232,89 @@ namespace Legion {
     {
       rendezvous.swap(to_rendezvous); 
       perform_collective_async(); 
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Concurrent Execution Validator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ConcurrentExecutionValidator::ConcurrentExecutionValidator(
+        ReplIndexTask *own, CollectiveIndexLocation loc,
+        ReplicateContext *ctx, ShardID target)
+      : GatherCollective(loc, ctx, target), owner(own)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentExecutionValidator::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(concurrent_processors.size());
+      for (std::map<DomainPoint,Processor>::const_iterator it =
+            concurrent_processors.begin(); it != 
+            concurrent_processors.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentExecutionValidator::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_points;
+      derez.deserialize(num_points);
+      for (unsigned idx = 0; idx < num_points; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+#ifdef DEBUG_LEGION
+        assert(concurrent_processors.find(point) == 
+            concurrent_processors.end());
+#endif
+        derez.deserialize(concurrent_processors[point]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ConcurrentExecutionValidator::post_gather(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,DomainPoint> inverted;
+      for (std::map<DomainPoint,Processor>::const_iterator it =
+            concurrent_processors.begin(); it != 
+            concurrent_processors.end(); it++)
+      {
+        std::map<Processor,DomainPoint>::const_iterator finder = 
+          inverted.find(it->second);
+        if (finder != inverted.end())
+        {
+          MapperManager *mapper = 
+            owner->runtime->find_mapper(owner->current_proc, owner->map_id);
+          // TODO: update this error message to name the bad points
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+              "Mapper %s performed illegal mapping of concurrent index "
+              "space task %s (UID %lld) by mapping multiple points to "
+              "the same processor " IDFMT ". All point tasks must be "
+              "mapped to different processors for concurrent execution "
+              "of index space tasks.", mapper->get_mapper_name(),
+              owner->get_task_name(), owner->get_unique_id(), it->second.id)
+        }
+        inverted[it->second] = it->first;
+      }
+      return GatherCollective::post_gather();
+    }
+
+    //--------------------------------------------------------------------------
+    void ConcurrentExecutionValidator::perform_validation(
+                                    std::map<DomainPoint,Processor> &processors)
+    //--------------------------------------------------------------------------
+    {
+      concurrent_processors.swap(processors);
+      perform_collective_async();
     }
 
     /////////////////////////////////////////////////////////////

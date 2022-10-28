@@ -421,6 +421,7 @@ namespace Legion {
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
+      LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_DEFER_RECORD_COMPLETE_REPLAY_TASK_ID,
@@ -547,6 +548,7 @@ namespace Legion {
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \
+        "Defer Concurrent Analysis",                              \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
         "Defer Record Complete Replay",                           \
@@ -791,6 +793,7 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
+      SLICE_VERIFY_CONCURRENT_EXECUTION,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
@@ -975,6 +978,8 @@ namespace Legion {
       SEND_FREE_FUTURE_INSTANCE,
       SEND_REMOTE_DISTRIBUTED_ID_REQUEST,
       SEND_REMOTE_DISTRIBUTED_ID_RESPONSE,
+      SEND_CONCURRENT_RESERVATION_CREATION,
+      SEND_CONCURRENT_EXECUTION_ANALYSIS,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1042,6 +1047,7 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
+        "Slice Verify Concurrent Execution",                          \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
@@ -1226,6 +1232,8 @@ namespace Legion {
         "Send Free Future Instance",                                  \
         "Send Remote Distributed ID Request",                         \
         "Send Remote Distributed ID Response",                        \
+        "Send Concurrent Reservation Creation",                       \
+        "Send Concurrent Execution Analysis",                         \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1578,11 +1586,11 @@ namespace Legion {
       COLLECTIVE_LOC_16 = 16,
       COLLECTIVE_LOC_17 = 17, 
       COLLECTIVE_LOC_18 = 18, 
-      //COLLECTIVE_LOC_19 = 19,
+      COLLECTIVE_LOC_19 = 19,
       COLLECTIVE_LOC_20 = 20,
       COLLECTIVE_LOC_21 = 21, 
       COLLECTIVE_LOC_22 = 22, 
-      //COLLECTIVE_LOC_23 = 23,
+      COLLECTIVE_LOC_23 = 23,
       COLLECTIVE_LOC_24 = 24,
       COLLECTIVE_LOC_25 = 25,
       COLLECTIVE_LOC_26 = 26,
@@ -1664,9 +1672,6 @@ namespace Legion {
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
       COLLECTIVE_LOC_104 = 104,
-      COLLECTIVE_LOC_105 = 105,
-      COLLECTIVE_LOC_106 = 106,
-      COLLECTIVE_LOC_107 = 107,
     };
 
     // legion_types.h
