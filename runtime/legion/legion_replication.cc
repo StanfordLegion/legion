@@ -323,12 +323,17 @@ namespace Legion {
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
+        RegionRequirement &req = logical_regions[idx];
         // Treat these as a special kind of projection requirement since we
         // need the logical analysis to look at sharding to determine if any
         // kind of close operations are required
-        RegionRequirement &req = logical_regions[idx];
-        ProjectionInfo projection_info(runtime, req, launch_space,
-                                       sharding_function, sharding_space);
+        // The one exception here is if this is part of a must-epoch
+        // launch in which case we know the analysis is global so we don't
+        // need to pretend like it is sharded
+        ProjectionInfo projection_info;
+        if (!must_epoch_task)
+          projection_info = ProjectionInfo(runtime, req, launch_space,
+                                           sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
                                                      privilege_paths[idx],
