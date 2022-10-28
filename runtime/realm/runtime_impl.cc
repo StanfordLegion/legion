@@ -1279,6 +1279,9 @@ namespace Realm {
       int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
       int active_msg_handler_threads = 0; // default is none (use bgwork)
       bool active_msg_handler_bgwork = true;
+      // This dummy network list is actually handled in network_init()
+      // this is just here to help verify low-level arguement
+      std::vector<std::string> dummy_network_list;
 
       CommandLineParser cp;
       cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
@@ -1314,6 +1317,7 @@ namespace Realm {
       cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
       cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
       cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
+      cp.add_option_stringlist("-ll:networks", dummy_network_list);
 
       // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
       cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
