@@ -35,6 +35,8 @@
 #include "mappers/debug_mapper.h"
 #include "realm/cmdline.h"
 
+#include <algorithm>
+#include <stdlib.h>
 #include <unistd.h> // sleep for warnings
 
 #include <sys/mman.h>
@@ -8123,9 +8125,16 @@ namespace Legion {
       if (!is_owner || (capacity == 0)) 
         return;
 
+      // Override the eager allocation percentage if we were
+      // requested to do so for a particular memory kind.
+      auto alloc_percentage = runtime->eager_alloc_percentage;
+      auto override = runtime->eager_alloc_percentage_overrides.find(memory.kind());
+      if (override != runtime->eager_alloc_percentage_overrides.end()) {
+        alloc_percentage = override->second;
+      }
+
       // Allocate eager pool
-      const coord_t eager_pool_size = 
-        capacity * runtime->eager_alloc_percentage / 100;
+      const coord_t eager_pool_size = capacity * alloc_percentage / 100;
       log_eager.info("create an eager pool of size %lld on memory " IDFMT,
                      eager_pool_size, memory.id);
       const DomainT<1,coord_t> bounds(Rect<1>(0,Point<1>(eager_pool_size - 1)));
@@ -16537,6 +16546,7 @@ namespace Legion {
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
         initial_meta_task_vector_width(config.initial_meta_task_vector_width),
         eager_alloc_percentage(config.eager_alloc_percentage),
+        eager_alloc_percentage_overrides(config.eager_alloc_percentage_overrides),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_control_replication_contexts(
@@ -29836,6 +29846,10 @@ namespace Legion {
                         config.initial_meta_task_vector_width, !filter)
         .add_option_int("-lg:eager_alloc_percentage",
                         config.eager_alloc_percentage, !filter)
+        .add_option_method("-lg:eager_alloc_percentage_override",
+                           &config,
+                           &LegionConfiguration::parse_alloc_percentage_override_argument,
+                           !filter)
         .add_option_bool("-lg:dump_free_ranges",
                          config.dump_free_ranges, !filter)
         .add_option_int("-lg:message",config.max_message_size, !filter)
@@ -29997,7 +30011,77 @@ namespace Legion {
               "LEVEL_FATAL" : "LEVEL_NONE")
       runtime_initialized = true;
       return config;
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::LegionConfiguration::parse_alloc_percentage_override_argument(
+        const std::string &s) {
+    //--------------------------------------------------------------------------
+      // Some of this code is borrowed from Realm's logger initialization.
+      const char *p1 = s.c_str();
+      while (true) {
+        // Skip commas.
+        while(*p1 == ',') p1++;
+        if(!*p1) break;
+
+        // We follow a similar format as the logger's -level arguments, where
+        // users can specify for particular memory kinds the amount of eager
+        // allocation space should be used. For example:
+        // -lg:eager_alloc_percentage_overrides socket_mem=35,system_mem=20.
+        std::string mem_kind_name;
+        if (!isdigit(*p1)) {
+          const char *p2 = p1;
+          while (*p2 != '=') {
+            if (!*p2) {
+              fprintf(stderr, "ERROR: memory kind in "
+                              "-lg:eager_alloc_percentage_override "
+                              "must be followed by =.\n");
+              return false;
+            }
+            p2++;
+          }
+          mem_kind_name.assign(p1, p2 - p1);
+          p1 = p2 + 1;
+        }
+        // Parse the memory kind now. First, convert the memory
+        // string to all upper case.
+        std::transform(
+            mem_kind_name.begin(),
+            mem_kind_name.end(),
+            mem_kind_name.begin(),
+            ::toupper
+        );
+        Realm::Memory::Kind mem_kind = Memory::NO_MEMKIND;
+        #define MEM_STR_EQ(name, desc) \
+          if (strcmp(mem_kind_name.c_str(), #name) == 0) { \
+            mem_kind = Realm::Memory::name;                \
+          }
+          REALM_MEMORY_KINDS(MEM_STR_EQ)
+        #undef MEM_STR_EQ
+        if (mem_kind == Realm::Memory::NO_MEMKIND) {
+          fprintf(stderr, "ERROR: unable to parse memory kind %s.\n",
+                  mem_kind_name.c_str());
+          return false;
+        }
+
+        // Advance until we don't see any more numbers.
+        const char* p2 = p1;
+        while (*p2 && isdigit(*p2)) p2++;
+        if (!*p2 || (*p2 == ',')) {
+          std::string percentage_str(p1, p2);
+          char* pos;
+          errno = 0; // No errors from before.
+          long percentage = strtol(percentage_str.c_str(), &pos, 10);
+          if (errno != 0) {
+            fprintf(stderr, "ERROR: unable to parse percentage value.\n");
+            return false;
+          }
+          this->eager_alloc_percentage_overrides[mem_kind] = percentage;
+          p1 = p2;
+        }
+      }
+      return true;
+    }
 
     //--------------------------------------------------------------------------
     Future Runtime::launch_top_level_task(const TaskLauncher &launcher)

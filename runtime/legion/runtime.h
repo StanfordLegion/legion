@@ -2492,6 +2492,7 @@ namespace Legion {
             initial_meta_task_vector_width(
                 LEGION_DEFAULT_META_TASK_VECTOR_WIDTH),
             eager_alloc_percentage(LEGION_DEFAULT_EAGER_ALLOC_PERCENTAGE),
+            eager_alloc_percentage_overrides({}),
             max_message_size(LEGION_DEFAULT_MAX_MESSAGE_SIZE),
             gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_control_replication_contexts(
@@ -2547,6 +2548,7 @@ namespace Legion {
         unsigned initial_tasks_to_schedule;
         unsigned initial_meta_task_vector_width;
         unsigned eager_alloc_percentage;
+        std::map<Realm::Memory::Kind, unsigned> eager_alloc_percentage_overrides;
         unsigned max_message_size;
         unsigned gc_epoch_size;
         unsigned max_control_replication_contexts;
@@ -2592,6 +2594,8 @@ namespace Legion {
         std::string prof_logfile;
         size_t prof_footprint_threshold;
         size_t prof_target_latency;
+      public:
+        bool parse_alloc_percentage_override_argument(const std::string& s);
       };
     public:
       struct TopFinishArgs : public LgTaskArgs<TopFinishArgs> {
@@ -2681,6 +2685,7 @@ namespace Legion {
       const unsigned initial_tasks_to_schedule;
       const unsigned initial_meta_task_vector_width;
       const unsigned eager_alloc_percentage;
+      const std::map<Realm::Memory::Kind, unsigned> eager_alloc_percentage_overrides;
       const unsigned max_message_size;
       const unsigned gc_epoch_size;
       const unsigned max_control_replication_contexts;
