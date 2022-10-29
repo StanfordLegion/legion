@@ -760,6 +760,7 @@ namespace Legion {
                      IndexSpace shard_space = IndexSpace::NO_SPACE);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
+      inline bool is_sharding(void) const { return (sharding_function != NULL); }
       bool is_complete_projection(RegionTreeNode *node,
                                   const LogicalUser &user) const;
     public:

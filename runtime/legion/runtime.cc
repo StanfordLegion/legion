@@ -16329,29 +16329,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CyclicShardingFunctor::CyclicShardingFunctor(
-                                               const CyclicShardingFunctor &rhs)
-      : ShardingFunctor()
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     CyclicShardingFunctor::~CyclicShardingFunctor(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CyclicShardingFunctor& CyclicShardingFunctor::operator=(
-                                               const CyclicShardingFunctor &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -16416,9 +16396,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(ShardingFunctor *func, 
-              RegionTreeForest *f, ShardManager *m, ShardingID id)
+              RegionTreeForest *f, ShardManager *m, ShardingID id, bool skip)
       : functor(func), forest(f), manager(m), sharding_id(id),
-        use_points(func->use_points())
+        use_points(func->use_points()), skip_checks(skip)
     //--------------------------------------------------------------------------
     {
     }
@@ -16447,7 +16427,8 @@ namespace Legion {
                                 "'shard_points' for control replicated task.",
                                 sharding_id)
           const coord_t shard = result[0];
-          if ((shard < 0) || (manager->total_shards <= size_t(shard)))
+          if (!skip_checks && 
+              ((shard < 0) || (manager->total_shards <= size_t(shard))))
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                                 "Illegal output shard %lld from sharding "
                                 "functor %d. Shards for this index space "
@@ -16478,7 +16459,7 @@ namespace Legion {
       {
         const ShardID shard =
           functor->shard(point, sharding_space, manager->total_shards);
-        if (manager->total_shards <= shard)
+        if (!skip_checks && (manager->total_shards <= shard))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                               "Illegal output shard %d from sharding "
                               "functor %d. Shards for this index space "
@@ -17512,6 +17493,8 @@ namespace Legion {
           true/*was preregistered*/, NULL, true/*preregistered*/);
       // Register the attach-detach sharding functor
       ReplicateContext::register_attach_detach_sharding_functor(this);
+      // Register the universal sharding functor
+      ReplicateContext::register_universal_sharding_functor(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20262,9 +20245,10 @@ namespace Legion {
     /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      // + 1 since we use that for first one for the attach-detach functor
+      // + 2 since we use that for first one for the attach-detach functor
+      // and the second one for the universal functor
       static ShardingID current_sharding_id =
-        LEGION_MAX_APPLICATION_SHARDING_ID + 1;
+        LEGION_MAX_APPLICATION_SHARDING_ID + 2;
       return current_sharding_id;
     }
 

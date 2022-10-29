@@ -21115,6 +21115,28 @@ namespace Legion {
       return node;
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::register_universal_sharding_functor(
+                                                               Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // See Runtime::get_current_static_sharding_id for how we get this ID
+      runtime->register_sharding_functor(LEGION_MAX_APPLICATION_SHARDING_ID + 1,
+          new UniversalShardingFunctor(), false/*need check*/,
+          true/*silence warnings*/, NULL, true/*preregistered*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* ReplicateContext::get_universal_sharding_function(void)
+    //--------------------------------------------------------------------------
+    {
+      // See Runtime::get_current_static_sharding_id for how we get this ID
+      // Note the universal sharding function is special and can skip checks
+      // on the output because it's not actually used for sharding
+      return shard_manager->find_sharding_function(
+                LEGION_MAX_APPLICATION_SHARDING_ID + 1, true/*skip checks*/);
+    }
+
     /////////////////////////////////////////////////////////////
     // Remote Task 
     /////////////////////////////////////////////////////////////

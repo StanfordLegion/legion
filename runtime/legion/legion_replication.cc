@@ -321,19 +321,32 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       RefinementTracker refinement_tracker(this, map_applied_conditions);
+      ShardingFunction *analysis_sharding_function = sharding_function;
+      if (must_epoch_task)
+      {
+        // Note we use a special 
+        // projection function for must epoch launches that maps all the 
+        // tasks to the special shard UINT_MAX so that they appear to be
+        // on a different shard than any other tasks, but on the same shard
+        // for all the tasks in the must epoch launch.
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        analysis_sharding_function = 
+          repl_ctx->get_universal_sharding_function();
+      }
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
         // Treat these as a special kind of projection requirement since we
         // need the logical analysis to look at sharding to determine if any
-        // kind of close operations are required
-        // The one exception here is if this is part of a must-epoch
-        // launch in which case we know the analysis is global so we don't
-        // need to pretend like it is sharded
-        ProjectionInfo projection_info;
-        if (!must_epoch_task)
-          projection_info = ProjectionInfo(runtime, req, launch_space,
-                                           sharding_function, sharding_space);
+        // kind of close operations are required. 
+        ProjectionInfo projection_info(runtime, req, launch_space,
+            analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
                                                      privilege_paths[idx],
@@ -880,11 +893,29 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       RefinementTracker refinement_tracker(this, map_applied_conditions);
+      ShardingFunction *analysis_sharding_function = sharding_function;
+      if (must_epoch_task)
+      {
+        // Note we use a special 
+        // projection function for must epoch launches that maps all the 
+        // tasks to the special shard UINT_MAX so that they appear to be
+        // on a different shard than any other tasks, but on the same shard
+        // for all the tasks in the must epoch launch.
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        analysis_sharding_function = 
+          repl_ctx->get_universal_sharding_function();
+      }
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
         ProjectionInfo projection_info(runtime, req, launch_space,
-                                       sharding_function, sharding_space);
+            analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
                                                      privilege_paths[idx],
@@ -10525,7 +10556,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunction* ShardManager::find_sharding_function(ShardingID sid)
+    ShardingFunction* ShardManager::find_sharding_function(ShardingID sid, 
+                                                           bool skip_checks)
     //--------------------------------------------------------------------------
     {
       // Check to see if it is in the cache
@@ -10546,7 +10578,7 @@ namespace Legion {
       if (finder != sharding_functions.end())
         return finder->second;
       ShardingFunction *result = 
-        new ShardingFunction(functor, runtime->forest, this, sid);
+        new ShardingFunction(functor, runtime->forest, this, sid, skip_checks);
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;

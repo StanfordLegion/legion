@@ -2873,7 +2873,12 @@ namespace Legion {
 #endif
       open_children.relax_valid_mask(m);
       if (IS_READ_ONLY(usage))
+      {
         open_state = OPEN_READ_ONLY_PROJ;
+        if (fn != NULL)
+          projections.insert(ProjectionSummary(proj_space, proj, fn,
+                                               shard_space, applied_events));
+      }
       else if (IS_REDUCE(usage))
       {
         if (dirty_reduction)

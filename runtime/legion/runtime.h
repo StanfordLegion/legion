@@ -2392,10 +2392,11 @@ namespace Legion {
     class CyclicShardingFunctor : public ShardingFunctor {
     public:
       CyclicShardingFunctor(void);
-      CyclicShardingFunctor(const CyclicShardingFunctor &rhs);
+      CyclicShardingFunctor(const CyclicShardingFunctor &rhs) = delete;
       virtual ~CyclicShardingFunctor(void);
     public:
-      CyclicShardingFunctor& operator=(const CyclicShardingFunctor &rhs);
+      CyclicShardingFunctor& operator=(
+          const CyclicShardingFunctor &rhs) = delete;
     public:
       template<int DIM>
       size_t linearize_point(const Realm::IndexSpace<DIM,coord_t> &is,
@@ -2448,7 +2449,7 @@ namespace Legion {
       };
     public:
       ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
-                       ShardManager *manager, ShardingID sharding_id);
+       ShardManager *manager, ShardingID sharding_id, bool skip_checks = false);
       ShardingFunction(const ShardingFunction &rhs) = delete;
       virtual ~ShardingFunction(void);
     public:
@@ -2464,6 +2465,7 @@ namespace Legion {
       ShardManager *const manager;
       const ShardingID sharding_id;
       const bool use_points;
+      const bool skip_checks;
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;

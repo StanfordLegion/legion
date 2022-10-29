@@ -2596,7 +2596,8 @@ namespace Legion {
                                       AddressSpaceID source);
       static void handle_barrier_refresh(Deserializer &derez, Runtime *rt);
     public:
-      ShardingFunction* find_sharding_function(ShardingID sid);
+      ShardingFunction* find_sharding_function(ShardingID sid, 
+                                               bool skip_check = false);
     public:
 #ifdef LEGION_USE_LIBDL
       void perform_global_registration_callbacks(
