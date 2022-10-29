@@ -29,7 +29,7 @@
 #define IS_NO_ACCESS(req) \
   (((req).privilege & LEGION_READ_WRITE) == LEGION_NO_ACCESS)
 #define IS_READ_ONLY(req) \
-  (((req).privilege & LEGION_READ_WRITE) <= LEGION_READ_PRIV)
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_READ_PRIV)
 #define HAS_READ(req) \
   ((req).privilege & LEGION_READ_PRIV)
 #define HAS_WRITE(req) \
