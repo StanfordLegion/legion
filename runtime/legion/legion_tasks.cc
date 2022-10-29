@@ -7950,6 +7950,17 @@ namespace Legion {
             "intra-index-space dependences on concurrent executions because "
             "the resulting execution is guaranteed to hang.", 
             get_task_name(), get_unique_id(), index)
+      if (!check_collective_regions.empty())
+      {
+        if (mapper == NULL)
+          mapper = runtime->find_mapper(current_proc, map_id);
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Mapper %s asked for collective region checks for index task "
+            "%s (UID %lld) but this task has intra-index-space task "
+            "dependences. Collective behavior cannot be analyzed on task "
+            "with inter-index-space dependences.", mapper->get_mapper_name(),
+            get_task_name(), get_unique_id())
+      }
       // Scan through the list until we find ourself
       for (unsigned idx = 0; idx < dependences.size(); idx++)
       {
@@ -9351,6 +9362,28 @@ namespace Legion {
         else if ((req.handle_type == LEGION_REGION_PROJECTION) &&
             (req.projection == 0) && (IS_READ_ONLY(req) || IS_REDUCE(req)))
           check_collective_regions.push_back(idx);
+      }
+      if (!check_collective_regions.empty())
+      {
+        // Check to make sure that there are no invertible projection functors
+        // in this index space launch on writing requirements which might cause
+        // point tasks to be interfering. If there are then we can't perform 
+        // any collective rendezvous here so the tasks can map together 
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          const RegionRequirement &req = regions[idx];
+          if (!IS_WRITE(req))
+            continue;
+          if (((req.projection == 0) && 
+              (req.handle_type == LEGION_REGION_PROJECTION)) ||
+              runtime->find_projection_function(req.projection)->is_invertible)
+          {
+            // Has potential dependences between the points so we can't
+            // assume that this is safe
+            check_collective_regions.clear();
+            break;
+          }
+        }
       }
       // Initialize the privilege paths
       privilege_paths.resize(get_region_count());
