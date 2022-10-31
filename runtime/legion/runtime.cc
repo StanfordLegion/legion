@@ -9438,6 +9438,7 @@ namespace Legion {
                            size_t return_size, const CodeDescriptor &realm,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
+        needs_scratch_space(needs_scratch(rt, registrar.layout_constraints)),
         return_type_size(return_size),
         descriptor_id(runtime->get_unique_code_descriptor_id()),
         realm_descriptor(realm),
@@ -9548,7 +9549,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), return_type_size(rhs.return_type_size),
+        global(rhs.global), needs_scratch_space(rhs.needs_scratch_space),
+        return_type_size(rhs.return_type_size),
         descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
     //--------------------------------------------------------------------------
     {
@@ -9809,6 +9811,22 @@ namespace Legion {
       derez.deserialize(local);
       VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
       impl->broadcast_variant(done, origin, local);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool VariantImpl::needs_scratch(Runtime *runtime, 
+                                     const TaskLayoutConstraintSet &constraints)
+    //--------------------------------------------------------------------------
+    {
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            constraints.layouts.begin(); it != constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->specialized_constraint.scratch_padding.get_dim() > 0)
+          return true;
+      }
+      return false;
     }
 
     /////////////////////////////////////////////////////////////

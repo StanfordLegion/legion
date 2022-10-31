@@ -1416,11 +1416,14 @@ namespace Legion {
     public:
       static void handle_variant_broadcast(Runtime *runtime, 
                                            Deserializer &derez);
+      static bool needs_scratch(Runtime *runtime,
+                                const TaskLayoutConstraintSet &constraints);
     public:
       const VariantID vid;
       TaskImpl *const owner;
       Runtime *const runtime;
       const bool global; // globally valid variant
+      const bool needs_scratch_space;
       const size_t return_type_size;
     public:
       const CodeDescriptorID descriptor_id;

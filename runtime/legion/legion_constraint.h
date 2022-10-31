@@ -345,6 +345,7 @@ namespace Legion {
       SpecializedKind kind;
       ReductionOpID  redop;
       Domain    collective;
+      Domain scratch_padding;
       size_t    max_pieces;
       int     max_overhead;
       bool       no_access;

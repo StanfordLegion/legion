@@ -327,6 +327,7 @@ namespace Legion {
       layout->alignment_reqd = 32;
       layout->space = space;
       std::vector<Rect<DIM,T> > piece_bounds;
+      const SpecializedConstraint &spec = constraints.specialized_constraint;
       if (space.dense() || !compact)
       {
         if (!space.bounds.empty())
@@ -340,7 +341,6 @@ namespace Legion {
         assert(piece_list_size != NULL);
         assert((*piece_list_size) == 0);
 #endif
-        const SpecializedConstraint &spec = constraints.specialized_constraint;
         if (spec.max_overhead > 0)
         {
           std::vector<Realm::Rect<DIM,T> > covering;
@@ -397,6 +397,26 @@ namespace Legion {
         }
         return layout;
       }
+      
+      // If the user requested any scratch padding on the instance apply it
+      if (spec.scratch_padding.get_dim() > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(spec.scratch_padding.get_dim() == DIM);
+        for (int i = 0; i < DIM; i++)
+        {
+          assert(spec.scratch_padding.lo()[i] >= 0);
+          assert(spec.scratch_padding.hi()[i] >= 0);
+        }
+#endif
+        for (typename std::vector<Rect<DIM,T> >::iterator it = 
+              piece_bounds.begin(); it != piece_bounds.end(); it++)
+        {
+          it->lo -= Point<DIM,T>(spec.scratch_padding.lo());
+          it->hi += Point<DIM,T>(spec.scratch_padding.hi());
+        }
+      }
+
       const OrderingConstraint &order = constraints.ordering_constraint;  
 #ifdef DEBUG_LEGION
       assert(order.ordering.size() == (DIM+1));

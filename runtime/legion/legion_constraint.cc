@@ -655,8 +655,9 @@ namespace Legion {
     {
       return ((kind == other.kind) && (redop == other.redop) &&
         (max_pieces == other.max_pieces) && (max_overhead == other.max_overhead)
-          && (collective == other.collective) && (no_access == other.no_access) 
-          && (exact == other.exact));
+          && (collective == other.collective) 
+          && (scratch_padding == other.scratch_padding) 
+          && (no_access == other.no_access) && (exact == other.exact));
     }
 
     //--------------------------------------------------------------------------
@@ -673,6 +674,15 @@ namespace Legion {
         return false;
       if (collective != other.collective)
         return false;
+      if (other.scratch_padding.get_dim() > 0)
+      {
+        if (scratch_padding.get_dim() != other.scratch_padding.get_dim())
+          return false;
+        if (scratch_padding.lo() < other.scratch_padding.lo())
+          return false;
+        if (scratch_padding.hi() < other.scratch_padding.hi())
+          return false;
+      }
       if (max_pieces > other.max_pieces)
         return false;
       if (max_overhead > other.max_overhead)
@@ -699,6 +709,15 @@ namespace Legion {
         return true;
       if (collective != other.collective)
         return true;
+      if (other.scratch_padding.get_dim() > 0)
+      {
+        if (scratch_padding.get_dim() != other.scratch_padding.get_dim())
+          return true;
+        if (scratch_padding.lo() < other.scratch_padding.lo())
+          return true;
+        if (scratch_padding.hi() < other.scratch_padding.hi())
+          return true;
+      }
       if (max_pieces != other.max_pieces)
         return true;
       if (max_overhead != other.max_overhead)
@@ -715,6 +734,7 @@ namespace Legion {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
       SWAP_HELPER(Domain, collective)
+      SWAP_HELPER(Domain, scratch_padding)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
       SWAP_HELPER(bool, no_access)
@@ -736,6 +756,7 @@ namespace Legion {
         rez.serialize(max_overhead);
       }
       rez.serialize(collective);
+      rez.serialize(scratch_padding);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -755,6 +776,7 @@ namespace Legion {
         derez.deserialize(max_overhead);
       }
       derez.deserialize(collective);
+      derez.deserialize(scratch_padding);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }
