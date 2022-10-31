@@ -52,7 +52,7 @@ struct AM_msg {
     char stuff[1];
 };
 
-void AM_Init(int *p_node_this, int *p_node_size);
+int AM_Init(int *p_node_this, int *p_node_size);
 void AM_Finalize();
 void AM_init_long_messages(MPI_Win win, void *am_base,
 			   Realm::IncomingMessageManager *message_manager);
