@@ -882,7 +882,7 @@ namespace Legion {
                  ShardingFunction *sharding_function, 
                  IndexSpaceNode *sharding_space,
                  std::set<RtEvent> &applied,
-                 RegionTreeNode *node, bool dirty_reduction = false);
+                 RegionTreeNode *node);
       FieldState(const FieldState &rhs);
       FieldState(FieldState &&rhs) noexcept;
       FieldState& operator=(const FieldState &rhs);
@@ -902,20 +902,20 @@ namespace Legion {
           const FieldMask &mask, std::set<RtEvent> &applied);
       void remove_child(RegionTreeNode *child);
     public:
-      bool can_elide_close_operation(Operation *op, unsigned index,
+      bool can_elide_close_operation(LogicalState &state,
+                                     Operation *op, unsigned index,
                                      const ProjectionInfo &info,
-                                     RegionTreeNode *node, bool reduction,
+                                     RegionTreeNode *node,
                                      std::set<RtEvent> &applied_events) const;
       void record_projection_summary(const ProjectionInfo &info,
                                      RegionTreeNode *node,
                                      std::set<RtEvent> &applied_events);
     protected:
-      bool elide_singular_same_shard(RegionTreeNode *node,
-                                     const ProjectionSummary &prev,
+      bool elide_singular_same_shard(const ProjectionSummary &prev,
                                      const ProjectionInfo &info) const;
       bool expensive_elide_test(Operation *op, unsigned index,
                                 const ProjectionInfo &info,
-                                RegionTreeNode *node, bool reduction) const;
+                                RegionTreeNode *node) const;
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask,
@@ -927,32 +927,37 @@ namespace Legion {
       FieldMaskSet<RegionTreeNode> open_children;
       OpenState open_state;
       ReductionOpID redop;
-      std::set<ProjectionSummary> projections;
+      // For control replication we need to keep track of the
+      // projections being done here to see if any of them are
+      // going to interfere with each other and need a merge 
+      // close fence to be inserted
+      std::set<ProjectionSummary> shard_projections;
     };
 
     /**
      * \class ProjectionTree
-     * This is a tree that stores the summary of a region
-     * tree that is accessed by an index launch and which
-     * node owns the leaves for in the case of control replication
+     * This class helps to construct a symbolic tree of all the 
+     * index space nodes used by a projection index space task
+     * launch along with the shards that access them. This then
+     * facilitates an analysis to determine if a close operation
+     * is needed to act as a fence between the shards.
      */
     class ProjectionTree {
     public:
-      ProjectionTree(IndexTreeNode *source,
-                     ShardID owner_shard = 0);
-      ProjectionTree(const ProjectionTree &rhs);
+      ProjectionTree(bool all_children_disjoint);
+      ProjectionTree(const ProjectionTree &rhs) = delete;
       ~ProjectionTree(void);
     public:
-      ProjectionTree& operator=(const ProjectionTree &rhs);
+      ProjectionTree& operator=(const ProjectionTree &rhs) = delete;
     public:
-      void add_child(ProjectionTree *child);
-      bool dominates(const ProjectionTree *other) const;
-      bool disjoint(const ProjectionTree *other) const;
-      bool all_same_shard(ShardID other_shard) const;
+      bool interferes(const ProjectionTree *other, ShardID other_shard) const;
+      bool uses_shard(ShardID other_shard) const;
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
     public:
-      IndexTreeNode *const node;
-      const ShardID owner_shard;
-      std::map<IndexTreeNode*,ProjectionTree*> children;
+      std::map<LegionColor,ProjectionTree*> children;
+      std::set<ShardID> users;
+      const bool all_children_disjoint;
     };
 
     /**
@@ -966,6 +971,18 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
     public:
+      class ElideCloseResult {
+      public:
+        ElideCloseResult(void) : result(false) { }
+        ElideCloseResult(
+            const std::set<ProjectionSummary> &projections, bool result);
+      public:
+        bool matches(const std::set<ProjectionSummary> &projections) const;
+      public:
+        std::set<ProjectionSummary> projections;
+        bool result;
+      };
+    public:
       LogicalState(RegionTreeNode *owner, ContextID ctx);
       LogicalState(const LogicalState &state);
       ~LogicalState(void);
@@ -978,6 +995,13 @@ namespace Legion {
       void clear_deleted_state(const FieldMask &deleted_mask);
       void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
       void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
+    public:
+      bool find_elide_close_result(const ProjectionInfo &info, 
+                  const std::set<ProjectionSummary> &projections, 
+                  bool &result, std::set<RtEvent> &applied_events) const;
+      void record_elide_close_result(const ProjectionInfo &info,
+                  const std::set<ProjectionSummary> &projections,
+                  bool result, std::set<RtEvent> &applied_events);
     public:
       RegionTreeNode *const owner;
     public:
@@ -1022,6 +1046,11 @@ namespace Legion {
       // these at the bottom of the disjoint complete access trees to say
       // how to project from a given node in the region tree
       FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
+    public:
+      // This helps to memoize expensive close operation elisions tests 
+      // within this context in a determinstic way for control replication
+      std::map<ProjectionSummary,
+               std::vector<ElideCloseResult> > *elide_close_results;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;

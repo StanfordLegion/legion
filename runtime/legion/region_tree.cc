@@ -18608,7 +18608,6 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
-          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // If we are reducing at this level we can 
               // leave it open otherwise we need a close
@@ -18739,37 +18738,36 @@ namespace Legion {
                 // These fields are already open below
                 open_below |= (it->valid_fields() & current_mask);
                 // Keep track of the sharding projections
+                // in case we need to promote to read-write later
                 if (proj_info.is_sharding())
                     it->record_projection_summary(proj_info, this, 
                                                   applied_events);
                 // Keep going
                 it++;
               }
-              else if (it->can_elide_close_operation(closer.user.op, 
-                    closer.user.idx, proj_info, this, 
-                    IS_REDUCE(closer.user.usage), applied_events))
+              // Reductions always need to go into a new mode to know
+              // that we need to flush them so close them up
+              else if (!IS_REDUCE(closer.user.usage) && 
+                  it->can_elide_close_operation(state, closer.user.op, 
+                    closer.user.idx, proj_info, this, applied_events))
               {
+                if (proj_info.is_sharding())
+                  it->record_projection_summary(proj_info, this, 
+                                                applied_events);
                 // Promote this up to a read-write projection state
-                // Go to the dirty reduction mode
                 const FieldMask overlap = current_mask & it->valid_fields();
                 // Record that some fields are already open
                 open_below |= overlap;
-                if (overlap == it->valid_fields())
-                {
-                  // We overlapped all the fields, so just change the mode
-                  it->open_state = OPEN_READ_WRITE_PROJ;
-                  it->record_projection_summary(proj_info, this,
-                                                applied_events);
-                }
-                else
+                if (overlap != it->valid_fields())
                 {
                   // Make the new state to add
                   FieldState new_state(closer.user.usage, overlap, 
                            proj_info.projection, proj_info.projection_space, 
                            proj_info.sharding_function,proj_info.sharding_space,
-                           applied_events, this, true/*dirty reduce*/);
-                  new_state.projections.insert(it->projections.begin(),
-                                               it->projections.end());
+                           applied_events, this);
+                  // Copy over any projections from before
+                  new_state.shard_projections.insert(
+                    it->shard_projections.begin(), it->shard_projections.end());
                   new_states.emplace_back(std::move(new_state));
                   // If we are a reduction, we can go straight there
                   it->filter(overlap);
@@ -18778,14 +18776,18 @@ namespace Legion {
                   else
                     it++;
                 }
+                else
+                {
+                  // We overlapped all the fields, so just change the mode
+                  it->open_state = OPEN_READ_WRITE_PROJ;
+                  // Keep going
+                  it++;
+                }
               }
               else
               {
-                // Check to see if we have a sharding functor
-                // in which case we need to make sure we don't
-                // need a close because of different sharding functors
-                if (record_close_operations &&
-                    (proj_info.sharding_function != NULL))
+                // Only need to record the close here if we're sharding
+                if (record_close_operations && proj_info.is_sharding())
                 {
                   // We need a close operation here
                   const FieldMask overlap = current_mask & it->valid_fields();
@@ -18811,44 +18813,21 @@ namespace Legion {
               // Can only avoid a close operation if we have the 
               // same projection function with the same or smaller
               // size domain as the original index space launch
-              if (it->can_elide_close_operation(closer.user.op, closer.user.idx,
-                    proj_info,this,IS_REDUCE(closer.user.usage),applied_events))
+              if (!IS_REDUCE(closer.user.usage) &&
+                  it->can_elide_close_operation(state, closer.user.op, 
+                    closer.user.idx, proj_info, this, applied_events))
               {
-                // If we're a reduction we have to go into a dirty 
-                // reduction mode since we know we're already open below
-                if (IS_REDUCE(closer.user.usage)) 
-                {
-                  // Go to the dirty reduction mode
-                  const FieldMask overlap = it->valid_fields() & current_mask;
-                  // Record that some fields are already open
-                  open_below |= overlap;
-                  // Make the new state to add
-                  FieldState new_state(closer.user.usage, overlap, 
-                           proj_info.projection, proj_info.projection_space, 
-                           proj_info.sharding_function,proj_info.sharding_space,
-                           applied_events, this, true/*dirty reduce*/);
-                  new_states.emplace_back(std::move(new_state));
-                  // If we are a reduction, we can go straight there
-                  it->filter(overlap);
-                  if (!it->valid_fields())
-                    it = state.field_states.erase(it);
-                  else
-                    it++;
-                }
-                else
-                {
-                  // If we're a write we need to update the projection space
-                  if (IS_WRITE(closer.user.usage) || proj_info.is_sharding())
-                    it->record_projection_summary(proj_info, this, 
-                                                  applied_events);
-                  open_below |= (it->valid_fields() & current_mask);
-                  it++;
-                }
+                // If we're a write we need to update the projection space
+                if (proj_info.is_sharding())
+                  it->record_projection_summary(proj_info, this, 
+                                                applied_events);
+                open_below |= (it->valid_fields() & current_mask);
+                it++;
               }
               else
               {
-                // Now we need the close operation
-                if (record_close_operations)
+                // Only need to record the close here if we're sharding
+                if (record_close_operations && proj_info.is_sharding())
                 {
                   const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
@@ -18865,14 +18844,13 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
-          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // Reduce projections of the same kind can always stay open
               // otherwise we need a close operation
               if (closer.user.usage.redop != it->redop)
               {
-                // We need a close operation here
-                if (record_close_operations)
+                // We need a close operation here if we're sharding
+                if (record_close_operations && proj_info.is_sharding())
                 {
                   const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
@@ -20101,14 +20079,15 @@ namespace Legion {
         rez.serialize(fit->redop);
         if (fit->open_state >= OPEN_READ_ONLY_PROJ)
         {
-          rez.serialize<size_t>(fit->projections.size());
+          rez.serialize<size_t>(fit->shard_projections.size());
           for (std::set<ProjectionSummary>::const_iterator it = 
-                fit->projections.begin(); it != fit->projections.end(); it++)
+                fit->shard_projections.begin(); it != 
+                fit->shard_projections.end(); it++)
             it->pack_summary(rez, to_remove);
         }
 #ifdef DEBUG_LEGION
         else
-          assert(fit->projections.empty());
+          assert(fit->shard_projections.empty());
 #endif
         rez.serialize<size_t>(fit->open_children.size());
         for (FieldMaskSet<RegionTreeNode>::const_iterator it =
@@ -20218,7 +20197,7 @@ namespace Legion {
           size_t num_summaries;
           derez.deserialize(num_summaries);
           for (unsigned idx = 0; idx < num_summaries; idx++)
-            fit->projections.insert(
+            fit->shard_projections.insert(
              ProjectionSummary::unpack_summary(derez, context, applied_events));
         }
         size_t num_open_children;

@@ -1259,6 +1259,27 @@ namespace Legion {
     };
 
     /**
+     * \class ElideCloseExchange
+     * This class supports an exchange of symbolic projection trees to
+     * determine if it is safe to elide a close operation in the logical
+     * dependence analysis.
+     */
+    class ElideCloseExchange : public AllGatherCollective<false> {
+    public:
+      ElideCloseExchange(ReplicateContext *ctx, CollectiveIndexLocation loc,
+                         ProjectionTree *t)
+        : AllGatherCollective<false>(ctx, 
+            ctx->get_next_collective_index(loc, true/*logical*/)), tree(t) { }
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) 
+        { tree->serialize(rez); }
+      virtual void unpack_collective_stage(Deserializer &derez, int stage)
+        { tree->deserialize(derez); }
+    public:
+      ProjectionTree *const tree;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases

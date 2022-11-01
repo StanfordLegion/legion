@@ -15261,8 +15261,6 @@ namespace Legion {
     void ProjectionFunction::prepare_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      // This will remove the index space references we are holding
-      elide_close_results.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -16039,122 +16037,39 @@ namespace Legion {
       
       }
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionFunction::ElideCloseResult::ElideCloseResult(void)
-      : node(NULL), result(false)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionFunction::ElideCloseResult::ElideCloseResult(IndexTreeNode *n,
-        const std::set<ProjectionSummary> &proj, bool res)
-      : node(n), projections(proj), result(res)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionFunction::ElideCloseResult::matches(IndexTreeNode *other,
-                     const std::set<ProjectionSummary> &other_projections) const
-    //--------------------------------------------------------------------------
-    {
-      if (node != other)
-        return false;
-      if (projections.size() != other_projections.size())
-        return false;
-      std::set<ProjectionSummary>::const_iterator it1 = projections.begin();
-      std::set<ProjectionSummary>::const_iterator it2 = 
-        other_projections.begin();
-      while (it1 != projections.end())
-      {
-        if (it1 != it2)
-          return false;
-        it1++; it2++;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionFunction::find_elide_close_result(const ProjectionInfo &info,
-                                 const std::set<ProjectionSummary> &projections, 
-                                 RegionTreeNode *node, bool &result,
-                                 std::set<RtEvent> &applied_events) const
-    //--------------------------------------------------------------------------
-    {
-      // No memoizing if we're not functional
-      if (!is_functional)
-        return false;
-      ProjectionSummary key(info, applied_events);
-      IndexTreeNode *row_source = node->get_row_source();
-      AutoLock p_lock(projection_reservation,1,false/*exclusive*/);
-      std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
-        finder = elide_close_results.find(key);
-      if (finder == elide_close_results.end())
-        return false;
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        if (it->matches(row_source, projections))
-        {
-          result = it->result;
-          return true;
-        }
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProjectionFunction::record_elide_close_result(
-                                const ProjectionInfo &info,
-                                const std::set<ProjectionSummary> &projections,
-                                RegionTreeNode *node, bool result,
-                                std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_functional)
-        return;
-      ProjectionSummary key(info, applied_events);
-      IndexTreeNode *row_source = node->get_row_source();
-      AutoLock p_lock(projection_reservation);
-      std::vector<ElideCloseResult> &close_results = elide_close_results[key];
-      // See if someone else saved the result in between to avoid duplicates
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            close_results.begin(); it != close_results.end(); it++)
-        if (it->matches(row_source, projections))
-          return;
-      close_results.push_back(ElideCloseResult(row_source, projections,result));
-    }
+    } 
 
     //--------------------------------------------------------------------------
     ProjectionTree* ProjectionFunction::construct_projection_tree(Operation *op,
-                            unsigned index, RegionTreeNode *root, 
-                            IndexSpaceNode *launch_space,
+                            unsigned index, ShardID local_shard, 
+                            RegionTreeNode *root, IndexSpaceNode *launch_space,
                             ShardingFunction *sharding_function, 
                             IndexSpaceNode *sharding_space) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_functional);
+      assert(sharding_function != NULL);
 #endif
       IndexTreeNode *row_source = root->get_row_source();
-      RegionTreeForest *context = root->context;
-      ProjectionTree *result = new ProjectionTree(row_source);
+      RegionTreeForest *forest = root->context;
+      ProjectionTree *result = NULL;
+      if (!row_source->is_index_space_node())
+        result = new ProjectionTree(
+            row_source->as_index_part_node()->is_disjoint(false/*from app*/));
+      else
+        result = new ProjectionTree(false/*not all children disjoint*/);
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
       node_map[row_source] = result;
-      // Iterate over the points, compute the projections, and build the tree   
-      Domain launch_domain, sharding_domain;
+      IndexSpace local_space = sharding_function->find_shard_space(local_shard,
+          launch_space, sharding_space->handle, op->get_provenance());
+      Domain local_domain, launch_domain;
+      forest->find_launch_space_domain(local_space, local_domain);
       launch_space->get_launch_space_domain(launch_domain);
-      if ((sharding_function != NULL) && (launch_space != sharding_space))
-        sharding_space->get_launch_space_domain(sharding_domain);
-      else
-        sharding_domain = launch_domain;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -16168,19 +16083,14 @@ namespace Legion {
                                          result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest, 
+                                 node_map, local_shard);
         }
       }
       else
       {
         PartitionNode *partition = root->as_partition_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -16194,13 +16104,8 @@ namespace Legion {
                                             result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest, 
+                                 node_map, local_shard);
         }
       }
       return result;
@@ -16208,8 +16113,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::construct_projection_tree(Operation *op,
-          unsigned index, RegionTreeNode *root, IndexSpaceNode *launch_space, 
-          ShardingFunction *sharding_function, IndexSpaceNode *sharding_space, 
+          unsigned index, ShardID local_shard, RegionTreeNode *root, 
+          IndexSpaceNode *launch_space, ShardingFunction *sharding_function,
+          IndexSpaceNode *sharding_space, 
           std::map<IndexTreeNode*,ProjectionTree*> &node_map) const
     //--------------------------------------------------------------------------
     {
@@ -16217,18 +16123,16 @@ namespace Legion {
       assert(is_functional);
 #endif
       IndexTreeNode *row_source = root->get_row_source();
-      RegionTreeForest *context = root->context;
-      // Iterate over the points, compute the projections, and build the tree   
-      Domain launch_domain, sharding_domain;
+      RegionTreeForest *forest = root->context;
+      IndexSpace local_space = sharding_function->find_shard_space(local_shard,
+          launch_space, sharding_space->handle, op->get_provenance());
+      Domain local_domain, launch_domain;
+      forest->find_launch_space_domain(local_space, local_domain);
       launch_space->get_launch_space_domain(launch_domain);
-      if ((sharding_function != NULL) && (launch_space != sharding_space))
-        sharding_space->get_launch_space_domain(sharding_domain);
-      else
-        sharding_domain = launch_domain;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -16242,19 +16146,14 @@ namespace Legion {
                                          result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest, 
+                                 node_map, local_shard);
         }
       }
       else
       {
         PartitionNode *partition = root->as_partition_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -16268,13 +16167,8 @@ namespace Legion {
                                             result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest,
+                                 node_map, local_shard);
         }
       }
     }
@@ -16292,11 +16186,12 @@ namespace Legion {
       ProjectionTree *current = NULL;
       if (finder == node_map.end())
       {
-        current = new ProjectionTree(child, owner_shard);
+        current = new ProjectionTree(false/*all children not disjoint*/);
         node_map[child] = current;
       }
       else
         current = finder->second;
+      current->users.insert(owner_shard);
       while (child != root)
       {
         // Find the next one to add this to
@@ -16305,12 +16200,16 @@ namespace Legion {
         ProjectionTree *next = NULL;
         if (finder == node_map.end())
         {
-          next = new ProjectionTree(parent);
+          if (!parent->is_index_space_node())
+            next = new ProjectionTree(
+                parent->as_index_part_node()->is_disjoint(false/*from app*/));
+          else
+            next = new ProjectionTree(false/*all children not disjoint*/);
           node_map[parent] = next;
         }
         else
           next = finder->second;
-        next->add_child(current);
+        next->children[child->color] = current;
         // Now we can walk up the tree
         child = parent;
         current = next;
