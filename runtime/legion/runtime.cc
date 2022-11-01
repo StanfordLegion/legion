@@ -16059,13 +16059,15 @@ namespace Legion {
             row_source->as_index_part_node()->is_disjoint(false/*from app*/));
       else
         result = new ProjectionTree(false/*not all children disjoint*/);
-      std::map<IndexTreeNode*,ProjectionTree*> node_map;
-      node_map[row_source] = result;
       IndexSpace local_space = sharding_function->find_shard_space(local_shard,
           launch_space, sharding_space->handle, op->get_provenance());
+      if (!local_space.exists())
+        return result;
       Domain local_domain, launch_domain;
       forest->find_launch_space_domain(local_space, local_domain);
       launch_space->get_launch_space_domain(launch_domain);
+      std::map<IndexTreeNode*,ProjectionTree*> node_map;
+      node_map[row_source] = result;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
@@ -16126,6 +16128,8 @@ namespace Legion {
       RegionTreeForest *forest = root->context;
       IndexSpace local_space = sharding_function->find_shard_space(local_shard,
           launch_space, sharding_space->handle, op->get_provenance());
+      if (!local_space.exists())
+        return;
       Domain local_domain, launch_domain;
       forest->find_launch_space_domain(local_space, local_domain);
       launch_space->get_launch_space_domain(launch_domain);
