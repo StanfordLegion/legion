@@ -12105,8 +12105,8 @@ namespace Legion {
         mpi_rank_table->perform_rank_exchange();
       initialize_mappers(); 
       // Pull in any static registrations that were done
-      register_static_variants();
       register_static_constraints();
+      register_static_variants();
       register_static_projections();
       // Initialize our virtual manager and our mappers
       initialize_virtual_manager();
