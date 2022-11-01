@@ -3258,34 +3258,56 @@ namespace Legion {
         // and if they do overlap, then all we just need to check to see if
         // the overlapping points shard to the same shards.
         elide = true;
+        Domain launch_domain;
+        info.projection_space->get_launch_space_domain(launch_domain);
+        const size_t launch_volume = info.projection_space->get_volume();
         for (std::set<ProjectionSummary>::const_iterator it =
               shard_projections.begin(); it != shard_projections.end(); it++)
         {
-          IndexSpaceExpression *intersection = 
-            node->context->intersect_index_spaces(it->domain, 
-                                                  info.projection_space);
-          if (intersection->is_empty())
-            continue;
           // See if all the points shard to the same shards
           if ((it->sharding == info.sharding_function) &&
               (it->sharding_domain == info.sharding_space))
             continue;
-          // Test all the points to see if their shards are the same
-          ApEvent ignore;
-          Domain intersection_domain = intersection->get_domain(ignore, true);
+          // Test all the overlapping points to see if their shards are the same
           Domain shard_domain_prev, shard_domain_next;
           it->sharding_domain->get_launch_space_domain(shard_domain_prev);
           info.sharding_space->get_launch_space_domain(shard_domain_next);
-          for (Domain::DomainPointIterator itr(intersection_domain); itr; itr++)
+          // Iterte over whichever one has fewer points
+          if (it->domain->get_volume() < launch_volume)
           {
-            const ShardID prev = 
-              it->sharding->find_owner(*itr, shard_domain_prev);
-            const ShardID next =
-              info.sharding_function->find_owner(*itr, shard_domain_next);
-            if (prev == next)
-              continue;
-            elide = false;
-            break;
+            Domain prev_domain;
+            it->domain->get_launch_space_domain(prev_domain);
+            for (Domain::DomainPointIterator itr(prev_domain); itr; itr++)
+            {
+              // Check for overlap
+              if (!info.projection_space->contains_point(*itr))
+                continue;
+              const ShardID prev = 
+                it->sharding->find_owner(*itr, shard_domain_prev);
+              const ShardID next =
+                info.sharding_function->find_owner(*itr, shard_domain_next);
+              if (prev == next)
+                continue;
+              elide = false;
+              break;
+            }
+          }
+          else
+          {
+            for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+            {
+              // Check for overlap
+              if (!it->domain->contains_point(*itr))
+                continue;
+              const ShardID prev = 
+                it->sharding->find_owner(*itr, shard_domain_prev);
+              const ShardID next =
+                info.sharding_function->find_owner(*itr, shard_domain_next);
+              if (prev == next)
+                continue;
+              elide = false;
+              break;
+            }
           }
           if (!elide)
             break;
