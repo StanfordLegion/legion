@@ -1053,7 +1053,7 @@ namespace Legion {
       };
       class AttachProjectionFunctor : public ProjectionFunctor {
       public:
-        AttachProjectionFunctor(ProjectionID pid,
+        AttachProjectionFunctor(Runtime *rt, ProjectionID pid,
                                 std::vector<IndexSpace> &&spaces);
         virtual ~AttachProjectionFunctor(void) { }
       public:
@@ -1067,7 +1067,10 @@ namespace Legion {
       public:
         virtual bool is_functional(void) const { return true; }
         // Some depth >0 means the runtime can't analyze it
-        virtual unsigned get_depth(void) const { return 1; }
+        virtual unsigned get_depth(void) const { return UINT_MAX; }
+      public:
+        static unsigned compute_offset(const DomainPoint &point,
+                                       const Domain &launch);
       public:
         const std::vector<IndexSpace> handles;
         const ProjectionID pid;
@@ -1526,7 +1529,8 @@ namespace Legion {
       ProjectionID compute_index_attach_projection(
                                         IndexTreeNode *node, IndexAttachOp *op,
                                         unsigned local_start, size_t local_size,
-                                        std::vector<IndexSpace> &spaces);
+                                        std::vector<IndexSpace> &spaces,
+                                        const bool can_use_identity = false);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered,
                                      Provenance *provenance = NULL);

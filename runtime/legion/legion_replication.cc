@@ -7327,11 +7327,11 @@ namespace Legion {
       if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
         requirement.projection = parent_ctx->compute_index_attach_projection(
             runtime->forest->get_node(requirement.partition.index_partition),
-            this, local_start, local_size, spaces);
+            this, local_start, local_size, spaces, false/*can use identity*/);
       else
         requirement.projection = parent_ctx->compute_index_attach_projection(
             runtime->forest->get_node(requirement.region.index_space),
-            this, local_start, local_size, spaces);
+            this, local_start, local_size, spaces, false/*can use identity*/);
       // Save this for later when we go to detach it
       resources.impl->set_projection(requirement.projection);
       if (runtime->check_privileges)

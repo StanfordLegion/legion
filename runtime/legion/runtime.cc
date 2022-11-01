@@ -15685,7 +15685,7 @@ namespace Legion {
             task->get_task_name(), task->get_unique_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15723,7 +15723,7 @@ namespace Legion {
             task->get_task_name(), task->get_unique_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15761,7 +15761,7 @@ namespace Legion {
             op->get_logging_name(), op->get_unique_op_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15799,7 +15799,7 @@ namespace Legion {
             op->get_logging_name(), op->get_unique_op_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
