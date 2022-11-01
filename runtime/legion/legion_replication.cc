@@ -11976,6 +11976,9 @@ namespace Legion {
       return result;
     }
 
+    // Instantiate this for a common use case
+    template class AllReduceCollective<ProdReduction<bool> >;
+
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast
     /////////////////////////////////////////////////////////////
