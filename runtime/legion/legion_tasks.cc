@@ -1674,7 +1674,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, VALIDATE_VARIANT_SELECTION_CALL);
       // Check the concurrent constraints
-      if (impl->is_concurrent() && !concurrent_task && !must_epoch_task)
+      if (impl->is_concurrent() && !concurrent_task && !must_epoch_task &&
+          is_index_space && (index_domain.get_volume() > 1))
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT, "Mapper %s has mapped "
               "task %s (UID %lld) to a concurrent task variant %s but this "
               "task was not launched in a concurrent index space task launch "
