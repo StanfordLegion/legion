@@ -2693,7 +2693,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualView::register_collective_analysis(
-                                                   CollectiveAnalysis *analysis)
+                     const CollectiveView *source, CollectiveAnalysis *analysis)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2704,30 +2704,33 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock v_lock(view_lock);
-        std::map<RendezvousKey,
-          std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
-            collective_analyses.find(key);
+        std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
+          collective_analyses.find(key);
         if (finder != collective_analyses.end())
         {
           // Note that this will deduplicate multiple registrations
-          if (finder->second.first == NULL)
+          if (finder->second.analysis == NULL)
           {
 #ifdef DEBUG_LEGION
-            assert(finder->second.second.exists());
+            assert(finder->second.ready.exists());
 #endif
             analysis->add_analysis_reference();
-            finder->second.first = analysis;
-            to_trigger = finder->second.second;
+            finder->second.analysis = analysis;
+            to_trigger = finder->second.ready;
 #ifdef DEBUG_LEGION
-            finder->second.second = RtUserEvent::NO_RT_USER_EVENT;
+            finder->second.ready = RtUserEvent::NO_RT_USER_EVENT;
 #endif
           }
+          // Record the view so we know how many registrations to expect
+          // We'll see one unregister for each source view
+          finder->second.views.insert(source->did);
         }
         else
         {
           analysis->add_analysis_reference();
-          collective_analyses[key] = 
-            std::make_pair(analysis, RtUserEvent::NO_RT_USER_EVENT);
+          RegisteredAnalysis &registration = collective_analyses[key];
+          registration.analysis = analysis;
+          registration.views.insert(source->did);
         }
       }
       if (to_trigger.exists())
@@ -2746,60 +2749,67 @@ namespace Legion {
       const RendezvousKey key(context_index, region_index);
       {
         AutoLock v_lock(view_lock);
-        std::map<RendezvousKey,
-          std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
-            collective_analyses.find(key);
+        std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
+          collective_analyses.find(key);
         if (finder != collective_analyses.end())
         {
-          if (finder->second.first == NULL)
+          if (finder->second.analysis == NULL)
           {
 #ifdef DEBUG_LEGION
-            assert(finder->second.second.exists());
+            assert(finder->second.ready.exists());
 #endif
-            wait_on = finder->second.second;
+            wait_on = finder->second.ready;
           }
           else
-            return finder->second.first;
+            return finder->second.analysis;
         }
         else
         {
-          const RtUserEvent to_notify = Runtime::create_rt_user_event();
-          collective_analyses[key] =
-            std::pair<CollectiveAnalysis*,RtUserEvent>(NULL, to_notify);
-          wait_on = to_notify;
+          RegisteredAnalysis &registration = collective_analyses[key];
+          registration.analysis = NULL;
+          registration.ready = Runtime::create_rt_user_event();
+          wait_on = registration.ready;
         }
       }
       if (!wait_on.has_triggered())
         wait_on.wait();
       AutoLock v_lock(view_lock);
-      std::map<RendezvousKey,
-        std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
-          collective_analyses.find(key);
+      std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
+        collective_analyses.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != collective_analyses.end());
-      assert(finder->second.first != NULL);
+      assert(finder->second.analysis != NULL);
 #endif
-      return finder->second.first;
+      return finder->second.analysis;
     }
 
     //--------------------------------------------------------------------------
-    void IndividualView::unregister_collective_analysis(size_t context_index,
-                                                        unsigned region_index)
+    void IndividualView::unregister_collective_analysis(
+      const CollectiveView *source, size_t context_index, unsigned region_index)
     //--------------------------------------------------------------------------
     {
       CollectiveAnalysis *removed = NULL;
       const RendezvousKey key(context_index, region_index);
       {
         AutoLock v_lock(view_lock);
-        std::map<RendezvousKey,
-          std::pair<CollectiveAnalysis*,RtUserEvent> >::iterator finder =
-            collective_analyses.find(key);
+        std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
+          collective_analyses.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != collective_analyses.end());
-        assert(finder->second.first != NULL);
-        assert(!finder->second.second.exists());
+        assert(finder->second.analysis != NULL);
+        assert(!finder->second.ready.exists());
 #endif
-        removed = finder->second.first;
+        std::set<DistributedID>::iterator view_finder = 
+          finder->second.views.find(source->did);
+#ifdef DEBUG_LEGION
+        assert(view_finder != finder->second.views.end());
+#endif
+        finder->second.views.erase(view_finder);
+        // If we're not the last view that needs to unregister this 
+        // analysis then we don't remove it yet
+        if (!finder->second.views.empty())
+          return;
+        removed = finder->second.analysis;
         collective_analyses.erase(finder);
       }
       if (removed->remove_analysis_reference())
@@ -7985,7 +7995,7 @@ namespace Legion {
       else
       {
         const unsigned local_index = find_local_index(target);
-        local_views[local_index]->register_collective_analysis(analysis);
+        local_views[local_index]->register_collective_analysis(this, analysis);
       }
     }
 
@@ -8030,42 +8040,6 @@ namespace Legion {
       if (analysis->remove_reference())
         delete analysis;
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    RtEvent CollectiveView::find_collective_analyses(size_t context_index,
-              unsigned index, const std::vector<CollectiveAnalysis*> *&analyses)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!local_views.empty());
-      assert(collective_mapping != NULL);
-#endif
-      const RendezvousKey key(context_index, index);
-      AutoLock v_lock(view_lock);
-      std::map<RendezvousKey,UserRendezvous>::iterator finder =
-        rendezvous_users.find(key);
-      if (finder == rendezvous_users.end())
-      {
-        finder = rendezvous_users.insert(
-            std::make_pair(key,UserRendezvous())).first; 
-        UserRendezvous &rendezvous = finder->second;
-        rendezvous.local_initialized = false;
-        rendezvous.remaining_remote_arrivals =
-          collective_mapping->count_children(owner_space, local_space);
-        rendezvous.local_registered = Runtime::create_rt_user_event();
-        rendezvous.global_registered = Runtime::create_rt_user_event();
-        rendezvous.local_applied = Runtime::create_rt_user_event();
-        rendezvous.global_applied = Runtime::create_rt_user_event();
-      }
-      analyses = &finder->second.analyses;
-      if ((finder->second.analyses.empty() || 
-            (finder->second.remaining_analyses > 0)) &&
-          !finder->second.analyses_ready.exists())
-        finder->second.analyses_ready = Runtime::create_rt_user_event();
-      return finder->second.analyses_ready;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     ApEvent CollectiveView::register_collective_user(const RegionUsage &usage,
@@ -8533,7 +8507,8 @@ namespace Legion {
             *trace_info, runtime->address_space, symbolic);
         Runtime::trigger_event(trace_info, ready_events[idx], ready);
         // Also unregister the collective analyses
-        local_views[idx]->unregister_collective_analysis(op_ctx_index, index);
+        local_views[idx]->unregister_collective_analysis(this, 
+                                          op_ctx_index, index);
       }
       if (!registered_events.empty())
         Runtime::trigger_event(local_registered,

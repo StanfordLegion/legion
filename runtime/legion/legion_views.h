@@ -308,10 +308,12 @@ namespace Legion {
       void update_field_reservations(const FieldMask &mask,
                                      const std::vector<Reservation> &rsrvs);
     public: 
-      void register_collective_analysis(CollectiveAnalysis *analysis);
+      void register_collective_analysis(const CollectiveView *source,
+                                        CollectiveAnalysis *analysis);
       CollectiveAnalysis* find_collective_analysis(size_t context_index,
                                                    unsigned region_index);
-      void unregister_collective_analysis(size_t context_index,
+      void unregister_collective_analysis(const CollectiveView *source,
+                                          size_t context_index,
                                           unsigned region_index);
     protected:
       ApEvent register_collective_user(const RegionUsage &usage,
@@ -417,8 +419,17 @@ namespace Legion {
       // only be occurring on collective views that are a subset of the 
       // collective view for the analysis. Therefore we register the analyses
       // with the individual views so that they can be found by any copies
-      std::map<RendezvousKey,
-        std::pair<CollectiveAnalysis*,RtUserEvent> > collective_analyses;
+      struct RegisteredAnalysis {
+      public:
+        CollectiveAnalysis *analysis;
+        RtUserEvent            ready;
+        // We need to deduplicate across views that are performing
+        // registrations on this instance. With multiple fields we
+        // can get multiple different views using the same instance
+        // and each doing their own registration
+        std::set<DistributedID> views;
+      };
+      std::map<RendezvousKey,RegisteredAnalysis> collective_analyses;
     };
 
     /**
