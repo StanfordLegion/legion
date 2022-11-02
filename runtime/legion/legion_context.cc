@@ -7303,7 +7303,8 @@ namespace Legion {
     ProjectionID InnerContext::compute_index_attach_projection(
                                   IndexTreeNode *upper_bound, IndexAttachOp *op,
                                   unsigned local_start, size_t local_size, 
-                                  std::vector<IndexSpace> &spaces)
+                                  std::vector<IndexSpace> &spaces,
+                                  const bool can_use_identity)
     //--------------------------------------------------------------------------
     {
       std::map<IndexTreeNode*,std::vector<AttachProjectionFunctor*> >::iterator
@@ -7333,7 +7334,7 @@ namespace Legion {
       // If the upper bound is a partition, do a quick check to see if
       // all the spaces are immediate children of the upper bound, if
       // so then we can use projection function 0
-      if (!upper_bound->is_index_space_node())
+      if (!upper_bound->is_index_space_node() && can_use_identity)
       {
         bool all_children = true;
         IndexPartNode *parent = upper_bound->as_index_part_node();
@@ -7352,8 +7353,8 @@ namespace Legion {
         {
           // We can use the identity projection in this case
           // so just make it, but no need to register it with the runtime
-          finder->second.push_back(
-              new AttachProjectionFunctor(0/*identity*/, std::move(spaces)));
+          finder->second.push_back(new AttachProjectionFunctor(runtime,
+                                      0/*identity*/, std::move(spaces)));
           return 0;
         }
       }
@@ -7362,7 +7363,7 @@ namespace Legion {
       const ProjectionID result =
         runtime->generate_dynamic_projection_id(false/*check context*/);
       AttachProjectionFunctor *functor =
-        new AttachProjectionFunctor(result, std::move(spaces));
+        new AttachProjectionFunctor(runtime, result, std::move(spaces));
       runtime->register_projection_functor(result, functor, false/*check*/,
                                            true/*silence warnings*/);
       finder->second.push_back(functor);
@@ -7373,9 +7374,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext::AttachProjectionFunctor::AttachProjectionFunctor(
+    InnerContext::AttachProjectionFunctor::AttachProjectionFunctor(Runtime *rt,
                                ProjectionID p, std::vector<IndexSpace> &&spaces)
-      : handles(spaces), pid(p)
+      : ProjectionFunctor(rt->external), handles(spaces), pid(p)
     //--------------------------------------------------------------------------
     {
     }
@@ -7385,8 +7386,11 @@ namespace Legion {
       LogicalRegion upper_bound, const DomainPoint &point, const Domain &launch)
     //--------------------------------------------------------------------------
     {
-      const Point<1> p = point;
-      return runtime->get_logical_subregion_by_tree(handles[p[0]],
+      const unsigned offset = compute_offset(point, launch);
+#ifdef DEBUG_LEGION
+      assert(offset < handles.size());
+#endif
+      return runtime->get_logical_subregion_by_tree(handles[offset],
           upper_bound.get_field_space(), upper_bound.get_tree_id());
     }
 
@@ -7395,9 +7399,42 @@ namespace Legion {
          LogicalPartition upper, const DomainPoint &point, const Domain &launch)
     //--------------------------------------------------------------------------
     {
-      const Point<1> p = point;
-      return runtime->get_logical_subregion_by_tree(handles[p[0]],
+      const unsigned offset = compute_offset(point, launch);
+#ifdef DEBUG_LEGION
+      assert(offset < handles.size());
+#endif
+      return runtime->get_logical_subregion_by_tree(handles[offset],
                     upper.get_field_space(), upper.get_tree_id());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ unsigned InnerContext::AttachProjectionFunctor::compute_offset(
+                                 const DomainPoint &point, const Domain &launch)
+    //--------------------------------------------------------------------------
+    {
+      if (point.get_dim() == 2)
+      {
+        const Point<2> p = point;
+        // Control replication case, see if we're compacted or not
+        if (launch.dense())
+        {
+          // Dense means that all the shards had the same number of points
+          // so we can compute where our offset is based on that
+          const Rect<2> bounds = launch;
+          return p[0] * (bounds.hi[1] - bounds.lo[1] + 1) + p[1];
+        }
+        else
+        {
+          // We computed prefix sums for the non-dense case so whatever
+          // the second dimension is is the one that says which space we are
+          return p[1];
+        }
+      }
+      else
+      {
+        const Point<1> p = point;
+        return p[0];
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -21101,9 +21138,15 @@ namespace Legion {
       else
       {
         std::vector<Rect<2> > rects(shard_sizes.size());
+        // Use prefix sum here so we know where each shard begins and ends
+        // in the color space of the projection
+        coord_t offset = 0;
         for (unsigned idx = 0; idx < shard_sizes.size(); idx++)
-          rects[idx] = Rect<2>(Point<2>(idx,0),
-                               Point<2>(idx,shard_sizes[idx]-1));
+        {
+          rects[idx] = Rect<2>(Point<2>(idx, offset),
+                               Point<2>(idx, offset + shard_sizes[idx] - 1));
+          offset += shard_sizes[idx];
+        }
         const Domain domain = Realm::IndexSpace<2,coord_t>(rects);
         handle = TaskContext::create_index_space(domain,
             NT_TemplateHelper::encode_tag<2,coord_t>(), provenance);
@@ -21113,6 +21156,28 @@ namespace Legion {
       space->shard_sizes.swap(shard_sizes);
       index_attach_launch_spaces.push_back(space);
       return node;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::register_universal_sharding_functor(
+                                                               Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      // See Runtime::get_current_static_sharding_id for how we get this ID
+      runtime->register_sharding_functor(LEGION_MAX_APPLICATION_SHARDING_ID + 1,
+          new UniversalShardingFunctor(), false/*need check*/,
+          true/*silence warnings*/, NULL, true/*preregistered*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* ReplicateContext::get_universal_sharding_function(void)
+    //--------------------------------------------------------------------------
+    {
+      // See Runtime::get_current_static_sharding_id for how we get this ID
+      // Note the universal sharding function is special and can skip checks
+      // on the output because it's not actually used for sharding
+      return shard_manager->find_sharding_function(
+                LEGION_MAX_APPLICATION_SHARDING_ID + 1, true/*skip checks*/);
     }
 
     /////////////////////////////////////////////////////////////

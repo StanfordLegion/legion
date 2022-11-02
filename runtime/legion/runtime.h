@@ -2279,21 +2279,7 @@ namespace Legion {
      * \class ProjectionFunction
      * A class for wrapping projection functors
      */
-    class ProjectionFunction {
-    public:
-      class ElideCloseResult {
-      public:
-        ElideCloseResult(void);
-        ElideCloseResult(IndexTreeNode *node, 
-            const std::set<ProjectionSummary> &projections, bool result);
-      public:
-        bool matches(IndexTreeNode *node, 
-                     const std::set<ProjectionSummary> &projections) const;
-      public:
-        IndexTreeNode *node;
-        std::set<ProjectionSummary> projections;
-        bool result;
-      };
+    class ProjectionFunction { 
     public:
       ProjectionFunction(ProjectionID pid, ProjectionFunctor *functor);
       ProjectionFunction(const ProjectionFunction &rhs);
@@ -2348,24 +2334,17 @@ namespace Legion {
     public:
       bool is_complete(RegionTreeNode *node, Operation *op, 
                        unsigned index, IndexSpaceNode *projection_space) const;
-    public:
-      bool find_elide_close_result(const ProjectionInfo &info, 
-                  const std::set<ProjectionSummary> &projections, 
-                  RegionTreeNode *node, bool &result,
-                  std::set<RtEvent> &applied_events) const;
-      void record_elide_close_result(const ProjectionInfo &info,
-                  const std::set<ProjectionSummary> &projections,
-                  RegionTreeNode *node, bool result,
-                  std::set<RtEvent> &applied_events);
+    public: 
       // From scratch
       ProjectionTree* construct_projection_tree(Operation *op, unsigned index,
-                  RegionTreeNode *root, IndexSpaceNode *launch_domain, 
-                  ShardingFunction *sharding, 
+                  ShardID local_shard, RegionTreeNode *root,
+                  IndexSpaceNode *launch_domain, ShardingFunction *sharding, 
                   IndexSpaceNode *shard_domain) const;
       // Contribute to an existing tree
       void construct_projection_tree(Operation *op, unsigned index,
-                  RegionTreeNode *root, IndexSpaceNode *launch_domain, 
-                  ShardingFunction *sharding, IndexSpaceNode *sharding_domain,
+                  ShardID local_shard, RegionTreeNode *root, 
+                  IndexSpaceNode *launch_domain, ShardingFunction *sharding,
+                  IndexSpaceNode *sharding_domain,
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map) const;
       static void add_to_projection_tree(LogicalRegion region,
                   IndexTreeNode *root, RegionTreeForest *context, 
@@ -2379,9 +2358,7 @@ namespace Legion {
       const ProjectionID projection_id;
       ProjectionFunctor *const functor;
     protected:
-      mutable LocalLock projection_reservation;
-      std::map<ProjectionSummary,
-               std::vector<ElideCloseResult> > elide_close_results;
+      mutable LocalLock projection_reservation;  
     }; 
 
     /**
@@ -2392,10 +2369,11 @@ namespace Legion {
     class CyclicShardingFunctor : public ShardingFunctor {
     public:
       CyclicShardingFunctor(void);
-      CyclicShardingFunctor(const CyclicShardingFunctor &rhs);
+      CyclicShardingFunctor(const CyclicShardingFunctor &rhs) = delete;
       virtual ~CyclicShardingFunctor(void);
     public:
-      CyclicShardingFunctor& operator=(const CyclicShardingFunctor &rhs);
+      CyclicShardingFunctor& operator=(
+          const CyclicShardingFunctor &rhs) = delete;
     public:
       template<int DIM>
       size_t linearize_point(const Realm::IndexSpace<DIM,coord_t> &is,
@@ -2448,7 +2426,7 @@ namespace Legion {
       };
     public:
       ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
-                       ShardManager *manager, ShardingID sharding_id);
+       ShardManager *manager, ShardingID sharding_id, bool skip_checks = false);
       ShardingFunction(const ShardingFunction &rhs) = delete;
       virtual ~ShardingFunction(void);
     public:
@@ -2464,6 +2442,7 @@ namespace Legion {
       ShardManager *const manager;
       const ShardingID sharding_id;
       const bool use_points;
+      const bool skip_checks;
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;

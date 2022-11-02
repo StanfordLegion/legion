@@ -242,11 +242,10 @@ namespace Legion {
     {
       activate_individual_task();
       owner_shard = 0;
+      launch_space = NULL;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      mapped_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
-      mapped_collective = NULL;
       future_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
@@ -261,8 +260,6 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (mapped_collective != NULL)
-        delete mapped_collective;
       if (future_collective != NULL)
         delete future_collective;
       deactivate_individual_task();
@@ -319,6 +316,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndividualTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis();
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
+      ShardingFunction *analysis_sharding_function = sharding_function;
+      if (must_epoch_task)
+      {
+        // Note we use a special 
+        // projection function for must epoch launches that maps all the 
+        // tasks to the special shard UINT_MAX so that they appear to be
+        // on a different shard than any other tasks, but on the same shard
+        // for all the tasks in the must epoch launch.
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        analysis_sharding_function = 
+          repl_ctx->get_universal_sharding_function();
+      }
+      for (unsigned idx = 0; idx < logical_regions.size(); idx++)
+      {
+        RegionRequirement &req = logical_regions[idx];
+        // Treat these as a special kind of projection requirement since we
+        // need the logical analysis to look at sharding to determine if any
+        // kind of close operations are required. 
+        ProjectionInfo projection_info(runtime, req, launch_space,
+            analysis_sharding_function, sharding_space);
+        runtime->forest->perform_dependence_analysis(this, idx, req,
+                                                     projection_info,
+                                                     privilege_paths[idx],
+                                                     refinement_tracker,
+                                                     map_applied_conditions);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndividualTask::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -349,11 +386,6 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
-#ifdef DEBUG_LEGION
-      assert(mapped_collective == NULL);
-#endif
-      mapped_collective = new SingleTaskTree(repl_ctx, owner_shard,
-                                mapped_collective_id, result.impl);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -362,12 +394,7 @@ namespace Legion {
         LegionSpy::log_operation_events(unique_op_id, 
             ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-        // We don't own it, so we can pretend like we
-        // mapped and executed this copy already
-        // Before we do this though we have to get the version state
-        // names for any writes so we can update our local state
-        const RtEvent local_done = mapped_collective->get_local_event();
-        shard_off(local_done);
+        shard_off(RtEvent::NO_RT_EVENT);
       }
       else // We own it, so it goes on the ready queue
       {
@@ -376,22 +403,6 @@ namespace Legion {
         // Then we can do the normal analysis
         IndividualTask::trigger_ready();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndividualTask::handle_future_size(size_t return_type_size,
-                   bool has_return_type_size, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert((mapped_collective != NULL) || (must_epoch != NULL));
-#endif
-      // Signal that we are done with our mapping with the future size
-      if (mapped_collective != NULL)
-        mapped_collective->broadcast_future_size(mapped_event,
-                      return_type_size, has_return_type_size);
-      IndividualTask::handle_future_size(return_type_size, 
-                      has_return_type_size, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -532,8 +543,16 @@ namespace Legion {
     void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_0);
+      IndexSpace handle;
+      if (index_domain.get_dim() == 0)
+      {
+        DomainPoint point(0);
+        Domain launch_domain(point, point);
+        handle = ctx->find_index_launch_space(launch_domain, get_provenance());
+      }
+      else
+        handle = ctx->find_index_launch_space(index_domain, get_provenance());
+      launch_space = runtime->forest->get_node(handle);
       if (!elide_future_return)
         future_collective_id = 
           ctx->get_next_collective_index(COLLECTIVE_LOC_1);
@@ -874,11 +893,29 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       RefinementTracker refinement_tracker(this, map_applied_conditions);
+      ShardingFunction *analysis_sharding_function = sharding_function;
+      if (must_epoch_task)
+      {
+        // Note we use a special 
+        // projection function for must epoch launches that maps all the 
+        // tasks to the special shard UINT_MAX so that they appear to be
+        // on a different shard than any other tasks, but on the same shard
+        // for all the tasks in the must epoch launch.
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        analysis_sharding_function = 
+          repl_ctx->get_universal_sharding_function();
+      }
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
       {
         RegionRequirement &req = logical_regions[idx];
         ProjectionInfo projection_info(runtime, req, launch_space,
-                                       sharding_function, sharding_space);
+            analysis_sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
                                                      privilege_paths[idx],
@@ -2153,8 +2190,16 @@ namespace Legion {
     void ReplFillOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_2);
+      IndexSpace handle;
+      if (index_domain.get_dim() == 0)
+      {
+        DomainPoint point(0);
+        Domain launch_domain(point, point);
+        handle = ctx->find_index_launch_space(launch_domain, get_provenance());
+      }
+      else
+        handle = ctx->find_index_launch_space(index_domain, get_provenance());
+      launch_space = runtime->forest->get_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -2162,14 +2207,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_fill();
+      launch_space = NULL;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       mapper = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
-      mapped_collective_id = UINT_MAX;
-      mapped_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -2180,8 +2224,6 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (mapped_collective != NULL)
-        delete mapped_collective;
       deactivate_fill();
       runtime->free_repl_fill_op(this);
     }
@@ -2227,6 +2269,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplFillOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis(); 
+      RefinementTracker tracker(this, map_applied_conditions);
+      ProjectionInfo projection_info(runtime, requirement, launch_space, 
+                                     sharding_function, sharding_space);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplFillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -2256,11 +2313,6 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
-#ifdef DEBUG_LEGION
-      assert(mapped_collective == NULL);
-#endif
-      mapped_collective = 
-        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -2271,19 +2323,11 @@ namespace Legion {
 #endif
         // We don't own it, so we can pretend like we
         // mapped and executed this fill already
-        // Before we do this though we have to get the version state
-        // names for any writes so we can update our local state
-        RtEvent local_done = mapped_collective->get_local_event();
-        complete_mapping(local_done);
+        complete_mapping();
         complete_execution();
       }
       else // We own it, so do the base call
-      {
-        // Signal the tree when we are done our mapping
-        mapped_collective->signal_tree(mapped_event);
-        // Perform the base operation 
         FillOp::trigger_ready();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2594,8 +2638,16 @@ namespace Legion {
     void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      mapped_collective_id = 
-        ctx->get_next_collective_index(COLLECTIVE_LOC_2);
+      IndexSpace handle;
+      if (index_domain.get_dim() == 0)
+      {
+        DomainPoint point(0);
+        Domain launch_domain(point, point);
+        handle = ctx->find_index_launch_space(launch_domain, get_provenance());
+      }
+      else
+        handle = ctx->find_index_launch_space(index_domain, get_provenance());
+      launch_space = runtime->forest->get_node(handle);
       // Initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
     }
@@ -2605,13 +2657,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_copy();
+      launch_space = NULL;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
-      mapped_collective_id = UINT_MAX;
-      mapped_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -2622,8 +2673,6 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (mapped_collective != NULL)
-        delete mapped_collective;
       deactivate_copy();
       runtime->free_repl_copy_op(this);
     }
@@ -2669,6 +2718,81 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis(false/*permit projection*/);
+      RefinementTracker refinement_tracker(this, map_applied_conditions);
+      // Make these requirements look like projection requirmeents since we
+      // need the logical analysis to look at sharding to determine if any
+      // kind of close operations are required
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        const RegionRequirement &req = src_requirements[idx];
+        ProjectionInfo projection_info(runtime, req, launch_space,
+                                       sharding_function, sharding_space);
+        runtime->forest->perform_dependence_analysis(this, idx, req, 
+                                                     projection_info,
+                                                     src_privilege_paths[idx],
+                                                     refinement_tracker,
+                                                     map_applied_conditions);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        unsigned index = src_requirements.size()+idx;
+        RegionRequirement &req = dst_requirements[idx];
+        ProjectionInfo projection_info(runtime, req, launch_space,
+                                       sharding_function, sharding_space);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(req);
+        if (is_reduce_req)
+          req.privilege = LEGION_READ_WRITE;
+        runtime->forest->perform_dependence_analysis(this, index, req, 
+                                                     projection_info,
+                                                     dst_privilege_paths[idx],
+                                                     refinement_tracker,
+                                                     map_applied_conditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          req.privilege = LEGION_REDUCE;
+      }
+      if (!src_indirect_requirements.empty())
+      {
+        gather_versions.resize(src_indirect_requirements.size());
+        const size_t offset = src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = src_indirect_requirements[idx];
+          ProjectionInfo projection_info(runtime, req, launch_space,
+                                         sharding_function, sharding_space); 
+          runtime->forest->perform_dependence_analysis(this, offset + idx, req,
+                                                 projection_info,
+                                                 gather_privilege_paths[idx],
+                                                 refinement_tracker,
+                                                 map_applied_conditions);
+        }
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        scatter_versions.resize(dst_indirect_requirements.size());
+        const size_t offset = src_requirements.size() +
+          dst_requirements.size() + src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = dst_indirect_requirements[idx];
+          ProjectionInfo projection_info(runtime, req, launch_space,
+                                         sharding_function, sharding_space);
+          runtime->forest->perform_dependence_analysis(this, offset + idx, req,
+                                                 projection_info,
+                                                 scatter_privilege_paths[idx],
+                                                 refinement_tracker,
+                                                 map_applied_conditions);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplCopyOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -2698,11 +2822,6 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
-#ifdef DEBUG_LEGION
-      assert(mapped_collective == NULL);
-#endif
-      mapped_collective = 
-        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -2713,19 +2832,11 @@ namespace Legion {
 #endif
         // We don't own it, so we can pretend like we
         // mapped and executed this copy already
-        // Before we do this though we have to get the version state
-        // names for any writes so we can update our local state
-        RtEvent local_done = mapped_collective->get_local_event();
-        complete_mapping(local_done);
+        complete_mapping();
         complete_execution();
       }
       else // We own it, so do the base call
-      {
-        // Signal the tree when we are done our mapping
-        mapped_collective->signal_tree(mapped_event);
-        // Perform the base operation 
         CopyOp::trigger_ready();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2896,7 +3007,7 @@ namespace Legion {
     void ReplIndexCopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      perform_base_dependence_analysis();
+      perform_base_dependence_analysis(true/*permit projection*/);
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -7216,11 +7327,11 @@ namespace Legion {
       if (requirement.handle_type == LEGION_PARTITION_PROJECTION)
         requirement.projection = parent_ctx->compute_index_attach_projection(
             runtime->forest->get_node(requirement.partition.index_partition),
-            this, local_start, local_size, spaces);
+            this, local_start, local_size, spaces, false/*can use identity*/);
       else
         requirement.projection = parent_ctx->compute_index_attach_projection(
             runtime->forest->get_node(requirement.region.index_space),
-            this, local_start, local_size, spaces);
+            this, local_start, local_size, spaces, false/*can use identity*/);
       // Save this for later when we go to detach it
       resources.impl->set_projection(requirement.projection);
       if (runtime->check_privileges)
@@ -10445,7 +10556,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardingFunction* ShardManager::find_sharding_function(ShardingID sid)
+    ShardingFunction* ShardManager::find_sharding_function(ShardingID sid, 
+                                                           bool skip_checks)
     //--------------------------------------------------------------------------
     {
       // Check to see if it is in the cache
@@ -10466,7 +10578,7 @@ namespace Legion {
       if (finder != sharding_functions.end())
         return finder->second;
       ShardingFunction *result = 
-        new ShardingFunction(functor, runtime->forest, this, sid);
+        new ShardingFunction(functor, runtime->forest, this, sid, skip_checks);
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;
@@ -11863,6 +11975,9 @@ namespace Legion {
       }
       return result;
     }
+
+    // Instantiate this for a common use case
+    template class AllReduceCollective<ProdReduction<bool> >;
 
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast

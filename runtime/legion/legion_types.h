@@ -282,7 +282,6 @@ namespace Legion {
       OPEN_READ_ONLY_PROJ     = 5, // read-only projection
       OPEN_READ_WRITE_PROJ    = 6, // read-write projection
       OPEN_REDUCE_PROJ        = 7, // reduction-only projection
-      OPEN_REDUCE_PROJ_DIRTY  = 8, // same as above but already open dirty 
     }; 
 
     // Internal reduction operators
@@ -1506,9 +1505,9 @@ namespace Legion {
     // with at most one logical static collective kind
     // Ones that have been commented out are free to be reused
     enum CollectiveIndexLocation {
-      COLLECTIVE_LOC_0 = 0, 
+      //COLLECTIVE_LOC_0 = 0, 
       COLLECTIVE_LOC_1 = 1,
-      COLLECTIVE_LOC_2 = 2,
+      //COLLECTIVE_LOC_2 = 2,
       COLLECTIVE_LOC_3 = 3,
       COLLECTIVE_LOC_4 = 4, 
       COLLECTIVE_LOC_5 = 5,
@@ -1596,10 +1595,10 @@ namespace Legion {
       COLLECTIVE_LOC_87 = 87,
       COLLECTIVE_LOC_88 = 88,
       COLLECTIVE_LOC_89 = 89,
-      //COLLECTIVE_LOC_90 = 90,
+      COLLECTIVE_LOC_90 = 90,
       COLLECTIVE_LOC_91 = 91,
       COLLECTIVE_LOC_92 = 92,
-      //COLLECTIVE_LOC_93 = 93,
+      COLLECTIVE_LOC_93 = 93,
       COLLECTIVE_LOC_94 = 94,
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,

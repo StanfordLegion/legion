@@ -1053,7 +1053,7 @@ namespace Legion {
       };
       class AttachProjectionFunctor : public ProjectionFunctor {
       public:
-        AttachProjectionFunctor(ProjectionID pid,
+        AttachProjectionFunctor(Runtime *rt, ProjectionID pid,
                                 std::vector<IndexSpace> &&spaces);
         virtual ~AttachProjectionFunctor(void) { }
       public:
@@ -1067,7 +1067,10 @@ namespace Legion {
       public:
         virtual bool is_functional(void) const { return true; }
         // Some depth >0 means the runtime can't analyze it
-        virtual unsigned get_depth(void) const { return 1; }
+        virtual unsigned get_depth(void) const { return UINT_MAX; }
+      public:
+        static unsigned compute_offset(const DomainPoint &point,
+                                       const Domain &launch);
       public:
         const std::vector<IndexSpace> handles;
         const ProjectionID pid;
@@ -1526,7 +1529,8 @@ namespace Legion {
       ProjectionID compute_index_attach_projection(
                                         IndexTreeNode *node, IndexAttachOp *op,
                                         unsigned local_start, size_t local_size,
-                                        std::vector<IndexSpace> &spaces);
+                                        std::vector<IndexSpace> &spaces,
+                                        const bool can_use_identity = false);
       virtual Future detach_resource(PhysicalRegion region, const bool flush,
                                      const bool unordered,
                                      Provenance *provenance = NULL);
@@ -2276,6 +2280,27 @@ namespace Legion {
                               const Domain &full_space,
                               const size_t total_shards);
       };
+      /**
+       * \class UniversalShardingFunctor
+       * This is a special sharding functor only used during the logical 
+       * analysis and has no bearing on the actual computed sharding. For
+       * some operations we need to have a way to say that an individual
+       * operation will be analyzed collectively on all the shards. This
+       * sharding function accomplishes this by mapping all the points to
+       * the non-shard UINT_MAX which will be non-interfering with 
+       * This maps all the points to the non-shard UINT_MAX which means that
+       * it will interfere with any normally mapped projections but not with
+       * any other projections which will be analyzed on all the nodes.
+       */
+      class UniversalShardingFunctor : public ShardingFunctor {
+      public:
+        UniversalShardingFunctor(void) { }
+        virtual ~UniversalShardingFunctor(void) { }
+      public:
+        virtual ShardID shard(const DomainPoint &point,
+                              const Domain &full_space,
+                              const size_t total_shards) { return UINT_MAX; }
+      };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
@@ -2997,6 +3022,8 @@ namespace Legion {
       ShardingFunction* get_attach_detach_sharding_function(void);
       IndexSpaceNode* compute_index_attach_launch_spaces(
           std::vector<size_t> &shard_sizes, Provenance *provenance);
+      static void register_universal_sharding_functor(Runtime *runtime);
+      ShardingFunction* get_universal_sharding_function(void);
     public:
       void hash_future(Murmur3Hasher &hasher, const unsigned safe_level, 
                        const Future &future, const char *description) const;
