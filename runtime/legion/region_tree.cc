@@ -18304,20 +18304,20 @@ namespace Legion {
                 // kind of write operation. Note that we don't need to
                 // actually perform close operations here because closing
                 // read-only children requires no work.
-                const bool needs_upgrade = HAS_WRITE(closer.user.usage);
+                const bool allow_next = IS_WRITE(closer.user.usage);
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, 
                                          *it, next_child,
-                                         true/*allow next*/,
+                                         allow_next,
                                          aliased_children,
-                                         needs_upgrade,
+                                         true/*needs upgrade*/,
                                          true/*read only close*/,
                                          false/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          already_open);
                 open_below |= already_open;
-                if (needs_upgrade && !!already_open)
+                if (allow_next && !!already_open)
                 {
                   FieldState new_state(closer.user, already_open, 
                                        next_child, applied_events);
