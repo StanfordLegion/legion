@@ -7524,15 +7524,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::initialize_replication(ReplicateContext *ctx, 
-                                    IndexSpace shard_sp, bool first_local_shard)
+    void ReplMapOp::initialize_replication(ReplicateContext *ctx) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!shard_space.exists());
-#endif
-      shard_space = shard_sp;
-      is_first_local_shard = first_local_shard;
       if (!remap_region && !runtime->unsafe_mapper)
       {
         mapping_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);
@@ -7706,9 +7700,7 @@ namespace Legion {
       ReplCollectiveViewCreator<CollectiveViewCreator<MapOp> >::activate();
       mapping_check = 0;
       sources_check = 0;
-      shard_space = IndexSpace::NO_SPACE;
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
-      is_first_local_shard = false;
     }
 
     //--------------------------------------------------------------------------

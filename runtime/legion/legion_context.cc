@@ -12205,8 +12205,6 @@ namespace Legion {
         equivalence_set_allocator_shard(0), fill_view_allocator_shard(0),
         next_available_collective_index(0), next_logical_collective_index(1),
         next_physical_template_index(0), 
-        sharding_launch_space(IndexSpace::NO_SPACE),
-        collective_map_launch_space(IndexSpace::NO_SPACE),
         next_replicate_bar_index(0), next_logical_bar_index(0),
         unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
@@ -18458,9 +18456,7 @@ namespace Legion {
                     launcher.requirement.region.tree_id, 
                     get_task_name(), get_unique_id());
 #endif
-      map_op->initialize_replication(this, 
-                      find_sharding_launch_space(provenance),
-                      shard_manager->is_first_local_shard(owner_shard));
+      map_op->initialize_replication(this); 
       if (current_trace != NULL)
         REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
                       "Attempted an inline mapping of region "
@@ -18540,9 +18536,7 @@ namespace Legion {
       }
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region, provenance);
-      map_op->initialize_replication(this,
-                      find_sharding_launch_space(provenance),
-                      shard_manager->is_first_local_shard(owner_shard));
+      map_op->initialize_replication(this);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_program_order_event();
       add_to_dependence_queue(map_op);
@@ -21772,27 +21766,6 @@ namespace Legion {
       if (next_logical_bar_index == total_shards)
         next_logical_bar_index = 0;
       return created;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::find_sharding_launch_space(
-                                                         Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      // In general this method is only called during intialization by the
-      // application task when launching off sub operations, but with detach
-      // operations it can be called in unordered context, but in that case
-      // we should already be able to find an existing launch space from
-      // the corresponding attach operation
-      if (sharding_launch_space.exists())
-        return sharding_launch_space;
-      // If we don't have a shard domain from the manager then there's
-      // nothing we can do about this either
-      if (shard_manager->shard_domain.get_dim() == 0)
-        return sharding_launch_space;
-      sharding_launch_space =
-        find_index_launch_space(shard_manager->shard_domain, provenance);
-      return sharding_launch_space;
     }
 
     //--------------------------------------------------------------------------

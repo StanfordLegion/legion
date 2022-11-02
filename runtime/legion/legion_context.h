@@ -3065,7 +3065,6 @@ namespace Legion {
       bool create_new_logical_barrier(ApBarrier &bar, size_t arrivals);
 #endif
     public:
-      IndexSpace find_sharding_launch_space(Provenance *provenance);
       const DomainPoint& get_shard_point(void) const; 
     public:
       static void register_attach_detach_sharding_functor(Runtime *runtime);
@@ -3277,8 +3276,6 @@ namespace Legion {
         std::vector<size_t> shard_sizes;
       };
       std::vector<AttachLaunchSpace*> index_attach_launch_spaces;
-      IndexSpace sharding_launch_space;
-      IndexSpace collective_map_launch_space;
     protected:
       unsigned next_replicate_bar_index;
       unsigned next_logical_bar_index;

@@ -2358,9 +2358,7 @@ namespace Legion {
     public:
       ReplMapOp& operator=(const ReplMapOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx,
-                                  IndexSpace shard_space,
-                                  bool first_local_shard);
+      void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2375,9 +2373,7 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     protected:
       CollectiveID mapping_check, sources_check;
-      IndexSpace shard_space;
       RtBarrier collective_map_barrier; 
-      bool is_first_local_shard;
     };
 
     /**
