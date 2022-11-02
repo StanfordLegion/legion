@@ -626,7 +626,9 @@ namespace Realm {
     }
 #endif
     int mpi_rank, mpi_size;
-    Realm::MPI::AM_Init(&mpi_rank, &mpi_size);
+    if (Realm::MPI::AM_Init(&mpi_rank, &mpi_size) != 0) {
+      return NULL;
+    }
     Network::my_node_id = mpi_rank;
     Network::max_node_id = mpi_size - 1;
     Network::all_peers.add_range(0, mpi_size - 1);

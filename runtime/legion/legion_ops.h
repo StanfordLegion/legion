@@ -1702,7 +1702,7 @@ namespace Legion {
       void initialize(InnerContext *ctx,
                       const CopyLauncher &launcher, Provenance *provenance);
       void log_copy_requirements(void) const;
-      void perform_base_dependence_analysis(void);
+      void perform_base_dependence_analysis(bool permit_projection);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -4078,6 +4078,7 @@ namespace Legion {
     public:
       void initialize(InnerContext *ctx, const FillLauncher &launcher,
                       Provenance *provenance);
+      void perform_base_dependence_analysis(void);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -4184,8 +4185,6 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       virtual size_t get_collective_points(void) const;
-    public:
-      void perform_base_dependence_analysis(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
       void enumerate_points(bool replaying);

@@ -3385,13 +3385,12 @@ class LogicalRegion(object):
         elif self.parent:
             # Recurse up the tree to the root
             return self.parent.parent.perform_logical_verification(op, req, field, 
-                                            logical_op, previous_deps, point_set)
+                                             logical_op, previous_deps, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_logical_state(field, point)
-                if not state.perform_logical_verification(op, req, logical_op,
-                                                            previous_deps):
+                if not state.perform_logical_verification(op, req, logical_op, previous_deps):
                     return False
             return True
 
@@ -3808,10 +3807,9 @@ class LogicalPartition(object):
             return
         self.logical_state[field].close_logical_tree(closed_users)
 
-    def perform_logical_verification(self, op, req, field, logical_op,
-                                     previous_deps):
+    def perform_logical_verification(self, op, req, field, logical_op, previous_deps):
         return self.parent.perform_logical_verification(op, req, field, logical_op,
-                                                 previous_deps, self.get_point_set())
+                                                previous_deps, self.get_point_set())
 
     def compute_current_version_numbers(self, depth, field, op, tree):
         self.parent.compute_current_version_numbers(depth, field, op, 
@@ -3878,84 +3876,64 @@ class LogicalPartition(object):
             child.print_tree()
 
 class LogicalVerificationState(object):
-    __slots__ = ['region', 'field', 'point', 'last_write',
-                 'current_epoch_users', 'previous_epoch_users']
+    __slots__ = ['region', 'field', 'point', 'current_epoch_users', 'previous_epoch_users']
 
     def __init__(self, region, field, point):
         self.region = region
         self.field = field
         self.point = point
-        self.last_write = None
         self.current_epoch_users = list()
         self.previous_epoch_users = list()
 
     def perform_logical_verification(self, op, req, logical_op, previous_deps):
-        dominates,success = self.perform_epoch_analysis(self.current_epoch_users,
-                                                op, req, logical_op, previous_deps)
+        dominates,success = self.perform_epoch_analysis(self.current_epoch_users, op, req,
+                                                        logical_op, previous_deps)
         if not success:
             return False
         if not dominates:
-            _,success = self.perform_epoch_analysis(self.previous_epoch_users,
-                                            op, req, logical_op, previous_deps)
+            _,success = self.perform_epoch_analysis(self.previous_epoch_users, op, req, 
+                                                    logical_op, previous_deps)
             if not success:
                 return False
         else:
             self.previous_epoch_users = self.current_epoch_users
             self.current_epoch_users = list()
         self.current_epoch_users.append((op,req,logical_op))
-        if req.is_write():
-            self.last_write = req.logical_node
         return True
 
     def perform_epoch_analysis(self, epoch_users, op, req, logical_op, previous_deps):
         dominates = True
-        for prev_op,prev_req,prev_log in epoch_users:
+        for prev_op,prev_req,prev_logical in epoch_users:
             dep_type = compute_dependence_type(prev_req, req)
             if dep_type is NO_DEPENDENCE:
                 dominates = False
                 continue
             # Interfering operations should have been caught earlier
             assert prev_op is not op
-            assert prev_log is not logical_op
-            # Deletions do no need close operations for now
+            assert prev_logical is not logical_op
+            # Deletions do no need close fence operations for now even across
+            # shards since they act like upwards facing fences
             if op.kind == DELETION_OP_KIND:
                 # Deletions of the same thing can race
                 if prev_op.kind == DELETION_OP_KIND:
                     continue
-                need_close = False
+                need_fence = False
             # Now determine whether we need to have a close operation along the
-            # path between these two operations
+            # path between these two operations due to them being in different shards
             elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_log:
                 # Operations from two different shards with control
-                # replication always need a close operation if the
-                # first one is an index space operation. If the first
-                # one is an individual operation then we know its mapping
-                # dependences are explicitly broadcast across the shards
-                # Note that the converse is not true, individual ops do
-                # not perform collective incoming dependences
-                need_close = True
-            elif req.is_read_only():
-                # If we're reading from a reduction we always need a close
-                if prev_req.is_reduce():
-                    need_close = not req.logical_node.has_ancestor(prev_req.logical_node)
-                else: 
-                    # Otherwise if we're not reading below the most 
-                    # recent write then we also need a close
-                    need_close = not req.logical_node.has_ancestor(self.last_write)
-            elif req.is_reduce():
-                # If we're reducing over a read we always need a close
-                if prev_req.is_read_only():
-                    need_close = not req.logical_node.has_ancestor(prev_req.logical_node)
-                else:
-                    # Otherwise if we're not reducing below the most
-                    # recent write then we also need a close
-                    need_close = not req.logical_node.has_ancestor(self.last_write)
+                # replication always need a close operation between them
+                # to ensure cross-shard mapping dependences are obeyed
+                need_fence = True
             else:
-                # If the previous thing is not directly above use then we need a close
-                need_close = not req.logical_node.has_ancestor(prev_req.logical_node)
+                # Close operations are never actually needed without control
+                # replication since all index operations are not mapped until
+                # all of their local points are
+                need_fence = False
             if not logical_op.has_verification_mapping_dependence(
-                    logical_op.reqs[req.index], prev_log, prev_log.reqs[prev_req.index], 
-                                        dep_type, self.field, need_close,previous_deps):
+                    logical_op.reqs[req.index], prev_logical, 
+                    prev_logical.reqs[prev_req.index], dep_type, 
+                    self.field, need_fence, previous_deps):
                 return dominates,False
         return dominates,True
 
@@ -5854,7 +5832,7 @@ class Operation(object):
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
                  'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance']
-                  # If you add a field here, you must update the merge method
+                 # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -6062,6 +6040,21 @@ class Operation(object):
 
     def get_logical_op(self):
         return self
+
+    def get_fence_operation(self, req, field):
+        # Any internal operation for the right region requirement
+        # and the right field will work as a fence operation
+        if self.internal_ops is None:
+            return None
+        for fence in self.internal_ops:
+            if not close.is_close():
+                continue
+            assert len(fence.reqs) == 1
+            fence_req = fence.reqs[0]
+            if field not in fence_req.fields:
+                continue
+            return fence
+        return None
 
     def get_close_operation(self, req, node, field, read_only):
         if self.internal_ops is None:
@@ -6896,7 +6889,6 @@ class Operation(object):
                 copy_reduce = False
         else:
             copy_reduce = False
-        # See if we are restricted in any way
         assert logical_op.context
         # Now do the traversal for each of the fields
         for field in req.fields: 
@@ -7003,13 +6995,12 @@ class Operation(object):
         return True
 
     def perform_op_logical_verification(self, logical_op, previous_deps):
+        # TODO: Remove this once we actually replay logical analysis correctly 
+        # under all tracing cases
         if self.replayed:
             return True
         # We need a context to do this
         assert logical_op.context is not None
-        # If this operation was predicated false, then there is nothing to do
-        if self.predicate and not self.predicate_result:
-            return True
         # See if there is a fence in place for this context
         if logical_op.context.current_fence is not None:
             if logical_op.context.current_fence not in logical_op.logical_incoming: 
@@ -7039,8 +7030,9 @@ class Operation(object):
                 for point in sorted(itervalues(self.points), key=lambda x: x.uid):
                     if not point.perform_op_logical_verification(logical_op, previous_deps):
                         return False
-        elif self.launch_shape is None: 
-            # This is a single operation if it doesn't have a launch rectangle
+        else:
+            # This is a single operation
+            assert self.launch_shape is None
             assert len(self.reqs) >= len(logical_op.reqs)
             for idx in xrange(0,len(logical_op.reqs)):
                 if not self.verify_logical_requirement(idx, logical_op, previous_deps):
@@ -7103,18 +7095,18 @@ class Operation(object):
         return False
 
     def has_verification_mapping_dependence(self, req, prev_op, prev_req, dtype, 
-                                            field, need_close, previous_deps):
+                                            field, need_fence, previous_deps):
         tree_id = req.logical_node.tree_id
         # Do a quick check to see if it is in the previous deps
         if prev_op in previous_deps:
-            if need_close:
+            if need_fence:
                 # Check to see if the previous dependence had an intermediate close
                 if (field,tree_id) in previous_deps[prev_op]:
                     return True
             else:
                 # We already found this prev_op as a previous dependence
                 return True
-        self.has_verification_transitive_mapping_dependence(prev_op, need_close, 
+        self.has_verification_transitive_mapping_dependence(prev_op, need_fence, 
                                                     field, tree_id, previous_deps)
         # Did not find it so issue the error and return false
         if prev_op not in previous_deps:
@@ -7122,26 +7114,29 @@ class Operation(object):
                   "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
                   str(self)+" (UID "+str(self.uid)+")")
+            if self.state.bad_graph_on_error:
+                self.state.dump_bad_graph(self.context, tree_id, self.field)
             if self.state.assert_on_error:
                 assert False
-        elif need_close and (field,tree_id) not in previous_deps[prev_op]:
-            assert need_close
-            print("ERROR: Missing close operation on "+str(field)+" of tree "+
+        elif need_fence and (field,tree_id) not in previous_deps[prev_op]:
+            print("ERROR: Missing internal fence operation on "+str(field)+" of tree "+
                     str(tree_id)+" between region requirement "+str(prev_req.index)+
                     " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
                     "requriement "+str(req.index)+" of "+str(self)+" (UID "+
                     str(self.uid)+")")
+            if self.state.bad_graph_on_error:
+                self.state.dump_bad_graph(self.context, tree_id, self.field)
             if self.state.assert_on_error:
                 assert False
         else:
             return True
         return False
 
-    def has_verification_transitive_mapping_dependence(self, prev_op, need_close, 
+    def has_verification_transitive_mapping_dependence(self, prev_op, need_fence, 
                                                     field, tree_id, previous_deps):
         # If we don't need a close then we can do BFS which is much more efficient
         # at finding dependences of things nearby in the graph
-        if not need_close:
+        if not need_fence:
             next_gen = self.state.get_next_traversal_generation()
             self.generation = next_gen
             queue = collections.deque()
@@ -7160,7 +7155,7 @@ class Operation(object):
                     next_op.generation = next_gen
                     queue.append(next_op)
         else:
-            # Otherwise start the traversal and look for a path that contains the close
+            # Otherwise start the traversal and look for a path that contains the fence
             # Since it's likely that the operation we're looking for is nearby in the
             # graph we'll use a timeout to find it efficiently search ever increasing
             # depths until we notice that we do not get a timeout
@@ -8610,14 +8605,25 @@ class Task(object):
                         if logical_op.state.assert_on_warning:
                             assert False
                         continue
-                    # Run this analysis for all the points from each shard
-                    for shard in itervalues(self.replicants.shards):
-                        # Handle cases where shards have different numbers
-                        # of operations because of a crash
-                        if idx >= len(shard.operations):
+                    # Check to see if this is an index space operation in which case
+                    # we need to run all the points across all the shards, otherwise
+                    # we just run the operation like normal in this context
+                    if logical_op.is_index_op():
+                        # Run the analysis for all the points from each shard
+                        for shard in itervalues(self.replicants.shards):
+                            # Handle cases where shards have different numbers
+                            # of operations because of a crash
+                            if idx >= len(shard.operations):
+                                continue
+                            op = shard.operations[idx]   
+                            if not op.fully_logged:
+                                print(('Warning: shard %s has operation %s which is '+
+                                        'not fully logged and therefore being skipped. '+
+                                        'This is likely the result of a crash in a run.') %
+                                        (str(shard.shard),str(op)))
+                                if op.state.assert_on_warning:
+                                    assert False
                             continue
-                        op = shard.operations[idx]
-                        if op.is_index_op():
                             if op.points is not None:
                                 if op.kind == INDEX_TASK_KIND:
                                     for point in itervalues(op.points):
@@ -8631,40 +8637,35 @@ class Task(object):
                                             assert not op.fully_logged
                                             break
                                         point.owner_shard = shard.shard
-                        elif shard is not logical_shard:
-                            # Skip individual operations not from our shard
-                            # as we only need to verify individual operations
-                            # once in each logical dependence pattern
-                            continue
-                        if not op.fully_logged:
-                            print(('Warning: shard %s has operation %s which is '+
-                                    'not fully logged and therefore being skipped. '+
-                                    'This is likely the result of a crash in a run.') %
-                                    (str(shard.shard),str(op)))
-                            if op.state.assert_on_warning:
-                                assert False
-                            continue
-                        # Can finally do the verification for this shard
-                        print('Verifying '+str(op)+' of shard '+str(shard.shard))
+                            previous_deps = dict()
+                            if self.op.state.verbose:
+                                print('Verifying '+str(op)+' of shard '+str(shard.shard))
+                            if not op.perform_op_logical_verification(logical_op, previous_deps):
+                                success = False
+                                break
+                        if not success:
+                            break
+                    else:
+                        # Not a sharded operation so just run this like normal
+                        if self.op.state.verbose:
+                            print('Verifying '+str(op))
                         previous_deps = dict()
-                        if not op.perform_op_logical_verification(logical_op,previous_deps):
+                        if not logical_op.perform_op_logical_verification(logical_op, previous_deps):
                             success = False
                             break
-                    if not success:
-                        break
                 # Clear out the logical analysis for the next shard
                 self.op.state.reset_logical_state()
                 if not success:
                     break
         else:
-            if self.op.state.verbose:
-                print('  Analyzing %d operations...' % len(self.operations))
             self.reset_logical_state()
             # Iterate over all the operations in order and
             # have them perform their analysis
             for op in self.operations:
                 # Keep track of the previous dependences so we can 
                 # use them for adding/checking dependences on close operations
+                if self.op.state.verbose:
+                    print('Verifying '+str(op))
                 previous_deps = dict()
                 if not op.perform_op_logical_verification(op, previous_deps):
                     success = False
@@ -12971,16 +12972,19 @@ class State(object):
             return (False,None)
         return (True,parent_one)
 
-    def perform_logical_analysis(self, perform_checks, sanity_checks):
-        for task in itervalues(self.tasks):
-            # If we're only performing checks then we might break out early
-            if not task.perform_logical_dependence_analysis(perform_checks):
-                return False
-        if sanity_checks:
+    def perform_logical_analysis(self, perform_checks):
+        if perform_checks:
+            # Use the verification algorithm if were performing checks
             for task in itervalues(self.tasks):
-                if not task.perform_task_logical_verification():
-                    return False
-        return True
+                task.perform_task_logical_verification()
+        else:
+            # Otherwise we use the emulation which tries to follow the
+            # same algorithm as the runtime (with a few minor differences)
+            # This used to be used for performing the verification, but it
+            # was not completely sound and precise so we switched to the 
+            # algorithm above to ensure we get the right behavior
+            for task in itervalues(self.tasks):
+                task.perform_logical_dependence_analysis(False)
 
     def perform_physical_analysis(self, perform_checks):
         assert self.top_level_uid is not None
@@ -12994,8 +12998,8 @@ class State(object):
         # Perform the physical analysis on all the operations in program order
         if not top_task.perform_task_physical_verification(perform_checks):
             print("FAIL")
-            return
-        print("Pass")
+        else:
+            print("Pass")
 
     def perform_cycle_checks(self, print_result=True):
         # To perform our cycle checks we run a modified version of
@@ -13684,9 +13688,6 @@ def main(temp_dir):
         '-c', '--cycle', dest='cycle_checks', action='store_true',
         help='check for cycles')
     parser.add_argument(
-        '-s', '--sanity', dest='sanity_checks', action='store_true',
-        help='check basic properties of the dataflow and event graphs')
-    parser.add_argument(
         '-w', '--leaks', dest='user_event_leaks', action='store_true',
         help='check for user event leaks')
     parser.add_argument(
@@ -13767,7 +13768,6 @@ def main(temp_dir):
     realm_stats = args.realm_stats
     replay_file = args.replay_file
     detailed_graphs = args.detailed_graphs
-    sanity_checks = args.sanity_checks
     user_event_leaks = args.user_event_leaks
     keep_temp_files = args.keep_temp_files
     simplify_graphs = args.simplify_graphs
@@ -13812,22 +13812,20 @@ def main(temp_dir):
         if state.assert_on_warning:
             assert False
         physical_checks = False
-    if logical_checks and sanity_checks and not state.detailed_logging:
+    if logical_checks and not state.detailed_logging:
         print("WARNING: Requested sanity checks for logical analysis but "+
               "logging information of logical analysis is missing. Please "+
               "compile the runtime with USE_SPY=1 to enable validation "+
               "of the runtime. Disabling sanity checks.")
         if state.assert_on_warning:
             assert False
-        sanity_checks = False
-    if physical_checks and sanity_checks and not state.detailed_logging:
+    if physical_checks and not state.detailed_logging:
         print("WARNING: Requested sanity checks for physical analysis but "+
               "logging information of logical analysis is missing. Please "+
               "compile the runtime with USE_SPY=1 to enable validation "+
               "of the runtime. Disabling sanity checks.")
         if state.assert_on_warning:
             assert False
-        sanity_checks = False
     if cycle_checks and not state.detailed_logging:
         print("WARNING: Requested cycle checks but logging information is "+
               "missing. Please compile the runtime with USE_SPY=1 to enable "+
@@ -13854,7 +13852,7 @@ def main(temp_dir):
                   "logical analysis to show the dataflow graphs that the runtime "+
                   "should compute. These are not the actual dataflow graphs computed.")
         print("Performing logical analysis...")
-        state.perform_logical_analysis(logical_checks, sanity_checks)
+        state.perform_logical_analysis(logical_checks)
     # If we are doing physical checks or the user asked for the event
     # graph but we don't have any logical data then perform the physical analysis
     need_physical = event_graphs and not state.detailed_logging 

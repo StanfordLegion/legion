@@ -7619,10 +7619,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
-    {
-      if (runtime->check_privileges)
-        check_copy_privileges(false/*permit projection*/);
-      perform_base_dependence_analysis();
+    { 
+      perform_base_dependence_analysis(false/*permit projection*/);
       ProjectionInfo projection_info;
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -7678,9 +7676,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::perform_base_dependence_analysis(void)
+    void CopyOp::perform_base_dependence_analysis(bool permit_projection)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_copy_privileges(permit_projection);
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
@@ -9940,10 +9940,7 @@ namespace Legion {
     void IndexCopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_copy_privileges(true/*permit projection*/);
-      // Register a dependence on our predicate
-      perform_base_dependence_analysis();
+      perform_base_dependence_analysis(true/*permit projection*/);
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -21325,6 +21322,20 @@ namespace Legion {
     void FillOp::trigger_dependence_analysis(void) 
     //--------------------------------------------------------------------------
     {
+      perform_base_dependence_analysis();
+      ProjectionInfo projection_info;
+      RefinementTracker tracker(this, map_applied_conditions);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, tracker,
+                                                   map_applied_conditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
       if (runtime->check_privileges)
         check_fill_privilege();
       if (!wait_barriers.empty() || !arrive_barriers.empty())
@@ -21333,13 +21344,6 @@ namespace Legion {
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
-      ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
-      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
-                                                   requirement,
-                                                   projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
     }
 
     //--------------------------------------------------------------------------
@@ -21943,8 +21947,6 @@ namespace Legion {
     void IndexFillOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_fill_privilege();
       perform_base_dependence_analysis();
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       RefinementTracker tracker(this, map_applied_conditions);
@@ -21953,19 +21955,7 @@ namespace Legion {
                                                    projection_info,
                                                    privilege_path, tracker,
                                                    map_applied_conditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::perform_base_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!wait_barriers.empty() || !arrive_barriers.empty())
-        parent_ctx->perform_barrier_dependence_analysis(this, 
-                              wait_barriers, arrive_barriers);
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndexFillOp::trigger_ready(void)
