@@ -7113,6 +7113,8 @@ class Operation(object):
                   "requirement "+str(prev_req.index)+" of "+str(prev_op)+" (UID "+
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
                   str(self)+" (UID "+str(self.uid)+")")
+            if self.state.bad_graph_on_error:
+                self.state.dump_bad_graph(self.context, tree_id, self.field)
             if self.state.assert_on_error:
                 assert False
         elif need_fence and (field,tree_id) not in previous_deps[prev_op]:
@@ -7121,6 +7123,8 @@ class Operation(object):
                     " of "+str(prev_op)+" (UID "+str(prev_op.uid)+") and region "+
                     "requriement "+str(req.index)+" of "+str(self)+" (UID "+
                     str(self.uid)+")")
+            if self.state.bad_graph_on_error:
+                self.state.dump_bad_graph(self.context, tree_id, self.field)
             if self.state.assert_on_error:
                 assert False
         else:
