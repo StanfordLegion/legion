@@ -11454,14 +11454,10 @@ namespace Legion {
       }
       if (!index_launch_spaces.empty())
       {
-        // Note that we know all these index spaces are used locally
-        // and therefore we use the InnerContext::destroy_index_space
-        // in order to avoid calling the control replicated variant for
-        // replicated contexts
         for (std::map<Domain,IndexSpace>::const_iterator it = 
               index_launch_spaces.begin(); it != 
               index_launch_spaces.end(); it++)
-          InnerContext::destroy_index_space(it->second, false/*unordered*/,
+          destroy_index_space(it->second, false/*unordered*/, 
               true/*recurse*/, NULL/*provenance*/);
       }
       if (overhead_tracker != NULL)
