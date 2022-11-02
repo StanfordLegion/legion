@@ -18304,11 +18304,10 @@ namespace Legion {
                 // kind of write operation. Note that we don't need to
                 // actually perform close operations here because closing
                 // read-only children requires no work.
-                const bool allow_next = IS_WRITE(closer.user.usage);
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, 
                                          *it, next_child,
-                                         allow_next,
+                                         false/*allow next*/,
                                          aliased_children,
                                          true/*needs upgrade*/,
                                          true/*read only close*/,
@@ -18316,9 +18315,9 @@ namespace Legion {
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          already_open);
-                open_below |= already_open;
-                if (allow_next && !!already_open)
+                if (!!already_open)
                 {
+                  open_below |= already_open;
                   FieldState new_state(closer.user, already_open, 
                                        next_child, applied_events);
                   new_states.emplace_back(std::move(new_state));
@@ -18430,7 +18429,7 @@ namespace Legion {
                   FieldMask already_open;
                   perform_close_operations(closer, current_mask, 
                                            *it, next_child,
-                                           true/*allow next*/,
+                                           false/*allow next*/,
                                            aliased_children,
                                            true/*needs upgrade*/,
                                            false/*read only close*/,
@@ -18547,9 +18546,9 @@ namespace Legion {
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, 
                                          *it, next_child,
-                                         false/*allow next child*/,
+                                         false/*allow next*/,
                                          NULL/*aliased children*/,
-                                         false/*needs upgrade*/,
+                                         true/*needs upgrade*/,
                                          false/*read only close*/,
                                          overwriting/*overwriting close*/,
                                          record_close_operations,
@@ -18998,7 +18997,6 @@ namespace Legion {
         // then there are never any close operations, all we have to
         // do is determine if we need to upgrade the child or not
 #ifdef DEBUG_LEGION
-        assert(allow_next_child);
         assert(aliased_children == NULL);
 #endif
         // Check to see if we have any open fields already 
