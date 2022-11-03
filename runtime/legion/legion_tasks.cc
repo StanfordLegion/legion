@@ -1029,12 +1029,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& TaskOp::get_provenance_string(void) const
+    const std::string& TaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -2826,12 +2826,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTaskOp::get_provenance_string(void) const
+    const std::string& RemoteTaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
