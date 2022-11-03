@@ -630,7 +630,11 @@ namespace Realm {
 					       int *argc, const char ***argv)
   {
     // iterate over the network module list, trying to create each module
+    // if need_loopback == false, it means a network module has been created
     bool need_loopback = true;
+
+    // this is for -ll:networks none, and we do not enable any network, but use LoopbackNetworkModule
+    bool disable_network = false;
 
     // TODO: Check for the argument, if it exists, tokenize it and load each module
     // else, load each module and pick the first one that works
@@ -643,6 +647,17 @@ namespace Realm {
         abort();
       }
       for (const std::string& name : network_list) {
+
+        // if -ll:networks is none, do not enable any networks
+        if (name == "none") {
+          // make sure none is not passed with other values
+          if (network_list.size() != 1) {
+            std::cerr << "Cannot specify both 'none' and another value in -ll:networks" << std::endl;
+            abort();
+          }
+          disable_network = true;
+          break;
+        }
         NetworkModuleRegistrationMap::const_iterator it = registered_network_modules->find(name);
         if (it == registered_network_modules->end()) {
           std::cerr << "Unable to find specified registered network module '" << name << '\'' << std::endl;
@@ -662,7 +677,7 @@ namespace Realm {
       }
     }
 
-    {
+    if (need_loopback && !disable_network) {
       const char *e = getenv("REALM_DYNAMIC_NETWORK_MODULES");
       if(e) {
 #ifdef REALM_USE_DLFCN
@@ -687,7 +702,7 @@ namespace Realm {
     // networks were not specified on command-line,
     // so fallback to loading all the modules and
     // picking the first one
-    if (modules.empty() && (registered_ordered_network_modules != NULL)) {
+    if (need_loopback && !disable_network && (registered_ordered_network_modules != NULL)) {
       for (const NetworkModuleOrderedRegistrationList::value_type &v :
           *registered_ordered_network_modules) {
         NetworkModule *m = v.second->create_network_module(runtime, argc, argv);
