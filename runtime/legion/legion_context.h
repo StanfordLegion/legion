@@ -1881,7 +1881,7 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool has_trace(void) const;
-      virtual const std::string& get_provenance_string(void) const;
+      virtual const std::string& get_provenance_string(bool human = true) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;

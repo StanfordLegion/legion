@@ -169,7 +169,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ShimMapper::Task::get_provenance_string(void) const
+    const std::string& ShimMapper::Task::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -274,7 +274,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ShimMapper::Inline::get_provenance_string(void) const
+    const std::string& ShimMapper::Inline::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -363,7 +364,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ShimMapper::Copy::get_provenance_string(void) const
+    const std::string& ShimMapper::Copy::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       assert(false);
