@@ -34,6 +34,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     /*static*/ const std::string Provenance::no_provenance;
+    /*static*/ constexpr char Provenance::delimeter;
 
     //--------------------------------------------------------------------------
     Provenance::Provenance(const char *prov)
@@ -56,7 +57,7 @@ namespace Legion {
       unsigned split = 0;
       while (split < size)
       {
-        if (prov[split] == '$')
+        if (prov[split] == delimeter)
           break;
         split++;
       }
@@ -77,7 +78,7 @@ namespace Legion {
         result[offset++] = human[idx];
       if (!machine.empty())
       {
-        result[offset++] = '$';
+        result[offset++] = delimeter; 
         for (unsigned idx = 0; idx < machine.length(); idx++)
           result[offset++] = machine[idx];
       }
@@ -89,16 +90,19 @@ namespace Legion {
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      const size_t strlen = human.length() + machine.length();
-      rez.serialize(strlen);
+      size_t strlen = human.length() + machine.length();
       if (strlen > 0)
       {
+        strlen++; // handle the delimeter
+        rez.serialize(strlen);
         if (human.length() > 0)
           rez.serialize(human.c_str(), human.length());
-        rez.serialize('$');
+        rez.serialize(delimeter);
         if (machine.length() > 0)
           rez.serialize(machine.c_str(), machine.length());
       }
+      else
+        rez.serialize(strlen);
     }
 
     //--------------------------------------------------------------------------

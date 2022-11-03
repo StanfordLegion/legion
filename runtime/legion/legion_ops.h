@@ -55,6 +55,8 @@ namespace Legion {
       std::string human, machine;
       // Useful for cases where interfaces want a string
       static const std::string no_provenance;
+      // Delimiter for the machine readable part of the string
+      static constexpr char delimeter = '$';
     };
 
     /**
