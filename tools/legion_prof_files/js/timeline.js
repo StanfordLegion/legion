@@ -408,19 +408,34 @@ function getMouseOver() {
     delay = parseFloat(delay.toFixed(3))
     var initiation = "";
     var provenance = "";
-    var initiation_provenance = "";
     // Insert texts in reverse order
     if (d.op_id != -1) {
         provenance = state.operations[d.op_id].provenance;
     }
-    if ((d.initiation != undefined) && (d.initiation != "")) {
-        initiation_provenance = state.operations[d.initiation].provenance;
+    if ((provenance == "") && (d.initiation != undefined) && (d.initiation != "")) {
+        provenance = state.operations[d.initiation].provenance;
     }
+
     if (provenance != "") {
-        descTexts.push("Provenance: " + provenance);
-    } else if (initiation_provenance != "") {
-        descTexts.push("Provenance: " + initiation_provenance);
+        // provenance strings are in this form:
+        // "(human readable string)$(key1),(value1)|(key2),(value2)|..."
+        var tokens = provenance.split("\$");
+
+        // If the provenance string doesn't match the format,
+        // we render it verbatim.
+        if (tokens.length != 2) descTexts.push("Provenance: " + provenance);
+        else {
+            var to_parse = tokens[1];
+            var pairs = to_parse.split("|");
+            pairs.forEach(pair => {
+                var tokens = pair.split(",");
+                descTexts.push(tokens[0] + ": " + tokens[1]);
+            });
+        }
     }
+    // Add a line break to separate provenance info from the rest
+    descTexts.push(" ");
+
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
       descTexts.push("Ready State: " + get_time_str(delay,false));
     }
