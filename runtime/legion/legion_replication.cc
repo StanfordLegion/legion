@@ -787,7 +787,12 @@ namespace Legion {
 #endif
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
-          complete_mapping();
+        {
+          if (!map_applied_conditions.empty())
+            complete_mapping(Runtime::merge_events(map_applied_conditions));
+          else
+            complete_mapping();
+        }
         if (redop > 0)
           finish_index_task_reduction();
         complete_execution(finish_index_task_complete());
@@ -870,7 +875,12 @@ namespace Legion {
           initialize_concurrent_analysis();
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
-          complete_mapping();
+        {
+          if (!map_applied_conditions.empty())
+            complete_mapping(Runtime::merge_events(map_applied_conditions));
+          else
+            complete_mapping();
+        }
         if (redop > 0)
         {
           std::vector<Memory> reduction_futures;
