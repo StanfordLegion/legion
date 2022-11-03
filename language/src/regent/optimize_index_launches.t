@@ -1131,6 +1131,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       local arg_type = std.as_read(arg.expr_type)
       -- XXX: This will break again if arg isn't unique for each argument,
       --      which can happen when de-duplicating AST nodes.
+      -- See: https://github.com/StanfordLegion/legion/issues/1345
       assert(mapping[arg] == nil)
       mapping[arg] = param_types[i]
       -- Tests for conformance to index launch requirements.

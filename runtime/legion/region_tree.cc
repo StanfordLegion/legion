@@ -315,7 +315,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
               complete, partition_color, runtime->address_space, 
-              (provenance == NULL) ? NULL : provenance->c_str());
+              (provenance == NULL) ? NULL : provenance->human_str());
       }
       else
       {
@@ -334,7 +334,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->c_str());
+              (provenance == NULL) ? NULL : provenance->human_str());
 	if (runtime->profiler != NULL)
 	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
 						    partition_color);
@@ -654,7 +654,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
                 complete, partition_color, runtime->address_space,
-                (provenance == NULL) ? NULL : provenance->c_str());
+                (provenance == NULL) ? NULL : provenance->human_str());
           if (runtime->profiler != NULL)
 	    runtime->profiler->record_index_partition(parent.id,pid.id,disjoint,
                                                       partition_color);
@@ -673,7 +673,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
                 complete, partition_color, runtime->address_space,
-                (provenance == NULL) ? NULL : provenance->c_str());
+                (provenance == NULL) ? NULL : provenance->human_str());
         }
         if (disjointness_event.exists())
         {

@@ -715,7 +715,7 @@ namespace Legion {
         assert(false);
         return NULL;
       }
-      virtual const std::string& get_provenance_string(void) const {
+      virtual const std::string& get_provenance_string(bool human=true) const {
         assert(false);
         return (*new std::string());
       }

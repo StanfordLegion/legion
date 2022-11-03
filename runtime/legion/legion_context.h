@@ -3231,7 +3231,7 @@ namespace Legion {
       virtual DomainPoint get_shard_point(void) const;
       virtual Domain get_shard_domain(void) const;
       virtual bool has_trace(void) const;
-      virtual const std::string& get_provenance_string(void) const;
+      virtual const std::string& get_provenance_string(bool human = true) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;
