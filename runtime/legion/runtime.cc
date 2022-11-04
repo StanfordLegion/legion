@@ -25998,7 +25998,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent Runtime::acquire_concurrent_reservation(RtEvent release_event)
+    RtEvent Runtime::acquire_concurrent_reservation(RtEvent release_event,
+                                                    RtEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -26006,7 +26007,7 @@ namespace Legion {
 #endif
       const Reservation r = find_or_create_concurrent_reservation(); 
       Runtime::release_reservation(r, release_event);
-      return Runtime::acquire_rt_reservation(r, true/*exclusive*/);
+      return Runtime::acquire_rt_reservation(r, true/*exclusive*/,precondition);
     }
 
     //--------------------------------------------------------------------------
