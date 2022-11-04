@@ -315,7 +315,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
               complete, partition_color, runtime->address_space, 
-              (provenance == NULL) ? NULL : provenance->c_str());
+              (provenance == NULL) ? NULL : provenance->human_str());
       }
       else
       {
@@ -334,7 +334,7 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
-              (provenance == NULL) ? NULL : provenance->c_str());
+              (provenance == NULL) ? NULL : provenance->human_str());
 	if (runtime->profiler != NULL)
 	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
 						    partition_color);
@@ -654,7 +654,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
                 complete, partition_color, runtime->address_space,
-                (provenance == NULL) ? NULL : provenance->c_str());
+                (provenance == NULL) ? NULL : provenance->human_str());
           if (runtime->profiler != NULL)
 	    runtime->profiler->record_index_partition(parent.id,pid.id,disjoint,
                                                       partition_color);
@@ -673,7 +673,7 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
                 complete, partition_color, runtime->address_space,
-                (provenance == NULL) ? NULL : provenance->c_str());
+                (provenance == NULL) ? NULL : provenance->human_str());
         }
         if (disjointness_event.exists())
         {
@@ -2797,11 +2797,8 @@ namespace Legion {
       across->initialize_source_indirections(this, src_records,
           src_req, idx_req, idx_target, op->index_point, gather_is_range, 
           possible_src_out_of_range);
-#ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
-#endif
-      
       // Initialize the destination fields
       InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
@@ -2958,10 +2955,8 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, idx_req, idx_target, op->index_point, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-#ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -3114,10 +3109,8 @@ namespace Legion {
       across->initialize_source_indirections(this, src_records,
           src_req, src_idx_req, src_idx_target, op->index_point, 
           both_are_range, possible_src_out_of_range);
-#ifdef LEGION_SPY
       across->src_indirect_instance_event = 
         src_idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -3127,10 +3120,8 @@ namespace Legion {
       across->initialize_destination_indirections(this, dst_records,
           dst_req, dst_idx_req, dst_idx_target, op->index_point, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
-#ifdef LEGION_SPY
       across->dst_indirect_instance_event = 
         dst_idx_target.get_physical_manager()->get_unique_event();
-#endif 
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
@@ -7245,13 +7236,13 @@ namespace Legion {
     CopyAcrossExecutor::DeferCopyAcrossArgs::DeferCopyAcrossArgs(
         CopyAcrossExecutor *e, Operation *o, PredEvent g, ApEvent copy_pre,
         ApEvent src_pre, ApEvent dst_pre, const PhysicalTraceInfo &info,
-        bool recurrent, unsigned s)
+        bool repl, bool recurrent, unsigned s)
       : LgTaskArgs<DeferCopyAcrossArgs>(o->get_unique_op_id()),
         executor(e), op(o), trace_info(new PhysicalTraceInfo(info)), guard(g),
         copy_precondition(copy_pre), src_indirect_precondition(src_pre),
         dst_indirect_precondition(dst_pre), 
         done_event(Runtime::create_ap_user_event(trace_info)),
-        stage(s+1), recurrent_replay(recurrent)
+        stage(s+1), replay(repl), recurrent_replay(recurrent)
     //--------------------------------------------------------------------------
     {
       executor->add_reference();
@@ -7267,7 +7258,7 @@ namespace Legion {
           dargs->executor->execute(dargs->op, dargs->guard, 
             dargs->copy_precondition, dargs->src_indirect_precondition, 
             dargs->dst_indirect_precondition, *dargs->trace_info,
-            dargs->recurrent_replay, dargs->stage));
+            dargs->replay, dargs->recurrent_replay, dargs->stage));
       if (dargs->executor->remove_reference())
         delete dargs->executor;
       delete dargs->trace_info;
@@ -7291,6 +7282,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       src_fields.reserve(indexes.size());
+      src_unique_events.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -7306,6 +7298,8 @@ namespace Legion {
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
           views[idx]->copy_from(copy_mask, src_fields);
+          src_unique_events.push_back(
+              ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -7331,6 +7325,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       dst_fields.reserve(indexes.size());
+      dst_unique_events.reserve(indexes.size());
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -7346,6 +7341,8 @@ namespace Legion {
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
           views[idx]->copy_to(copy_mask, dst_fields);
+          dst_unique_events.push_back(
+              ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -18307,21 +18304,20 @@ namespace Legion {
                 // kind of write operation. Note that we don't need to
                 // actually perform close operations here because closing
                 // read-only children requires no work.
-                const bool needs_upgrade = HAS_WRITE(closer.user.usage);
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, 
                                          *it, next_child,
-                                         true/*allow next*/,
+                                         false/*allow next*/,
                                          aliased_children,
-                                         needs_upgrade,
+                                         true/*needs upgrade*/,
                                          true/*read only close*/,
                                          false/*overwriting close*/,
                                          record_close_operations,
                                          false/*record closed fields*/,
                                          already_open);
-                open_below |= already_open;
-                if (needs_upgrade && !!already_open)
+                if (!!already_open)
                 {
+                  open_below |= already_open;
                   FieldState new_state(closer.user, already_open, 
                                        next_child, applied_events);
                   new_states.emplace_back(std::move(new_state));
@@ -18433,7 +18429,7 @@ namespace Legion {
                   FieldMask already_open;
                   perform_close_operations(closer, current_mask, 
                                            *it, next_child,
-                                           true/*allow next*/,
+                                           false/*allow next*/,
                                            aliased_children,
                                            true/*needs upgrade*/,
                                            false/*read only close*/,
@@ -18550,9 +18546,9 @@ namespace Legion {
                 FieldMask already_open;
                 perform_close_operations(closer, current_mask, 
                                          *it, next_child,
-                                         false/*allow next child*/,
+                                         false/*allow next*/,
                                          NULL/*aliased children*/,
-                                         false/*needs upgrade*/,
+                                         true/*needs upgrade*/,
                                          false/*read only close*/,
                                          overwriting/*overwriting close*/,
                                          record_close_operations,
@@ -18611,7 +18607,6 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
-          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // If we are reducing at this level we can 
               // leave it open otherwise we need a close
@@ -18741,16 +18736,57 @@ namespace Legion {
               {
                 // These fields are already open below
                 open_below |= (it->valid_fields() & current_mask);
+                // Keep track of the sharding projections
+                // in case we need to promote to read-write later
+                if (proj_info.is_sharding())
+                    it->record_projection_summary(proj_info, this, 
+                                                  applied_events);
                 // Keep going
                 it++;
               }
+              // Reductions always need to go into a new mode to know
+              // that we need to flush them so close them up
+              else if (!IS_REDUCE(closer.user.usage) && 
+                  it->can_elide_close_operation(state, closer.user.op, 
+                    closer.user.idx, proj_info, this, applied_events))
+              {
+                if (proj_info.is_sharding())
+                  it->record_projection_summary(proj_info, this, 
+                                                applied_events);
+                // Promote this up to a read-write projection state
+                const FieldMask overlap = current_mask & it->valid_fields();
+                // Record that some fields are already open
+                open_below |= overlap;
+                if (overlap != it->valid_fields())
+                {
+                  // Make the new state to add
+                  FieldState new_state(closer.user.usage, overlap, 
+                           proj_info.projection, proj_info.projection_space, 
+                           proj_info.sharding_function,proj_info.sharding_space,
+                           applied_events, this);
+                  // Copy over any projections from before
+                  new_state.shard_projections.insert(
+                    it->shard_projections.begin(), it->shard_projections.end());
+                  new_states.emplace_back(std::move(new_state));
+                  // If we are a reduction, we can go straight there
+                  it->filter(overlap);
+                  if (!it->valid_fields())
+                    it = state.field_states.erase(it);
+                  else
+                    it++;
+                }
+                else
+                {
+                  // We overlapped all the fields, so just change the mode
+                  it->open_state = OPEN_READ_WRITE_PROJ;
+                  // Keep going
+                  it++;
+                }
+              }
               else
               {
-                // Check to see if we have a sharding functor
-                // in which case we need to make sure we don't
-                // need a close because of different sharding functors
-                if (record_close_operations &&
-                    (proj_info.sharding_function != NULL))
+                // Only need to record the close here if we're sharding
+                if (record_close_operations && proj_info.is_sharding())
                 {
                   // We need a close operation here
                   const FieldMask overlap = current_mask & it->valid_fields();
@@ -18776,44 +18812,21 @@ namespace Legion {
               // Can only avoid a close operation if we have the 
               // same projection function with the same or smaller
               // size domain as the original index space launch
-              if (it->can_elide_close_operation(closer.user.op, closer.user.idx,
-                    proj_info,this,IS_REDUCE(closer.user.usage),applied_events))
+              if (!IS_REDUCE(closer.user.usage) &&
+                  it->can_elide_close_operation(state, closer.user.op, 
+                    closer.user.idx, proj_info, this, applied_events))
               {
-                // If we're a reduction we have to go into a dirty 
-                // reduction mode since we know we're already open below
-                if (IS_REDUCE(closer.user.usage)) 
-                {
-                  // Go to the dirty reduction mode
-                  const FieldMask overlap = it->valid_fields() & current_mask;
-                  // Record that some fields are already open
-                  open_below |= overlap;
-                  // Make the new state to add
-                  FieldState new_state(closer.user.usage, overlap, 
-                           proj_info.projection, proj_info.projection_space, 
-                           proj_info.sharding_function,proj_info.sharding_space,
-                           applied_events, this, true/*dirty reduce*/);
-                  new_states.emplace_back(std::move(new_state));
-                  // If we are a reduction, we can go straight there
-                  it->filter(overlap);
-                  if (!it->valid_fields())
-                    it = state.field_states.erase(it);
-                  else
-                    it++;
-                }
-                else
-                {
-                  // If we're a write we need to update the projection space
-                  if (IS_WRITE(closer.user.usage))
-                    it->record_projection_summary(proj_info, this, 
-                                                  applied_events);
-                  open_below |= (it->valid_fields() & current_mask);
-                  it++;
-                }
+                // If we're a write we need to update the projection space
+                if (proj_info.is_sharding())
+                  it->record_projection_summary(proj_info, this, 
+                                                applied_events);
+                open_below |= (it->valid_fields() & current_mask);
+                it++;
               }
               else
               {
-                // Now we need the close operation
-                if (record_close_operations)
+                // Only need to record the close here if we're sharding
+                if (record_close_operations && proj_info.is_sharding())
                 {
                   const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
@@ -18830,14 +18843,13 @@ namespace Legion {
               break;
             }
           case OPEN_REDUCE_PROJ:
-          case OPEN_REDUCE_PROJ_DIRTY:
             {
               // Reduce projections of the same kind can always stay open
               // otherwise we need a close operation
               if (closer.user.usage.redop != it->redop)
               {
-                // We need a close operation here
-                if (record_close_operations)
+                // We need a close operation here if we're sharding
+                if (record_close_operations && proj_info.is_sharding())
                 {
                   const FieldMask overlap = current_mask & it->valid_fields();
 #ifdef DEBUG_LEGION
@@ -18985,7 +18997,6 @@ namespace Legion {
         // then there are never any close operations, all we have to
         // do is determine if we need to upgrade the child or not
 #ifdef DEBUG_LEGION
-        assert(allow_next_child);
         assert(aliased_children == NULL);
 #endif
         // Check to see if we have any open fields already 
@@ -20023,18 +20034,17 @@ namespace Legion {
       VersionManager &src_manager = get_current_version_manager(src);
       VersionManager &dst_manager = get_current_version_manager(dst);
       std::set<RegionTreeNode*> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       if (merge)
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_manager.merge(src_manager, to_traverse, to_untrack, subscribers);
+        dst_manager.merge(src_manager, to_traverse, subscribers);
       }
       else
-        dst_manager.swap(src_manager, to_traverse, to_untrack, subscribers);
+        dst_manager.swap(src_manager, to_traverse, subscribers);
       EqSetTracker::finish_subscriptions(context->runtime, src_manager, 
-                                         subscribers,to_untrack,applied_events);
+                                         subscribers, applied_events);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_version_state(src, dst, applied_events, merge);
@@ -20067,14 +20077,15 @@ namespace Legion {
         rez.serialize(fit->redop);
         if (fit->open_state >= OPEN_READ_ONLY_PROJ)
         {
-          rez.serialize<size_t>(fit->projections.size());
+          rez.serialize<size_t>(fit->shard_projections.size());
           for (std::set<ProjectionSummary>::const_iterator it = 
-                fit->projections.begin(); it != fit->projections.end(); it++)
+                fit->shard_projections.begin(); it != 
+                fit->shard_projections.end(); it++)
             it->pack_summary(rez, to_remove);
         }
 #ifdef DEBUG_LEGION
         else
-          assert(fit->projections.empty());
+          assert(fit->shard_projections.empty());
 #endif
         rez.serialize<size_t>(fit->open_children.size());
         for (FieldMaskSet<RegionTreeNode>::const_iterator it =
@@ -20184,7 +20195,7 @@ namespace Legion {
           size_t num_summaries;
           derez.deserialize(num_summaries);
           for (unsigned idx = 0; idx < num_summaries; idx++)
-            fit->projections.insert(
+            fit->shard_projections.insert(
              ProjectionSummary::unpack_summary(derez, context, applied_events));
         }
         size_t num_open_children;
@@ -20279,13 +20290,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);  
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      manager.pack_manager(rez, invalidate, to_traverse, 
-                          to_untrack, subscribers, to_remove);
-      EqSetTracker::finish_subscriptions(context->runtime, manager, subscribers,
-                      to_untrack, applied_events, true/*remove references*/);
+      manager.pack_manager(rez, invalidate, to_traverse, subscribers,to_remove);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, 
+                                         subscribers, applied_events);
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -21572,12 +21581,11 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       manager.invalidate_refinement(source_context, mask, self, to_traverse,
-        to_untrack, subscribers, to_release, nonexclusive_virtual_mapping_root);
-      EqSetTracker::finish_subscriptions(context->runtime, manager, subscribers,
-          to_untrack, applied_events, true/*remove refs*/);
+                subscribers, to_release, nonexclusive_virtual_mapping_root);
+      EqSetTracker::finish_subscriptions(context->runtime, manager, 
+                                         subscribers, applied_events);
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
@@ -23163,12 +23171,10 @@ namespace Legion {
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
-      FieldMaskSet<EquivalenceSet> to_untrack;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       manager.invalidate_refinement(source_context, mask, true/*delete self*/,
-                              to_traverse, to_untrack, subscribers, to_release);
+                                    to_traverse, subscribers, to_release);
 #ifdef DEBUG_LEGION
-      assert(to_untrack.empty());
       assert(subscribers.empty());
 #endif
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 

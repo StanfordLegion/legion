@@ -138,10 +138,13 @@ def run_prof(out_dir, logfiles, verbose, py_exe_path):
         '-o', result_dir,
     ] + logfiles
     if verbose: print('Running', ' '.join(cmd))
+    cmd_env = dict(os.environ.items())
+    cmd_env["USE_TYPE_CHECK"] = "1"
     proc = subprocess.Popen(
         cmd,
         stdout=None if verbose else subprocess.PIPE,
-        stderr=None if verbose else subprocess.STDOUT)
+        stderr=None if verbose else subprocess.STDOUT,
+        env=cmd_env)
     output, _ = proc.communicate()
     retcode = proc.wait()
     if retcode != 0:
@@ -163,7 +166,9 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
     return result_dir
 
 def compare_prof_results(verbose, py_exe_path, profile_dirs):
-    cmd = ['diff', '-r', '-u'] + profile_dirs
+    cmd = ['diff', '-r', '-u',
+           '--exclude', 'critical_path.json',
+           ] + profile_dirs
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -226,7 +231,7 @@ def test_run_pass(filename, debug, verbose, short, timelimit, py_exe_path, legio
 def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
-    spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
+    spy_flags = ['-lg:spy', '-level', 'legion_spy=2', '-logfile', spy_log]
 
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
@@ -236,6 +241,9 @@ def test_spy(filename, debug, verbose, short, timelimit, py_exe_path, legion_pro
             spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
             assert len(spy_logs) > 0
             run_spy(spy_logs, verbose, py_exe_path)
+            # Run legion_prof_rs too so that we can be sure it's at least parsing all the logs
+            if legion_prof_rs is not None:
+                run_prof_rs(spy_dir, spy_logs, verbose, legion_prof_rs)
     finally:
         shutil.rmtree(spy_dir)
 
@@ -256,6 +264,9 @@ def test_gc(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof
         shutil.rmtree(gc_dir)
 
 def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_prof_rs, flags, env):
+    if legion_prof_rs is None:
+        raise Exception('Need to specify the path to legion_prof_rs via --legion-prof-rs')
+
     prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     prof_log = os.path.join(prof_dir, 'prof_%.gz')
     prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
@@ -641,7 +652,6 @@ def test_driver(argv):
                         help='disable pretty-printing tests',
                         dest='no_pretty')
     parser.add_argument('--legion-prof-rs',
-                        default='legion_prof',
                         help='location of Legion Prof Rust binary')
     args = parser.parse_args(argv[1:])
 

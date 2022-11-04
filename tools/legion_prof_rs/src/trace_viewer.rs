@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json;
 
-use crate::state::{ProcEntry, State, Timestamp};
+use crate::state::{ProcEntryKind, State, Timestamp};
 
 #[derive(Serialize, Copy, Clone)]
 struct Event<'a> {
@@ -46,44 +46,29 @@ pub fn emit_trace<P: AsRef<Path>>(state: &State, path: P, force: bool) -> io::Re
     for proc in state.procs.values() {
         for point in &proc.time_points {
             if point.first {
-                let (_base, time_range, waiters) = proc.entry(point.entry);
+                let entry = proc.entry(point.entry);
+                let (time_range, waiters) = (&entry.time_range, &entry.waiters);
 
-                let name = match point.entry {
-                    ProcEntry::Task(op_id) => {
-                        let task = &proc.tasks.get(&op_id).unwrap();
-                        let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
-                        let variant_name = &state
-                            .variants
-                            .get(&(task.task_id, task.variant_id))
-                            .unwrap()
-                            .name;
+                let name = match entry.kind {
+                    ProcEntryKind::Task(task_id, variant_id) => {
+                        let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                        let variant_name =
+                            &state.variants.get(&(task_id, variant_id)).unwrap().name;
                         match task_name {
                             Some(task_name) => format!("{} ({})", task_name, variant_name),
                             None => variant_name.clone(),
                         }
                     }
-                    ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                        let task = &proc.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                        state
-                            .meta_variants
-                            .get(&task.variant_id)
-                            .unwrap()
-                            .name
-                            .clone()
+                    ProcEntryKind::MetaTask(variant_id) => {
+                        state.meta_variants.get(&variant_id).unwrap().name.clone()
                     }
-                    ProcEntry::MapperCall(idx) => state
-                        .mapper_call_kinds
-                        .get(&proc.mapper_calls[idx].kind)
-                        .unwrap()
-                        .name
-                        .clone(),
-                    ProcEntry::RuntimeCall(idx) => state
-                        .runtime_call_kinds
-                        .get(&proc.runtime_calls[idx].kind)
-                        .unwrap()
-                        .name
-                        .clone(),
-                    ProcEntry::ProfTask(_) => "ProfTask".to_owned(),
+                    ProcEntryKind::MapperCall(kind) => {
+                        state.mapper_call_kinds.get(&kind).unwrap().name.clone()
+                    }
+                    ProcEntryKind::RuntimeCall(kind) => {
+                        state.runtime_call_kinds.get(&kind).unwrap().name.clone()
+                    }
+                    ProcEntryKind::ProfTask => "ProfTask".to_owned(),
                 };
 
                 let default = Event {

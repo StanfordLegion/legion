@@ -159,8 +159,10 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+#ifdef LEGION_MULTI_REGION_ACCESSOR
   template<typename, int,typename,typename,bool,bool,int>
     class MultiRegionAccessor;
+#endif
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
   namespace ArraySyntax {
@@ -253,6 +255,7 @@ namespace Legion {
     class ProfilingRequestSet;
     class Mapper;
     class MapperRuntime;
+    class AutoLock;
     class DefaultMapper;
     class ShimMapper;
     class TestMapper;
@@ -279,7 +282,6 @@ namespace Legion {
       OPEN_READ_ONLY_PROJ     = 5, // read-only projection
       OPEN_READ_WRITE_PROJ    = 6, // read-write projection
       OPEN_REDUCE_PROJ        = 7, // reduction-only projection
-      OPEN_REDUCE_PROJ_DIRTY  = 8, // same as above but already open dirty 
     }; 
 
     // Internal reduction operators
@@ -418,6 +420,7 @@ namespace Legion {
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
+      LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -542,6 +545,7 @@ namespace Legion {
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \
+        "Defer Concurrent Analysis",                              \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
         "Yield",                                                  \
@@ -783,6 +787,7 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
+      SLICE_VERIFY_CONCURRENT_EXECUTION,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_COLLECTIVE_REQUEST,
@@ -939,6 +944,8 @@ namespace Legion {
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
+      SEND_CONCURRENT_RESERVATION_CREATION,
+      SEND_CONCURRENT_EXECUTION_ANALYSIS,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -1006,6 +1013,7 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
+        "Slice Verify Concurrent Execution",                          \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Collective Instance Request",                          \
@@ -1162,6 +1170,8 @@ namespace Legion {
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
+        "Send Concurrent Reservation Creation",                       \
+        "Send Concurrent Execution Analysis",                         \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1495,9 +1505,9 @@ namespace Legion {
     // with at most one logical static collective kind
     // Ones that have been commented out are free to be reused
     enum CollectiveIndexLocation {
-      COLLECTIVE_LOC_0 = 0, 
+      //COLLECTIVE_LOC_0 = 0, 
       COLLECTIVE_LOC_1 = 1,
-      COLLECTIVE_LOC_2 = 2,
+      //COLLECTIVE_LOC_2 = 2,
       COLLECTIVE_LOC_3 = 3,
       COLLECTIVE_LOC_4 = 4, 
       COLLECTIVE_LOC_5 = 5,
@@ -1514,11 +1524,11 @@ namespace Legion {
       COLLECTIVE_LOC_16 = 16,
       COLLECTIVE_LOC_17 = 17, 
       COLLECTIVE_LOC_18 = 18, 
-      COLLECTIVE_LOC_19 = 19,
+      //COLLECTIVE_LOC_19 = 19,
       COLLECTIVE_LOC_20 = 20,
       COLLECTIVE_LOC_21 = 21, 
       COLLECTIVE_LOC_22 = 22, 
-      COLLECTIVE_LOC_23 = 23,
+      //COLLECTIVE_LOC_23 = 23,
       COLLECTIVE_LOC_24 = 24,
       COLLECTIVE_LOC_25 = 25,
       COLLECTIVE_LOC_26 = 26,
@@ -1545,7 +1555,7 @@ namespace Legion {
       COLLECTIVE_LOC_47 = 47,
       COLLECTIVE_LOC_48 = 48,
       COLLECTIVE_LOC_49 = 49,
-      COLLECTIVE_LOC_50 = 50,
+      //COLLECTIVE_LOC_50 = 50,
       COLLECTIVE_LOC_51 = 51,
       COLLECTIVE_LOC_52 = 52,
       COLLECTIVE_LOC_53 = 53,
@@ -1574,7 +1584,7 @@ namespace Legion {
       COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
-      COLLECTIVE_LOC_79 = 79,
+      //COLLECTIVE_LOC_79 = 79,
       COLLECTIVE_LOC_80 = 80,
       COLLECTIVE_LOC_81 = 81,
       COLLECTIVE_LOC_82 = 82,
@@ -1588,7 +1598,7 @@ namespace Legion {
       COLLECTIVE_LOC_90 = 90,
       COLLECTIVE_LOC_91 = 91,
       COLLECTIVE_LOC_92 = 92,
-      //COLLECTIVE_LOC_93 = 93,
+      COLLECTIVE_LOC_93 = 93,
       COLLECTIVE_LOC_94 = 94,
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,
@@ -1599,6 +1609,7 @@ namespace Legion {
       COLLECTIVE_LOC_101 = 101,
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
+      COLLECTIVE_LOC_104 = 104,
     };
 
     // legion_types.h
@@ -2134,6 +2145,7 @@ namespace Legion {
   typedef ::legion_projection_type_t HandleType;
   typedef ::legion_address_space_t AddressSpace;
   typedef ::legion_task_priority_t TaskPriority;
+  typedef ::legion_task_priority_t RealmPriority;
   typedef ::legion_garbage_collection_priority_t GCPriority;
   typedef ::legion_color_t Color;
   typedef ::legion_field_id_t FieldID;
@@ -2185,11 +2197,9 @@ namespace Legion {
   namespace Mapping {
     typedef Internal::MappingCallInfo* MapperContext;
     typedef Internal::InstanceManager* PhysicalInstanceImpl;
-    // These type imports are experimental to facilitate coordination and
+    // This type import is experimental to facilitate coordination and
     // synchronization between different mappers and may be revoked later
     // as we develop new abstractions for mappers to interact
-    typedef Internal::AutoLock AutoLock;
-    typedef Internal::AutoTryLock AutoTryLock;
     typedef Internal::LocalLock LocalLock;
   };
 
@@ -2198,6 +2208,7 @@ namespace Legion {
     const LegionColor INVALID_COLOR = LLONG_MAX;
     // This is only needed internally
     typedef Realm::RegionInstance PhysicalInstance;
+    typedef Realm::CopySrcDstField CopySrcDstField;
     typedef unsigned long long CollectiveID;
     typedef unsigned long long IndexSpaceExprID;
     struct ContextCoordinate;
@@ -2608,6 +2619,7 @@ namespace Legion {
       // These are only accessible via AutoLock
       friend class AutoLock;
       friend class AutoTryLock;
+      friend class Mapping::AutoLock;
       inline RtEvent lock(void)   { return RtEvent(wrlock()); }
       inline RtEvent wrlock(void) { return RtEvent(reservation.wrlock()); }
       inline RtEvent rdlock(void) { return RtEvent(reservation.rdlock()); }
@@ -2660,7 +2672,7 @@ namespace Legion {
         Internal::local_lock_list = this;
       }
     protected:
-      // Helper constructor for AutoTryLock
+      // Helper constructor for AutoTryLock and Mapping::AutoLock
       inline AutoLock(int mode, bool excl, LocalLock &r)
         : local_lock(r), previous(Internal::local_lock_list), 
           exclusive(excl), held(false)
@@ -2671,6 +2683,7 @@ namespace Legion {
 #endif
       }
     public:
+      AutoLock(AutoLock &&rhs) = delete;
       AutoLock(const AutoLock &rhs) = delete;
       inline ~AutoLock(void)
       {
@@ -2686,6 +2699,7 @@ namespace Legion {
           assert(Internal::local_lock_list == previous);
       }
     public:
+      AutoLock& operator=(AutoLock &&rhs) = delete;
       AutoLock& operator=(const AutoLock &rhs) = delete;
     public:
       inline void release(void) 
@@ -2931,26 +2945,6 @@ namespace Legion {
         assert(false);
 #endif
     }
-
-#ifdef LEGION_SPY
-    // Need a custom version of these for Legion Spy to track instance events
-    class CopySrcDstField : public Realm::CopySrcDstField {
-    public:
-      CopySrcDstField(void) : Realm::CopySrcDstField() { }
-      CopySrcDstField(const CopySrcDstField &rhs)
-        : Realm::CopySrcDstField(rhs) { inst_event = rhs.inst_event; }
-      inline CopySrcDstField& operator=(const CopySrcDstField &rhs)
-      { 
-        Realm::CopySrcDstField::operator = (rhs); 
-        inst_event = rhs.inst_event; 
-        return *this; 
-      }
-    public:
-      ApEvent inst_event;
-    };
-#else
-    typedef Realm::CopySrcDstField CopySrcDstField;
-#endif
 
   }; // namespace Internal 
   

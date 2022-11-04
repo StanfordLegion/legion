@@ -1463,6 +1463,97 @@ namespace Legion {
       return ctx->manager->find_local_MPI_rank();
     }
 
+    /////////////////////////////////////////////////////////////
+    // AutoLock
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    AutoLock::AutoLock(MapperContext c, LocalLock &r, int mode, bool excl)
+      : Internal::AutoLock(mode, excl, r), ctx(c)
+    //--------------------------------------------------------------------------
+    {
+      bool paused = false;
+      if (exclusive)
+      {
+        Internal::RtEvent ready = local_lock.wrlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.wrlock();
+        }
+      }
+      else
+      {
+        Internal::RtEvent ready = local_lock.rdlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.rdlock();
+        }
+      }
+      held = true;
+      Internal::local_lock_list = this;
+      if (paused)
+        ctx->manager->resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void AutoLock::reacquire(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!held);
+      assert(Internal::local_lock_list == previous);
+#endif
+#ifdef DEBUG_REENTRANT_LOCKS
+      if (previous != NULL)
+        previous->check_for_reentrant_locks(&local_lock);
+#endif
+      bool paused = false;
+      if (exclusive)
+      {
+        Internal::RtEvent ready = local_lock.wrlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.wrlock();
+        }
+      }
+      else
+      {
+        Internal::RtEvent ready = local_lock.rdlock();
+        while (ready.exists())
+        {
+          if (!paused)
+          {
+            ctx->manager->pause_mapper_call(ctx);
+            paused = true;
+          }
+          ready.wait();
+          ready = local_lock.rdlock();
+        }
+      }
+      Internal::local_lock_list = this;
+      held = true;
+      if (paused)
+        ctx->manager->resume_mapper_call(ctx);
+    }
+
   }; // namespace Mapping
 }; // namespace Legion
 

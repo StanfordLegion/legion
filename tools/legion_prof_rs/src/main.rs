@@ -4,7 +4,8 @@ use rayon::prelude::*;
 
 use legion_prof::analyze::print_statistics;
 use legion_prof::serialize::deserialize;
-use legion_prof::state::{State, Timestamp};
+use legion_prof::spy;
+use legion_prof::state::{Records, SpyState, State, Timestamp};
 use legion_prof::trace_viewer::emit_trace;
 use legion_prof::visualize::emit_interactive_visualization;
 
@@ -87,19 +88,38 @@ fn main() -> io::Result<()> {
         .value_of("message-percentage")
         .map_or(5.0, |x| x.parse::<f64>().unwrap());
 
-    let mut state = State::default();
     let filenames: Vec<_> = filenames.collect();
-    let records: Result<Vec<_>, _> = filenames
+    let records: Result<Vec<Records>, _> = filenames
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
-            deserialize(filename)
+            deserialize(filename).map_or_else(
+                |_| spy::serialize::deserialize(filename).map(Records::Spy),
+                |r| Ok(Records::Prof(r)),
+            )
         })
         .collect();
+    let mut state = State::default();
+    let mut spy_state = SpyState::default();
     for record in records? {
-        println!("Matched {} objects", record.len());
-        state.process_records(&record);
+        match record {
+            Records::Prof(r) => {
+                println!("Matched {} objects", r.len());
+                state.process_records(&r);
+            }
+            Records::Spy(r) => {
+                println!("Matched {} objects", r.len());
+                spy_state.process_spy_records(&r);
+            }
+        }
     }
+
+    if !state.has_prof_data {
+        println!("Nothing to do");
+        return Ok(());
+    }
+
+    spy_state.postprocess_spy_records(&state);
 
     state.trim_time_range(start_trim, stop_trim);
     println!("Sorting time ranges");
@@ -111,7 +131,7 @@ fn main() -> io::Result<()> {
         emit_trace(&state, output, force)?;
     } else {
         state.assign_colors();
-        emit_interactive_visualization(&state, output, force)?;
+        emit_interactive_visualization(&state, &spy_state, output, force)?;
     }
 
     Ok(())

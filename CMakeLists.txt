@@ -789,6 +789,7 @@ option(Legion_BUILD_BINDINGS "Build Legion language bindings" OFF)
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
+option(Legion_BUILD_JUPYTER "Build Legion jupyter notebook support" OFF)
 option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
 if(Legion_ENABLE_TESTING)
   enable_testing()
@@ -851,6 +852,9 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
   endif()
+  if(Legion_BUILD_ALL OR Legion_BUILD_JUPYTER)
+    add_subdirectory(jupyter_notebook)
+  endif()
 elseif(Legion_BUILD_REALM_TESTS)
   # temporary hackery to just enable the realm tests
   add_library(Legion::Realm ALIAS Realm)
@@ -904,6 +908,7 @@ install(FILES ${PROJECT_BINARY_DIR}/runtime/realm_defines.h
 install(
   FILES
     ${PROJECT_SOURCE_DIR}/tools/legion_prof.py
+    ${PROJECT_SOURCE_DIR}/tools/legion_util.py
     ${PROJECT_SOURCE_DIR}/tools/legion_spy.py
   DESTINATION
     ${CMAKE_INSTALL_BINDIR}

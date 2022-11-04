@@ -715,6 +715,10 @@ namespace Legion {
         assert(false);
         return NULL;
       }
+      virtual const std::string& get_provenance_string(bool human=true) const {
+        assert(false);
+        return (*new std::string());
+      }
       virtual bool has_parent_task(void) const {
         assert(false);
         return false;

@@ -37,7 +37,7 @@ kernel_json_suffix_nocr = ["legion_kernel_nocr.py", "-f", "{connection_file}"]
 
 
 required_cmd_dict_key = ["name", "kernel_name", "legion_prefix", "exe", 
-                         "cpus", "gpus", "openmp", "ompthreads", "utility", 
+                         "cpus", "gpus", "omps", "ompthreads", "utility", 
                          "sysmem", "numamem", "fbmem", "zcmem", "regmem", 
                          "not_control_replicable"]
 
@@ -70,7 +70,7 @@ def _install_kernel(ksm, kernel_name, kernel_json, user, prefix, mute=True):
 def parse_json(legion_prefix,
                cpus, 
                gpus,
-               openmp,
+               omps,
                ompthreads,
                utility,
                sysmem,
@@ -164,9 +164,9 @@ def install_kernel_nocr(user, prefix, cmd_opts, cmd_dict, verbose, kernel_file_d
             kernel_json["argv"] += cmd_dict["zcmem"]["cmd"], str(cmd_dict["zcmem"]["value"])
 
     # openmp
-    if cmd_dict["openmp"]["value"] > 0:
+    if cmd_dict["omps"]["value"] > 0:
         if cmd_dict["ompthreads"]["value"] > 0:
-            kernel_json["argv"] += cmd_dict["openmp"]["cmd"], str(cmd_dict["openmp"]["value"])
+            kernel_json["argv"] += cmd_dict["omps"]["cmd"], str(cmd_dict["omps"]["value"])
             kernel_json["argv"] += cmd_dict["ompthreads"]["cmd"], str(cmd_dict["ompthreads"]["value"])
             # numemem
             if cmd_dict["launcher"]["type"] != "legate":
@@ -300,7 +300,7 @@ def parse_args(argv=None):
         "--omps",
         type=int,
         default=0,
-        dest="openmp",
+        dest="omps",
         help="Number of OpenMP groups to use per rank",
     )
     parser.add_argument(
@@ -402,7 +402,7 @@ def driver(args, opts, kernel_file_dir=None):
     cmd_dict = parse_json(legion_prefix=args.legion_prefix,
                           cpus=args.cpus,
                           gpus=args.gpus,
-                          openmp=args.openmp,
+                          omps=args.omps,
                           ompthreads=args.ompthreads,
                           utility=args.utility,
                           sysmem=args.sysmem,

@@ -384,7 +384,7 @@ function analyze_expr_noninterference_self(expression, cx, loop_vars, report_fai
     }
 
   elseif expr:is(ast.typed.expr.FieldAccess) then
-    local id = expr.value
+    local id = strip_casts(expr.value)
     if cx:is_loop_index(id.value) and field_name == expr.field_name then
       return result.node.Variant {
         coefficient = 1,
@@ -1131,6 +1131,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       local arg_type = std.as_read(arg.expr_type)
       -- XXX: This will break again if arg isn't unique for each argument,
       --      which can happen when de-duplicating AST nodes.
+      -- See: https://github.com/StanfordLegion/legion/issues/1345
       assert(mapping[arg] == nil)
       mapping[arg] = param_types[i]
       -- Tests for conformance to index launch requirements.
@@ -1425,8 +1426,14 @@ local function insert_dynamic_check(is_demand, args_need_dynamic_check, index_la
       then_block:insert(util.mk_stat_assignment(util.mk_expr_id_rawref(conflict), bitmask_value))
 
       local privileges, _, _, _, _ = std.find_task_privileges(param_region_types[arg], task)
-      assert(#privileges == 1)
-      if privileges[1] ~= "reads" then
+      local is_read_only = true
+      for _, privilege in ipairs(privileges) do
+        if privilege ~= "reads" then
+          is_read_only = false
+        end
+      end
+
+      if not is_read_only then
         then_block:insert(util.mk_stat_assignment(bitmask_value, util.mk_expr_constant(arg, uint8)))
       end
 

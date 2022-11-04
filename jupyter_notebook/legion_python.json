@@ -11,7 +11,7 @@
         "cmd": "-ll:gpu",
         "value": 0
     },
-    "openmp": {
+    "omps": {
         "cmd": "-ll:ocpu", 
         "value": 0
     },

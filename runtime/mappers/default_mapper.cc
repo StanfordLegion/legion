@@ -1586,7 +1586,8 @@ namespace Legion {
                                     std::vector<Processor> &target_procs)
     //--------------------------------------------------------------------------
     {
-      if (task.target_proc.address_space() == node_id)
+      if ((task.target_proc.address_space() == node_id) && 
+          !task.concurrent_task)
       {
         switch (task.target_proc.kind())
         {
@@ -2173,16 +2174,20 @@ namespace Legion {
       {
         // Make reduction fold instances
         constraints.add_constraint(SpecializedConstraint(
-                            LEGION_AFFINE_REDUCTION_SPECIALIZE, req.redop))
-          .add_constraint(MemoryConstraint(target_memory.kind()));
+                            LEGION_AFFINE_REDUCTION_SPECIALIZE, req.redop));
+        if (not constraints.memory_constraint.has_kind)
+          constraints.add_constraint(MemoryConstraint(target_memory.kind()));
       }
       else
       {
         // Our base default mapper will try to make instances of containing
         // all fields (in any order) laid out in SOA format to encourage
         // maximum re-use by any tasks which use subsets of the fields
-        constraints.add_constraint(SpecializedConstraint())
-          .add_constraint(MemoryConstraint(target_memory.kind()));
+        if (constraints.specialized_constraint.kind == LEGION_NO_SPECIALIZE)
+          constraints.add_constraint(SpecializedConstraint());
+
+        if (not constraints.memory_constraint.has_kind)
+          constraints.add_constraint(MemoryConstraint(target_memory.kind()));
 
         if (constraints.field_constraint.field_set.size() == 0)
         {

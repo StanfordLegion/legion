@@ -243,7 +243,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,
+                           int priority) = 0;
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -280,7 +282,8 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard) = 0;
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority) = 0;
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -384,7 +387,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent src_unique, LgEvent dst_unique,int priority);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -420,7 +424,8 @@ namespace Legion {
                            FieldSpace handle,
                            RegionTreeID tree_id,
 #endif
-                           ApEvent precondition, PredEvent pred_guard);
+                           ApEvent precondition, PredEvent pred_guard,
+                           LgEvent unique_event, int priority);
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -615,7 +620,9 @@ namespace Legion {
 #ifdef LEGION_SPY
                           RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
-                          ApEvent precondition, PredEvent pred_guard) const
+                          ApEvent precondition, PredEvent pred_guard,
+                          LgEvent src_unique, LgEvent dst_unique,
+                          int priority) const
         {
           sanity_check();
           rec->record_issue_copy(tlid, result, expr, src_fields,
@@ -623,7 +630,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  src_tree_id, dst_tree_id,
 #endif
-                                 precondition, pred_guard);
+                                 precondition, pred_guard,
+                                 src_unique, dst_unique, priority);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,
@@ -634,7 +642,8 @@ namespace Legion {
                           FieldSpace handle,
                           RegionTreeID tree_id,
 #endif
-                          ApEvent precondition, PredEvent pred_guard) const
+                          ApEvent precondition, PredEvent pred_guard,
+                          LgEvent unique_event, int priority) const
         {
           sanity_check();
           rec->record_issue_fill(tlid, result, expr, fields, 
@@ -642,7 +651,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                  fill_uid, handle, tree_id,
 #endif
-                                 precondition, pred_guard);
+                                 precondition, pred_guard,
+                                 unique_event, priority);
         }
       inline void record_issue_across(ApEvent &result,
                                       ApEvent collective_precondition,
@@ -750,6 +760,7 @@ namespace Legion {
                      IndexSpace shard_space = IndexSpace::NO_SPACE);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
+      inline bool is_sharding(void) const { return (sharding_function != NULL); }
       bool is_complete_projection(RegionTreeNode *node,
                                   const LogicalUser &user) const;
     public:
@@ -871,7 +882,7 @@ namespace Legion {
                  ShardingFunction *sharding_function, 
                  IndexSpaceNode *sharding_space,
                  std::set<RtEvent> &applied,
-                 RegionTreeNode *node, bool dirty_reduction = false);
+                 RegionTreeNode *node);
       FieldState(const FieldState &rhs);
       FieldState(FieldState &&rhs) noexcept;
       FieldState& operator=(const FieldState &rhs);
@@ -891,17 +902,20 @@ namespace Legion {
           const FieldMask &mask, std::set<RtEvent> &applied);
       void remove_child(RegionTreeNode *child);
     public:
-      bool can_elide_close_operation(Operation *op, unsigned index,
+      bool can_elide_close_operation(LogicalState &state,
+                                     Operation *op, unsigned index,
                                      const ProjectionInfo &info,
-                                     RegionTreeNode *node, bool reduction,
+                                     RegionTreeNode *node,
                                      std::set<RtEvent> &applied_events) const;
       void record_projection_summary(const ProjectionInfo &info,
                                      RegionTreeNode *node,
                                      std::set<RtEvent> &applied_events);
     protected:
+      bool elide_singular_same_shard(const ProjectionSummary &prev,
+                                     const ProjectionInfo &info) const;
       bool expensive_elide_test(Operation *op, unsigned index,
                                 const ProjectionInfo &info,
-                                RegionTreeNode *node, bool reduction) const;
+                                RegionTreeNode *node) const;
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask,
@@ -913,32 +927,37 @@ namespace Legion {
       FieldMaskSet<RegionTreeNode> open_children;
       OpenState open_state;
       ReductionOpID redop;
-      std::set<ProjectionSummary> projections;
+      // For control replication we need to keep track of the
+      // projections being done here to see if any of them are
+      // going to interfere with each other and need a merge 
+      // close fence to be inserted
+      std::set<ProjectionSummary> shard_projections;
     };
 
     /**
      * \class ProjectionTree
-     * This is a tree that stores the summary of a region
-     * tree that is accessed by an index launch and which
-     * node owns the leaves for in the case of control replication
+     * This class helps to construct a symbolic tree of all the 
+     * index space nodes used by a projection index space task
+     * launch along with the shards that access them. This then
+     * facilitates an analysis to determine if a close operation
+     * is needed to act as a fence between the shards.
      */
     class ProjectionTree {
     public:
-      ProjectionTree(IndexTreeNode *source,
-                     ShardID owner_shard = 0);
-      ProjectionTree(const ProjectionTree &rhs);
+      ProjectionTree(bool all_children_disjoint);
+      ProjectionTree(const ProjectionTree &rhs) = delete;
       ~ProjectionTree(void);
     public:
-      ProjectionTree& operator=(const ProjectionTree &rhs);
+      ProjectionTree& operator=(const ProjectionTree &rhs) = delete;
     public:
-      void add_child(ProjectionTree *child);
-      bool dominates(const ProjectionTree *other) const;
-      bool disjoint(const ProjectionTree *other) const;
-      bool all_same_shard(ShardID other_shard) const;
+      bool interferes(const ProjectionTree *other, ShardID other_shard) const;
+      bool uses_shard(ShardID other_shard) const;
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
     public:
-      IndexTreeNode *const node;
-      const ShardID owner_shard;
-      std::map<IndexTreeNode*,ProjectionTree*> children;
+      std::map<LegionColor,ProjectionTree*> children;
+      std::set<ShardID> users;
+      const bool all_children_disjoint;
     };
 
     /**
@@ -952,6 +971,18 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
     public:
+      class ElideCloseResult {
+      public:
+        ElideCloseResult(void) : result(false) { }
+        ElideCloseResult(
+            const std::set<ProjectionSummary> &projections, bool result);
+      public:
+        bool matches(const std::set<ProjectionSummary> &projections) const;
+      public:
+        std::set<ProjectionSummary> projections;
+        bool result;
+      };
+    public:
       LogicalState(RegionTreeNode *owner, ContextID ctx);
       LogicalState(const LogicalState &state);
       ~LogicalState(void);
@@ -964,6 +995,13 @@ namespace Legion {
       void clear_deleted_state(const FieldMask &deleted_mask);
       void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
       void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
+    public:
+      bool find_elide_close_result(const ProjectionInfo &info, 
+                  const std::set<ProjectionSummary> &projections, 
+                  bool &result, std::set<RtEvent> &applied_events) const;
+      void record_elide_close_result(const ProjectionInfo &info,
+                  const std::set<ProjectionSummary> &projections,
+                  bool result, std::set<RtEvent> &applied_events);
     public:
       RegionTreeNode *const owner;
     public:
@@ -1008,6 +1046,11 @@ namespace Legion {
       // these at the bottom of the disjoint complete access trees to say
       // how to project from a given node in the region tree
       FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
+    public:
+      // This helps to memoize expensive close operation elisions tests 
+      // within this context in a determinstic way for control replication
+      std::map<ProjectionSummary,
+               std::vector<ElideCloseResult> > *elide_close_results;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
@@ -2345,15 +2388,13 @@ namespace Legion {
                                           const FieldMask &mask) = 0;
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask) = 0;
-      virtual void remove_equivalence_sets(const FieldMask &mask,
-                  const FieldMaskSet<EquivalenceSet> &to_filter) = 0;
+      virtual void invalidate_equivalence_sets(const FieldMask &mask) = 0;
     public:
       void cancel_subscriptions(Runtime *runtime,
        const std::map<AddressSpaceID,std::vector<VersionManager*> > &to_cancel);
       static void finish_subscriptions(Runtime *runtime, VersionManager &source,
           LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-          const FieldMaskSet<EquivalenceSet> &to_filter,
-          std::set<RtEvent> &applied_events, bool remove_refs = false);
+          std::set<RtEvent> &applied_events);
       static void handle_cancel_subscription(Deserializer &derez,
           Runtime *runtime, AddressSpaceID source);
       static void handle_finish_subscription(Deserializer &derez,
@@ -2619,7 +2660,7 @@ namespace Legion {
       inline RtEvent chain_deferral_events(RtUserEvent deferral_event)
       {
         RtEvent continuation_pre;
-        continuation_pre.id = 
+        continuation_pre.id =
           next_deferral_precondition.exchange(deferral_event.id);
         return continuation_pre;
       }
@@ -3046,8 +3087,7 @@ namespace Legion {
                                           const FieldMask &mask);
       virtual void record_pending_equivalence_set(EquivalenceSet *set,
                                           const FieldMask &mask);
-      virtual void remove_equivalence_sets(const FieldMask &mask,
-                  const FieldMaskSet<EquivalenceSet> &to_filter);
+      virtual void invalidate_equivalence_sets(const FieldMask &mask);
     public:
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void finalize_manager(void);
@@ -3099,20 +3139,16 @@ namespace Legion {
       void invalidate_refinement(InnerContext &context,
                                  const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
-                                 FieldMaskSet<EquivalenceSet> &to_untrack,
                                  LegionMap<AddressSpaceID,
                                   SubscriberInvalidations> &subscribers,
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_mapping_root=false);
       void merge(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-               FieldMaskSet<EquivalenceSet> &to_untrack,
                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void swap(VersionManager &src, std::set<RegionTreeNode*> &to_traverse,
-              FieldMaskSet<EquivalenceSet> &to_untrack,
               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void pack_manager(Serializer &rez, const bool invalidate, 
                 std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                FieldMaskSet<EquivalenceSet> &to_untrack,
                 LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
                 std::vector<DistributedCollectable*> &to_remove);
       void unpack_manager(Deserializer &derez, AddressSpaceID source,

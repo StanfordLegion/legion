@@ -12,9 +12,9 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Bounds, Chan, ChanEntry, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace, ISpaceID, Inst,
-    Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc, ProcEntry, ProcID,
-    ProcKind, ProcPoint, State, TimePoint, Timestamp, Operation,
+    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
+    ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc,
+    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -51,6 +51,15 @@ impl Serialize for Count {
 }
 
 #[derive(Serialize, Copy, Clone)]
+struct DependencyRecord(u64, u64, u64);
+
+#[derive(Serialize, Copy, Clone)]
+struct CriticalPathRecord {
+    tuple: Option<DependencyRecord>,
+    obj: Option<DependencyRecord>,
+}
+
+#[derive(Serialize, Copy, Clone)]
 struct DataRecord<'a> {
     level: u32,
     level_ready: Option<u32>,
@@ -73,7 +82,7 @@ struct DataRecord<'a> {
 #[derive(Serialize, Copy, Clone)]
 struct OpRecord<'a> {
     op_id: u64,
-    parent_id: u64,
+    parent_id: Option<u64>,
     desc: &'a str,
     proc: Option<&'a str>,
     level: Option<u32>,
@@ -102,140 +111,121 @@ struct ScaleRecord {
     max_level: u32,
 }
 
+fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord> {
+    let proc_id = state.prof_uid_proc.get(&prof_uid)?;
+    Some(DependencyRecord(
+        proc_id.node_id().0,
+        proc_id.proc_in_node(),
+        prof_uid.0,
+    ))
+}
+
 impl Proc {
     fn emit_tsv_point(
         &self,
         f: &mut csv::Writer<File>,
         point: &ProcPoint,
         state: &State,
+        spy_state: &SpyState,
     ) -> io::Result<()> {
-        let (base, time_range, waiters) = self.entry(point.entry);
-        let name = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let task = &self.tasks.get(&op_id).unwrap();
-                let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
-                let variant_name = &state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .name;
+        let entry = self.entry(point.entry);
+        let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
+        let (base, time_range, waiters) = (&entry.base, &entry.time_range, &entry.waiters);
+        let name = match entry.kind {
+            ProcEntryKind::Task(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
                 match task_name {
                     Some(task_name) => {
                         if task_name != variant_name {
-                            format!("{} [{}] <{}>", task_name, variant_name, op_id.0)
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.unwrap().0)
                         } else {
-                            format!("{} <{}>", task_name, op_id.0)
+                            format!("{} <{}>", task_name, op_id.unwrap().0)
                         }
                     }
                     None => variant_name.clone(),
                 }
             }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                state
-                    .meta_variants
-                    .get(&task.variant_id)
-                    .unwrap()
-                    .name
-                    .clone()
+            ProcEntryKind::MetaTask(variant_id) => {
+                state.meta_variants.get(&variant_id).unwrap().name.clone()
             }
-            ProcEntry::MapperCall(idx) => {
-                let mapper_call = &self.mapper_calls[idx];
-                if mapper_call.deps.op_id.0 > 0 {
-                    format!(
-                        "Mapper Call {} for {}",
-                        state.mapper_call_kinds.get(&mapper_call.kind).unwrap().name,
-                        mapper_call.deps.op_id.0
-                    )
+            ProcEntryKind::MapperCall(kind) => {
+                let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
+                if let Some(initiation_op_id) = initiation_op {
+                    format!("Mapper Call {} for {}", name, initiation_op_id.0)
                 } else {
-                    format!(
-                        "Mapper Call {}",
-                        state.mapper_call_kinds.get(&mapper_call.kind).unwrap().name
-                    )
+                    format!("Mapper Call {}", name)
                 }
             }
-            ProcEntry::RuntimeCall(idx) => state
-                .runtime_call_kinds
-                .get(&self.runtime_calls[idx].kind)
-                .unwrap()
-                .name
-                .clone(),
-            ProcEntry::ProfTask(idx) => format!("ProfTask <{:?}>", self.prof_tasks[idx].op_id.0),
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().name.clone()
+            }
+            ProcEntryKind::ProfTask => format!("ProfTask <{:?}>", initiation_op.unwrap().0),
         };
 
-        let color = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let task = &self.tasks.get(&op_id).unwrap();
-                state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .color
-                    .unwrap()
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                state
-                    .meta_variants
-                    .get(&task.variant_id)
-                    .unwrap()
-                    .color
-                    .unwrap()
-            }
-            ProcEntry::MapperCall(idx) => state
-                .mapper_call_kinds
-                .get(&self.mapper_calls[idx].kind)
+        let color = match entry.kind {
+            ProcEntryKind::Task(task_id, variant_id) => state
+                .variants
+                .get(&(task_id, variant_id))
                 .unwrap()
                 .color
                 .unwrap(),
-            ProcEntry::RuntimeCall(idx) => state
-                .runtime_call_kinds
-                .get(&self.runtime_calls[idx].kind)
-                .unwrap()
-                .color
-                .unwrap(),
-            ProcEntry::ProfTask(_) => {
-                // proftask color is hardcoded to
-                // self.color = '#FFC0CB'  # Pink
+            ProcEntryKind::MetaTask(variant_id) => {
+                state.meta_variants.get(&variant_id).unwrap().color.unwrap()
+            }
+            ProcEntryKind::MapperCall(kind) => {
+                state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ProfTask => {
                 // FIXME don't hardcode this here
                 Color(0xFFC0CB)
             }
         };
         let color = format!("#{:06x}", color);
 
-        let initiation = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let op = state.operations.get(&op_id);
-                Some(op.unwrap().parent_id.0)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                Some(task.deps.op_id.0)
-            }
-            ProcEntry::MapperCall(idx) => {
-                let dep = self.mapper_calls[idx].deps.op_id.0;
-                if dep > 0 {
-                    Some(dep)
-                } else {
-                    None
-                }
-            }
-            ProcEntry::RuntimeCall(_) => None,
-            ProcEntry::ProfTask(_) => None,
+        let initiation = match entry.kind {
+            // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
+            ProcEntryKind::ProfTask => None,
+            // And another special case, because for MapperCalls only, we set default to 0 to match with python
+            ProcEntryKind::MapperCall(_) => Some(initiation_op.map_or(0, |op_id| op_id.0)),
+            _ => initiation_op.map(|op_id| op_id.0),
         };
 
-        let op_id = match point.entry {
-            ProcEntry::Task(op_id) => {
-                let task = &self.tasks.get(&op_id).unwrap();
-                Some(task.op_id.0)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => None,
-            ProcEntry::MapperCall(idx) => None,
-            ProcEntry::RuntimeCall(_) => None,
-            ProcEntry::ProfTask(idx) => {
-                Some(self.prof_tasks[idx].op_id.0)
-            }
+        let op_id = match entry.kind {
+            // FIXME: Elliott: special case on ProfTask to match legion_prof.py behavior
+            ProcEntryKind::ProfTask => Some(initiation_op.unwrap().0),
+            _ => op_id.map(|id| id.0),
         };
+
+        let render_op = |prof_uid: &ProfUID| prof_uid_record(*prof_uid, state);
+
+        let deps = spy_state.spy_op_deps.get(&base.prof_uid);
+
+        let mut in_ = String::new();
+        let mut out = String::new();
+        let mut parent = String::new();
+        let mut children = String::new();
+        if let Some(deps) = deps {
+            let deps_in: Vec<_> = deps.in_.iter().filter_map(render_op).collect();
+            let deps_out: Vec<_> = deps.out.iter().filter_map(render_op).collect();
+            let deps_parent: Vec<_> = deps.parent.iter().filter_map(render_op).collect();
+            let deps_children: Vec<_> = deps.children.iter().filter_map(render_op).collect();
+            if !deps_in.is_empty() {
+                in_ = serde_json::to_string(&deps_in)?;
+            }
+            if !deps_out.is_empty() {
+                out = serde_json::to_string(&deps_out)?;
+            }
+            if !deps_parent.is_empty() {
+                parent = serde_json::to_string(&deps_parent)?;
+            }
+            if !deps_children.is_empty() {
+                children = serde_json::to_string(&deps_children)?;
+            }
+        }
 
         let level = self.max_levels + 1 - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready + 1 - l);
@@ -267,8 +257,18 @@ impl Proc {
                     end: wait.start,
                     opacity: 1.0,
                     title: &name,
+                    // Somehow, these are coming through backwards...
+                    in_: &out, //&in_,
+                    out: &in_, //&out,
+                    children: &children,
+                    parents: &parent,
                     ..default
                 })?;
+                // Only write dependencies once
+                in_ = String::new();
+                out = String::new();
+                parent = String::new();
+                children = String::new();
                 f.serialize(DataRecord {
                     title: &format!("{} (waiting)", &name),
                     ready: Some(wait.start),
@@ -302,6 +302,11 @@ impl Proc {
                 ready: Some(time_range.ready.unwrap_or(start)),
                 start: start,
                 end: time_range.stop.unwrap(),
+                // Somehow, these are coming through backwards...
+                in_: &out, //&in_,
+                out: &in_, //&out,
+                children: &children,
+                parents: &parent,
                 ..default
             })?;
         }
@@ -309,7 +314,12 @@ impl Proc {
         Ok(())
     }
 
-    fn emit_tsv<P: AsRef<Path>>(&self, path: P, state: &State) -> io::Result<ProcessorRecord> {
+    fn emit_tsv<P: AsRef<Path>>(
+        &self,
+        path: P,
+        state: &State,
+        spy_state: &SpyState,
+    ) -> io::Result<ProcessorRecord> {
         let mut filename = PathBuf::new();
         filename.push("tsv");
         filename.push(format!("Proc_0x{:x}.tsv", self.proc_id));
@@ -319,7 +329,7 @@ impl Proc {
 
         for point in &self.time_points {
             if point.first {
-                self.emit_tsv_point(&mut f, point, state)?;
+                self.emit_tsv_point(&mut f, point, state, spy_state)?;
             }
         }
 
@@ -455,10 +465,10 @@ impl Chan {
         point: &ChanPoint,
         state: &State,
     ) -> io::Result<()> {
-        let (base, time_range, _) = self.entry(point.entry);
-        let name = match point.entry {
-            ChanEntry::Copy(idx) => {
-                let copy = &self.copies[idx];
+        let entry = self.entry(point.entry);
+        let (base, time_range) = (entry.base(), entry.time_range());
+        let name = match entry {
+            ChanEntryRef::Copy(_, copy) => {
                 let nreqs = copy.copy_info.len();
                 if nreqs > 0 {
                     format!(
@@ -471,18 +481,19 @@ impl Chan {
                     format!("size={}, num reqs={}", SizePretty(copy.size), nreqs)
                 }
             }
-            ChanEntry::Fill(_) => {
-                format!("Fill")
-            }
-            ChanEntry::DepPart(idx) => {
-                format!("{}", self.depparts[idx].part_op)
-            }
+            ChanEntryRef::Fill(_, _) => format!("Fill"),
+            ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
+        };
+        let ready_timestamp = match point.entry {
+            ChanEntry::Copy(_, _) => time_range.ready,
+            ChanEntry::Fill(_, _) => None,
+            ChanEntry::DepPart(_, _) => None,
         };
 
         let initiation = match point.entry {
-            ChanEntry::Copy(idx) => self.copies[idx].deps.op_id,
-            ChanEntry::Fill(idx) => self.fills[idx].deps.op_id,
-            ChanEntry::DepPart(idx) => self.depparts[idx].deps.op_id,
+            ChanEntry::Copy(op_id, _) => op_id,
+            ChanEntry::Fill(op_id, _) => op_id,
+            ChanEntry::DepPart(op_id, _) => op_id,
         };
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
@@ -492,7 +503,7 @@ impl Chan {
         f.serialize(DataRecord {
             level,
             level_ready: None,
-            ready: None,
+            ready: ready_timestamp,
             start: time_range.start.unwrap(),
             end: time_range.stop.unwrap(),
             color: &color,
@@ -828,15 +839,34 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
+        let (_, op_id) = point.entry;
         let inst = self.insts.get(&point.entry).unwrap();
-        let (base, time_range, deps) = (&inst.base, &inst.time_range, &inst.deps);
+        let (base, time_range) = (&inst.base, &inst.time_range);
         let name = format!("{}", InstPretty(inst, state));
 
-        let initiation = deps.op_id;
+        let initiation = op_id;
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
 
         let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
+
+        f.serialize(DataRecord {
+            level,
+            level_ready: None,
+            ready: None,
+            start: time_range.create.unwrap(),
+            end: time_range.ready.unwrap(),
+            color: &color,
+            opacity: 0.45,
+            title: &format!("{} (deferred)", &name),
+            initiation: Some(initiation.0),
+            in_: "",
+            out: "",
+            children: "",
+            parents: "",
+            prof_uid: base.prof_uid.0,
+            op_id: None,
+        })?;
 
         f.serialize(DataRecord {
             level,
@@ -901,22 +931,27 @@ impl Mem {
 
 impl State {
     fn get_op_color(&self, op_id: OpID) -> Color {
-        self.find_task(op_id).map_or_else(
-            || {
-                self.find_op(op_id).map_or(Color(0x000000), |op| {
-                    op.kind.map_or(Color(0x000000), |kind| {
-                        self.op_kinds.get(&kind).unwrap().color.unwrap()
-                    })
-                })
-            },
-            |task| {
-                self.variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .color
-                    .unwrap()
-            },
-        )
+        if let Some(task) = self.find_task(op_id) {
+            match task.kind {
+                ProcEntryKind::Task(task_id, variant_id) => {
+                    return self
+                        .variants
+                        .get(&(task_id, variant_id))
+                        .unwrap()
+                        .color
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        if let Some(op) = self.find_op(op_id) {
+            if let Some(kind) = op.kind {
+                return self.op_kinds.get(&kind).unwrap().color.unwrap();
+            }
+        }
+
+        return Color(0x000000);
     }
 
     fn has_multiple_nodes(&self) -> bool {
@@ -1451,6 +1486,7 @@ fn write_file<P: AsRef<Path>>(path: P, content: &[u8]) -> io::Result<()> {
 
 pub fn emit_interactive_visualization<P: AsRef<Path>>(
     state: &State,
+    spy_state: &SpyState,
     path: P,
     force: bool,
 ) -> io::Result<()> {
@@ -1476,7 +1512,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         .par_iter()
         .filter(|proc| !proc.is_empty())
         .map(|proc| {
-            proc.emit_tsv(&path, state)
+            proc.emit_tsv(&path, state, spy_state)
                 .map(|record| (proc.proc_id, record))
         })
         .collect::<io::Result<_>>()?;
@@ -1538,18 +1574,18 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             .delimiter(b'\t')
             .from_path(filename)?;
         for (op_id, op) in &state.operations {
-            let parent_id = op.parent_id;
+            let parent_id = op.parent_id.map(|x| x.0);
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(&op_id) {
                 let proc = state.procs.get(&proc_id).unwrap();
                 let proc_record = proc_records.get(&proc_id).unwrap();
-                let task = proc.tasks.get(&op_id).unwrap();
-                let task_name = &state.task_kinds.get(&task.task_id).unwrap().name;
-                let variant_name = &state
-                    .variants
-                    .get(&(task.task_id, task.variant_id))
-                    .unwrap()
-                    .name;
+                let task = proc.find_task(*op_id).unwrap();
+                let (task_id, variant_id) = match task.kind {
+                    ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
+                    _ => unreachable!(),
+                };
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
                 let desc = match task_name {
                     Some(task_name) => {
                         if task_name == variant_name {
@@ -1563,7 +1599,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.0,
+                    parent_id: parent_id,
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
@@ -1580,7 +1616,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.0,
+                    parent_id: parent_id,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
@@ -1594,7 +1630,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id.0,
+                    parent_id: parent_id,
                     desc: &desc,
                     proc: None,
                     level: None,
@@ -1620,8 +1656,18 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
     {
         let filename = path.join("json").join("critical_path.json");
-        let mut file = File::create(filename)?;
-        write!(file, "[]")?;
+        let file = File::create(filename)?;
+        let render_op = |prof_uid: ProfUID| prof_uid_record(prof_uid, state);
+        let mut critical_path = Vec::new();
+        let mut last = None;
+        for node in &spy_state.critical_path {
+            critical_path.push(CriticalPathRecord {
+                tuple: render_op(*node),
+                obj: last.and_then(render_op),
+            });
+            last = Some(*node);
+        }
+        serde_json::to_writer(file, &critical_path)?;
     }
 
     Ok(())

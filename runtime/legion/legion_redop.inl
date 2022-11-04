@@ -1683,7 +1683,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1746,7 +1746,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DiffReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 += rhs2;
+    rhs1 -= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -1795,7 +1795,7 @@ namespace Legion {
     }
 #endif
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1827,7 +1827,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicSub(&rhs1, rhs2);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1879,7 +1879,7 @@ namespace Legion {
             __longlong_as_ulonglong(oldval), __longlong_as_ulonglong(newval)));
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -1935,7 +1935,7 @@ namespace Legion {
       newval = atomicCAS(ptr, oldval, newval);
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -2039,7 +2039,7 @@ namespace Legion {
     }
 #endif
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -2071,7 +2071,7 @@ namespace Legion {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     atomicSub(&rhs1, rhs2);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -2117,7 +2117,7 @@ namespace Legion {
       newval = atomicCAS(target, oldval, newval);
     } while (oldval != newval);
 #else
-    __sync_fetch_and_add(&rhs1, rhs2);
+    __sync_fetch_and_sub(&rhs1, rhs2);
 #endif
   }
 
@@ -3971,7 +3971,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int8_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4085,7 +4085,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int16_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4193,7 +4193,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int32_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4271,7 +4271,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<int64_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4355,7 +4355,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint8_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4465,7 +4465,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint16_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4569,7 +4569,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint32_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4643,7 +4643,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<uint64_t>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4757,7 +4757,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<__half>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 = rhs1 * rhs2;
+    rhs1 = rhs1 / rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4875,7 +4875,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<float>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -4957,7 +4957,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<double>::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -5040,7 +5040,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<complex<__half> >::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -5121,7 +5121,7 @@ namespace Legion {
   template<> __CUDA_HD__ inline
   void DivReduction<complex<float> >::fold<true>(RHS &rhs1, RHS rhs2)
   {
-    rhs1 *= rhs2;
+    rhs1 /= rhs2;
   }
 
   template<> __CUDA_HD__ inline
@@ -6327,174 +6327,6 @@ namespace Legion {
 #endif
   }
 
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs > lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 > rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<__half> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs2);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_HALF
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs > lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 > rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MaxReduction<complex<float> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MAX__(newval, rhs2);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MAX__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MAX__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_COMPLEX
-
   template<> __CUDA_HD__ inline
   void MinReduction<bool>::apply<true>(LHS &lhs, RHS rhs)
   {
@@ -7667,174 +7499,6 @@ namespace Legion {
 #endif
 #endif
   }
-
-#ifdef LEGION_REDOP_COMPLEX
-#ifdef LEGION_REDOP_HALF
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs < lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 < rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<__half> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned int *ptr = (unsigned int*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs2);
-      newval = __uint_as_complex(atomicCAS(ptr,
-            __complex_as_uint(oldval), __complex_as_uint(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int32_t,complex<__half> > oldval, newval;
-    TypePunning::Pointer<int32_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int32_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_HALF
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::apply<true>(LHS &lhs, RHS rhs)
-  {
-    if (rhs < lhs)
-      lhs = rhs;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::apply<false>(LHS &lhs, RHS rhs)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = lhs, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&lhs;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(lhs);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&lhs);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::fold<true>(RHS &rhs1, RHS rhs2)
-  {
-    if (rhs2 < rhs1)
-      rhs1 = rhs2;
-  }
-
-  template<> __CUDA_HD__ inline
-  void MinReduction<complex<float> >::fold<false>(RHS &rhs1, RHS rhs2)
-  {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    RHS newval = rhs1, oldval;
-    // Type punning like this is illegal in C++ but the
-    // CUDA manual has an example just like it so fuck it
-    unsigned long long *ptr = (unsigned long long*)&rhs1;
-    do {
-      oldval = newval;
-      newval = __MIN__(newval, rhs2);
-      newval = __ulonglong_as_complex(atomicCAS(ptr,
-            __complex_as_ulonglong(oldval), __complex_as_ulonglong(newval)));
-    } while (oldval != newval);
-#else
-#if __cplusplus >= 202002L
-    std::atomic_ref<RHS> atomic(rhs1);
-    RHS oldval = atomic.load();
-    RHS newval;
-    do {
-      newval = __MIN__(oldval, rhs2);
-    } while (!atomic.compare_exchange_weak(oldval, newval));
-#else
-    TypePunning::Alias<int64_t,complex<float> > oldval, newval;
-    TypePunning::Pointer<int64_t> pointer((void*)&rhs1);
-    do {
-      oldval.load(pointer);
-      newval = __MIN__(oldval.as_two(), rhs2);
-    } while (!__sync_bool_compare_and_swap((int64_t*)pointer,
-                      oldval.as_one(), newval.as_one()));
-#endif
-#endif
-  }
-#endif // LEGION_REDOP_COMPLEX
 
   template<> __CUDA_HD__ inline
   void OrReduction<int8_t>::apply<true>(LHS &lhs, RHS rhs)

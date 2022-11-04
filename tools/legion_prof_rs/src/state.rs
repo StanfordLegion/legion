@@ -9,8 +9,15 @@ use num_enum::TryFromPrimitive;
 use rayon::prelude::*;
 
 use crate::serialize::Record;
+use crate::spy;
 
 const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
+
+#[derive(Debug, Clone)]
+pub enum Records {
+    Prof(Vec<Record>),
+    Spy(Vec<spy::serialize::Record>),
+}
 
 // Make sure this is up to date with lowlevel.h
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
@@ -154,15 +161,6 @@ impl fmt::Display for Timestamp {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ProcEntry {
-    Task(OpID),
-    MetaTask(OpID, VariantID, usize),
-    MapperCall(usize),
-    RuntimeCall(usize),
-    ProfTask(usize),
-}
-
-#[derive(Debug, Copy, Clone)]
 pub struct TimePoint<Entry, Secondary>
 where
     Entry: std::marker::Copy,
@@ -199,7 +197,7 @@ where
     }
 }
 
-pub type ProcPoint = TimePoint<ProcEntry, u64>;
+pub type ProcPoint = TimePoint<ProfUID, u64>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct ProcID(pub u64);
@@ -224,11 +222,9 @@ impl ProcID {
 pub struct Proc {
     pub proc_id: ProcID,
     pub kind: ProcKind,
-    pub tasks: BTreeMap<OpID, Task>,
-    pub meta_tasks: BTreeMap<(OpID, VariantID), Vec<MetaTask>>,
-    pub mapper_calls: Vec<MapperCall>,
-    pub runtime_calls: Vec<RuntimeCall>,
-    pub prof_tasks: Vec<ProfTask>,
+    entries: BTreeMap<ProfUID, ProcEntry>,
+    tasks: BTreeMap<OpID, ProfUID>,
+    meta_tasks: BTreeMap<(OpID, VariantID), Vec<ProfUID>>,
     pub max_levels: u32,
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
@@ -240,11 +236,9 @@ impl Proc {
         Proc {
             proc_id,
             kind,
+            entries: BTreeMap::new(),
             tasks: BTreeMap::new(),
             meta_tasks: BTreeMap::new(),
-            mapper_calls: Vec::new(),
-            runtime_calls: Vec::new(),
-            prof_tasks: Vec::new(),
             max_levels: 0,
             max_levels_ready: 0,
             time_points: Vec::new(),
@@ -252,95 +246,82 @@ impl Proc {
         }
     }
 
+    fn create_proc_entry(
+        &mut self,
+        base: Base,
+        op: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
+        time_range: TimeRange,
+        op_prof_uid: &mut BTreeMap<OpID, ProfUID>,
+        prof_uid_proc: &mut BTreeMap<ProfUID, ProcID>,
+    ) -> &mut ProcEntry {
+        if let Some(op_id) = op {
+            op_prof_uid.insert(op_id, base.prof_uid);
+        }
+        prof_uid_proc.insert(base.prof_uid, self.proc_id);
+        match kind {
+            ProcEntryKind::Task(_, _) => {
+                self.tasks.insert(op.unwrap(), base.prof_uid);
+            }
+            ProcEntryKind::MetaTask(variant_id) => {
+                self.meta_tasks
+                    .entry((initiation_op.unwrap(), variant_id))
+                    .or_insert_with(|| Vec::new())
+                    .push(base.prof_uid);
+            }
+            // If we don't need to look up later... don't bother building the index
+            _ => {}
+        }
+        self.entries
+            .entry(base.prof_uid)
+            .or_insert_with(|| ProcEntry::new(base, op, initiation_op, kind, time_range))
+    }
+
+    pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
+        let prof_uid = self.tasks.get(&op_id)?;
+        self.entries.get(prof_uid)
+    }
+
+    pub fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut ProcEntry> {
+        let prof_uid = self.tasks.get(&op_id)?;
+        self.entries.get_mut(prof_uid)
+    }
+
+    pub fn find_last_meta(&self, op_id: OpID, variant_id: VariantID) -> Option<&ProcEntry> {
+        let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
+        self.entries.get(&prof_uid)
+    }
+
+    pub fn find_last_meta_mut(
+        &mut self,
+        op_id: OpID,
+        variant_id: VariantID,
+    ) -> Option<&mut ProcEntry> {
+        let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
+        self.entries.get_mut(&prof_uid)
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.tasks.is_empty()
-            && self.meta_tasks.is_empty()
-            && self.mapper_calls.is_empty()
-            && self.runtime_calls.is_empty()
-            && self.prof_tasks.is_empty()
+        self.entries.is_empty()
     }
 
-    pub fn entry(&self, entry: ProcEntry) -> (&Base, &TimeRange, &Waiters) {
-        match entry {
-            ProcEntry::Task(op_id) => {
-                let task = self.tasks.get(&op_id).unwrap();
-                (&task.base, &task.time_range, &task.waiters)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &self.meta_tasks.get(&(op_id, variant_id)).unwrap()[idx];
-                (&task.base, &task.time_range, &task.waiters)
-            }
-            ProcEntry::MapperCall(idx) => {
-                let call = &self.mapper_calls[idx];
-                (&call.base, &call.time_range, &call.waiters)
-            }
-            ProcEntry::RuntimeCall(idx) => {
-                let call = &self.runtime_calls[idx];
-                (&call.base, &call.time_range, &call.waiters)
-            }
-            ProcEntry::ProfTask(idx) => {
-                let task = &self.prof_tasks.get(idx).unwrap();
-                (&task.base, &task.time_range, &task.waiters)
-            }
-        }
+    pub fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
+        self.entries.get(&prof_uid).unwrap()
     }
 
-    pub fn entry_mut(&mut self, entry: ProcEntry) -> (&mut Base, &mut TimeRange, &mut Waiters) {
-        match entry {
-            ProcEntry::Task(op_id) => {
-                let task = self.tasks.get_mut(&op_id).unwrap();
-                (&mut task.base, &mut task.time_range, &mut task.waiters)
-            }
-            ProcEntry::MetaTask(op_id, variant_id, idx) => {
-                let task = &mut self.meta_tasks.get_mut(&(op_id, variant_id)).unwrap()[idx];
-                (&mut task.base, &mut task.time_range, &mut task.waiters)
-            }
-            ProcEntry::MapperCall(idx) => {
-                let call = &mut self.mapper_calls[idx];
-                (&mut call.base, &mut call.time_range, &mut call.waiters)
-            }
-            ProcEntry::RuntimeCall(idx) => {
-                let call = &mut self.runtime_calls[idx];
-                (&mut call.base, &mut call.time_range, &mut call.waiters)
-            }
-            ProcEntry::ProfTask(idx) => {
-                let task = self.prof_tasks.get_mut(idx).unwrap();
-                (&mut task.base, &mut task.time_range, &mut task.waiters)
-            }
-        }
-    }
-
-    pub fn entry_base(&self, entry: ProcEntry) -> &Base {
-        self.entry(entry).0
-    }
-
-    pub fn entry_base_mut(&mut self, entry: ProcEntry) -> &mut Base {
-        self.entry_mut(entry).0
+    pub fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ProcEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        for task in self.tasks.values_mut() {
-            task.trim_time_range(start, stop);
-        }
-        self.tasks.retain(|_, t| !t.time_range.was_removed);
-        for mapper_call in &mut self.mapper_calls {
-            mapper_call.trim_time_range(start, stop);
-        }
-        self.mapper_calls.retain(|t| !t.time_range.was_removed);
-        for runtime_call in &mut self.runtime_calls {
-            runtime_call.trim_time_range(start, stop);
-        }
-        self.runtime_calls.retain(|t| !t.time_range.was_removed);
-        for prof_task in &mut self.prof_tasks {
-            prof_task.trim_time_range(start, stop);
-        }
-        self.prof_tasks.retain(|t| !t.time_range.was_removed);
+        self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
         fn add(
             time: &TimeRange,
-            entry: ProcEntry,
+            prof_uid: ProfUID,
             all_points: &mut Vec<ProcPoint>,
             points: &mut Vec<ProcPoint>,
             util_points: &mut Vec<ProcPoint>,
@@ -349,23 +330,23 @@ impl Proc {
             let stop = time.stop.unwrap();
             let ready = time.ready;
             if stop - start > TASK_GRANULARITY_THRESHOLD && !ready.is_none() {
-                all_points.push(ProcPoint::new(ready.unwrap(), entry, true, start.0));
-                all_points.push(ProcPoint::new(stop, entry, false, 0));
+                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             } else {
-                all_points.push(ProcPoint::new(start, entry, true, 0));
-                all_points.push(ProcPoint::new(stop, entry, false, 0));
+                all_points.push(ProcPoint::new(start, prof_uid, true, 0));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             }
 
-            points.push(ProcPoint::new(start, entry, true, 0));
-            points.push(ProcPoint::new(stop, entry, false, 0));
+            points.push(ProcPoint::new(start, prof_uid, true, 0));
+            points.push(ProcPoint::new(stop, prof_uid, false, 0));
 
-            util_points.push(ProcPoint::new(start, entry, true, 0));
-            util_points.push(ProcPoint::new(stop, entry, false, 0));
+            util_points.push(ProcPoint::new(start, prof_uid, true, 0));
+            util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
         }
-        fn add_waiters(waiters: &Waiters, entry: ProcEntry, util_points: &mut Vec<ProcPoint>) {
+        fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
-                util_points.push(ProcPoint::new(wait.start, entry, false, 0));
-                util_points.push(ProcPoint::new(wait.end, entry, true, 0));
+                util_points.push(ProcPoint::new(wait.start, prof_uid, false, 0));
+                util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
             }
         }
 
@@ -373,38 +354,10 @@ impl Proc {
         let mut points = Vec::new();
         let mut util_points = Vec::new();
 
-        for task in self.tasks.values() {
-            let time = &task.time_range;
-            let entry = ProcEntry::Task(task.op_id);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&task.waiters, entry, &mut util_points);
-        }
-        for tasks in self.meta_tasks.values() {
-            for (idx, task) in tasks.iter().enumerate() {
-                let time = &task.time_range;
-                let entry = ProcEntry::MetaTask(task.op_id, task.variant_id, idx);
-                add(&time, entry, &mut all_points, &mut points, &mut util_points);
-                add_waiters(&task.waiters, entry, &mut util_points);
-            }
-        }
-        for (idx, mapper_call) in self.mapper_calls.iter().enumerate() {
-            let time = &mapper_call.time_range;
-            let entry = ProcEntry::MapperCall(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&mapper_call.waiters, entry, &mut util_points);
-        }
-        for (idx, runtime_call) in self.runtime_calls.iter().enumerate() {
-            let time = &runtime_call.time_range;
-            let entry = ProcEntry::RuntimeCall(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&runtime_call.waiters, entry, &mut util_points);
-        }
-
-        for (idx, prof_task) in self.prof_tasks.iter().enumerate() {
-            let time = &prof_task.time_range;
-            let entry = ProcEntry::ProfTask(idx);
-            add(&time, entry, &mut all_points, &mut points, &mut util_points);
-            add_waiters(&prof_task.waiters, entry, &mut util_points);
+        for (uid, entry) in &self.entries {
+            let time = &entry.time_range;
+            add(&time, *uid, &mut all_points, &mut points, &mut util_points);
+            add_waiters(&entry.waiters, *uid, &mut util_points);
         }
 
         points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
@@ -420,9 +373,9 @@ impl Proc {
                     self.max_levels += 1;
                     self.max_levels
                 };
-                self.entry_base_mut(point.entry).set_level(level);
+                self.entry_mut(point.entry).base.set_level(level);
             } else {
-                let level = self.entry_base(point.entry).level.unwrap();
+                let level = self.entry(point.entry).base.level.unwrap();
                 free_levels.push(Reverse(level));
             }
         }
@@ -439,9 +392,9 @@ impl Proc {
                     self.max_levels_ready += 1;
                     self.max_levels_ready
                 };
-                self.entry_base_mut(point.entry).set_level_ready(level);
+                self.entry_mut(point.entry).base.set_level_ready(level);
             } else {
-                let level = self.entry_base(point.entry).level_ready.unwrap();
+                let level = self.entry(point.entry).base.level_ready.unwrap();
                 free_levels_ready.push(Reverse(level));
             }
         }
@@ -497,20 +450,12 @@ impl Mem {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        // BTreeMap::retain requires Rust 1.53
-        let mut removed_insts = Vec::new();
-        for (key, inst) in self.insts.iter_mut() {
-            inst.trim_time_range(start, stop);
-            if inst.time_range.was_removed {
-                removed_insts.push(*key);
-            }
-        }
-        for op_id in removed_insts {
-            self.insts.remove(&op_id);
-        }
+        self.insts.retain(|_, i| !i.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
+        let mut time_points_level = Vec::new();
+
         for (key, inst) in &self.insts {
             self.time_points.push(MemPoint::new(
                 inst.time_range.start.unwrap(),
@@ -523,14 +468,28 @@ impl Mem {
                 *key,
                 false,
                 (),
-            ))
+            ));
+
+            time_points_level.push(MemPoint::new(
+                inst.time_range.create.unwrap(),
+                *key,
+                true,
+                (),
+            ));
+            time_points_level.push(MemPoint::new(
+                inst.time_range.stop.unwrap(),
+                *key,
+                false,
+                (),
+            ));
         }
         self.time_points
             .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        time_points_level.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in &self.time_points {
+        for point in &time_points_level {
             if point.first {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
@@ -553,7 +512,7 @@ impl Mem {
 
 #[derive(Debug)]
 pub struct MemProcAffinity {
-    mem_id: MemID,
+    _mem_id: MemID,
     bandwidth: u32,
     latency: u32,
     pub best_aff_proc: ProcID,
@@ -562,7 +521,7 @@ pub struct MemProcAffinity {
 impl MemProcAffinity {
     fn new(mem_id: MemID, bandwidth: u32, latency: u32, best_aff_proc: ProcID) -> Self {
         MemProcAffinity {
-            mem_id,
+            _mem_id: mem_id,
             bandwidth,
             latency,
             best_aff_proc,
@@ -570,18 +529,66 @@ impl MemProcAffinity {
     }
     fn update_best_aff(&mut self, proc_id: ProcID, b: u32, l: u32) {
         if b > self.bandwidth {
-           self.best_aff_proc = proc_id;
-           self.bandwidth = b;
-           self.latency = l;
-       }
-   }
+            self.best_aff_proc = proc_id;
+            self.bandwidth = b;
+            self.latency = l;
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum ChanEntry {
-    Copy(usize),
-    Fill(usize),
-    DepPart(usize),
+    Copy(OpID, usize),
+    Fill(OpID, usize),
+    DepPart(OpID, usize),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ChanEntryRef<'a> {
+    Copy((OpID, usize), &'a Copy),
+    Fill((OpID, usize), &'a Fill),
+    DepPart((OpID, usize), &'a DepPart),
+}
+
+impl<'a> ChanEntryRef<'a> {
+    pub fn base(self) -> &'a Base {
+        match self {
+            ChanEntryRef::Copy(_, copy) => &copy.base,
+            ChanEntryRef::Fill(_, fill) => &fill.base,
+            ChanEntryRef::DepPart(_, deppart) => &deppart.base,
+        }
+    }
+    pub fn time_range(self) -> &'a TimeRange {
+        match self {
+            ChanEntryRef::Copy(_, copy) => &copy.time_range,
+            ChanEntryRef::Fill(_, fill) => &fill.time_range,
+            ChanEntryRef::DepPart(_, deppart) => &deppart.time_range,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ChanEntryRefMut<'a> {
+    Copy((OpID, usize), &'a mut Copy),
+    Fill((OpID, usize), &'a mut Fill),
+    DepPart((OpID, usize), &'a mut DepPart),
+}
+
+impl<'a> ChanEntryRefMut<'a> {
+    pub fn base(self) -> &'a mut Base {
+        match self {
+            ChanEntryRefMut::Copy(_, copy) => &mut copy.base,
+            ChanEntryRefMut::Fill(_, fill) => &mut fill.base,
+            ChanEntryRefMut::DepPart(_, deppart) => &mut deppart.base,
+        }
+    }
+    pub fn time_range(self) -> &'a mut TimeRange {
+        match self {
+            ChanEntryRefMut::Copy(_, copy) => &mut copy.time_range,
+            ChanEntryRefMut::Fill(_, fill) => &mut fill.time_range,
+            ChanEntryRefMut::DepPart(_, deppart) => &mut deppart.time_range,
+        }
+    }
 }
 
 pub type ChanPoint = TimePoint<ChanEntry, ()>;
@@ -624,9 +631,9 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub chan_id: ChanID,
-    pub copies: Vec<Copy>,
-    pub fills: Vec<Fill>,
-    pub depparts: Vec<DepPart>,
+    pub copies: BTreeMap<OpID, Vec<Copy>>,
+    pub fills: BTreeMap<OpID, Vec<Fill>>,
+    pub depparts: BTreeMap<OpID, Vec<DepPart>>,
     pub time_points: Vec<ChanPoint>,
     pub max_levels: u32,
 }
@@ -635,9 +642,9 @@ impl Chan {
     fn new(chan_id: ChanID) -> Self {
         Chan {
             chan_id,
-            copies: Vec::new(),
-            fills: Vec::new(),
-            depparts: Vec::new(),
+            copies: BTreeMap::new(),
+            fills: BTreeMap::new(),
+            depparts: BTreeMap::new(),
             time_points: Vec::new(),
             max_levels: 0,
         }
@@ -648,18 +655,15 @@ impl Chan {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        for copy in &mut self.copies {
-            copy.trim_time_range(start, stop);
+        for copies in self.copies.values_mut() {
+            copies.retain_mut(|t| !t.trim_time_range(start, stop));
         }
-        self.copies.retain(|t| !t.time_range.was_removed);
-        for fill in &mut self.fills {
-            fill.trim_time_range(start, stop);
+        for fills in self.fills.values_mut() {
+            fills.retain_mut(|t| !t.trim_time_range(start, stop));
         }
-        self.fills.retain(|t| !t.time_range.was_removed);
-        for deppart in &mut self.depparts {
-            deppart.trim_time_range(start, stop);
+        for depparts in self.depparts.values_mut() {
+            depparts.retain_mut(|t| !t.trim_time_range(start, stop));
         }
-        self.depparts.retain(|t| !t.time_range.was_removed);
     }
 
     fn sort_time_range(&mut self) {
@@ -670,29 +674,35 @@ impl Chan {
             points.push(ChanPoint::new(stop, entry, false, ()));
         }
 
-        let points = &mut self.time_points;
+        let mut points = Vec::new();
 
-        for (idx, copy) in self.copies.iter().enumerate() {
-            let time = &copy.time_range;
-            let entry = ChanEntry::Copy(idx);
-            add(&time, entry, points);
+        for (op_id, copies) in &self.copies {
+            for (idx, copy) in copies.iter().enumerate() {
+                let time = &copy.time_range;
+                let entry = ChanEntry::Copy(*op_id, idx);
+                add(&time, entry, &mut points);
+            }
         }
-        for (idx, fill) in self.fills.iter().enumerate() {
-            let time = &fill.time_range;
-            let entry = ChanEntry::Fill(idx);
-            add(&time, entry, points);
+        for (op_id, fills) in &self.fills {
+            for (idx, fill) in fills.iter().enumerate() {
+                let time = &fill.time_range;
+                let entry = ChanEntry::Fill(*op_id, idx);
+                add(&time, entry, &mut points);
+            }
         }
-        for (idx, deppart) in self.depparts.iter().enumerate() {
-            let time = &deppart.time_range;
-            let entry = ChanEntry::DepPart(idx);
-            add(&time, entry, points);
+        for (op_id, depparts) in &self.depparts {
+            for (idx, deppart) in depparts.iter().enumerate() {
+                let time = &deppart.time_range;
+                let entry = ChanEntry::DepPart(*op_id, idx);
+                add(&time, entry, &mut points);
+            }
         }
 
         points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
-        for point in points {
+        for point in &points {
             if point.first {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
@@ -700,35 +710,46 @@ impl Chan {
                     self.max_levels += 1;
                     self.max_levels
                 };
-                match point.entry {
-                    ChanEntry::Copy(idx) => self.copies[idx].base.set_level(level),
-                    ChanEntry::Fill(idx) => self.fills[idx].base.set_level(level),
-                    ChanEntry::DepPart(idx) => self.depparts[idx].base.set_level(level),
-                };
+                self.entry_mut(point.entry).base().set_level(level);
             } else {
-                let level = match point.entry {
-                    ChanEntry::Copy(idx) => self.copies[idx].base.level.unwrap(),
-                    ChanEntry::Fill(idx) => self.fills[idx].base.level.unwrap(),
-                    ChanEntry::DepPart(idx) => self.depparts[idx].base.level.unwrap(),
-                };
+                let level = self.entry(point.entry).base().level.unwrap();
                 free_levels.push(Reverse(level));
+            }
+        }
+
+        self.time_points = points;
+    }
+
+    pub fn entry(&self, entry: ChanEntry) -> ChanEntryRef {
+        match entry {
+            ChanEntry::Copy(op_id, idx) => {
+                let copy = &self.copies.get(&op_id).unwrap()[idx];
+                ChanEntryRef::Copy((op_id, idx), copy)
+            }
+            ChanEntry::Fill(op_id, idx) => {
+                let fill = &self.fills.get(&op_id).unwrap()[idx];
+                ChanEntryRef::Fill((op_id, idx), fill)
+            }
+            ChanEntry::DepPart(op_id, idx) => {
+                let deppart = &self.depparts.get(&op_id).unwrap()[idx];
+                ChanEntryRef::DepPart((op_id, idx), deppart)
             }
         }
     }
 
-    pub fn entry(&self, entry: ChanEntry) -> (&Base, &TimeRange, &InitiationDependencies) {
+    pub fn entry_mut(&mut self, entry: ChanEntry) -> ChanEntryRefMut {
         match entry {
-            ChanEntry::Copy(idx) => {
-                let copy = &self.copies[idx];
-                (&copy.base, &copy.time_range, &copy.deps)
+            ChanEntry::Copy(op_id, idx) => {
+                let copy = &mut self.copies.get_mut(&op_id).unwrap()[idx];
+                ChanEntryRefMut::Copy((op_id, idx), copy)
             }
-            ChanEntry::Fill(idx) => {
-                let fill = &self.fills[idx];
-                (&fill.base, &fill.time_range, &fill.deps)
+            ChanEntry::Fill(op_id, idx) => {
+                let fill = &mut self.fills.get_mut(&op_id).unwrap()[idx];
+                ChanEntryRefMut::Fill((op_id, idx), fill)
             }
-            ChanEntry::DepPart(idx) => {
-                let deppart = &self.depparts[idx];
-                (&deppart.base, &deppart.time_range, &deppart.deps)
+            ChanEntry::DepPart(op_id, idx) => {
+                let deppart = &mut self.depparts.get_mut(&op_id).unwrap()[idx];
+                ChanEntryRefMut::DepPart((op_id, idx), deppart)
             }
         }
     }
@@ -806,7 +827,7 @@ impl ISpace {
         self
     }
 
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.is_none());
         self.name = Some(name.to_owned());
         self
@@ -832,7 +853,7 @@ pub struct IPartID(pub u64);
 
 #[derive(Debug)]
 pub struct IPart {
-    ipart_id: IPartID,
+    _ipart_id: IPartID,
     name: Option<String>,
     pub parent: Option<ISpaceID>,
     disjoint: Option<bool>,
@@ -842,14 +863,14 @@ pub struct IPart {
 impl IPart {
     fn new(ipart_id: IPartID) -> Self {
         IPart {
-            ipart_id,
+            _ipart_id: ipart_id,
             name: None,
             parent: None,
             disjoint: None,
             point0: None,
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         assert!(self.name.as_ref().map_or(true, |x| x == name));
         self.name = Some(name.to_owned());
         self
@@ -889,7 +910,7 @@ impl FSpace {
             fields: BTreeMap::new(),
         }
     }
-    fn set_name(&mut self, name: &String) -> &mut Self {
+    fn set_name(&mut self, name: &str) -> &mut Self {
         let new_name = Some(name.to_owned());
         assert!(self.name.is_none() || self.name == new_name);
         self.name = new_name;
@@ -902,18 +923,18 @@ pub struct FieldID(pub u32);
 
 #[derive(Debug)]
 pub struct Field {
-    fspace_id: FSpaceID,
-    field_id: FieldID,
-    size: u64,
+    _fspace_id: FSpaceID,
+    _field_id: FieldID,
+    _size: u64,
     pub name: String,
 }
 
 impl Field {
-    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &String) -> Self {
+    fn new(fspace_id: FSpaceID, field_id: FieldID, size: u64, name: &str) -> Self {
         Field {
-            fspace_id,
-            field_id,
-            size,
+            _fspace_id: fspace_id,
+            _field_id: field_id,
+            _size: size,
             name: name.to_owned(),
         }
     }
@@ -924,95 +945,76 @@ pub struct TreeID(pub u32);
 
 #[derive(Debug)]
 pub struct Region {
-    ispace_id: ISpaceID,
-    fspace_id: FSpaceID,
-    tree_id: TreeID,
-    name: String,
+    _ispace_id: ISpaceID,
+    _fspace_id: FSpaceID,
+    _tree_id: TreeID,
+    _name: String,
 }
 
 impl Region {
-    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &String) -> Self {
+    fn new(ispace_id: ISpaceID, fspace_id: FSpaceID, tree_id: TreeID, name: &str) -> Self {
         Region {
-            ispace_id,
-            fspace_id,
-            tree_id,
-            name: name.to_owned(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct PathRange {
-    start: u64,
-    stop: u64,
-    path: Vec<()>,
-}
-
-impl PathRange {
-    fn new() -> Self {
-        PathRange {
-            start: 0,
-            stop: 0,
-            path: Vec::new(),
+            _ispace_id: ispace_id,
+            _fspace_id: fspace_id,
+            _tree_id: tree_id,
+            _name: name.to_owned(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Dependencies {
-    deps_in: BTreeSet<()>,
-    deps_out: BTreeSet<()>,
-    deps_parent: BTreeSet<()>,
-    deps_children: BTreeSet<()>,
-    path: PathRange,
-    visited: bool,
+    pub in_: BTreeSet<ProfUID>,
+    pub out: BTreeSet<ProfUID>,
+    pub parent: BTreeSet<ProfUID>,
+    pub children: BTreeSet<ProfUID>,
 }
 
 impl Dependencies {
     fn new() -> Self {
         Dependencies {
-            deps_in: BTreeSet::new(),
-            deps_out: BTreeSet::new(),
-            deps_parent: BTreeSet::new(),
-            deps_children: BTreeSet::new(),
-            path: PathRange::new(),
-            visited: false,
+            in_: BTreeSet::new(),
+            out: BTreeSet::new(),
+            parent: BTreeSet::new(),
+            children: BTreeSet::new(),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct InitiationDependencies {
-    deps: Dependencies,
-    pub op_id: OpID,
+pub struct SpyEvent {
+    preconditions: BTreeSet<EventID>,
+    postconditions: BTreeSet<EventID>,
 }
 
-impl InitiationDependencies {
-    fn new(op_id: OpID) -> Self {
-        InitiationDependencies {
-            deps: Dependencies::new(),
-            op_id,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct NoDependencies {
-    deps: Dependencies,
-}
-
-impl NoDependencies {
+impl SpyEvent {
     fn new() -> Self {
-        NoDependencies {
-            deps: Dependencies::new(),
+        SpyEvent {
+            preconditions: BTreeSet::new(),
+            postconditions: BTreeSet::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SpyOp {
+    precondition: EventID,
+    postcondition: EventID,
+}
+
+impl SpyOp {
+    fn new(precondition: EventID, postcondition: EventID) -> Self {
+        SpyOp {
+            precondition,
+            postcondition,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Align {
-    field_id: FieldID,
-    eqk: u32,
+    _field_id: FieldID,
+    _eqk: u32,
     pub align_desc: u32,
     pub has_align: bool,
 }
@@ -1020,8 +1022,8 @@ pub struct Align {
 impl Align {
     fn new(field_id: FieldID, eqk: u32, align_desc: u32, has_align: bool) -> Self {
         Align {
-            field_id,
-            eqk,
+            _field_id: field_id,
+            _eqk: eqk,
             align_desc,
             has_align,
         }
@@ -1041,7 +1043,6 @@ pub struct Inst {
     mem_id: Option<MemID>,
     pub size: Option<u64>,
     pub time_range: TimeRange,
-    pub deps: InitiationDependencies,
     pub ispace_ids: Vec<ISpaceID>,
     pub fspace_ids: Vec<FSpaceID>,
     tree_id: Option<TreeID>,
@@ -1051,14 +1052,13 @@ pub struct Inst {
 }
 
 impl Inst {
-    fn new(base: Base, inst_id: InstID, op_id: OpID) -> Self {
+    fn new(base: Base, inst_id: InstID) -> Self {
         Inst {
             base,
             inst_id,
             mem_id: None,
             size: None,
             time_range: TimeRange::new_empty(),
-            deps: InitiationDependencies::new(op_id),
             ispace_ids: Vec::new(),
             fspace_ids: Vec::new(),
             tree_id: None,
@@ -1075,8 +1075,8 @@ impl Inst {
         self.size = Some(size);
         self
     }
-    fn set_start_stop(&mut self, start: Timestamp, stop: Timestamp) -> &mut Self {
-        self.time_range = TimeRange::new_start(start, stop);
+    fn set_start_stop(&mut self, start: Timestamp, ready: Timestamp, stop: Timestamp) -> &mut Self {
+        self.time_range = TimeRange::new_full(start, ready, ready, stop);
         self
     }
     fn set_start(&mut self, start: Timestamp) -> &mut Self {
@@ -1127,8 +1127,8 @@ impl Inst {
         self.tree_id = Some(tree_id);
         self
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1140,13 +1140,13 @@ pub struct MapperCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct MapperCallKind {
-    kind: MapperCallKindID,
+    pub kind: MapperCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
 
 impl MapperCallKind {
-    fn new(kind: MapperCallKindID, name: &String) -> Self {
+    fn new(kind: MapperCallKindID, name: &str) -> Self {
         MapperCallKind {
             kind,
             name: name.to_owned(),
@@ -1164,13 +1164,13 @@ pub struct RuntimeCallKindID(pub u32);
 
 #[derive(Debug)]
 pub struct RuntimeCallKind {
-    kind: RuntimeCallKindID,
+    pub kind: RuntimeCallKindID,
     pub name: String,
     pub color: Option<Color>,
 }
 
 impl RuntimeCallKind {
-    fn new(kind: RuntimeCallKindID, name: &String) -> Self {
+    fn new(kind: RuntimeCallKindID, name: &str) -> Self {
         RuntimeCallKind {
             kind,
             name: name.to_owned(),
@@ -1188,7 +1188,7 @@ pub struct TaskID(pub u32);
 
 #[derive(Debug)]
 pub struct TaskKind {
-    task_id: TaskID,
+    pub task_id: TaskID,
     pub name: Option<String>,
 }
 
@@ -1199,7 +1199,7 @@ impl TaskKind {
             name: None,
         }
     }
-    fn set_name(&mut self, name: &String, overwrite: bool) {
+    fn set_name(&mut self, name: &str, overwrite: bool) {
         if self.name.is_none() || overwrite {
             self.name = Some(name.to_owned());
         }
@@ -1220,7 +1220,7 @@ pub struct Variant {
 }
 
 impl Variant {
-    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &String) -> Self {
+    fn new(variant_id: VariantID, message: bool, ordered_vc: bool, name: &str) -> Self {
         Variant {
             variant_id,
             message,
@@ -1279,8 +1279,6 @@ pub struct TimeRange {
     pub ready: Option<Timestamp>,
     pub start: Option<Timestamp>,
     pub stop: Option<Timestamp>,
-    trimmed: bool,
-    was_removed: bool,
 }
 
 impl TimeRange {
@@ -1293,8 +1291,6 @@ impl TimeRange {
             ready: Some(ready),
             start: Some(start),
             stop: Some(stop),
-            trimmed: false,
-            was_removed: false,
         }
     }
     fn new_start(start: Timestamp, stop: Timestamp) -> Self {
@@ -1304,8 +1300,6 @@ impl TimeRange {
             ready: None,
             start: Some(start),
             stop: Some(stop),
-            trimmed: false,
-            was_removed: false,
         }
     }
     fn new_empty() -> Self {
@@ -1314,11 +1308,9 @@ impl TimeRange {
             ready: None,
             start: None,
             stop: None,
-            trimmed: false,
-            was_removed: false,
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         let clip = |value| {
             let value = value - start;
             if value < 0.into() {
@@ -1331,13 +1323,13 @@ impl TimeRange {
         };
 
         if self.stop.map_or(false, |x| x < start) || self.start.map_or(false, |x| x > stop) {
-            self.was_removed = true;
-            return;
+            return true;
         }
         self.create = self.create.map(clip);
         self.ready = self.ready.map(clip);
         self.start = self.start.map(clip);
         self.stop = self.stop.map(clip);
+        false
     }
 }
 
@@ -1376,35 +1368,56 @@ impl Waiters {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OpID(pub u64);
 
+impl From<spy::serialize::UniqueID> for OpID {
+    fn from(e: spy::serialize::UniqueID) -> Self {
+        OpID(e.0)
+    }
+}
+
+impl From<spy::serialize::ContextID> for OpID {
+    fn from(e: spy::serialize::ContextID) -> Self {
+        OpID(e.0)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ProcEntryKind {
+    Task(TaskID, VariantID),
+    MetaTask(VariantID),
+    MapperCall(MapperCallKindID),
+    RuntimeCall(RuntimeCallKindID),
+    ProfTask,
+}
+
 #[derive(Debug)]
-pub struct Task {
+pub struct ProcEntry {
     pub base: Base,
-    pub op_id: OpID,
-    pub task_id: TaskID,
-    pub variant_id: VariantID,
+    pub op_id: Option<OpID>,
+    pub initiation_op: Option<OpID>,
+    pub kind: ProcEntryKind,
     pub time_range: TimeRange,
     pub waiters: Waiters,
 }
 
-impl Task {
+impl ProcEntry {
     fn new(
         base: Base,
-        op_id: OpID,
-        task_id: TaskID,
-        variant_id: VariantID,
+        op_id: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
         time_range: TimeRange,
     ) -> Self {
-        Task {
+        ProcEntry {
             base,
             op_id,
-            task_id,
-            variant_id,
+            initiation_op,
+            kind,
             time_range,
             waiters: Waiters::new(),
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1441,20 +1454,18 @@ impl OpKind {
 
 #[derive(Debug)]
 pub struct Operation {
-    base: Base,
-    op_id: OpID,
-    pub parent_id: OpID,
+    pub base: Base,
+    pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
     // owner: Option<OpID>,
 }
 
 impl Operation {
-    fn new(base: Base, op_id: OpID) -> Self {
+    fn new(base: Base) -> Self {
         Operation {
             base,
-            op_id,
-            parent_id: OpID(0),
+            parent_id: None,
             kind: None,
             provenance: None,
             // owner: None,
@@ -1462,9 +1473,9 @@ impl Operation {
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
         if parent_id == OpID(std::u64::MAX) {
-            self.parent_id = OpID(0)
+            self.parent_id = None;
         } else {
-            self.parent_id = parent_id;
+            self.parent_id = Some(parent_id);
         }
         self
     }
@@ -1473,122 +1484,26 @@ impl Operation {
         self.kind = Some(kind);
         self
     }
-    fn set_provenance(&mut self, provenance: &String) -> &mut Self {
+    fn set_provenance(&mut self, provenance: &str) -> &mut Self {
         self.provenance = Some(provenance.to_owned());
         self
-    }
-    // fn set_owner(&mut self, owner: OpID) -> &mut Self {
-    //     assert_eq!(self.owner, None);
-    //     self.owner = Some(owner);
-    //     self
-    // }
-}
-
-#[derive(Debug)]
-pub struct MetaTask {
-    base: Base,
-    op_id: OpID,
-    pub variant_id: VariantID,
-    time_range: TimeRange,
-    pub deps: InitiationDependencies,
-    waiters: Waiters,
-}
-
-impl MetaTask {
-    fn new(base: Base, op_id: OpID, variant_id: VariantID, time_range: TimeRange) -> Self {
-        MetaTask {
-            base,
-            op_id,
-            variant_id,
-            time_range,
-            deps: InitiationDependencies::new(op_id),
-            waiters: Waiters::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct MapperCall {
-    pub base: Base,
-    pub kind: MapperCallKindID,
-    op_id: OpID,
-    pub time_range: TimeRange,
-    pub deps: InitiationDependencies,
-    pub waiters: Waiters,
-}
-
-impl MapperCall {
-    fn new(base: Base, kind: MapperCallKindID, op_id: OpID, time_range: TimeRange) -> Self {
-        MapperCall {
-            base,
-            kind,
-            op_id,
-            time_range,
-            deps: InitiationDependencies::new(op_id),
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
-    }
-}
-
-#[derive(Debug)]
-pub struct RuntimeCall {
-    pub base: Base,
-    pub kind: RuntimeCallKindID,
-    pub time_range: TimeRange,
-    deps: NoDependencies,
-    pub waiters: Waiters,
-}
-
-impl RuntimeCall {
-    fn new(base: Base, kind: RuntimeCallKindID, time_range: TimeRange) -> Self {
-        RuntimeCall {
-            base,
-            kind,
-            time_range,
-            deps: NoDependencies::new(),
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
-    }
-}
-
-#[derive(Debug)]
-pub struct ProfTask {
-    base: Base,
-    pub op_id: OpID,
-    time_range: TimeRange,
-    deps: NoDependencies,
-    waiters: Waiters,
-}
-
-impl ProfTask {
-    fn new(base: Base, op_id: OpID, time_range: TimeRange) -> Self {
-        ProfTask {
-            base,
-            op_id,
-            time_range,
-            deps: NoDependencies::new(),
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventID(pub u64);
 
+impl From<spy::serialize::EventID> for EventID {
+    fn from(e: spy::serialize::EventID) -> Self {
+        EventID(e.0 .0)
+    }
+}
+
 #[derive(Debug)]
 pub struct CopyInfo {
     src_inst: InstID,
     dst_inst: InstID,
-    fevent: EventID,
+    _fevent: EventID,
     num_fields: u32,
     request_type: u32,
     num_hops: u32,
@@ -1616,13 +1531,12 @@ impl fmt::Display for CopyInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    src: MemID,
-    dst: MemID,
+    _src: MemID,
+    _dst: MemID,
     pub size: u64,
     time_range: TimeRange,
-    pub deps: InitiationDependencies,
-    fevent: EventID,
-    num_requests: u32,
+    _fevent: EventID,
+    _num_requests: u32,
     pub copy_info: Vec<CopyInfo>,
 }
 
@@ -1632,7 +1546,6 @@ impl Copy {
         src: MemID,
         dst: MemID,
         size: u64,
-        op_id: OpID,
         time_range: TimeRange,
         fevent: EventID,
         num_requests: u32,
@@ -1640,40 +1553,37 @@ impl Copy {
     ) -> Self {
         Copy {
             base,
-            src,
-            dst,
+            _src: src,
+            _dst: dst,
             size,
             time_range,
-            deps: InitiationDependencies::new(op_id),
-            fevent,
-            num_requests,
+            _fevent: fevent,
+            _num_requests: num_requests,
             copy_info,
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
     }
 }
 
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    dst: MemID,
+    _dst: MemID,
     time_range: TimeRange,
-    pub deps: InitiationDependencies,
 }
 
 impl Fill {
-    fn new(base: Base, dst: MemID, op_id: OpID, time_range: TimeRange) -> Self {
+    fn new(base: Base, dst: MemID, time_range: TimeRange) -> Self {
         Fill {
             base,
-            dst,
+            _dst: dst,
             time_range,
-            deps: InitiationDependencies::new(op_id),
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1682,20 +1592,18 @@ pub struct DepPart {
     base: Base,
     pub part_op: DepPartKind,
     time_range: TimeRange,
-    pub deps: InitiationDependencies,
 }
 
 impl DepPart {
-    fn new(base: Base, part_op: DepPartKind, op_id: OpID, time_range: TimeRange) -> Self {
+    fn new(base: Base, part_op: DepPartKind, time_range: TimeRange) -> Self {
         DepPart {
             base,
             part_op,
             time_range,
-            deps: InitiationDependencies::new(op_id),
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.time_range.trim_time_range(start, stop);
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1816,7 +1724,8 @@ pub struct State {
     meta_tasks: BTreeMap<(OpID, VariantID), ProcID>,
     pub op_kinds: BTreeMap<OpKindID, OpKind>,
     pub operations: BTreeMap<OpID, Operation>,
-    prof_uid_map: BTreeMap<u64, u64>,
+    op_prof_uid: BTreeMap<OpID, ProfUID>,
+    pub prof_uid_proc: BTreeMap<ProfUID, ProcID>,
     pub tasks: BTreeMap<OpID, ProcID>,
     pub multi_tasks: BTreeMap<OpID, MultiTask>,
     pub last_time: Timestamp,
@@ -1827,9 +1736,8 @@ pub struct State {
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
-    copy_map: BTreeMap<EventID, (ChanID, usize)>,
-    has_spy_data: bool,
-    spy_state: (), // TODO
+    copy_map: BTreeMap<EventID, (ChanID, OpID, usize)>,
+    pub has_prof_data: bool,
 }
 
 impl State {
@@ -1837,7 +1745,7 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         self.operations
             .entry(op_id)
-            .or_insert_with(|| Operation::new(Base::new(alloc), op_id))
+            .or_insert_with(|| Operation::new(Base::new(alloc)))
     }
 
     pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
@@ -1851,28 +1759,34 @@ impl State {
         task_id: TaskID,
         variant_id: VariantID,
         time_range: TimeRange,
-    ) -> &mut Task {
-        self.create_op(op_id);
+    ) -> &mut ProcEntry {
+        // Hack: we have to do this in two places, because we don't know what
+        // order the logger calls are going to come in. If the operation gets
+        // logged first, this will come back Some(_) and we'll store it below.
+        let parent_id = self.create_op(op_id).parent_id;
         self.tasks.insert(op_id, proc_id);
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .tasks
-            .entry(op_id)
-            .or_insert_with(|| Task::new(Base::new(alloc), op_id, task_id, variant_id, time_range))
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            Some(op_id),
+            parent_id,
+            ProcEntryKind::Task(task_id, variant_id),
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
-    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut Task> {
-        self.create_op(op_id);
-        self.procs
-            .get_mut(self.tasks.get(&op_id)?)?
-            .tasks
-            .get_mut(&op_id)
+    pub fn find_task(&self, op_id: OpID) -> Option<&ProcEntry> {
+        let proc = self.procs.get(self.tasks.get(&op_id)?)?;
+        proc.find_task(op_id)
     }
 
-    pub fn find_task(&self, op_id: OpID) -> Option<&Task> {
-        self.procs.get(self.tasks.get(&op_id)?)?.tasks.get(&op_id)
+    fn find_task_mut(&mut self, op_id: OpID) -> Option<&mut ProcEntry> {
+        self.create_op(op_id); // FIXME: Elliott: do we REALLY need this? (and if so, yuck)
+        let proc = self.procs.get_mut(self.tasks.get(&op_id)?)?;
+        proc.find_task_mut(op_id)
     }
 
     fn create_meta(
@@ -1881,32 +1795,27 @@ impl State {
         variant_id: VariantID,
         proc_id: ProcID,
         time_range: TimeRange,
-    ) -> &mut MetaTask {
+    ) -> &mut ProcEntry {
         self.create_op(op_id);
         self.meta_tasks.insert((op_id, variant_id), proc_id);
-        let tasks = self
-            .procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .meta_tasks
-            .entry((op_id, variant_id))
-            .or_insert_with(|| Vec::new());
         let alloc = &mut self.prof_uid_allocator;
-        tasks.push(MetaTask::new(
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
             Base::new(alloc),
-            op_id,
-            variant_id,
+            None,
+            Some(op_id),
+            ProcEntryKind::MetaTask(variant_id),
             time_range,
-        ));
-        tasks.last_mut().unwrap()
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
-    fn find_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut MetaTask> {
-        self.procs
-            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?
-            .meta_tasks
-            .get_mut(&(op_id, variant_id))?
-            .last_mut()
+    fn find_last_meta_mut(&mut self, op_id: OpID, variant_id: VariantID) -> Option<&mut ProcEntry> {
+        let proc = self
+            .procs
+            .get_mut(self.meta_tasks.get(&(op_id, variant_id))?)?;
+        proc.find_last_meta_mut(op_id, variant_id)
     }
 
     fn create_mapper_call(
@@ -1915,14 +1824,19 @@ impl State {
         proc_id: ProcID,
         op_id: OpID,
         time_range: TimeRange,
-    ) {
+    ) -> &mut ProcEntry {
         self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .mapper_calls
-            .push(MapperCall::new(Base::new(alloc), kind, op_id, time_range));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            if op_id.0 > 0 { Some(op_id) } else { None },
+            ProcEntryKind::MapperCall(kind),
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
     fn create_runtime_call(
@@ -1930,22 +1844,37 @@ impl State {
         kind: RuntimeCallKindID,
         proc_id: ProcID,
         time_range: TimeRange,
-    ) {
+    ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .runtime_calls
-            .push(RuntimeCall::new(Base::new(alloc), kind, time_range));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            None,
+            ProcEntryKind::RuntimeCall(kind),
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
-    fn create_prof_task(&mut self, proc_id: ProcID, op_id: OpID, time_range: TimeRange) {
+    fn create_prof_task(
+        &mut self,
+        proc_id: ProcID,
+        op_id: OpID,
+        time_range: TimeRange,
+    ) -> &mut ProcEntry {
         let alloc = &mut self.prof_uid_allocator;
-        self.procs
-            .get_mut(&proc_id)
-            .unwrap()
-            .prof_tasks
-            .push(ProfTask::new(Base::new(alloc), op_id, time_range));
+        let proc = self.procs.get_mut(&proc_id).unwrap();
+        proc.create_proc_entry(
+            Base::new(alloc),
+            None,
+            Some(op_id),
+            ProcEntryKind::ProfTask,
+            time_range,
+            &mut self.op_prof_uid,
+            &mut self.prof_uid_proc,
+        )
     }
 
     fn create_copy(
@@ -1964,13 +1893,14 @@ impl State {
         let chan_id = ChanID::new_copy(src, dst);
         let chan = self.find_chan_mut(chan_id);
 
-        let copy_id = chan.copies.len();
-        chan.copies.push(Copy::new(
+        let copies = chan.copies.entry(op_id).or_insert_with(|| Vec::new());
+
+        let copy_id = copies.len();
+        copies.push(Copy::new(
             base,
             src,
             dst,
             size,
-            op_id,
             time_range,
             fevent,
             num_requests,
@@ -1979,19 +1909,22 @@ impl State {
 
         self.copy_map
             .entry(fevent)
-            .or_insert_with(|| (chan_id, copy_id));
+            .or_insert_with(|| (chan_id, op_id, copy_id));
     }
 
     fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
-        let (chan_id, copy_idx) = *self.copy_map.get(&fevent)?;
-        Some(&mut self.find_chan_mut(chan_id).copies[copy_idx])
+        let (chan_id, op_id, copy_idx) = *self.copy_map.get(&fevent)?;
+        Some(&mut self.find_chan_mut(chan_id).copies.get_mut(&op_id).unwrap()[copy_idx])
     }
 
     fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan = self.find_fill_chan_mut(dst);
-        chan.fills.push(Fill::new(base, dst, op_id, time_range));
+        chan.fills
+            .entry(op_id)
+            .or_insert_with(|| Vec::new())
+            .push(Fill::new(base, dst, time_range));
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
@@ -1999,7 +1932,9 @@ impl State {
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan = self.find_deppart_chan_mut();
         chan.depparts
-            .push(DepPart::new(base, part_op, op_id, time_range));
+            .entry(op_id)
+            .or_insert_with(|| Vec::new())
+            .push(DepPart::new(base, part_op, time_range));
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
@@ -2032,7 +1967,7 @@ impl State {
         let alloc = &mut self.prof_uid_allocator;
         insts
             .entry((inst_id, op_id))
-            .or_insert_with(|| Inst::new(Base::new(alloc), inst_id, op_id))
+            .or_insert_with(|| Inst::new(Base::new(alloc), inst_id))
     }
 
     fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
@@ -2074,6 +2009,23 @@ impl State {
                 unreachable!();
             }
         }
+        self.has_prof_data = true;
+    }
+
+    fn compute_duration(&self, prof_uid: ProfUID) -> u64 {
+        if let Some(proc_id) = self.prof_uid_proc.get(&prof_uid) {
+            let proc = self.procs.get(proc_id).unwrap();
+            let entry = &proc.entry(prof_uid);
+            let mut total = 0;
+            let mut start = entry.time_range.start.unwrap().0;
+            for wait in &entry.waiters.wait_intervals {
+                total += wait.start.0 - start;
+                start = wait.end.0;
+            }
+            total += entry.time_range.stop.unwrap().0 - start;
+            return total;
+        }
+        0
     }
 
     pub fn trim_time_range(&mut self, start: Option<Timestamp>, stop: Option<Timestamp>) {
@@ -2114,7 +2066,8 @@ impl State {
                     continue;
                 }
                 total_messages += meta_tasks.len();
-                for meta_task in meta_tasks {
+                for meta_uid in meta_tasks {
+                    let meta_task = proc.entry(*meta_uid);
                     let latency =
                         meta_task.time_range.ready.unwrap() - meta_task.time_range.create.unwrap();
                     if threshold <= latency.to_us() {
@@ -2200,6 +2153,374 @@ impl State {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct SpyState {
+    has_spy_data: bool,
+    spy_ops: BTreeMap<OpID, SpyOp>,
+    spy_op_by_precondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_by_postcondition: BTreeMap<EventID, BTreeSet<OpID>>,
+    spy_op_parent: BTreeMap<OpID, OpID>,
+    spy_op_children: BTreeMap<OpID, BTreeSet<OpID>>,
+    pub spy_op_deps: BTreeMap<ProfUID, Dependencies>,
+    spy_events: BTreeMap<EventID, SpyEvent>,
+    pub critical_path: Vec<ProfUID>,
+}
+
+impl SpyState {
+    fn create_spy_event_depencence(&mut self, pre: EventID, post: EventID) {
+        assert!(pre != post);
+        self.spy_events
+            .entry(post)
+            .or_insert_with(|| SpyEvent::new())
+            .preconditions
+            .insert(pre);
+        self.spy_events
+            .entry(pre)
+            .or_insert_with(|| SpyEvent::new())
+            .postconditions
+            .insert(post);
+    }
+
+    fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
+        assert!(self.spy_ops.insert(op, SpyOp::new(pre, post)).is_none());
+        self.spy_op_by_precondition
+            .entry(pre)
+            .or_insert_with(|| BTreeSet::new())
+            .insert(op);
+        self.spy_op_by_postcondition
+            .entry(post)
+            .or_insert_with(|| BTreeSet::new())
+            .insert(op);
+    }
+
+    fn create_spy_op_parent(&mut self, parent: OpID, child: OpID) {
+        if let Some(old) = self.spy_op_parent.insert(child, parent) {
+            assert!(old == parent);
+        }
+        self.spy_op_children
+            .entry(parent)
+            .or_insert_with(|| BTreeSet::new())
+            .insert(child);
+    }
+
+    pub fn process_spy_records(&mut self, records: &Vec<spy::serialize::Record>) {
+        for record in records {
+            process_spy_record(record, self);
+        }
+        assert!(self.has_spy_data, "no Legion Spy logs in logfile");
+    }
+
+    fn traverse_dag_pre<V, N, F>(root: V, neighbors: N, mut pre: F)
+    where
+        V: std::marker::Copy + Ord,
+        N: Fn(&mut Vec<V>, V),
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        stack.push(root);
+        while let Some(node) = stack.pop() {
+            if visited.contains(&node) {
+                continue;
+            }
+            visited.insert(node);
+
+            neighbors(&mut stack, node);
+
+            pre(node);
+        }
+    }
+
+    fn traverse_dag_post<V, I, J, N, F>(roots: I, neighbors: N, mut post: F)
+    where
+        V: std::marker::Copy + Ord,
+        I: Iterator<Item = V>,
+        J: Iterator<Item = V>,
+        N: Fn(V) -> J,
+        F: FnMut(V),
+    {
+        let mut visited = BTreeSet::new();
+        let mut stack = Vec::new();
+        for root in roots {
+            stack.push((root, true));
+            while let Some((node, first_pass)) = stack.pop() {
+                if first_pass {
+                    if visited.contains(&node) {
+                        continue;
+                    }
+                    visited.insert(node);
+                    stack.push((node, false));
+                    stack.extend(neighbors(node).map(|x| (x, true)));
+                } else {
+                    post(node);
+                }
+            }
+        }
+    }
+
+    fn compute_op_preconditions(
+        op: &SpyOp,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_by_postcondition: &BTreeMap<EventID, BTreeSet<OpID>>,
+        spy_events: &BTreeMap<EventID, SpyEvent>,
+    ) {
+        let neighbors = |stack: &mut Vec<_>, event_id| {
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.preconditions.iter());
+            }
+        };
+        let visit = |event_id| {
+            if let Some(op_ids) = spy_op_by_postcondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.in_.insert(*prof_uid);
+                    }
+                }
+            }
+        };
+        Self::traverse_dag_pre(op.precondition, neighbors, visit);
+    }
+
+    fn compute_op_postconditions(
+        op: &SpyOp,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_by_precondition: &BTreeMap<EventID, BTreeSet<OpID>>,
+        spy_events: &BTreeMap<EventID, SpyEvent>,
+    ) {
+        let neighbors = |stack: &mut Vec<_>, event_id| {
+            if let Some(event) = spy_events.get(&event_id) {
+                stack.extend(event.postconditions.iter());
+            }
+        };
+        let visit = |event_id| {
+            if let Some(op_ids) = spy_op_by_precondition.get(&event_id) {
+                for op_id in op_ids {
+                    if let Some(prof_uid) = op_prof_uid.get(op_id) {
+                        deps.out.insert(*prof_uid);
+                    }
+                }
+            }
+        };
+        Self::traverse_dag_pre(op.postcondition, neighbors, visit);
+    }
+
+    fn compute_op_parent(
+        op_id: OpID,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_parent: &BTreeMap<OpID, OpID>,
+    ) {
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(parent) = spy_op_parent.get(&node) {
+                if let Some(parent_uid) = op_prof_uid.get(parent) {
+                    deps.parent.insert(*parent_uid);
+                } else {
+                    stack.push(*parent);
+                }
+            }
+        }
+    }
+
+    fn compute_op_children(
+        op_id: OpID,
+        deps: &mut Dependencies,
+        op_prof_uid: &BTreeMap<OpID, ProfUID>,
+        spy_op_children: &BTreeMap<OpID, BTreeSet<OpID>>,
+    ) {
+        let mut stack = Vec::new();
+        stack.push(op_id);
+        while let Some(node) = stack.pop() {
+            if let Some(children) = spy_op_children.get(&node) {
+                for child in children {
+                    if let Some(child_uid) = op_prof_uid.get(child) {
+                        deps.children.insert(*child_uid);
+                    } else {
+                        stack.push(*child);
+                    }
+                }
+            }
+        }
+    }
+
+    fn toposort_graph(&mut self) -> Vec<ProfUID> {
+        let mut postorder = Vec::new();
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            deps.in_.iter().copied()
+        };
+        let visit = |node| {
+            postorder.push(node);
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
+        postorder
+    }
+
+    fn transitive_reduce_graph(&mut self, toposort: &Vec<ProfUID>) {
+        // TODO: Elliott: legion_spy.py computes this with a bit set,
+        // which may be more efficient.
+        let mut reachable: BTreeMap<ProfUID, BTreeSet<ProfUID>> = BTreeMap::new();
+        for root in toposort {
+            // Compute the reachable sets in topological order to
+            // minimize the size of the graph we have to traverse
+            let mut root_reachable = BTreeSet::new();
+            let deps = self.spy_op_deps.get(root).unwrap();
+            for node in &deps.in_ {
+                // Ok to unwrap here as we're walking in toposort
+                // order to make sure this has been precomputed
+                let node_reachable = reachable.get(&node).unwrap();
+                root_reachable.extend(node_reachable.iter());
+            }
+
+            let mut to_remove = Vec::new();
+            for node in &deps.in_ {
+                if root_reachable.contains(node) {
+                    to_remove.push(*node);
+                } else {
+                    root_reachable.insert(*node);
+                }
+            }
+            reachable.insert(*root, root_reachable);
+
+            for node in to_remove {
+                let root_deps = self.spy_op_deps.get_mut(root).unwrap();
+                assert!(root_deps.in_.remove(&node));
+                let node_deps = self.spy_op_deps.get_mut(&node).unwrap();
+                assert!(node_deps.out.remove(root));
+            }
+        }
+    }
+
+    fn simplify_spy_graph(&mut self) {
+        let toposort = self.toposort_graph();
+
+        self.transitive_reduce_graph(&toposort);
+    }
+
+    fn compute_critical_path(&mut self, state: &State) {
+        // Postorder DFS walking both in and child edges, computing the
+        // longest path at each node based on the sum of the longest input and
+        // longest child
+        type Path = (u64, Vec<ProfUID>);
+        fn path_max<'a>(a: &'a Path, b: &'a Path) -> &'a Path {
+            if a.0 > b.0 {
+                a
+            } else {
+                b
+            }
+        }
+
+        let empty_path = (0, Vec::new());
+
+        let mut longest_paths = BTreeMap::<ProfUID, Path>::new();
+        let neighbors = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let children = deps.children.iter().copied();
+            children.chain(deps.in_.iter().copied())
+        };
+        let visit = |node| {
+            let deps = self.spy_op_deps.get(&node).unwrap();
+            let path = |dep| longest_paths.get(dep).unwrap();
+            let long_in = deps.in_.iter().map(path).fold(&empty_path, path_max);
+            let long_child = deps.children.iter().map(path).fold(&empty_path, path_max);
+            let duration = long_in.0 + long_child.0 + state.compute_duration(node);
+            let mut path = long_in.1.to_owned();
+            path.extend(long_child.1.iter());
+            path.push(node);
+            longest_paths.insert(node, (duration, path));
+        };
+        Self::traverse_dag_post(self.spy_op_deps.keys().copied(), neighbors, visit);
+        self.critical_path = longest_paths
+            .values()
+            .fold(&empty_path, path_max)
+            .1
+            .to_owned();
+    }
+
+    pub fn postprocess_spy_records(&mut self, state: &State) {
+        if !self.has_spy_data {
+            println!("No Legion Spy data, skipping postprocess step");
+            return;
+        }
+
+        // Process tasks first
+        for op_id in state.tasks.keys() {
+            let prof_uid = state.op_prof_uid.get(op_id).unwrap();
+            let mut deps = self
+                .spy_op_deps
+                .entry(*prof_uid)
+                .or_insert_with(|| Dependencies::new());
+            let op = self
+                .spy_ops
+                .get(&op_id)
+                .expect("missing dependecies for op");
+            Self::compute_op_preconditions(
+                &op,
+                &mut deps,
+                &state.op_prof_uid,
+                &self.spy_op_by_postcondition,
+                &self.spy_events,
+            );
+            Self::compute_op_postconditions(
+                &op,
+                &mut deps,
+                &state.op_prof_uid,
+                &self.spy_op_by_precondition,
+                &self.spy_events,
+            );
+            Self::compute_op_parent(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_parent);
+            Self::compute_op_children(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_children);
+        }
+
+        // Now add the implicit dependencies on meta tasks/mapper calls/etc.
+        for proc in state.procs.values() {
+            for (uid, entry) in &proc.entries {
+                if let ProcEntryKind::ProfTask = entry.kind {
+                    // FIXME: Elliott: legion_prof.py seems to think ProfTask
+                    // has an op_id not an initiation_op, so we have to work
+                    // around that here
+                    continue;
+                }
+                if let (Some(initiation_op), None) = (entry.initiation_op, entry.op_id) {
+                    if let Some(task) = state.find_task(initiation_op) {
+                        let task_stop = task.time_range.stop;
+                        let task_uid = task.base.prof_uid;
+                        let before = entry.time_range.stop < task_stop;
+
+                        let task_deps = self
+                            .spy_op_deps
+                            .entry(task_uid)
+                            .or_insert_with(|| Dependencies::new());
+                        if before {
+                            task_deps.in_.insert(*uid);
+                        } else {
+                            task_deps.out.insert(*uid);
+                        }
+
+                        let entry_deps = self
+                            .spy_op_deps
+                            .entry(*uid)
+                            .or_insert_with(|| Dependencies::new());
+                        if before {
+                            entry_deps.out.insert(task_uid);
+                        } else {
+                            entry_deps.in_.insert(task_uid);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reduce the graph
+        self.simplify_spy_graph();
+
+        self.compute_critical_path(state);
+    }
+}
+
 fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(InstID, OpID), Inst>) {
     match record {
         Record::MapperCallDesc { kind, name } => {
@@ -2259,7 +2580,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .entry(*mem_id)
                 .or_insert_with(|| Mem::new(*mem_id, kind, *capacity));
         }
-        Record::ProcMDesc { proc_id, mem_id, bandwidth, latency} => {
+        Record::ProcMDesc {
+            proc_id,
+            mem_id,
+            bandwidth,
+            latency,
+        } => {
             state
                 .mem_proc_affinity
                 .entry(*mem_id)
@@ -2421,11 +2747,24 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .or_insert_with(|| Variant::new(*variant_id, false, false, name))
                 .set_task(*task_id);
         }
-        Record::OperationInstance { op_id, parent_id, kind, provenance } => {
+        Record::OperationInstance {
+            op_id,
+            parent_id,
+            kind,
+            provenance,
+        } => {
             let kind = OpKindID(*kind);
-            state.create_op(*op_id).set_parent_id(*parent_id)
-                                   .set_kind(kind)
-                                   .set_provenance(provenance);
+            state
+                .create_op(*op_id)
+                .set_parent_id(*parent_id)
+                .set_kind(kind)
+                .set_provenance(provenance);
+            // Hack: we have to do this in two places, because we don't know what
+            // order the logger calls are going to come in. If the task gets
+            // logged first, this will come back Some(_) and we'll store it below.
+            if let Some(task) = state.find_task_mut(*op_id) {
+                task.initiation_op = Some(*parent_id);
+            }
         }
         Record::MultiTask { op_id, task_id } => {
             state.create_op(*op_id);
@@ -2461,7 +2800,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
         } => {
             state.create_op(*op_id);
             state
-                .find_meta_mut(*op_id, *lg_id)
+                .find_last_meta_mut(*op_id, *lg_id)
                 .unwrap()
                 .waiters
                 .add_wait_interval(WaitInterval::new(*start, *ready, *end));
@@ -2544,7 +2883,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let copy_info = CopyInfo {
                 src_inst: *src_inst,
                 dst_inst: *dst_inst,
-                fevent: *fevent,
+                _fevent: *fevent,
                 num_fields: *num_fields,
                 request_type: *request_type,
                 num_hops: *num_hops,
@@ -2595,11 +2934,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             op_id,
             inst_id,
             create,
+            ready,
             destroy,
         } => {
             state
                 .create_inst(*inst_id, *op_id, insts)
-                .set_start_stop(*create, *destroy);
+                .set_start_stop(*create, *ready, *destroy);
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {
@@ -2655,5 +2995,65 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             state.create_prof_task(*proc_id, *op_id, time_range);
             state.update_last_time(*stop);
         }
+    }
+}
+
+fn process_spy_record(record: &spy::serialize::Record, state: &mut SpyState) {
+    use spy::serialize::Record;
+
+    match record {
+        Record::SpyLogging => unimplemented!("legion_prof_rs requires detailed Legion Spy logging"),
+        Record::SpyDetailedLogging => {
+            state.has_spy_data = true;
+        }
+        Record::EventDependence { id1, id2 } => {
+            state.create_spy_event_depencence((*id1).into(), (*id2).into());
+        }
+
+        Record::OperationEvents { uid, pre, post } => {
+            state.create_spy_op((*uid).into(), (*pre).into(), (*post).into());
+        }
+        Record::RealmCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
+        }
+        Record::IndirectCopy { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
+        }
+        Record::RealmFill { pre, post, .. } => {
+            state.create_spy_event_depencence((*pre).into(), (*post).into());
+        }
+        Record::RealmDepPart { preid, postid, .. } => {
+            state.create_spy_event_depencence((*preid).into(), (*postid).into());
+        }
+
+        Record::TopTask { ctx, uid, .. } => {
+            state.create_spy_op_parent((*ctx).into(), (*uid).into());
+        }
+        Record::IndividualTask { ctx, uid, .. } => {
+            state.create_spy_op_parent((*ctx).into(), (*uid).into());
+        }
+        Record::IndexTask { ctx, uid, .. } => {
+            state.create_spy_op_parent((*ctx).into(), (*uid).into());
+        }
+        Record::IndexSlice { index, slice, .. } => {
+            state.create_spy_op_parent((*index).into(), (*slice).into());
+        }
+        Record::SliceSlice { slice1, slice2, .. } => {
+            state.create_spy_op_parent((*slice1).into(), (*slice2).into());
+        }
+        Record::SlicePoint {
+            slice, point_id, ..
+        } => {
+            state.create_spy_op_parent((*slice).into(), (*point_id).into());
+        }
+        Record::PointPoint { point1, point2, .. } => {
+            state.create_spy_op_parent((*point1).into(), (*point2).into());
+        }
+        Record::IndexPoint {
+            index, point_id, ..
+        } => {
+            state.create_spy_op_parent((*index).into(), (*point_id).into());
+        }
+        _ => {} // ok, ignore everything else
     }
 }

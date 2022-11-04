@@ -300,7 +300,7 @@ namespace Legion {
       public:
         UniqueID op_id;
         InstID inst_id;
-        timestamp_t create, destroy;
+        timestamp_t create, ready, destroy;
       };
       struct PartitionInfo {
       public:

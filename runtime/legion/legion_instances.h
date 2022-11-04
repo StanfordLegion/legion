@@ -54,19 +54,13 @@ namespace Legion {
     public:
       LayoutDescription& operator=(const LayoutDescription &rhs);
     public:
-      void log_instance_layout(ApEvent inst_event) const;
+      void log_instance_layout(LgEvent inst_event) const;
     public:
       void compute_copy_offsets(const FieldMask &copy_mask, 
                                 const PhysicalInstance instance,  
-#ifdef LEGION_SPY
-                                const ApEvent inst_event, 
-#endif
                                 std::vector<CopySrcDstField> &fields);
       void compute_copy_offsets(const std::vector<FieldID> &copy_fields,
                                 const PhysicalInstance instance,
-#ifdef LEGION_SPY
-                                const ApEvent inst_event,
-#endif
                                 std::vector<CopySrcDstField> &fields);
     public:
       void get_fields(std::set<FieldID> &fields) const;
@@ -133,7 +127,7 @@ namespace Legion {
     public: 
       virtual ApEvent get_use_event(void) const = 0;
       virtual ApEvent get_use_event(ApEvent user) const = 0;
-      virtual ApEvent get_unique_event(void) const = 0;
+      virtual LgEvent get_unique_event(void) const = 0;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const = 0;
       virtual PointerConstraint 
                      get_pointer_constraint(const DomainPoint &key) const = 0;
@@ -262,11 +256,11 @@ namespace Legion {
                       const ReductionOp *rop, FieldSpaceNode *node,
                       IndexSpaceExpression *index_domain, 
                       const void *piece_list, size_t piece_list_size,
-                      RegionTreeID tree_id, ApEvent unique, 
+                      RegionTreeID tree_id, LgEvent unique, 
                       bool register_now, bool output_instance = false);
       virtual ~PhysicalManager(void);
     public:
-      virtual ApEvent get_unique_event(void) const { return unique_event; }
+      virtual LgEvent get_unique_event(void) const { return unique_event; }
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
                      const std::vector<LogicalRegion> &regions) const; 
@@ -380,7 +374,9 @@ namespace Legion {
       const ReductionOp *reduction_op;
       const ReductionOpID redop;
       // Unique identifier event that is common across nodes
-      const ApEvent unique_event;
+      // Note this is just an LgEvent which suggests you shouldn't be using
+      // it for anything other than logging
+      const LgEvent unique_event;
       const void *const piece_list;
       const size_t piece_list_size;
     protected:
@@ -669,7 +665,7 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApEvent unique_event, bool external_instance);
+                        LgEvent unique_event, bool external_instance);
       CollectiveManager(const CollectiveManager &rhs) = delete;
       virtual ~CollectiveManager(void);
     public:
@@ -797,7 +793,7 @@ namespace Legion {
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
       virtual RtEvent get_instance_ready_event(void) const;
-      virtual ApEvent get_unique_event(void) const;
+      virtual LgEvent get_unique_event(void) const;
       virtual PhysicalInstance get_instance(const DomainPoint &key) const;
       virtual PointerConstraint
                      get_pointer_constraint(const DomainPoint &key) const;

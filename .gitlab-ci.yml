@@ -117,6 +117,7 @@ variables:
 
 .spy: &spy
   USE_SPY: "1"
+  BASH_ENV: "/root/.cargo/env" # make sure Cargo environment gets loaded
 
 .checks: &checks
   BOUNDS_CHECKS: "1"
@@ -450,6 +451,12 @@ before_script:
   - |
     if [[ "$TEST_JUPYTER" -eq 1 ]]; then
       pip3 install notebook==6.4.10
+    fi
+  - |
+    if [[ "$USE_PROF" -eq 1 ]]; then
+      wget https://bootstrap.pypa.io/get-pip.py
+      python3 get-pip.py
+      pip3 install mypy==0.971
     fi
 
 
@@ -1067,7 +1074,7 @@ clang12_cxx11_32bit_debug_legion:
 clang12_cxx11_32bit_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *release, *cxx11_32bit_normal, *legion]
+    <<: [*clang12, *terra12, *release, *cxx11_32bit_normal, *legion, *short]
 # * External tests
 clang12_cxx11_debug_external1:
   <<: [*linux_compute, *image_2004, *external_tests]

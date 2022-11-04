@@ -176,20 +176,21 @@ namespace Realm {
     Event fill(const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
                const void *fill_value, size_t fill_value_size,
-               Event wait_on = Event::NO_EVENT) const;
+               Event wait_on = Event::NO_EVENT,
+               int priority = 0) const;
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
                const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
                Event wait_on = Event::NO_EVENT,
-               ReductionOpID redop_id = 0, bool red_fold = false) const;
+               int priority = 0) const;
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
                const std::vector<CopySrcDstField> &dsts,
                const IndexSpace<N,T> &mask,
                const ProfilingRequestSet &requests,
                Event wait_on = Event::NO_EVENT,
-               ReductionOpID redop_id = 0, bool red_fold = false) const;
+               int priority = 0) const;
   };
 
   template <int N, typename T>

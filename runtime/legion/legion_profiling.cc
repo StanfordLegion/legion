@@ -135,7 +135,7 @@ namespace Legion {
       Provenance *prov = op->get_provenance();
       if (prov != NULL)
       {
-        inst.provenance = strdup(prov->provenance.c_str());
+        inst.provenance = prov->clone();
         owner->update_footprint(
             sizeof(OperationInstance) + strlen(inst.provenance), this);
       }
@@ -716,6 +716,7 @@ namespace Legion {
       info.op_id = prof_info->op_id;
       info.inst_id = timeline.instance.id;
       info.create = timeline.create_time;
+      info.ready = timeline.ready_time;
       info.destroy = timeline.delete_time;
       owner->update_footprint(sizeof(InstTimelineInfo), this);
     }

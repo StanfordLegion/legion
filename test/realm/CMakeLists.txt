@@ -49,6 +49,7 @@ list(APPEND REALM_TESTS
   realm_reinit
   sparse_construct
   extres_alias
+  reservations
   )
 
 if(Legion_USE_CUDA)
@@ -117,4 +118,14 @@ if(Legion_ENABLE_TESTING)
   foreach(test IN LISTS REALM_TESTS)
     add_test(NAME ${test} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:${test}> ${Legion_TEST_ARGS} ${TESTARGS_${test}})
   endforeach()
+
+  if(Legion_NETWORKS)
+    # For verifying the -ll:networks arguments, try each network we've compiled with
+    string(REPLACE "," ";" NETWORK_LIST "${Legion_NETWORKS}")
+    foreach(ITEM IN LISTS NETWORK_LIST)
+      set(NETWORK_ARGS "-ll:networks ${ITEM}")
+      message(${NETWORK_ARGS})
+      add_test(NAME version_check_network_${ITEM} COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:version_check> ${NETWORK_ARGS} ${Legion_TEST_ARGS} ${TESTARGS_version_check})
+    endforeach()
+  endif()
 endif()

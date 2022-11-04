@@ -2204,6 +2204,10 @@ local function emit_debuginfo(node)
   end
 end
 
+local function get_provenance(node)
+  return node.span.source .. ":" .. node.span.start.line
+end
+
 function codegen.expr_internal(cx, node)
   return node.value
 end
@@ -3812,6 +3816,7 @@ function codegen.expr_call(cx, node)
         var [launcher] = c.legion_task_launcher_create(
           [fn.value:get_task_id()], [task_args],
           [predicate_symbol], [mapper], [tag])
+        c.legion_task_launcher_set_provenance([launcher], [get_provenance(node)])
         [args_setup]
       end
     else
@@ -4750,6 +4755,7 @@ function codegen.expr_region(cx, node)
       -- because this is guarranteed to be the first use of the region
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.WRITE_DISCARD, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+      c.legion_inline_launcher_set_provenance(il, [get_provenance(node)])
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
@@ -6661,7 +6667,7 @@ local function expr_copy_extract_phase_barriers(index, values, value_types, dept
 end
 
 local function expr_copy_setup_region(
-    cx, src_value, src_type, src_container_type, src_fields,
+    cx, node, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds,
     depth, op, launcher)
@@ -6693,6 +6699,7 @@ local function expr_copy_setup_region(
     [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [launcher] = c.legion_copy_launcher_create(
       c.legion_predicate_true(), 0, [tag])
+    c.legion_copy_launcher_set_provenance([launcher], [get_provenance(node)])
   end)
 
   local region_src_i, region_dst_i
@@ -6795,7 +6802,7 @@ local function count_nested_list_size(value, value_type)
 end
 
 local function expr_copy_setup_list_one_to_many(
-    cx, src_value, src_type, src_container_type, src_fields,
+    cx, node, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds,
     depth, op, launcher)
@@ -6823,7 +6830,7 @@ local function expr_copy_setup_list_one_to_many(
         [c_actions]
         [update_actions]
         [expr_copy_setup_region(
-           cx, src_value, src_type, src_container_type, src_fields,
+           cx, node, src_value, src_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds,
            depth + 1, op, launcher)]
@@ -6831,7 +6838,7 @@ local function expr_copy_setup_list_one_to_many(
     end
   else
     return expr_copy_setup_region(
-      cx, src_value, src_type, src_container_type, src_fields,
+      cx, node, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds,
       depth, op, launcher)
@@ -6839,7 +6846,7 @@ local function expr_copy_setup_list_one_to_many(
 end
 
 local function expr_copy_setup_list_one_to_one(
-    cx, src_value, src_type, src_container_type, src_fields,
+    cx, node, src_value, src_type, src_container_type, src_fields,
     dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds,
     depth, op, launcher)
@@ -6870,7 +6877,7 @@ local function expr_copy_setup_list_one_to_one(
         [c_actions]
         [update_actions]
         [expr_copy_setup_list_one_to_one(
-           cx, src_element, src_element_type, src_container_type, src_fields,
+           cx, node, src_element, src_element_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds,
            depth + 1, op, launcher)]
@@ -6878,7 +6885,7 @@ local function expr_copy_setup_list_one_to_one(
     end
   else
     return expr_copy_setup_list_one_to_many(
-      cx, src_value, src_type, src_container_type, src_fields,
+      cx, node, src_value, src_type, src_container_type, src_fields,
       dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds,
       depth, op, launcher)
@@ -6905,7 +6912,7 @@ function codegen.expr_copy(cx, node)
   actions:insert(
     quote
       [expr_copy_setup_list_one_to_one(
-         cx, src.value, src_type, src_type, node.src.fields,
+         cx, node, src.value, src_type, src_type, node.src.fields,
          dst.value, dst_type, dst_type, node.dst.fields,
          conditions:map(function(condition) return condition.value end),
          node.conditions:map(
@@ -7070,7 +7077,7 @@ local function expr_acquire_extract_phase_barriers(index, values, value_types)
 end
 
 local function expr_acquire_setup_region(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
@@ -7087,6 +7094,7 @@ local function expr_acquire_setup_region(
     var [launcher] = c.legion_acquire_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
+    c.legion_acquire_launcher_set_provenance([launcher], [get_provenance(node)])
   end)
   for j, dst_copy_field in ipairs(dst_copy_fields) do
     local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
@@ -7105,7 +7113,7 @@ local function expr_acquire_setup_region(
 end
 
 local function expr_acquire_setup_list(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   if std.is_list(dst_type) then
     local dst_element_type = dst_type.element_type
@@ -7118,13 +7126,13 @@ local function expr_acquire_setup_list(
         var [dst_element] = [dst_type:data(dst_value)][ [index] ]
         [c_actions]
         [expr_acquire_setup_list(
-           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           cx, node, dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds)]
       end
     end
   else
     return expr_acquire_setup_region(
-      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      cx, node, dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds)
   end
 end
@@ -7144,7 +7152,7 @@ function codegen.expr_acquire(cx, node)
     [emit_debuginfo(node)]
 
     [expr_acquire_setup_list(
-       cx, region.value, region_type, region_type, node.region.fields,
+       cx, node, region.value, region_type, region_type, node.region.fields,
        conditions:map(function(condition) return condition.value end),
        node.conditions:map(
          function(condition)
@@ -7195,7 +7203,7 @@ local function expr_release_extract_phase_barriers(index, values, value_types)
 end
 
 local function expr_release_setup_region(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   assert(std.is_region(dst_type))
   assert(std.type_supports_privileges(dst_container_type))
@@ -7212,6 +7220,7 @@ local function expr_release_setup_region(
     var [launcher] = c.legion_release_launcher_create(
       [dst_value].impl, [dst_parent],
       c.legion_predicate_true(), 0, tag)
+    c.legion_release_launcher_set_provenance([launcher], [get_provenance(node)])
   end)
   for j, dst_copy_field in ipairs(dst_copy_fields) do
     local dst_field_id = cx:region_or_list(dst_container_type):field_id(dst_copy_field)
@@ -7230,7 +7239,7 @@ local function expr_release_setup_region(
 end
 
 local function expr_release_setup_list(
-    cx, dst_value, dst_type, dst_container_type, dst_fields,
+    cx, node, dst_value, dst_type, dst_container_type, dst_fields,
     condition_values, condition_types, condition_kinds)
   if std.is_list(dst_type) then
     local dst_element_type = dst_type.element_type
@@ -7243,13 +7252,13 @@ local function expr_release_setup_list(
         var [dst_element] = [dst_type:data(dst_value)][ [index] ]
         [c_actions]
         [expr_release_setup_list(
-           cx, dst_element, dst_element_type, dst_container_type, dst_fields,
+           cx, node, dst_element, dst_element_type, dst_container_type, dst_fields,
            c_values, c_types, condition_kinds)]
       end
     end
   else
     return expr_release_setup_region(
-      cx, dst_value, dst_type, dst_container_type, dst_fields,
+      cx, node, dst_value, dst_type, dst_container_type, dst_fields,
       condition_values, condition_types, condition_kinds)
   end
 end
@@ -7269,7 +7278,7 @@ function codegen.expr_release(cx, node)
     [emit_debuginfo(node)]
 
     [expr_release_setup_list(
-       cx, region.value, region_type, region_type, node.region.fields,
+       cx, node, region.value, region_type, region_type, node.region.fields,
        conditions:map(function(condition) return condition.value end),
        node.conditions:map(
          function(condition)
@@ -7973,6 +7982,7 @@ function codegen.expr_import_region(cx, node)
       [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
       var il = c.legion_inline_launcher_create_logical_region(
         [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+      c.legion_inline_launcher_set_provenance(il, [get_provenance(node)])
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
@@ -9162,6 +9172,7 @@ function codegen.stat_must_epoch(cx, node)
     var [tag] = 0
     [codegen_hooks.gen_update_mapping_tag(tag, false, cx.task)]
     var [must_epoch] = c.legion_must_epoch_launcher_create(0, [tag])
+    c.legion_must_epoch_launcher_set_provenance([must_epoch], [get_provenance(node)])
     var [must_epoch_point] = 0
     [cleanup_after(cx, codegen.block(cx, node.block))]
     var [future_map] = c.legion_must_epoch_launcher_execute(
@@ -9507,6 +9518,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
       [predicate_symbol], false, [mapper], [tag])
+    c.legion_index_launcher_set_provenance([launcher], [get_provenance(node)])
     [task_args_loop_setup]
   end
 
@@ -9747,10 +9759,14 @@ function codegen.stat_var(cx, node)
   cx:add_cleanup_item(make_cleanup_item(cx, lhs, lhs_type))
 
   local function is_partitioning_expr(node)
-    if node:is(ast.typed.expr.Partition) or node:is(ast.typed.expr.PartitionEqual) or
-       node:is(ast.typed.expr.PartitionByField) or node:is(ast.typed.expr.Image) or
-       node:is(ast.typed.expr.Preimage) or
-       (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type)) then
+    if node:is(ast.typed.expr.Partition) or
+      node:is(ast.typed.expr.PartitionEqual) or
+      node:is(ast.typed.expr.PartitionByField) or
+      node:is(ast.typed.expr.PartitionByRestriction) or
+      node:is(ast.typed.expr.Image) or
+      node:is(ast.typed.expr.Preimage) or
+      (node:is(ast.typed.expr.Binary) and std.is_partition(node.expr_type))
+    then
       return true
     else
       return false
@@ -9773,6 +9789,7 @@ function codegen.stat_var(cx, node)
       actions = quote
         [actions]
         c.legion_logical_partition_attach_name([cx.runtime], [rhs_value].impl, [lhs.displayname], false)
+        c.legion_index_partition_attach_name([cx.runtime], [rhs_value].impl.index_partition, [lhs.displayname], false)
       end
     end
     decls:insert(quote var [lhs] = [rhs_value] end)

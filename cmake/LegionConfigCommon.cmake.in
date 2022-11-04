@@ -3,12 +3,14 @@
 set(Legion_NETWORKS @Legion_NETWORKS@)
 set(Legion_EMBED_GASNet @Legion_EMBED_GASNet@)
 if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
-  # define a GASNet::GASNet package that just points at:
-  #  gasnet libs (embedded or external) for static builds
-  #  external libs (e.g. mpi) needed in all cases
-  cmake_minimum_required(VERSION 3.11)  # required for adding libs to imported target
-  add_library(GASNet::GASNet INTERFACE IMPORTED)
-  target_link_libraries(GASNet::GASNet INTERFACE @GASNET_LINK_LIBRARIES_FOR_INSTALL@)
+  if(NOT TARGET GASNet::GASNet)
+    # define a GASNet::GASNet package that just points at:
+    #  gasnet libs (embedded or external) for static builds
+    #  external libs (e.g. mpi) needed in all cases
+    cmake_minimum_required(VERSION 3.11)  # required for adding libs to imported target
+    add_library(GASNet::GASNet INTERFACE IMPORTED)
+    target_link_libraries(GASNet::GASNet INTERFACE @GASNET_LINK_LIBRARIES_FOR_INSTALL@)
+  endif()
 endif()
 
 # LLVM is a private dependency and only needs to be pulled in for static
