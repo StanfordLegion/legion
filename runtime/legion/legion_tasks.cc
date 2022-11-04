@@ -1111,12 +1111,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& TaskOp::get_provenance_string(void) const
+    const std::string& TaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -2161,12 +2161,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTaskOp::get_provenance_string(void) const
+    const std::string& RemoteTaskOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -4648,7 +4648,7 @@ namespace Legion {
               "Task %s (UID %lld, provenance: %s) used a task "
               "variant with a maximum return size of %zd but "
               "returned a result of %zd bytes.",
-              get_task_name(), get_unique_id(), provenance->c_str(),
+              get_task_name(), get_unique_id(), provenance->human_str(),
               var_impl->return_type_size, instance->size)
         else
           REPORT_LEGION_ERROR(ERROR_FUTURE_SIZE_BOUNDS_EXCEEDED,
