@@ -11484,6 +11484,8 @@ namespace Legion {
       Runtime::trigger_event(to_trigger, precondition);
     }
 
+    template class AllGatherCollective<false>;
+
     /////////////////////////////////////////////////////////////
     // Future All Reduce Collective 
     /////////////////////////////////////////////////////////////
