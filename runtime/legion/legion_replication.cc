@@ -7114,7 +7114,7 @@ namespace Legion {
     void ReplTunableOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      TunableOp::deactivate();
+      TunableOp::deactivate(false/*freeop*/);
       if (value_broadcast != NULL)
       {
         delete value_broadcast;
