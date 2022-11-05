@@ -2536,8 +2536,16 @@ namespace Legion {
       if ((lowest == runtime->address_space) && 
           repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
       {
+        // Very important! Make sure to give the prior concurrent_prebar as
+        // a precondition to performing the acquire on the reservation to 
+        // avoid deadlocks because Realm barriers need to trigger in order
+        RtBarrier precondition = Runtime::get_previous_phase(concurrent_prebar);
+        // If it's the first generation then we don't need a precondition
+        if (precondition == concurrent_prebar)
+          precondition = RtBarrier::NO_RT_BARRIER;
         Runtime::phase_barrier_arrive(concurrent_prebar, 1/*arrivals*/,
-          runtime->acquire_concurrent_reservation(concurrent_postbar));
+          runtime->acquire_concurrent_reservation(concurrent_postbar, 
+                                                  precondition));
       }
       concurrent_precondition = concurrent_prebar;
       Runtime::phase_barrier_arrive(concurrent_postbar, 

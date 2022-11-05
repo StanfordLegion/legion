@@ -3900,7 +3900,8 @@ namespace Legion {
                                    RtEvent precondition = RtEvent::NO_RT_EVENT);
     public:
       // Support for concurrent index task execution 
-      RtEvent acquire_concurrent_reservation(RtEvent release_event);
+      RtEvent acquire_concurrent_reservation(RtEvent release_event,
+                        RtEvent precondition = RtEvent::NO_RT_EVENT);
       Reservation find_or_create_concurrent_reservation(void);
       RtEvent find_concurrent_fence_event(Processor target, ApEvent next,
                                 ApEvent &previous, RtEvent precondition);
