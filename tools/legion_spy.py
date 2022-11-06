@@ -5012,8 +5012,8 @@ class DataflowTraverser(object):
             # If we've already traversed this then we can skip the verification
             if fill.record_version_number(self.state):
                 return False
-            assert self.state.fill_op in fill.fill_ops or self.op.replayed or \
-                    self.state.fill_op.index_owner is fill.fill_ops
+            assert fill.fill_op in self.state.fill_ops or self.op.replayed or \
+                    fill.fill_op.index_owner in self.state.fill_ops
             if self.across:
                 fill.record_across_version_number(self.point, self.dst_field,
                                                   self.dst_tree, self.dst_version)
@@ -5234,7 +5234,10 @@ class EquivalenceSet(object):
         else:
             assert self.pending_fill
         assert op.kind == FILL_OP_KIND
-        self.fill_ops.add(op)
+        if op.index_owner:
+            self.fill_ops.add(op.index_owner)
+        else:
+            self.fill_ops.add(op)
         # If this instance is restricted then we need to perform the fill eagerly
         if self.restricted_instances:
             error_str = "region requirement "+str(req.index)+" of "+str(op)
@@ -7000,6 +7003,8 @@ class Operation(object):
         return True
 
     def perform_op_logical_verification(self, logical_op, previous_deps):
+        if not self.predicate_result:
+            return True
         # TODO: Remove this once we actually replay logical analysis correctly 
         # under all tracing cases
         if self.replayed:
@@ -8019,7 +8024,8 @@ class Operation(object):
                     if not shard.perform_task_physical_verification(perform_checks):
                         return False
         else:
-            if self.reqs:
+            # Attach operations do not register themselves as users currently in legion
+            if self.reqs and self.kind != ATTACH_OP_KIND:
                 for index,req in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks,
                                                             registration=True):
