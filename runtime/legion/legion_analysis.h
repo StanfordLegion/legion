@@ -2458,7 +2458,6 @@ namespace Legion {
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
-                     AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
                      RegionNode *region_node,
                      bool register_now, 
@@ -2477,8 +2476,8 @@ namespace Legion {
         { return replicated_states.get_valid_mask(); }
     public:
       // From distributed collectable
-      virtual void notify_invalid(void) { }
-      virtual void notify_inactive(void);
+      virtual void notify_invalid(void) { assert(false); }
+      virtual void notify_local(void);
     public:
       // Analysis methods
       void initialize_set(const RegionUsage &usage,
@@ -2795,7 +2794,7 @@ namespace Legion {
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
+                                                  Runtime *runtime);
       static void handle_migration(Deserializer &derez, 
                                    Runtime *runtime, AddressSpaceID source);
       static void handle_owner_update(Deserializer &derez, Runtime *rt);

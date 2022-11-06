@@ -2999,8 +2999,7 @@ namespace Legion {
         const size_t future_size = sizeof(bool);
         Future temp = Future(
               new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(),
-                runtime->address_space, get_completion_event(), 
+                runtime->get_available_distributed_id(), get_completion_event(),
                 get_provenance(), &future_size, this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
@@ -8792,9 +8791,8 @@ namespace Legion {
       {
         const size_t future_size = 0;
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              runtime->address_space, completion_event, get_provenance(),
-              &future_size, track ? this : NULL));
+              runtime->get_available_distributed_id(), completion_event,
+              get_provenance(), &future_size, track ? this : NULL));
         // We can set the future result right now because we know that it
         // will not be complete until we are complete ourselves
         result.impl->set_result(NULL);
@@ -9985,7 +9983,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -10520,7 +10518,7 @@ namespace Legion {
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(),
-            local_space, local_space, region_node, true/*register now*/);
+            local_space, region_node, true/*register now*/);
         // Merge the state from the old equivalence sets if not overwriting
         if (!refinement_overwrite)
         {
@@ -10557,7 +10555,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -11592,7 +11590,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -13901,8 +13899,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), 
+            runtime->get_available_distributed_id(), get_completion_event(), 
             get_provenance(), NULL/*no known future size*/, this));
       collective = dc;
       if (runtime->legion_spy_enabled)
@@ -14775,8 +14772,7 @@ namespace Legion {
     {
       IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
       return new FutureMapImpl(ctx, this, launch_node,
-            runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, get_provenance());
+            runtime, runtime->get_available_distributed_id(), get_provenance());
     }
 
     //--------------------------------------------------------------------------
@@ -21666,9 +21662,8 @@ namespace Legion {
       // Create the future result that we will complete when we're done
       const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(),
-                  get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(), get_completion_event(),
+                get_provenance(), &future_size, this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, unordered);
@@ -22111,9 +22106,8 @@ namespace Legion {
       // Create the future result that we will complete when we're done
       const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(),
-                  get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(), get_completion_event(),
+                get_provenance(), &future_size, this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
@@ -22469,9 +22463,8 @@ namespace Legion {
       const size_t future_size = (measurement == LEGION_MEASURE_SECONDS) ?
         sizeof(double) : sizeof(long long);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(), 
-                  get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(), get_completion_event(),
+                get_provenance(), &future_size, this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(),
@@ -22684,9 +22677,8 @@ namespace Legion {
       }
       return_type_size = launcher.return_type_size;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(),
-            runtime->address_space, get_completion_event(), get_provenance(),
-            (launcher.return_type_size < SIZE_MAX) ?
+            runtime->get_available_distributed_id(), get_completion_event(),
+            get_provenance(), (launcher.return_type_size < SIZE_MAX) ?
               &launcher.return_type_size : NULL/*no size*/, this));
       if (runtime->legion_spy_enabled)
       {
@@ -22878,8 +22870,8 @@ namespace Legion {
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              runtime->address_space, get_completion_event(), get_provenance(),
+              runtime->get_available_distributed_id(), get_completion_event(), 
+              get_provenance(),
               (serdez_redop_fns == NULL) ? &redop->sizeof_rhs : NULL, this));
       mapper_id = map_id;
       tag = t;

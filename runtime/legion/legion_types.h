@@ -381,7 +381,6 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
-      LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
       LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -503,7 +502,6 @@ namespace Legion {
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \
         "Defer Equivalence Set Apply State",                      \
-        "Defer Remote Reference Update",                          \
         "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
@@ -786,11 +784,6 @@ namespace Legion {
       SLICE_COLLECTIVE_REQUEST,
       SLICE_COLLECTIVE_RESPONSE,
       DISTRIBUTED_REMOTE_REGISTRATION,
-      DISTRIBUTED_VALID_UPDATE,
-      DISTRIBUTED_GC_UPDATE,
-      DISTRIBUTED_RESOURCE_UPDATE,
-      DISTRIBUTED_CREATE_ADD,
-      DISTRIBUTED_CREATE_REMOVE,
       DISTRIBUTED_UNREGISTER,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
@@ -1009,11 +1002,6 @@ namespace Legion {
         "Slice Collective Instance Request",                          \
         "Slice Collective Instance Response",                         \
         "Distributed Remote Registration",                            \
-        "Distributed Valid Update",                                   \
-        "Distributed GC Update",                                      \
-        "Distributed Resource Update",                                \
-        "Distributed Create Add",                                     \
-        "Distributed Create Remove",                                  \
         "Distributed Unregister",                                     \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \

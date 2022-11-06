@@ -1122,8 +1122,7 @@ namespace Legion {
         launch_node : runtime->forest->get_node(shard_space);
       // Make a replicate future map 
       return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
-          runtime, runtime->get_available_distributed_id(),
-          runtime->address_space, get_provenance());
+          runtime, runtime->get_available_distributed_id(), get_provenance());
     } 
 
     //--------------------------------------------------------------------------
@@ -1474,7 +1473,7 @@ namespace Legion {
         // Register this refinement in the tree 
         region_node->record_refinement(ctx, set, refinement_mask); 
         // Remove the CONTEXT_REF on the set now that it is registered
-        if (set->remove_base_valid_ref(CONTEXT_REF))
+        if (set->remove_base_gc_ref(CONTEXT_REF))
           assert(false); // should never actually hit this
         if (!map_applied_conditions.empty())
           Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
@@ -1945,7 +1944,7 @@ namespace Legion {
                 initialize_replicated_set(set, mask, map_applied_conditions);
               child->record_refinement(ctx, set, mask);
               // Remove the CONTEXT_REF on the set now that it is registered
-              if (set->remove_base_valid_ref(CONTEXT_REF))
+              if (set->remove_base_gc_ref(CONTEXT_REF))
                 assert(false); // should never actually hit this
             }
           }
@@ -1967,7 +1966,7 @@ namespace Legion {
                 initialize_replicated_set(set, mask, map_applied_conditions);
               child->record_refinement(ctx, set, mask);
               // Remove the CONTEXT_REF on the set now that it is registered
-              if (set->remove_base_valid_ref(CONTEXT_REF))
+              if (set->remove_base_gc_ref(CONTEXT_REF))
                 assert(false); // should never actually hit this
             }
             delete itr;
@@ -1999,7 +1998,7 @@ namespace Legion {
             initialize_replicated_set(set, mask, map_applied_conditions);
           it->second->record_refinement(ctx, set, mask); 
           // Remove the CONTEXT_REF on the set now that it is registered
-          if (set->remove_base_valid_ref(CONTEXT_REF))
+          if (set->remove_base_gc_ref(CONTEXT_REF))
             assert(false); // should never actually hit this
         }
 #ifdef DEBUG_LEGION
@@ -3682,7 +3681,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -4817,8 +4816,7 @@ namespace Legion {
         ((launch_space == shard_space) || !shard_space.exists()) ?
         launch_node : runtime->forest->get_node(shard_space);
       return new ReplFutureMapImpl(repl_ctx, this, launch_node, shard_node,
-          runtime, runtime->get_available_distributed_id(),
-          runtime->address_space, get_provenance());
+          runtime, runtime->get_available_distributed_id(), get_provenance());
     }
 
     //--------------------------------------------------------------------------
@@ -8975,8 +8973,8 @@ namespace Legion {
           node->column_source->get_field_mask(req.privilege_fields);
         mapped_equivalence_sets[idx] =
           new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-              runtime->address_space, runtime->address_space, node,
-              true/*reg now*/, collective_mapping, &mask);
+              runtime->address_space, node, true/*reg now*/,
+              collective_mapping, &mask);
       }
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
@@ -9195,7 +9193,7 @@ namespace Legion {
         derez.deserialize(mask);
         RegionNode *region_node = runtime->forest->get_node(handle);
         mapped_equivalence_sets[idx] = new EquivalenceSet(runtime, did,
-            owner_space, owner_space, region_node, true/*register now*/,
+            owner_space, region_node, true/*register now*/,
             collective_mapping, &mask);
         // This adds a CONTEXT_REF for each local shard
         mapped_equivalence_sets[idx]->initialize_collective_references(
@@ -9268,7 +9266,7 @@ namespace Legion {
           return result;
         }
         // Didn't find it so make it
-        result = new EquivalenceSet(runtime, did, owner_space, owner_space,
+        result = new EquivalenceSet(runtime, did, owner_space,
               region_node, true/*register now*/, collective_mapping, &mask);
         // This adds as many context refs as there are shards
         result->initialize_collective_references(local_shards.size());
@@ -9280,7 +9278,7 @@ namespace Legion {
       }
       else // Only one shard here on this node so just make it
       {
-        result = new EquivalenceSet(runtime, did, owner_space, owner_space,
+        result = new EquivalenceSet(runtime, did, owner_space,
               region_node, true/*register now*/, collective_mapping, &mask);
         // This adds as many context refs as there are shards
         result->initialize_collective_references(1/*local shard count*/);

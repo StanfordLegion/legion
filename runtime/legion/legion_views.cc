@@ -38,9 +38,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
-                             AddressSpaceID own_addr, bool register_now,
-                             CollectiveMapping *map)
-      : DistributedCollectable(ctx->runtime, did, own_addr, register_now, map),
+                             bool register_now, CollectiveMapping *map)
+      : DistributedCollectable(ctx->runtime, did, register_now, map),
         context(ctx)
     //--------------------------------------------------------------------------
     {
@@ -76,21 +75,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
-                               PhysicalManager *man, AddressSpaceID owner_sp,
-                               AddressSpaceID log_own,
+                               PhysicalManager *man, AddressSpaceID log_own,
                                UniqueID own_ctx, bool register_now,
                                CollectiveMapping *mapping)
-      : LogicalView(ctx, did, owner_sp, register_now, mapping), manager(man),
+      : LogicalView(ctx, did, register_now, mapping), manager(man),
         owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      // Keep the manager from being collected
-      if (is_owner())
-        manager->add_nested_valid_ref(did);
       manager->add_nested_resource_ref(did);
+      manager->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -116,12 +112,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InstanceView::notify_invalid(void)
+    void InstanceView::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      // No need to check for delete since we still hold a resource reference
-      if (is_owner())
-        manager->remove_nested_valid_ref(did);
+      manager->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -2547,11 +2541,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID own_addr,
                                AddressSpaceID log_own, PhysicalManager *man,
                                UniqueID own_ctx, bool register_now,
                                CollectiveMapping *mapping)
-      : InstanceView(ctx, encode_materialized_did(did), man, own_addr,
+      : InstanceView(ctx, encode_materialized_did(did), man,
                      log_own, own_ctx, register_now, mapping), 
         expr_cache_uses(0), outstanding_additions(0)
 #ifdef ENABLE_VIEW_REPLICATION
@@ -2578,7 +2571,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, NULL, 0, 0, 0, false, NULL)
+      : InstanceView(NULL, 0, NULL, 0, 0, false, NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3838,7 +3831,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
       }
@@ -3856,8 +3848,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      AddressSpaceID owner_space;
-      derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       UniqueID context_uid;
@@ -3868,14 +3858,12 @@ namespace Legion {
       if (man_ready.exists() && !man_ready.has_triggered())
       {
         // Defer this until the manager is ready
-        DeferMaterializedViewArgs args(did, manager, owner_space,
-                                       logical_owner, context_uid);
+        DeferMaterializedViewArgs args(did, manager, logical_owner,context_uid);
         runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_RESPONSE_PRIORITY, man_ready);
       }
       else
-        create_remote_view(runtime, did, manager, owner_space, 
-                           logical_owner, context_uid); 
+        create_remote_view(runtime, did, manager, logical_owner, context_uid); 
     }
 
     //--------------------------------------------------------------------------
@@ -3886,13 +3874,12 @@ namespace Legion {
       const DeferMaterializedViewArgs *dargs = 
         (const DeferMaterializedViewArgs*)args; 
       create_remote_view(runtime, dargs->did, dargs->manager, 
-          dargs->owner_space, dargs->logical_owner, dargs->context_uid);
+                         dargs->logical_owner, dargs->context_uid);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::create_remote_view(Runtime *runtime,
                             DistributedID did, PhysicalManager *manager,
-                            AddressSpaceID owner_space,
                             AddressSpaceID logical_owner, UniqueID context_uid)
     //--------------------------------------------------------------------------
     {
@@ -3903,13 +3890,12 @@ namespace Legion {
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) MaterializedView(runtime->forest,
-                                              did, owner_space, 
+        view = new(location) MaterializedView(runtime->forest, did,
                                               logical_owner, inst_manager,
                                               context_uid,
                                               false/*register now*/);
       else
-        view = new MaterializedView(runtime->forest, did, owner_space,
+        view = new MaterializedView(runtime->forest, did,
                                     logical_owner, inst_manager, 
                                     context_uid, false/*register now*/);
       // Register only after construction
@@ -3922,8 +3908,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID owner_sp, bool register_now)
-      : LogicalView(ctx, did, owner_sp, register_now, NULL/*no collective map*/)
+                               bool register_now)
+      : LogicalView(ctx, did, register_now, NULL/*no collective map*/)
     //--------------------------------------------------------------------------
     {
     }
@@ -3940,13 +3926,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_proc,
                        FillViewValue *val, bool register_now
 #ifdef LEGION_SPY
                        , UniqueID op_uid
 #endif
                        )
-      : DeferredView(ctx, encode_fill_did(did), owner_proc, register_now), 
+      : DeferredView(ctx, encode_fill_did(did), register_now), 
         value(val)
 #ifdef LEGION_SPY
         , fill_op_uid(op_uid)
@@ -3965,7 +3950,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, false), value(NULL)
+      : DeferredView(NULL, 0, false), value(NULL)
 #ifdef LEGION_SPY
         , fill_op_uid(0)
 #endif
@@ -4003,7 +3988,6 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(owner_space);
         rez.serialize(value->value_size);
         rez.serialize(value->value, value->value_size);
 #ifdef LEGION_SPY
@@ -4034,8 +4018,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      AddressSpaceID owner_space;
-      derez.deserialize(owner_space);
       size_t value_size;
       derez.deserialize(value_size);
       void *value = malloc(value_size);
@@ -4050,15 +4032,14 @@ namespace Legion {
       void *location;
       FillView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) FillView(runtime->forest, did,
-                                      owner_space, fill_value,
+        view = new(location) FillView(runtime->forest, did, fill_value,
                                       false/*register now*/
 #ifdef LEGION_SPY
                                       , op_uid
 #endif
                                       );
       else
-        view = new FillView(runtime->forest, did, owner_space,
+        view = new FillView(runtime->forest, did,
                             fill_value, false/*register now*/
 #ifdef LEGION_SPY
                             , op_uid
@@ -4073,10 +4054,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
-                     AddressSpaceID owner_space,
                      PredEvent tguard, PredEvent fguard, 
                      InnerContext *owner, bool register_now) 
-      : DeferredView(ctx, encode_phi_did(did), owner_space, register_now),
+      : DeferredView(ctx, encode_phi_did(did), register_now),
         true_guard(tguard), false_guard(fguard), owner_context(owner)
     //--------------------------------------------------------------------------
     {
@@ -4088,7 +4068,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
-      : DeferredView(NULL, 0, 0, false),
+      : DeferredView(NULL, 0, false),
         true_guard(PredEvent::NO_PRED_EVENT), 
         false_guard(PredEvent::NO_PRED_EVENT), owner_context(NULL)
     //--------------------------------------------------------------------------
@@ -4127,15 +4107,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::notify_invalid(void)
+    void PhiView::notify_local(void)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             true_views.begin(); it != true_views.end(); it++)
-        it->first->remove_nested_valid_ref(did);
+        it->first->remove_nested_gc_ref(did);
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
-        it->first->remove_nested_valid_ref(did);
+        it->first->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -4150,14 +4130,8 @@ namespace Legion {
       if (finder == true_views.end())
       {
         true_views[view] = mask;
-        if (view->is_deferred_view())
-        {
-          // Deferred views need valid and gc references
-          view->add_nested_gc_ref(did);
-          view->add_nested_valid_ref(did);
-        }
-        else // Otherwise we just need the valid reference
-          view->add_nested_resource_ref(did);
+        view->add_nested_resource_ref(did);
+        view->add_nested_gc_ref(did);
       }
       else
         finder->second |= mask;
@@ -4175,14 +4149,8 @@ namespace Legion {
       if (finder == false_views.end())
       {
         false_views[view] = mask;
-        if (view->is_deferred_view())
-        {
-          // Deferred views need valid and gc references
-          view->add_nested_gc_ref(did);
-          view->add_nested_valid_ref(did);
-        }
-        else // Otherwise we just need the valid reference
-          view->add_nested_resource_ref(did);
+        view->add_nested_resource_ref(did);
+        view->add_nested_gc_ref(did);
       }
       else
         finder->second |= mask;
@@ -4196,6 +4164,7 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             true_views.begin(); it != true_views.end(); it++)
       {
+        it->first->pack_global_ref();
         rez.serialize(it->first->did);
         rez.serialize(it->second);
       }
@@ -4203,6 +4172,7 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it = 
             false_views.begin(); it != false_views.end(); it++)
       {
+        it->first->pack_global_ref();
         rez.serialize(it->first->did);
         rez.serialize(it->second);
       }
@@ -4223,10 +4193,15 @@ namespace Legion {
         LogicalView *view = static_cast<LogicalView*>(
             runtime->find_or_request_logical_view(view_did, ready));
         derez.deserialize(true_views[view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
-        else // Otherwise we can add the reference now
+        if (!ready.exists() || ready.has_triggered())
+        {
+          // Otherwise we can add the reference now
           view->add_nested_resource_ref(did);
+          view->add_nested_gc_ref(did);
+          view->unpack_global_ref();
+        }
+        else
+          preconditions.insert(defer_add_reference(view, ready));
       }
       size_t num_false_views;
       derez.deserialize(num_false_views);
@@ -4238,10 +4213,15 @@ namespace Legion {
         LogicalView *view = static_cast<LogicalView*>(
             runtime->find_or_request_logical_view(view_did, ready));
         derez.deserialize(false_views[view]);
-        if (ready.exists() && !ready.has_triggered())
-          preconditions.insert(defer_add_reference(view, ready));
-        else // Otherwise we can add the reference now
+        if (!ready.exists() || ready.has_triggered())
+        {
+          // Otherwise we can add the reference now
           view->add_nested_resource_ref(did);
+          view->add_nested_gc_ref(did);
+          view->unpack_global_ref();
+        }
+        else
+          preconditions.insert(defer_add_reference(view, ready));
       }
     }
 
@@ -4263,7 +4243,6 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(owner_space);
         rez.serialize(true_guard);
         rez.serialize(false_guard);
         rez.serialize<UniqueID>(owner_context->get_context_uid());
@@ -4292,8 +4271,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      AddressSpaceID owner;
-      derez.deserialize(owner);
       PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -4309,11 +4286,11 @@ namespace Legion {
       void *location;
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) PhiView(runtime->forest, did, owner,
+        view = new(location) PhiView(runtime->forest, did,
                                      true_guard, false_guard, owner_context, 
                                      false/*register_now*/);
       else
-        view = new PhiView(runtime->forest, did, owner, true_guard, 
+        view = new PhiView(runtime->forest, did, true_guard, 
                            false_guard, owner_context, false/*register now*/);
       // Unpack all the internal data structures
       view->unpack_phi_view(derez, ready_events);
@@ -4334,6 +4311,8 @@ namespace Legion {
     {
       const DeferPhiViewRefArgs *rargs = (const DeferPhiViewRefArgs*)args;
       rargs->dc->add_nested_resource_ref(rargs->did); 
+      rargs->dc->add_nested_gc_ref(rargs->did);
+      rargs->dc->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -4352,7 +4331,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardedView::ShardedView(RegionTreeForest *forest, DistributedID did,
                              AddressSpaceID owner_space, bool register_now)
-      : DeferredView(forest, encode_sharded_did(did), owner_space, register_now)
+      : DeferredView(forest, encode_sharded_did(did), register_now)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4393,41 +4372,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedView::notify_inactive(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(valid);
-        valid = false;
-#endif
-        // Remove our valid references
-        for (std::set<PhysicalManager*>::const_iterator it =
-              local_instances.begin(); it != local_instances.end(); it++)
-          if ((*it)->remove_nested_valid_ref(did))
-            delete (*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardedView::notify_invalid(void)
+    void ShardedView::notify_local(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(valid);
+      valid = false;
 #endif
-      if (is_owner())
-      {
-#ifdef DEBUG_LEGION
-        valid = false;
-#endif
-        // Remove our valid references
-        for (std::set<PhysicalManager*>::const_iterator it =
-              local_instances.begin(); it != local_instances.end(); it++)
-          if ((*it)->remove_nested_valid_ref(did))
-            delete (*it);
-      }
+      // Remove our valid references
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        if ((*it)->remove_nested_gc_ref(did))
+          delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -4514,7 +4470,7 @@ namespace Legion {
           local_instances.insert(manager);
         if (result.second)
         {
-          manager->add_nested_valid_ref(did);
+          manager->add_nested_gc_ref(did);
           manager->add_nested_resource_ref(did);
         }
       }
@@ -4568,11 +4524,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
-                                 AddressSpaceID own_sp,
                                  AddressSpaceID log_own,
                                  PhysicalManager *man, UniqueID own_ctx, 
                                  bool register_now, CollectiveMapping *mapping)
-      : InstanceView(ctx, encode_reduction_did(did), man, own_sp, log_own, 
+      : InstanceView(ctx, encode_reduction_did(did), man, log_own, 
                      own_ctx, register_now, mapping),
         fill_view(runtime->find_or_create_reduction_fill_view(manager->redop))
     //--------------------------------------------------------------------------
@@ -4586,7 +4541,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, NULL, 0, 0, 0, false, NULL), fill_view(NULL)
+      : InstanceView(NULL, 0, NULL, 0, 0, false, NULL), fill_view(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5385,8 +5340,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      AddressSpaceID owner_space;
-      derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       UniqueID context_uid;
@@ -5398,14 +5351,12 @@ namespace Legion {
       if (man_ready.exists() && !man_ready.has_triggered())
       {
         // Defer this until the manager is ready
-        DeferReductionViewArgs args(did, manager, owner_space,
-                                    logical_owner, context_uid);
+        DeferReductionViewArgs args(did, manager, logical_owner, context_uid);
         runtime->issue_runtime_meta_task(args,
             LG_LATENCY_RESPONSE_PRIORITY, man_ready);
       }
       else
-        create_remote_view(runtime, did, manager, owner_space, 
-                           logical_owner, context_uid);
+        create_remote_view(runtime, did, manager, logical_owner, context_uid);
     }
 
     //--------------------------------------------------------------------------
@@ -5416,13 +5367,12 @@ namespace Legion {
       const DeferReductionViewArgs *dargs = 
         (const DeferReductionViewArgs*)args; 
       create_remote_view(runtime, dargs->did, dargs->manager, 
-          dargs->owner_space, dargs->logical_owner, dargs->context_uid);
+                         dargs->logical_owner, dargs->context_uid);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void ReductionView::create_remote_view(Runtime *runtime,
                             DistributedID did, PhysicalManager *manager,
-                            AddressSpaceID owner_space, 
                             AddressSpaceID logical_owner, UniqueID context_uid)
     //--------------------------------------------------------------------------
     {
@@ -5432,12 +5382,11 @@ namespace Legion {
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReductionView(runtime->forest, did, owner_space, 
+        view = new(location) ReductionView(runtime->forest, did,
                                            logical_owner, manager,
                                            context_uid, false/*register now*/);
       else
-        view = new ReductionView(runtime->forest, did, owner_space,
-                                 logical_owner, manager, 
+        view = new ReductionView(runtime->forest, did, logical_owner, manager,
                                  context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime();

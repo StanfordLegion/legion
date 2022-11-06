@@ -1378,7 +1378,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             FieldSpaceNode *node = get_node(handle);
-            if (node->remove_base_valid_ref(APPLICATION_REF))
+            if (node->remove_base_gc_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -1394,7 +1394,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           FieldSpaceNode *node = get_node(handle);
-          if (node->remove_base_valid_ref(APPLICATION_REF))
+          if (node->remove_base_gc_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -3981,7 +3981,7 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF);
+          result->add_base_gc_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
       return result;
@@ -4017,7 +4017,7 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF);
+          result->add_base_gc_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
       return result;
@@ -7439,9 +7439,8 @@ namespace Legion {
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        DistributedCollectable(ctx->runtime, LEGION_DISTRIBUTED_HELP_ENCODE( 
-          ctx->runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC),
-          ctx->runtime->address_space),
+        ValidDistributedCollectable(ctx->runtime,LEGION_DISTRIBUTED_HELP_ENCODE(
+          ctx->runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC)),
         context(ctx), origin_expr(this), op_kind(kind), invalidated(0)
     //--------------------------------------------------------------------------
     {
@@ -7453,10 +7452,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
-        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
-        IndexSpaceOperation *origin)
+        IndexSpaceExprID eid, DistributedID did, IndexSpaceOperation *origin)
       : IndexSpaceExpression(tag, eid, inter_lock),
-        DistributedCollectable(ctx->runtime, did, owner), 
+        ValidDistributedCollectable(ctx->runtime, did), 
         context(ctx), origin_expr(origin),
         op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
     //--------------------------------------------------------------------------
@@ -7490,7 +7488,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceOperation::notify_inactive(void)
+    void IndexSpaceOperation::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -7982,11 +7980,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
-        LegionColor c, DistributedID did, AddressSpaceID owner,
+        LegionColor c, DistributedID did,
         RtEvent init, CollectiveMapping *mapping, Provenance *prov)
-      : DistributedCollectable(ctx->runtime, did, owner, false/*register*/,
-          mapping), context(ctx), depth(d), color(c), provenance(prov),
-        initialized(init)
+      : ValidDistributedCollectable(ctx->runtime, did, false/*register*/,
+          mapping), context(ctx), depth(d), color(c),
+        provenance(prov), initialized(init)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8203,7 +8201,7 @@ namespace Legion {
       : IndexTreeNode(ctx,
           (dep == UINT_MAX) ? ((par == NULL) ? 0 : par->depth + 1) : dep, c, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_SPACE_NODE_DC),
-          get_owner_space(h, ctx->runtime), init, map, prov),
+          init, map, prov),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
@@ -8252,7 +8250,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_inactive(void)
+    void IndexSpaceNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -8868,7 +8866,7 @@ namespace Legion {
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-        assert(is_active());
+        assert(is_global());
         assert(is_valid() || !recurse);
 #endif
         if (!has_remote_instance(target))
@@ -9072,7 +9070,7 @@ namespace Legion {
           }
           else
           {
-            target->pack_gc_ref();
+            target->pack_global_ref();
             recurse = false;
           }
         }
@@ -9085,7 +9083,7 @@ namespace Legion {
           }
           else
           {
-            target->pack_gc_ref();
+            target->pack_global_ref();
             recurse = false;
           }
         }
@@ -9121,7 +9119,7 @@ namespace Legion {
       if (recurse)
         node->unpack_valid_ref();
       else
-        node->unpack_gc_ref();
+        node->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -9348,7 +9346,7 @@ namespace Legion {
         rez.serialize<bool>(false/*local*/);
         rez.serialize<bool>(true/*index space*/);
         rez.serialize(handle);
-        pack_gc_ref();
+        pack_global_ref();
       }
       else
       {
@@ -9365,7 +9363,7 @@ namespace Legion {
     {
       rez.serialize<bool>(true/*index space*/);
       rez.serialize(handle);
-      pack_gc_ref();
+      pack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -9630,7 +9628,7 @@ namespace Legion {
                                  Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      get_owner_space(p, ctx->runtime), init, mapping, prov), 
+                      init, mapping, prov), 
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
@@ -9671,7 +9669,7 @@ namespace Legion {
                                  ShardMapping *shard_map, Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      get_owner_space(p, ctx->runtime), init, map, prov),
+                      init, map, prov),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
@@ -9752,7 +9750,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::notify_inactive(void)
+    void IndexPartNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
       // Finally remove valid references on all owner children and any trackers
@@ -11654,7 +11652,6 @@ namespace Legion {
                    ShardMapping *shard_mapping, Provenance *prov)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
-          get_owner_space(sp, ctx->runtime), 
           false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state((shard_mapping != NULL) ? FIELD_ALLOC_COLLECTIVE :
@@ -11696,7 +11693,7 @@ namespace Legion {
          DistributedID did, RtEvent init, Provenance *prov, Deserializer &derez)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
-          get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
+          false/*register with runtime*/),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state(FIELD_ALLOC_INVALID), outstanding_allocators(0),
         outstanding_invalidations(0)
@@ -15875,11 +15872,10 @@ namespace Legion {
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
        FieldSpaceNode *column_src, RtEvent init, RtEvent tree, Provenance *prov,
        DistributedID id, CollectiveMapping *map)
-      : DistributedCollectable(ctx->runtime, 
+      : ValidDistributedCollectable(ctx->runtime, 
             LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id :
               ctx->runtime->get_available_distributed_id(),
-              REGION_TREE_NODE_DC), (id > 0) ? ctx->runtime->determine_owner(id)
-            : ctx->runtime->address_space, false/*register with runtime*/, map),
+              REGION_TREE_NODE_DC), false/*register with runtime*/, map),
         context(ctx), column_source(column_src), provenance(prov),
         initialized(init), tree_initialized(tree), registered(false)
     //--------------------------------------------------------------------------
@@ -19674,11 +19670,11 @@ namespace Legion {
         row_source->remove_nested_valid_ref(did);
       else
         row_source->parent->remove_nested_valid_ref(did);
-      column_source->remove_nested_valid_ref(did);
+      column_source->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::notify_inactive(void)
+    void RegionNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
@@ -19716,7 +19712,7 @@ namespace Legion {
         row_source->add_nested_valid_ref(did);
         column_source->add_nested_resource_ref(did);
       }
-      column_source->add_nested_valid_ref(did);
+      column_source->add_nested_gc_ref(did);
       row_source->add_nested_resource_ref(did);
       registered = true;
       register_with_runtime();
@@ -21215,12 +21211,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to check for deletion since we hold resource references 
-      column_source->remove_nested_valid_ref(did);
+      column_source->remove_nested_gc_ref(did);
       row_source->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::notify_inactive(void)
+    void PartitionNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
       parent->remove_child(row_source->color);
@@ -21242,7 +21238,7 @@ namespace Legion {
 #endif
       row_source->add_nested_resource_ref(did);
       parent->add_nested_resource_ref(did);
-      column_source->add_nested_valid_ref(did);
+      column_source->add_nested_gc_ref(did);
       row_source->add_nested_valid_ref(did);
       parent->add_child(this);
       // Create a partition deletion tracker for this node and add it to 
@@ -21297,7 +21293,7 @@ namespace Legion {
       child->add_nested_gc_ref(did);
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-      assert(is_active());
+      assert(is_global());
       assert(color_map.find(child->row_source->color) == color_map.end());
 #endif
       color_map[child->row_source->color] = child;

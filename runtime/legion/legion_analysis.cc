@@ -8816,13 +8816,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID id,
-                                   AddressSpaceID owner, AddressSpaceID logical,
+                                   AddressSpaceID logical,
                                    RegionNode *node, bool reg_now,
                                    CollectiveMapping *mapping /*= NULL*/,
                                    const FieldMask *replicated /*= NULL*/)
       : DistributedCollectable(rt,
           LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
-          owner, reg_now, mapping), region_node(node), 
+          reg_now, mapping), region_node(node), 
         set_expr(node->row_source), tracing_preconditions(NULL),
         tracing_anticonditions(NULL), tracing_postconditions(NULL), 
         logical_owner_space(logical), migration_index(0), sample_count(0)
@@ -8888,7 +8888,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::notify_inactive(void)
+    void EquivalenceSet::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (!total_valid_instances.empty())
@@ -9005,14 +9005,14 @@ namespace Legion {
       if (is_owner())
       {
         if (local_valid > 0) 
-          add_base_valid_ref(CONTEXT_REF, local_valid);
+          add_base_gc_ref(CONTEXT_REF, local_valid);
       }
       else
       {
 #ifdef DEBUG_LEGION
         assert(local_valid > 0);
 #endif
-        add_base_valid_ref(CONTEXT_REF, local_valid);
+        add_base_gc_ref(CONTEXT_REF, local_valid);
       }
     }
 
@@ -15294,7 +15294,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_equivalence_set_response(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -15309,10 +15309,10 @@ namespace Legion {
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
+        set = new(location) EquivalenceSet(runtime, did, logical_owner,
                                            node, false/*register now*/);
       else
-        set = new EquivalenceSet(runtime, did, source, logical_owner,
+        set = new EquivalenceSet(runtime, did, logical_owner,
                                  node, false/*register now*/);
       set->unpack_replicated_states(derez);
       // Once construction is complete then we do the registration
@@ -16901,11 +16901,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((new_set != NULL) && 
-          new_set->remove_base_valid_ref(PENDING_REFINEMENT_REF))
+          new_set->remove_base_gc_ref(PENDING_REFINEMENT_REF))
         delete new_set;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             previous_sets.begin(); it != previous_sets.end(); it++)
-        if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
+        if (it->first->remove_base_gc_ref(PENDING_REFINEMENT_REF))
           delete it->first;
       if (region_node->remove_base_resource_ref(PENDING_REFINEMENT_REF))
         delete region_node;
@@ -16931,7 +16931,7 @@ namespace Legion {
         assert((set->region_node != it->first->region_node) ||
             (mask * it->second));
       if (previous_sets.insert(set, mask))
-        set->add_base_valid_ref(PENDING_REFINEMENT_REF);
+        set->add_base_gc_ref(PENDING_REFINEMENT_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -16944,7 +16944,7 @@ namespace Legion {
       version_info.swap(previous_sets);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             previous_sets.begin(); it != previous_sets.end(); it++)
-        it->first->add_base_valid_ref(PENDING_REFINEMENT_REF);
+        it->first->add_base_gc_ref(PENDING_REFINEMENT_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -16956,9 +16956,9 @@ namespace Legion {
       if (new_set == NULL)
       {
         new_set = new EquivalenceSet(runtime, 
-            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->get_available_distributed_id(),
             suggested_owner, region_node, true/*register now*/);
-        new_set->add_base_valid_ref(PENDING_REFINEMENT_REF);
+        new_set->add_base_gc_ref(PENDING_REFINEMENT_REF);
         std::set<RtEvent> preconditions;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
@@ -16988,7 +16988,7 @@ namespace Legion {
       {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               previous_sets.begin(); it != previous_sets.end(); it++)
-          if (it->first->remove_base_valid_ref(PENDING_REFINEMENT_REF))
+          if (it->first->remove_base_gc_ref(PENDING_REFINEMENT_REF))
             delete it->first;
         previous_sets.clear();
         // Indicate that we can delete this now
@@ -17652,7 +17652,7 @@ namespace Legion {
       disjoint_complete |= mask;
       if (equivalence_sets.insert(set, mask))
       {
-        set->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+        set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         set->add_base_resource_ref(VERSION_MANAGER_REF);
       }
     }
@@ -17676,7 +17676,7 @@ namespace Legion {
             sets.begin(); it != sets.end(); it++)
         if (equivalence_sets.insert(it->first, it->second))
         {
-          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+          it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
           it->first->add_base_resource_ref(VERSION_MANAGER_REF);
         }
     }
@@ -18006,7 +18006,7 @@ namespace Legion {
 #endif
       if (equivalence_sets.insert(set, mask))
       {
-        set->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+        set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         set->add_base_resource_ref(VERSION_MANAGER_REF);
       }
       else
@@ -18020,7 +18020,7 @@ namespace Legion {
 #endif
         const FieldMask previous = finder->second - mask;
         if (previous * disjoint_complete)
-          set->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+          set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
       }
       parent_mask = mask;
       if (!!disjoint_complete)
@@ -18376,7 +18376,7 @@ namespace Legion {
             if (!(finder->second * disjoint_complete))
             {
               // Remove the duplicate references
-              if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+              if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
                 assert(false); // should never end up deleting this
             }
             finder.merge(it->second);
@@ -18486,10 +18486,10 @@ namespace Legion {
             rez.serialize(it->second);
             // Add a remote valid reference on these nodes to keep
             // them live until we can add on remotely.
-            it->first->pack_valid_ref();
+            it->first->pack_global_ref();
             if (invalidate)
             {
-              it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+              it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
               untrack_mask |= it->second; 
             }
           }
@@ -18512,10 +18512,10 @@ namespace Legion {
               to_send.push_back(it->first);
               // Add a remote valid reference on these nodes to keep
               // them live until we can add on remotely.
-              it->first->pack_valid_ref();
+              it->first->pack_global_ref();
               if (invalidate)
               {
-                it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+                it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
                 untrack_mask |= it->second;
               }
             }
@@ -18629,9 +18629,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->first->region_node == node);
 #endif
-        it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+        it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-        it->first->unpack_valid_ref();
+        it->first->unpack_global_ref();
       }
     }
 
@@ -18858,7 +18858,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      manager->add_base_valid_ref(source);
+      manager->as_physical_manager()->add_base_valid_ref(source);
     }
 
     //--------------------------------------------------------------------------
@@ -18868,7 +18868,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      if (manager->remove_base_valid_ref(source))
+      if (manager->as_physical_manager()->remove_base_valid_ref(source))
         delete manager;
     }
 

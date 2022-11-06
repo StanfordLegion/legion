@@ -2630,7 +2630,7 @@ namespace Legion {
       // Otherwise check to see if we have a value
       const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-        runtime->get_available_distributed_id(), runtime->address_space,
+        runtime->get_available_distributed_id(),
         ApEvent::NO_AP_EVENT, provenance, &future_size);
       if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
@@ -2656,7 +2656,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(), context_index,
-          runtime->address_space, ApEvent::NO_AP_EVENT, provenance);
+          ApEvent::NO_AP_EVENT, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical = 
@@ -2719,7 +2719,7 @@ namespace Legion {
       // Otherwise check to see if we have a value
       const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
-        runtime->get_available_distributed_id(), runtime->address_space, 
+        runtime->get_available_distributed_id(),
         ApEvent::NO_AP_EVENT, provenance, &future_size);
       if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
@@ -6501,7 +6501,7 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT, provenance,
+          ApEvent::NO_AP_EVENT, provenance,
           &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
@@ -6543,8 +6543,7 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT, prov,
-          &reduction_op->sizeof_rhs);
+          ApEvent::NO_AP_EVENT, prov, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6575,8 +6574,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-          total_children_count++, runtime->address_space, ApEvent::NO_AP_EVENT,
-          provenance);
+          total_children_count++, ApEvent::NO_AP_EVENT, provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -6587,7 +6585,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->get_available_distributed_id(),
             ApEvent::NO_AP_EVENT, provenance, &future_size);
         future->set_local(it->second.get_ptr(), future_size);
         impl->set_future(it->first, future);
@@ -6631,7 +6629,7 @@ namespace Legion {
             "in task %s (UID %lld)", futures.size(), launch_node->get_volume(),
             get_task_name(), get_unique_id())
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, launch_node,
-                            runtime, did, runtime->address_space, provenance);
+                            runtime, did, provenance);
       add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
@@ -10390,7 +10388,7 @@ namespace Legion {
         region_node->initialize_versioning_analysis(ctx, eq_set, user_mask);
         // Each equivalence set here comes with a CONTEXT_REF that we
         // need to remove after we've registered it
-        if (eq_set->remove_base_valid_ref(CONTEXT_REF))
+        if (eq_set->remove_base_gc_ref(CONTEXT_REF))
           assert(false); // should never hit this
       }
     }
@@ -10435,7 +10433,7 @@ namespace Legion {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               invalidated_refinements.begin(); it != 
               invalidated_refinements.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         invalidated_refinements.clear();
       }
@@ -10788,8 +10786,7 @@ namespace Legion {
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        new FillView(runtime->forest, did, runtime->address_space,
-                     fill_value, true/*register now*/
+        new FillView(runtime->forest, did, fill_value, true/*register now*/
 #ifdef LEGION_SPY
                      , op->get_unique_op_id()
 
@@ -14677,7 +14674,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            total_children_count++, runtime->address_space, 
+            total_children_count++,
             ApEvent::NO_AP_EVENT, provenance, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
@@ -17548,7 +17545,7 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(), runtime->address_space,
+          runtime->get_available_distributed_id(),
           ApEvent::NO_AP_EVENT, provenance, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
@@ -17606,8 +17603,7 @@ namespace Legion {
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT,
+          runtime->get_available_distributed_id(), ApEvent::NO_AP_EVENT,
           provenance, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
@@ -17665,8 +17661,7 @@ namespace Legion {
       {
         ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, runtime,
             domain_node, domain_node, runtime->get_available_distributed_id(),
-            total_children_count++, runtime->address_space,
-            ApEvent::NO_AP_EVENT, provenance);
+            total_children_count++, ApEvent::NO_AP_EVENT, provenance);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17703,8 +17698,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              total_children_count++, runtime->address_space,
-              ApEvent::NO_AP_EVENT, provenance));
+              total_children_count++, ApEvent::NO_AP_EVENT, provenance));
       }
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
@@ -17716,7 +17710,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->get_available_distributed_id(),
             ApEvent::NO_AP_EVENT, provenance, &future_size);
         future->set_local(it->second.get_ptr(), future_size);
         result.impl->set_future(it->first, future);
@@ -17768,8 +17762,7 @@ namespace Legion {
         // Make one future map for all the shards
         ReplFutureMapImpl *repl_impl =
           new ReplFutureMapImpl(this, creation_op, domain_node, domain_node,
-              runtime, runtime->get_available_distributed_id(),
-              runtime->address_space, provenance);
+              runtime, runtime->get_available_distributed_id(),  provenance);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17808,7 +17801,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, creation_op, domain_node,
-                          runtime, did, runtime->address_space, provenance));
+                          runtime, did, provenance));
       }
       add_to_dependence_queue(creation_op);
       result.impl->set_all_futures(futures);

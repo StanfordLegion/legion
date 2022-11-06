@@ -439,7 +439,7 @@ namespace Legion {
         // We know that they are already completed 
         DistributedID did = runtime->get_available_distributed_id();
         future_map = FutureMap(new FutureMapImpl(ctx, runtime, point_set, did,
-                      0/*index*/, runtime->address_space, ApEvent::NO_AP_EVENT,
+                      0/*index*/, ApEvent::NO_AP_EVENT,
                       provenance, true/*reg now*/));
         future_map.impl->set_all_futures(arguments);
       }
@@ -619,12 +619,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now,
-            DistributedID did, AddressSpaceID own_space, ApEvent complete,
-            Provenance *prov, const size_t *fsize /*=NULL*/, 
-            Operation *o /*= NULL*/) 
+            DistributedID did, ApEvent complete, Provenance *prov,
+            const size_t *fsize /*=NULL*/, Operation *o /*= NULL*/) 
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
-          own_space, register_now), context(ctx),
+          register_now), context(ctx),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
         producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -653,7 +652,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now, 
-                           DistributedID did, AddressSpaceID own_space,
+                           DistributedID did,
                            ApEvent complete, Operation *o, GenerationID gen,
                            size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
@@ -662,7 +661,7 @@ namespace Legion {
                            int depth, Provenance *prov)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
-          own_space, register_now), context(ctx),
+          register_now), context(ctx),
         producer_op(o), op_gen(gen), producer_depth(depth),
 #ifdef LEGION_SPY
         producer_uid(uid),
@@ -689,7 +688,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
-      : DistributedCollectable(NULL, 0, 0), context(NULL), producer_op(NULL),
+      : DistributedCollectable(NULL, 0), context(NULL), producer_op(NULL),
         op_gen(0), producer_depth(0),
 #ifdef LEGION_SPY
         producer_uid(0),
@@ -2158,15 +2157,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::notify_inactive(void)
+    void FutureImpl::notify_local(void)
     //--------------------------------------------------------------------------
     {
       // Nothing to do
@@ -2415,7 +2406,13 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       if (!is_owner())
+      {
+        update_remote_instances(owner_space);
+        // Add a base resource ref that will be held until
+        // the owner node removes it with an unregister message
+        add_base_resource_ref(REMOTE_DID_REF);
         send_remote_registration();
+      }
       registered_with_runtime = true;
     }
 
@@ -3367,10 +3364,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, AddressSpaceID owner_space,
-                                 Provenance *prov)
+                                 DistributedID did, Provenance *prov)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
         op_gen(o->get_generation()), op_depth(o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -3395,11 +3391,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, size_t index,
-                                 AddressSpaceID owner_space, ApEvent completion,
+                                 ApEvent completion,
                                  Provenance *prov, bool register_now)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
-          owner_space, register_now), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), register_now), 
         context(ctx), op(NULL), op_ctx_index(index), op_gen(0), op_depth(0),
 #ifdef LEGION_SPY
         op_uid(0),
@@ -3427,9 +3422,9 @@ namespace Legion {
 #endif
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, ApEvent completion,
-                                 AddressSpaceID owner_space, Provenance *prov)
+                                 Provenance *prov)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), owner_space), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
         context(ctx), op(o), op_ctx_index(index), op_gen(gen), op_depth(depth),
 #ifdef LEGION_SPY
         op_uid(uid),
@@ -3488,15 +3483,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureMapImpl::notify_inactive(void)
+    void FutureMapImpl::notify_local(void)
     //--------------------------------------------------------------------------
     {
       for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
@@ -3576,7 +3563,7 @@ namespace Legion {
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), runtime->address_space,
+              runtime->get_available_distributed_id(),
               completion_event, op, op_gen, op_ctx_index, point,
 #ifdef LEGION_SPY
             op_uid,
@@ -3814,7 +3801,13 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       if (!is_owner())
+      {
+        update_remote_instances(owner_space);
+        // Add a base resource ref that will be held until
+        // the owner node removes it with an unregister message
+        add_base_resource_ref(REMOTE_DID_REF);
         send_remote_registration();
+      }
       registered_with_runtime = true;
     }
 
@@ -3895,7 +3888,7 @@ namespace Legion {
           prev->op_uid,
 #endif
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prev->completion_event, prev->runtime->address_space, prov),
+          prev->completion_event, prov),
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
@@ -3913,7 +3906,7 @@ namespace Legion {
           prev->op_uid,
 #endif
           domain, prev->runtime, prev->runtime->get_available_distributed_id(),
-          prev->completion_event, prev->runtime->address_space, prov),
+          prev->completion_event, prov),
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
@@ -4149,9 +4142,8 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
                                          IndexSpaceNode *domain,
                                          IndexSpaceNode *shard_dom, Runtime *rt, 
-                                         DistributedID did,AddressSpaceID owner,
-                                         Provenance *prov)
-      : FutureMapImpl(ctx, op, domain, rt, did, owner, prov),
+                                         DistributedID did, Provenance *prov)
+      : FutureMapImpl(ctx, op, domain, rt, did, prov),
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -4175,9 +4167,8 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
                             IndexSpaceNode *domain, IndexSpaceNode *shard_dom,
                             DistributedID did, size_t index, 
-                            AddressSpaceID owner, ApEvent completion,
-                            Provenance *prov, bool reg)
-      : FutureMapImpl(ctx, rt, domain, did, index, owner, completion, prov,reg),
+                            ApEvent completion, Provenance *prov, bool reg)
+      : FutureMapImpl(ctx, rt, domain, did, index, completion, prov,reg),
         repl_ctx(ctx), shard_domain(shard_dom),
         future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
         future_map_barrier(ctx->get_next_future_map_barrier()),
@@ -4230,14 +4221,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::notify_inactive(void)
+    void ReplFutureMapImpl::notify_local(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       // Do the base version, then arrive on our barrier
-      FutureMapImpl::notify_inactive();
+      FutureMapImpl::notify_local();
       // Decide what to do here about our future map barrier depending
       // on whether we saw any non-trivial calls on this shard. If we 
       // did not see any non-trivial calls then neither should any of
@@ -8339,7 +8330,7 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          manager->unpack_gc_ref();
+          manager->unpack_global_ref();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -8428,7 +8419,7 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          manager->unpack_gc_ref();
+          manager->unpack_global_ref();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -8519,7 +8510,7 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          manager->unpack_gc_ref();
+          manager->unpack_global_ref();
           created = remote_created.load();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
@@ -8623,7 +8614,7 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          manager->unpack_gc_ref();
+          manager->unpack_global_ref();
           created = remote_created.load();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
@@ -8712,7 +8703,7 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          manager->unpack_gc_ref();
+          manager->unpack_global_ref();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -8763,7 +8754,7 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          manager->unpack_gc_ref();
+          manager->unpack_global_ref();
           if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
             return false;
           else
@@ -8818,7 +8809,7 @@ namespace Legion {
             assert(manager != NULL);
 #endif
             results.emplace_back(MappingInstance(manager));
-            manager->unpack_gc_ref();
+            manager->unpack_global_ref();
             if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
               results.pop_back();
           }
@@ -8866,7 +8857,7 @@ namespace Legion {
             assert(manager != NULL);
 #endif
             results.emplace_back(MappingInstance(manager));
-            manager->unpack_gc_ref();
+            manager->unpack_global_ref();
             if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
               results.pop_back();
           }
@@ -9037,7 +9028,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
-                  manager->pack_gc_ref();
+                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                 }
@@ -9114,7 +9105,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
-                  manager->pack_gc_ref();
+                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                 }
@@ -9178,7 +9169,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
-                  manager->pack_gc_ref();
+                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                   rez.serialize(kind);
@@ -9248,7 +9239,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
-                  manager->pack_gc_ref();
+                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                   rez.serialize(kind);
@@ -9284,7 +9275,7 @@ namespace Legion {
             if (success)
             {
               InstanceManager *manager = result.impl;
-              manager->pack_gc_ref();
+              manager->pack_global_ref();
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -9324,7 +9315,7 @@ namespace Legion {
             if (success)
             {
               InstanceManager *manager = result.impl;
-              manager->pack_gc_ref();
+              manager->pack_global_ref();
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -9373,7 +9364,7 @@ namespace Legion {
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
                   InstanceManager *manager = results[idx].impl;
-                  manager->pack_gc_ref();
+                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -9417,7 +9408,7 @@ namespace Legion {
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
                   InstanceManager *manager = results[idx].impl;
-                  manager->pack_gc_ref();
+                  manager->pack_global_ref();
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -12098,31 +12089,6 @@ namespace Legion {
                                                       remote_address_space);
               break;
             }
-          case DISTRIBUTED_VALID_UPDATE:
-            {
-              runtime->handle_did_remote_valid_update(derez);
-              break;
-            }
-          case DISTRIBUTED_GC_UPDATE:
-            {
-              runtime->handle_did_remote_gc_update(derez); 
-              break;
-            }
-          case DISTRIBUTED_RESOURCE_UPDATE:
-            {
-              runtime->handle_did_remote_resource_update(derez);
-              break;
-            }
-          case DISTRIBUTED_CREATE_ADD:
-            {
-              runtime->handle_did_create_add(derez);
-              break;
-            }
-          case DISTRIBUTED_CREATE_REMOVE:
-            {
-              runtime->handle_did_create_remove(derez);
-              break;
-            }
           case DISTRIBUTED_UNREGISTER:
             {
               runtime->handle_did_remote_unregister(derez);
@@ -12529,8 +12495,7 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_RESPONSE:
             {
-              runtime->handle_equivalence_set_response(derez,
-                                                       remote_address_space);
+              runtime->handle_equivalence_set_response(derez);
               break;
             }
           case SEND_EQUIVALENCE_SET_REPLICATION_REQUEST:
@@ -14445,9 +14410,8 @@ namespace Legion {
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
                                      Runtime *rt, bool inter, DistributedID did)
       : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
-          rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
-          false/*register*/), layout_id(lay_id), handle(h), internal(inter), 
-        constraints_name(NULL)
+          rt->get_available_distributed_id(), false/*register*/),
+        layout_id(lay_id), handle(h), internal(inter), constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -14461,8 +14425,7 @@ namespace Legion {
       const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
       : LayoutConstraintSet(registrar.layout_constraints), 
         DistributedCollectable(rt, (did > 0) ? did : 
-            rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
-            false/*register with runtime*/), 
+            rt->get_available_distributed_id(), false/*register with runtime*/), 
         layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -14484,8 +14447,7 @@ namespace Legion {
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
-          rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
-          false/*register with runtime*/), 
+          rt->get_available_distributed_id(), false/*register with runtime*/), 
         layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -14499,7 +14461,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
-      : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0, 0), 
+      : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0), 
         layout_id(rhs.layout_id), handle(rhs.handle), internal(false)
     //--------------------------------------------------------------------------
     {
@@ -14557,19 +14519,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_inactive(void)
+    void LayoutConstraints::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
         runtime->unregister_layout(layout_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -18051,7 +18005,7 @@ namespace Legion {
       if (owner_space == address_space)
       {
         FieldSpaceNode *node = forest->get_node(handle);
-        if (!node->check_valid_and_increment(APPLICATION_REF))
+        if (!node->check_active_and_increment(APPLICATION_REF))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
               "Illegal call to add shared ownership to field space %x "
               "which has already been deleted", handle.get_id())
@@ -18078,7 +18032,7 @@ namespace Legion {
       if (owner_space == address_space)
       {
         RegionNode *node = forest->get_node(handle);
-        if (!node->check_valid_and_increment(APPLICATION_REF))
+        if (!node->check_active_and_increment(APPLICATION_REF))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
               "Illegal call to add shared ownership to logical region "
               "(%x,%x,%x) which has already been deleted", 
@@ -21931,51 +21885,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_valid_update(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<DISTRIBUTED_VALID_UPDATE>(rez,
-                                                          true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_gc_update(AddressSpaceID target,
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<DISTRIBUTED_GC_UPDATE>(rez,
-                                                        true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<DISTRIBUTED_RESOURCE_UPDATE>(rez,
-                                                        true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_add_create_reference(AddressSpaceID target,
-                                                 Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<DISTRIBUTED_CREATE_ADD>(rez,
-                                                        true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remove_create_reference(AddressSpaceID target,
-                                                    Serializer &rez, bool flush)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<DISTRIBUTED_CREATE_REMOVE>(rez,
-                                                                      flush);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_did_remote_unregister(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24003,41 +23912,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_valid_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_valid_update(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_gc_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_gc_update(this, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_resource_update(this, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_create_add(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_add_create(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_create_remove(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remove_create(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_did_remote_unregister(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -24655,11 +24529,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_response(Deserializer &derez,
-                                                  AddressSpaceID source)
+    void Runtime::handle_equivalence_set_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_equivalence_set_response(derez, this, source);
+      EquivalenceSet::handle_equivalence_set_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -25912,18 +25785,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::unregister_distributed_collectable(DistributedID did)
+    void Runtime::unregister_distributed_collectable(DistributedID did)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
       AutoLock d_lock(distributed_collectable_lock);
       std::map<DistributedID,DistributedCollectable*>::iterator finder =
         dist_collectables.find(did);
-      if ((finder == dist_collectables.end()) ||
-          !finder->second->confirm_deletion())
-        return false;
+#ifdef DEBUG_LEGION
+      assert(finder != dist_collectables.end());
+#endif
       dist_collectables.erase(finder);
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -26217,7 +26089,7 @@ namespace Legion {
 #endif
       InnerContext *context = find_context(context_uid);
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
-             owner_space, ApEvent::NO_AP_EVENT, op, gen, op_ctx_index, op_point,
+             ApEvent::NO_AP_EVENT, op, gen, op_ctx_index, op_point,
 #ifdef LEGION_SPY
              op_uid,
 #endif
@@ -26274,7 +26146,7 @@ namespace Legion {
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
-           index, owner_space, completion, provenance, false/*register now*/);
+           index, completion, provenance, false/*register now*/);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -28423,7 +28295,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return Future(new FutureImpl(ctx, this, true/*register*/,
-                                   get_available_distributed_id(),address_space, 
+                                   get_available_distributed_id(),
                                    complete_event, provenance, future_size,op));
     }
 
@@ -30439,7 +30311,7 @@ namespace Legion {
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(fill_buffer, reduction_op->sizeof_rhs);
       FillView *fill_view = new FillView(forest, get_available_distributed_id(),
-                                 address_space, fill_value, true/*register now*/
+                                 fill_value, true/*register now*/
 #ifdef LEGION_SPY
                                  , 0/*no creator*/
 #endif
@@ -31607,12 +31479,6 @@ namespace Legion {
         case LG_DEFER_APPLY_STATE_TASK_ID:
           {
             EquivalenceSet::handle_apply_state(args);
-            break;
-          }
-        case LG_DEFER_REMOTE_REF_UPDATE_TASK_ID:
-          {
-            DistributedCollectable::handle_defer_remote_reference_update(
-                                                            runtime, args);
             break;
           }
         case LG_DEFER_REMOTE_UNREGISTER_TASK_ID:

@@ -5170,10 +5170,9 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(regions[idx].region);
       EquivalenceSet *result =
         new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, runtime->address_space, node,
-            true/*register now*/);
+            runtime->address_space, node, true/*register now*/);
       // Add a context ref that will be removed after this is registered
-      result->add_base_valid_ref(CONTEXT_REF);
+      result->add_base_gc_ref(CONTEXT_REF);
       return result;
     } 
 
@@ -5978,8 +5977,7 @@ namespace Legion {
         elide_future_return = true;
       else
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), 
-              runtime->address_space, get_completion_event(), 
+              runtime->get_available_distributed_id(), get_completion_event(),
               this, gen, context_index, index_point,
 #ifdef LEGION_SPY
               unique_op_id,
@@ -8930,7 +8928,7 @@ namespace Legion {
                              launcher.predicate_false_result);
       reduction_future = Future(new FutureImpl(parent_ctx, runtime,
           true/*register*/, runtime->get_available_distributed_id(), 
-          runtime->address_space, get_completion_event(), provenance,
+          get_completion_event(), provenance,
           (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
       if (runtime->legion_spy_enabled && track)
@@ -9969,8 +9967,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return new FutureMapImpl(ctx, this, this->launch_space, runtime,
-          runtime->get_available_distributed_id(), runtime->address_space,
-          get_provenance());
+          runtime->get_available_distributed_id(), get_provenance());
     }
 
     //--------------------------------------------------------------------------

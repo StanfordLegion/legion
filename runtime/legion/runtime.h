@@ -257,11 +257,11 @@ namespace Legion {
       };
     public:
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
-                 DistributedID did, AddressSpaceID owner_space,
+                 DistributedID did,
                  ApEvent complete, Provenance *provenance,
                  const size_t *future_size = NULL, Operation *op = NULL);
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
-                 DistributedID did, AddressSpaceID owner_space,
+                 DistributedID did,
                  ApEvent complete, Operation *op, GenerationID gen,
                  size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
@@ -342,8 +342,7 @@ namespace Legion {
 #endif
           int op_depth = 0);
     public:
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       void register_dependence(Operation *consumer_op);
       void register_remote(AddressSpaceID sid);
@@ -570,10 +569,9 @@ namespace Legion {
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
       FutureMapImpl(TaskContext *ctx, Operation *op, IndexSpaceNode *domain,
-                    Runtime *rt, DistributedID did, AddressSpaceID owner_space,
-                    Provenance *provenance);
+                    Runtime *rt, DistributedID did, Provenance *provenance);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
-                    DistributedID did, size_t index, AddressSpaceID owner_space,
+                    DistributedID did, size_t index,
                     ApEvent completion, Provenance *provenance,
                     bool register_now = true); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
@@ -582,8 +580,7 @@ namespace Legion {
                     UniqueID uid,
 #endif
                     IndexSpaceNode *domain, Runtime *rt, DistributedID did,
-                    ApEvent completion, AddressSpaceID owner_space,
-                    Provenance *provenance);
+                    ApEvent completion, Provenance *provenance);
       FutureMapImpl(const FutureMapImpl &rhs);
       virtual ~FutureMapImpl(void);
     public:
@@ -591,8 +588,7 @@ namespace Legion {
     public:
       virtual bool is_replicate_future_map(void) const { return false; }
     public:
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       Domain get_domain(void) const;
       virtual Future get_future(const DomainPoint &point, 
@@ -725,11 +721,10 @@ namespace Legion {
     public:
       ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
-                        Runtime *rt, DistributedID did, AddressSpaceID owner,
-                        Provenance *provenance);
+                        Runtime *rt, DistributedID did, Provenance *provenance);
       ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
-                        DistributedID did, size_t index, AddressSpaceID owner,
+                        DistributedID did, size_t index,
                         ApEvent completion, Provenance *provenance,
                         bool register_now = true);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
@@ -740,7 +735,7 @@ namespace Legion {
       virtual bool is_replicate_future_map(void) const { return true; }
     public:
       // Override this so we can trigger our deletion barrier
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       virtual Future get_future(const DomainPoint &point,
                                 bool internal, RtEvent *wait_on = NULL);
@@ -2163,8 +2158,7 @@ namespace Legion {
       bool operator==(const LayoutConstraints &rhs) const;
       bool operator==(const LayoutConstraintSet &rhs) const;
     public:
-      virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       inline FieldSpace get_field_space(void) const { return handle; }
       inline const char* get_name(void) const { return constraints_name; }
@@ -3154,13 +3148,6 @@ namespace Legion {
       void send_slice_collective_instance_response(AddressSpaceID target,
                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_resource_update(AddressSpaceID target,
-                                           Serializer &rez);
-      void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
-      void send_did_remove_create_reference(AddressSpaceID target,
-                                            Serializer &rez, bool flush = true);
       void send_did_remote_unregister(AddressSpaceID target, Serializer &rez);
       void send_created_region_contexts(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
@@ -3475,11 +3462,6 @@ namespace Legion {
       void handle_slice_collective_response(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
-      void handle_did_remote_valid_update(Deserializer &derez);
-      void handle_did_remote_gc_update(Deserializer &derez);
-      void handle_did_remote_resource_update(Deserializer &derez);
-      void handle_did_create_add(Deserializer &derez);
-      void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
@@ -3579,8 +3561,7 @@ namespace Legion {
                                                        AddressSpaceID source);
       void handle_equivalence_set_request(Deserializer &derez,
                                           AddressSpaceID source);
-      void handle_equivalence_set_response(Deserializer &derez,
-                                           AddressSpaceID source);
+      void handle_equivalence_set_response(Deserializer &derez);
       void handle_equivalence_set_replication_request(Deserializer &derez);
       void handle_equivalence_set_replication_response(Deserializer &derez);
       void handle_equivalence_set_replication_update(Deserializer &derez);
@@ -3784,7 +3765,7 @@ namespace Legion {
     public:
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc);
-      bool unregister_distributed_collectable(DistributedID did);
+      void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did);
       DistributedCollectable* find_distributed_collectable(DistributedID did,
@@ -5537,16 +5518,6 @@ namespace Legion {
         case SLICE_COLLECTIVE_RESPONSE:
           break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
-          return REFERENCE_VIRTUAL_CHANNEL;
-        case DISTRIBUTED_VALID_UPDATE:
-          return REFERENCE_VIRTUAL_CHANNEL;
-        case DISTRIBUTED_GC_UPDATE:
-          return REFERENCE_VIRTUAL_CHANNEL;
-        case DISTRIBUTED_RESOURCE_UPDATE:
-          return REFERENCE_VIRTUAL_CHANNEL;
-        case DISTRIBUTED_CREATE_ADD:
-          return REFERENCE_VIRTUAL_CHANNEL;
-        case DISTRIBUTED_CREATE_REMOVE:
           return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_UNREGISTER:
           return REFERENCE_VIRTUAL_CHANNEL;

@@ -1583,7 +1583,7 @@ namespace Legion {
     };
 
     class IndexSpaceOperation : public IndexSpaceExpression,
-                                public DistributedCollectable {
+                                public ValidDistributedCollectable {
     public:
       enum OperationKind {
         UNION_OP_KIND,
@@ -1596,12 +1596,11 @@ namespace Legion {
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
                           RegionTreeForest *ctx);
       IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
-          IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
-          IndexSpaceOperation *origin);
+          IndexSpaceExprID eid, DistributedID did, IndexSpaceOperation *origin);
       virtual ~IndexSpaceOperation(void);
     public:
       virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
@@ -1614,7 +1613,8 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) { return DistributedCollectable::is_valid(); }
+      virtual bool is_valid(void) 
+        { return ValidDistributedCollectable::is_valid(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -1962,17 +1962,13 @@ namespace Legion {
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
-    class IndexTreeNode : public DistributedCollectable {
+    class IndexTreeNode : public ValidDistributedCollectable {
     public:
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
                     LegionColor color, DistributedID did,
-                    AddressSpaceID owner, RtEvent init_event,
-                    CollectiveMapping *mapping,
+                    RtEvent init_event, CollectiveMapping *mapping,
                     Provenance *provenance);
       virtual ~IndexTreeNode(void);
-    public:
-      virtual void notify_invalid(void) = 0;
-      virtual void notify_inactive(void) { }
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
@@ -2090,7 +2086,7 @@ namespace Legion {
       inline bool is_set(void) const { return index_space_set; }
     public:
       virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -2176,7 +2172,8 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) { return DistributedCollectable::is_valid(); }
+      virtual bool is_valid(void) 
+        { return ValidDistributedCollectable::is_valid(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -3113,7 +3110,7 @@ namespace Legion {
       IndexPartNode& operator=(const IndexPartNode &rhs) = delete;
     public:
       virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -3519,8 +3516,7 @@ namespace Legion {
       AddressSpaceID get_owner_space(void) const; 
       static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
     public:
-      virtual void notify_invalid(void) { }
-      virtual void notify_inactive(void) { }
+      virtual void notify_local(void) { }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
             const void *buffer, size_t size, bool is_mutable, bool local_only);
@@ -3783,16 +3779,13 @@ namespace Legion {
      * this kind of node making them general across
      * all kinds of node types.
      */
-    class RegionTreeNode : public DistributedCollectable {
+    class RegionTreeNode : public ValidDistributedCollectable {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column,
                      RtEvent initialized, RtEvent tree_init, 
                      Provenance *provenance = NULL, DistributedID did = 0,
                      CollectiveMapping *mapping = NULL);
       virtual ~RegionTreeNode(void);
-    public:
-      virtual void notify_invalid(void) = 0;
-      virtual void notify_inactive(void) = 0;
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
@@ -4074,7 +4067,7 @@ namespace Legion {
       RegionNode& operator=(const RegionNode &rhs) = delete;
     public:
       virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       void record_registered(void);
     public:
@@ -4241,7 +4234,7 @@ namespace Legion {
       PartitionNode& operator=(const PartitionNode &rhs);
     public:
       virtual void notify_invalid(void);
-      virtual void notify_inactive(void);
+      virtual void notify_local(void);
     public:
       void record_registered(void);
     public:

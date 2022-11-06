@@ -568,12 +568,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceManager::InstanceManager(RegionTreeForest *ctx,
-                                     AddressSpaceID owner_space,
                                      DistributedID did, LayoutDescription *desc,
                                      FieldSpaceNode *node, 
                                      IndexSpaceExpression *domain,
                                      RegionTreeID tid, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, owner_space, register_now), 
+      : DistributedCollectable(ctx->runtime, did, register_now),
         context(ctx), layout(desc), field_space_node(node),
         instance_domain(domain), tree_id(tid)
     //--------------------------------------------------------------------------
@@ -727,7 +726,7 @@ namespace Legion {
                                      const void *pl, size_t pl_size,
                                      RegionTreeID tree_id, LgEvent u_event,
                                      bool register_now, bool output)
-      : InstanceManager(ctx, owner_space, did, layout, node,
+      : InstanceManager(ctx, did, layout, node,
           // If we're on the owner node we need to produce the expression
           // that actually describes this points in this space
           // On remote nodes we'll already have it from the owner
@@ -737,8 +736,7 @@ namespace Legion {
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
-        remaining_collection_guards(0), currently_active(true),
-        min_gc_priority(0)
+        remaining_collection_guards(0), min_gc_priority(0), valid_references(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -828,10 +826,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (redop > 0)
-        return new ReductionView(context, view_did, owner_space,
+        return new ReductionView(context, view_did,
             logical_owner, this, uid, true/*register now*/, mapping);
       else
-        return new MaterializedView(context, view_did, owner_space, 
+        return new MaterializedView(context, view_did,
               logical_owner, this, uid, true/*register now*/, mapping);
     }
 
@@ -1133,16 +1131,11 @@ namespace Legion {
                                                   piece_list, piece_list_size);
     }
 
-
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_inactive(void)
+    void PhysicalManager::notify_local(void)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(currently_active);
-#endif
-      currently_active = false;
       if (deferred_deletion.exists())
       {
 #ifdef DEBUG_LEGION
@@ -1152,22 +1145,124 @@ namespace Legion {
       }
     }
 
-#if 0
+#ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_valid(ReferenceMutator *mutator)
+    void PhysicalManager::add_base_valid_ref_internal(
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
     //--------------------------------------------------------------------------
     {
-#ifndef DEBUG_LEGION
-      // In non-debug mode we can just add the valid reference to the
-      // owner without needing to check. While this isn't strictly necessary
-      // for correctness, it is an important performance optimization to help
-      // the garbage collector quickly detect when instances should not be
-      // eligible for collection early in the process before trying to do
-      // the whole distributed protocol.
-      if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
 #endif
+      valid_references += cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      if (finder == detailed_base_valid_references.end())
+        detailed_base_valid_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (valid_reference == cnt)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::add_nested_valid_ref_internal (
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+#endif
+      valid_references += cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(did);
+      if (finder == detailed_nested_valid_references.end())
+        detailed_nested_valid_references[did] = cnt;
+      else
+        finder->second += cnt;
+      if (valid_references == cnt)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_base_valid_ref_internal(
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+      assert(valid_references >= cnt);
+#endif
+      valid_references -= cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      assert(finder != detailed_base_valid_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_base_valid_references.erase(finder);
+      if (valid_references == 0)
+        return notify_invalid();
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool DistributedCollectable::remove_nested_valid_ref_internal(
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+      assert(valid_references >= cnt);
+#endif
+      valid_references -= cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(did);
+      assert(finder != detailed_nested_valid_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_nested_valid_references.erase(finder);
+      if (valid_references == 0)
+        return notify_invalid();
+      else
+        return false;
+    }
+#else // DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    void PhysicalManager::add_valid_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
       AutoLock i_lock(inst_lock);
+      if (valid_references.fetch_add(cnt) == 0)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::remove_valid_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+#ifdef DEBUG_LEGION
+      assert(valid_references.load() >= cnt);
+#endif
+      if (valid_references.fetch_sub(cnt) == cnt)
+        return notify_invalid();
+      else
+        return false;
+    }
+#endif // DEBUG_LEGION_GC
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock, it is held by the caller
 #ifdef DEBUG_LEGION
       assert(!deferred_deletion.exists());
       assert(gc_state != COLLECTED_GC_STATE);
@@ -1189,7 +1284,6 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(&result);
           rez.serialize(done);
-          rez.serialize<bool>(false/*acquired*/);
         }
         runtime->send_gc_debug_request(owner_space, rez);
         if (!done.has_triggered())
@@ -1207,7 +1301,6 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(&result);
           rez.serialize(done);
-          rez.serialize<bool>(true/*acquired*/);
         }
         runtime->send_gc_debug_request(owner_space, rez);
         if (!done.has_triggered())
@@ -1216,6 +1309,7 @@ namespace Legion {
       }
 #endif
       gc_state = VALID_GC_STATE;
+      add_base_gc_ref(MAPPING_ACQUIRE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1231,33 +1325,20 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent done;
       derez.deserialize(done);
-      bool acquired;
-      derez.deserialize(acquired);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
           runtime->weak_find_distributed_collectable(did));
       if (manager != NULL)
       {
-        if (acquired)
+        // Should be guaranteed to be able to acquire this
+        if (manager->acquire_instance(REMOTE_DID_REF))
         {
-          LocalReferenceMutator mutator;
-          // Should be guaranteed to be able to acquire thi
-          if (manager->acquire_instance(REMOTE_DID_REF, &mutator))
-          {
-            Runtime::trigger_event(done, mutator.get_done_event());
-            manager->remove_base_resource_ref(RUNTIME_REF);
-            return;
-          }
-        }
-        else
-        {
-          if (manager->check_valid_and_increment(REMOTE_DID_REF))
-          {
-            // This must already be valid for us to succeed
-            Runtime::trigger_event(done);
-            manager->remove_base_resource_ref(RUNTIME_REF);
-            return;
-          }
+          Runtime::trigger_event(done);
+          // Remove the reference that we just got
+          manager->remove_base_valid_ref(REMOTE_DID_REF);
+          if (manager->remove_base_resource_ref(RUNTIME_REF))
+            delete manager;
+          return;
         }
       }
       // If we get here, we failed so send the response
@@ -1274,7 +1355,6 @@ namespace Legion {
       assert(false); // should never get this in release mode
 #endif
     }
-#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_garbage_collection_debug_response(
@@ -1296,10 +1376,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_invalid(void)
+    bool PhysicalManager::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock i_lock(inst_lock);
+      // No need for the lock it is held by the caller
 #ifdef DEBUG_LEGION
       assert(gc_state == VALID_GC_STATE);
 #endif
@@ -1310,8 +1390,10 @@ namespace Legion {
       }
       else
         gc_state = ACQUIRED_GC_STATE;
+      return remove_base_gc_ref(MAPPING_ACQUIRE_REF);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool PhysicalManager::acquire_instance(ReferenceSource source)
     //--------------------------------------------------------------------------
@@ -1411,7 +1493,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_acquire_request(Runtime *runtime,
                                      Deserializer &derez, AddressSpaceID source) 
@@ -2865,10 +2946,10 @@ namespace Legion {
       assert(pending_views.empty());
 #endif
 #ifndef DISABLE_GC
-      // If we're still active that means there are still outstanding
+      // If we're still global that means there are still outstanding
       // users so make an event for when we are done, not we're holding
       // the instance lock when this is called
-      if (currently_active)
+      if (is_global())
         deferred_deletion = Runtime::create_rt_user_event();
       // Now we can release the lock since we're done with the atomic updates
       i_lock->release();
@@ -4010,7 +4091,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualManager::VirtualManager(Runtime *runtime, DistributedID did,
                                    LayoutDescription *desc)
-      : InstanceManager(runtime->forest, runtime->address_space, did, desc,
+      : InstanceManager(runtime->forest, did, desc,
                         NULL/*field space node*/,NULL/*index space expression*/,
                         0/*tree id*/, true/*register now*/)
     //--------------------------------------------------------------------------
@@ -4023,7 +4104,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualManager::VirtualManager(const VirtualManager &rhs)
-      : InstanceManager(NULL, 0, 0, NULL, NULL, NULL, 0, false)
+      : InstanceManager(NULL, 0, NULL, NULL, NULL, 0, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
