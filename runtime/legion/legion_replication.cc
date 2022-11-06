@@ -1472,8 +1472,7 @@ namespace Legion {
         region_node->invalidate_refinement(ctx, refinement_mask,
             false/*self*/, *repl_ctx, map_applied_conditions, to_release);
         // Register this refinement in the tree 
-        region_node->record_refinement(ctx, set, refinement_mask, 
-                                       map_applied_conditions);
+        region_node->record_refinement(ctx, set, refinement_mask); 
         // Remove the CONTEXT_REF on the set now that it is registered
         if (set->remove_base_valid_ref(CONTEXT_REF))
           assert(false); // should never actually hit this
@@ -1894,8 +1893,7 @@ namespace Legion {
         {
           // Still propagate the refinement so we can do lookups
           // correctly for control replication
-          it->first->propagate_refinement(ctx, NULL/*no child*/, it->second,
-                                          map_applied_conditions);
+          it->first->propagate_refinement(ctx, NULL/*no child*/, it->second);
           continue;
         }
         // We're not actually going to make the equivalence sets here
@@ -1905,8 +1903,7 @@ namespace Legion {
         // actual owner of the initial equivalence set will be done
         // with a first touch policy so that the first writer will
         // the one to make the equivalence sets
-        it->first->propagate_refinement(ctx, children, it->second, 
-                                        map_applied_conditions);
+        it->first->propagate_refinement(ctx, children, it->second); 
       }
       // Now we do the replicated partitions and regions
       if (!replicated_partitions.empty() || !replicated_regions.empty())
@@ -1946,7 +1943,7 @@ namespace Legion {
                                                       child, mask, did, first);
               if (first)
                 initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask, map_applied_conditions);
+              child->record_refinement(ctx, set, mask);
               // Remove the CONTEXT_REF on the set now that it is registered
               if (set->remove_base_valid_ref(CONTEXT_REF))
                 assert(false); // should never actually hit this
@@ -1968,7 +1965,7 @@ namespace Legion {
                                                       child, mask, did, first);
               if (first)
                 initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask, map_applied_conditions);
+              child->record_refinement(ctx, set, mask);
               // Remove the CONTEXT_REF on the set now that it is registered
               if (set->remove_base_valid_ref(CONTEXT_REF))
                 assert(false); // should never actually hit this
@@ -2000,8 +1997,7 @@ namespace Legion {
                                         it->second, mask, did, first);
           if (first)
             initialize_replicated_set(set, mask, map_applied_conditions);
-          it->second->record_refinement(ctx, set, mask, 
-                                        map_applied_conditions);
+          it->second->record_refinement(ctx, set, mask); 
           // Remove the CONTEXT_REF on the set now that it is registered
           if (set->remove_base_valid_ref(CONTEXT_REF))
             assert(false); // should never actually hit this
@@ -5695,10 +5691,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second.impl;
+        FutureImpl *impl = it->second;
         size_t src_size = 0;
         const void *source = impl->find_internal_buffer(parent_ctx, src_size);
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
@@ -5754,10 +5750,10 @@ namespace Legion {
     {
       std::vector<FutureInstance*> instances;
       instances.reserve(sources.size());
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second.impl;
+        FutureImpl *impl = it->second;
         FutureInstance *instance = impl->get_canonical_instance();
         if (instance->size != redop->sizeof_rhs)
           REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
@@ -13178,15 +13174,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureNameExchange::exchange_future_names(
-                                          std::map<DomainPoint,Future> &futures)
+                                     std::map<DomainPoint,FutureImpl*> &futures)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock c_lock(collective_lock);
-        results.insert(futures.begin(), futures.end());
-      }
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+        results[it->first] = Future(it->second);
       perform_collective_sync();
-      futures = results;
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            results.begin(); it != results.end(); it++)
+        futures.insert(std::make_pair(it->first, it->second.impl));
     }
 
     /////////////////////////////////////////////////////////////

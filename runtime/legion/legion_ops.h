@@ -3239,7 +3239,7 @@ namespace Legion {
     protected:
       PendingPartitionThunk *thunk;
       FutureMap future_map;
-      std::map<DomainPoint,Future> sources;
+      std::map<DomainPoint,FutureImpl*> sources;
     };
 
     /**
@@ -4239,7 +4239,7 @@ namespace Legion {
       const ReductionOp *redop; 
       const SerdezRedopFns *serdez_redop_fns;
       Future result;
-      std::map<DomainPoint,Future> sources;
+      std::map<DomainPoint,FutureImpl*> sources;
       std::vector<FutureInstance*> targets;
       size_t future_result_size;
       void *serdez_redop_buffer;

@@ -10538,8 +10538,7 @@ namespace Legion {
         }
         region_node->invalidate_refinement(ctx, refinement_mask, 
             false/*self*/, *parent_ctx, map_applied_conditions, to_release);
-        region_node->record_refinement(ctx, set, refinement_mask,
-                                       map_applied_conditions);
+        region_node->record_refinement(ctx, set, refinement_mask);
         if (!map_applied_conditions.empty())
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
@@ -11441,7 +11440,7 @@ namespace Legion {
         assert(refinement_regions.find(it->first) != refinement_regions.end());
 #endif
         it->first->propagate_refinement(ctx, refinement_regions[it->first],
-                                        it->second, map_applied_conditions);
+                                        it->second);
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -16284,14 +16283,14 @@ namespace Legion {
               std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      for (std::map<DomainPoint,Future>::const_iterator it =
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent mapped =
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
+          it->second->request_internal_buffer(this, false/*eager*/);
         if (mapped.exists())
           mapped_events.insert(mapped);
-        const RtEvent ready = it->second.impl->subscribe();
+        const RtEvent ready = it->second->subscribe();
         if (ready.exists())
           ready_events.insert(ready);
       }
@@ -22962,11 +22961,11 @@ namespace Legion {
     {
       populate_sources();
       std::vector<RtEvent> preconditions;
-      for (std::map<DomainPoint,Future>::const_iterator it =
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent ready =
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
+          it->second->request_internal_buffer(this, false/*eager*/);
         if (ready.exists() && !ready.has_triggered())
           preconditions.push_back(ready);
       }
@@ -22993,10 +22992,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second.impl;
+        FutureImpl *impl = it->second;
         size_t src_size = 0;
         const void *source = impl->find_internal_buffer(parent_ctx, src_size);
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
@@ -23077,11 +23076,10 @@ namespace Legion {
       {
         // Need to do our subscriptions now
         std::vector<RtEvent> ready_events;
-        for (std::map<DomainPoint,Future>::const_iterator it = 
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
         {
-          FutureImpl *impl = it->second.impl;
-          const RtEvent ready = impl->subscribe();
+          const RtEvent ready = it->second->subscribe();
           if (ready.exists())
             ready_events.push_back(ready);
         }
@@ -23110,10 +23108,10 @@ namespace Legion {
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
       std::vector<RtEvent> ready_events;
-      for (std::map<DomainPoint,Future>::const_iterator it =
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent ready = it->second.impl->subscribe();
+        const RtEvent ready = it->second->subscribe();
         if (ready.exists() && !ready.has_triggered())
           ready_events.push_back(ready);
       }
@@ -23246,10 +23244,10 @@ namespace Legion {
       RtEvent completion_precondition;
       std::vector<FutureInstance*> instances;
       instances.reserve(sources.size());
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second.impl;
+        FutureImpl *impl = it->second;
         FutureInstance *instance = impl->get_canonical_instance();
         if (instance->size != redop->sizeof_rhs)
           REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,

@@ -19625,9 +19625,6 @@ namespace Legion {
                            CollectiveMapping *mapping, Provenance *prov)
       : RegionTreeNode(ctx, col_src, init, tree, prov, id, mapping), handle(r),
         parent(par), row_source(row_src)
-#ifdef DEBUG_LEGION
-        , currently_valid(true)
-#endif
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -19670,116 +19667,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::notify_valid(ReferenceMutator *mutator)
+    void RegionNode::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
-      {
-        if (is_owner())
-        {
-#ifdef DEBUG_LEGION
-          assert(currently_valid);
-#endif
-          // Add valid references on our index space and our field space
-          column_source->add_nested_valid_ref(did, mutator);
-          row_source->add_nested_valid_ref(did, mutator);
-        }
-        else
-        {
-          if ((collective_mapping != NULL) &&
-              collective_mapping->contains(local_space))
-            send_remote_valid_increment(
-              collective_mapping->get_parent(owner_space,local_space),
-              mutator, initialized);
-          else
-            send_remote_valid_increment(owner_space, mutator);     
-        }
-      }
+        row_source->remove_nested_valid_ref(did);
       else
-      {
-        column_source->add_nested_valid_ref(did, mutator);
-        row_source->parent->add_nested_valid_ref(did, mutator);
-      }
+        row_source->parent->remove_nested_valid_ref(did);
+      column_source->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::InvalidFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      node->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::notify_invalid(ReferenceMutator *mutator)
+    void RegionNode::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
-      {
-        if (is_owner())
-        {
-#ifdef DEBUG_LEGION
-          assert(currently_valid);
-          currently_valid = false;
-#endif
-          // Remove our valid references, no need to check for deletion
-          // since we know that we are holding resource references too
-          column_source->remove_nested_valid_ref(did, mutator);
-          row_source->remove_nested_valid_ref(did, mutator);
-          // Send deletion messages to each of our remote instances
-          if (has_remote_instances())
-          {
-            InvalidFunctor functor(this, mutator);
-            map_over_remote_instances(functor);
-          }
-          if (collective_mapping != NULL)
-          {
-            std::vector<AddressSpaceID> children;
-            collective_mapping->get_children(owner_space,local_space,children);
-            for (std::vector<AddressSpaceID>::const_iterator it =
-                  children.begin(); it != children.end(); it++)
-              send_remote_gc_decrement(*it, mutator);
-          }
-        }
-        else
-        {
-          if ((collective_mapping != NULL) &&
-              collective_mapping->contains(local_space))
-            send_remote_valid_decrement(
-              collective_mapping->get_parent(owner_space,local_space),
-              mutator, initialized);
-          else
-            send_remote_valid_decrement(owner_space, mutator);
-        }
-      }
-      else
-      {
-        column_source->remove_nested_valid_ref(did, mutator);
-        row_source->parent->remove_nested_valid_ref(did, mutator);
-      } 
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(currently_active);
-      currently_active = false;
-#endif
-      if (parent == NULL)
-      {
         context->runtime->release_tree_instances(handle.get_tree_id());
-        // Continue propagating gc reference removals
-        if (!is_owner() && (collective_mapping != NULL) &&
-            collective_mapping->contains(local_space))
-        {
-          std::vector<AddressSpaceID> children;
-          collective_mapping->get_children(owner_space, local_space, children);
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            send_remote_gc_decrement(*it, mutator);
-        }
-      }
       if (!partition_trackers.empty())
       {
 #ifdef DEBUG_LEGION
@@ -19787,7 +19690,7 @@ namespace Legion {
 #endif
         for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
-          if ((*it)->remove_partition_reference(mutator))
+          if ((*it)->remove_partition_reference())
             delete (*it);
         partition_trackers.clear();
       } 
@@ -19804,12 +19707,19 @@ namespace Legion {
       assert(!registered);
 #endif
       if (parent != NULL)
+      {
+        row_source->parent->add_nested_valid_ref(did);
         parent->add_child(this);
+      }
       else
+      {
+        row_source->add_nested_valid_ref(did);
         column_source->add_nested_resource_ref(did);
+      }
+      column_source->add_nested_valid_ref(did);
       row_source->add_nested_resource_ref(did);
       registered = true;
-      result->register_with_runtime();
+      register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
@@ -19931,10 +19841,7 @@ namespace Legion {
 #endif
       // Record the new disjoint complete tree
       if (state.disjoint_complete_children.insert(child, refinement_mask))
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-      }
+        child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
       // Update the refinement tree for the full subtree
       child->update_disjoint_complete_tree(ctx, refinement_op,
                                            refinement_mask, applied_events);
@@ -20340,10 +20247,7 @@ namespace Legion {
         refined_partition |= overlap;
         // Add it to the current set
         if (state.disjoint_complete_children.insert(it->first, overlap))
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-        }
+          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF);
         // Remove it from this set
         it.filter(overlap);
         if (!it->second)
@@ -20366,24 +20270,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::initialize_versioning_analysis(ContextID ctx,
                                               EquivalenceSet *set,
-                                              const FieldMask &mask,
-                                              std::set<RtEvent> &applied_events)
+                                              const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.initialize_versioning_analysis(set, mask, applied_events);
+      manager.initialize_versioning_analysis(set, mask);
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::initialize_nonexclusive_virtual_analysis(ContextID ctx,
                                     const FieldMask &mask,
-                                    const FieldMaskSet<EquivalenceSet> &eq_sets,
-                                              std::set<RtEvent> &applied_events)
+                                    const FieldMaskSet<EquivalenceSet> &eq_sets)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets,
-                                                       applied_events);
+      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -20528,26 +20429,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                                       const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.record_refinement(set, mask, parent_mask, applied_events);
+      manager.record_refinement(set, mask, parent_mask);
       if (!!parent_mask && (parent != NULL))
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::propagate_refinement(ContextID ctx, PartitionNode *child,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                                          const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(child, mask, parent_mask, applied_events);
+      manager.propagate_refinement(child, mask, parent_mask);
       if (!!parent_mask && (parent != NULL))
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -21236,14 +21137,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionTracker::remove_partition_reference(ReferenceMutator *mutator)
+    bool PartitionTracker::remove_partition_reference()
     //--------------------------------------------------------------------------
     {
       // Pull a copy of this on to the stack in case we get deleted
       std::atomic<PartitionNode*> node(partition);
       const bool last = remove_reference();
       // If we weren't the last one that means we remove the reference
-      if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF, mutator))
+      if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF))
         delete node.load();
       return last;
     }
@@ -21310,30 +21211,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      column_source->add_nested_valid_ref(did, mutator);
-      row_source->add_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::notify_invalid(ReferenceMutator *mutator)
+    void PartitionNode::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       // No need to check for deletion since we hold resource references 
-      column_source->remove_nested_valid_ref(did, mutator);
-      row_source->remove_nested_valid_ref(did, mutator);
+      column_source->remove_nested_valid_ref(did);
+      row_source->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::notify_inactive(ReferenceMutator *mutator)
+    void PartitionNode::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(currently_active);
-      currently_active = false;
-#endif
       parent->remove_child(row_source->color);
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
@@ -21341,7 +21230,7 @@ namespace Legion {
       // No need to check for deletion since we hold resource references
       for (std::map<LegionColor,RegionNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
-        it->second->remove_nested_gc_ref(did, mutator);
+        it->second->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -21353,6 +21242,8 @@ namespace Legion {
 #endif
       row_source->add_nested_resource_ref(did);
       parent->add_nested_resource_ref(did);
+      column_source->add_nested_valid_ref(did);
+      row_source->add_nested_valid_ref(did);
       parent->add_child(this);
       // Create a partition deletion tracker for this node and add it to 
       // both the index partition node and the root logical region for this
@@ -21894,10 +21785,7 @@ namespace Legion {
             unrefined_children.insert(child, child_overlap);
           // Add it to the current set
           if (state.disjoint_complete_children.insert(child, child_overlap))
-          {
-            WrapperReferenceMutator mutator(applied_events);
-            child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-          }
+            child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
         }
       }
       else
@@ -21928,10 +21816,7 @@ namespace Legion {
             unrefined_children.insert(child, child_overlap);
           // Add it to the current set
           if (state.disjoint_complete_children.insert(child, child_overlap))
-          {
-            WrapperReferenceMutator mutator(applied_events);
-            child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-          }
+            child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
         }
         delete itr;
       } 
@@ -22121,27 +22006,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx, RegionNode *child, 
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                                             const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(child, mask, parent_mask, applied_events);
+      manager.propagate_refinement(child, mask, parent_mask);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx,
-                       const std::vector<RegionNode*> &children,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                const std::vector<RegionNode*> &children, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(children, mask, parent_mask, applied_events);
+      manager.propagate_refinement(children, mask, parent_mask);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------

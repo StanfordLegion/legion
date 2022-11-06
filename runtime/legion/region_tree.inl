@@ -1206,7 +1206,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->add_base_expression_reference(REMOTE_DID_REF);
+        this->pack_gc_ref();
       }
       else
       {
@@ -1216,7 +1216,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->add_base_expression_reference(REMOTE_DID_REF);
+        this->pack_gc_ref();
       }
     }
 
@@ -4576,9 +4576,9 @@ namespace Legion {
         // Fast case for when we know that the bounds of future map
         // is the same as the color space of the new partition
         // Get the shard-local futures for this future map            
-        std::map<DomainPoint,Future> shard_local_futures;
+        std::map<DomainPoint,FutureImpl*> shard_local_futures;
         future_map->get_shard_local_futures(shard_local_futures);
-        for (std::map<DomainPoint,Future>::const_iterator it = 
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
              shard_local_futures.begin(); it != shard_local_futures.end(); it++)
         {
           const Point<COLOR_DIM,COLOR_T> point = it->first;
@@ -4587,7 +4587,7 @@ namespace Legion {
           IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
                                             partition->get_child(child_color));
           size_t future_size = 0;
-          const Domain *domain = static_cast<const Domain*>(it->second.impl->
+          const Domain *domain = static_cast<const Domain*>(it->second->
                         find_internal_buffer(op->get_context(), future_size));
           if (future_size != sizeof(Domain))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
@@ -4709,7 +4709,7 @@ namespace Legion {
       std::vector<size_t> long_weights;
       std::vector<LegionColor> child_colors(count);
       unsigned color_index = 0;
-      std::map<DomainPoint,Future> futures;
+      std::map<DomainPoint,FutureImpl*> futures;
       future_map->get_all_futures(futures);
       // Make all the entries for the color space
       for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
@@ -4719,13 +4719,13 @@ namespace Legion {
               itr(rect_iter.rect); itr.valid; itr.step())
         {
           const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
-          std::map<DomainPoint,Future>::const_iterator finder = 
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
             futures.find(key);
           if (finder == futures.end())
             REPORT_LEGION_ERROR(ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR,
                 "A partition by weight call is missing an entry for a "
                 "color in the color space. All colors must be present.")
-          FutureImpl *future = future_map->unpack_future(finder->second);
+          FutureImpl *future = finder->second;
           size_t future_size = 0;
           const void *data =
             future->find_internal_buffer(op->get_context(), future_size);

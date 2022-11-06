@@ -353,8 +353,6 @@ namespace Legion {
       void unpack_gc_ref(int cnt = 1);
       void pack_valid_ref(int cnt = 1);
       void unpack_valid_ref(int cnt = 1);
-      void pack_resource_ref(int cnt = 1);
-      void unpack_resource_ref(int cnt = 1);
     public:
 #ifdef DEBUG_LEGION
       bool is_valid(void);
@@ -430,8 +428,8 @@ namespace Legion {
       static void handle_unregister_collectable(Runtime *runtime,
                                                 Deserializer &derez);
     public:
+      void send_remote_registration(void);
 #if 0
-      RtEvent send_remote_registration(void);
       // Return events indicate when message is on the virtual channel
       RtEvent send_remote_valid_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,

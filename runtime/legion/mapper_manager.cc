@@ -2725,7 +2725,7 @@ namespace Legion {
           ctx->acquired_instances->end())
         return true;
       pause_mapper_call(ctx);
-      if (manager->acquire_instance(MAPPING_ACQUIRE_REF, ctx->operation))
+      if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
       {
         record_acquired_instance(ctx, manager, false/*created*/);
         resume_mapper_call(ctx);
@@ -2897,7 +2897,7 @@ namespace Legion {
         // Try to add an acquired reference immediately
         // If we're remote it has to be valid already to be sound, but if
         // we're local whatever works
-        if (manager->acquire_instance(MAPPING_ACQUIRE_REF, info->operation))
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
         {
           // We already know it wasn't there before
           already_acquired[manager] = 1;
@@ -3037,8 +3037,7 @@ namespace Legion {
         return;
       // Release the refrences and then keep going, we know there is 
       // a resource reference so no need to check for deletion
-      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, ctx->operation,
-                                     finder->second);
+      manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF, finder->second);
       acquired.erase(finder);
     }
 

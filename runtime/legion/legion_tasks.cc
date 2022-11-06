@@ -4707,7 +4707,7 @@ namespace Legion {
         std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
                                 version_infos, equivalence_sets, unmap_events,
-                                map_applied_conditions, execution_events);
+                                execution_events);
         // Execution events come from copying over virtual mapping state
         // which needs to be done before the child task starts
         if (!execution_events.empty())

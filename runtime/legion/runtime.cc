@@ -462,7 +462,12 @@ namespace Legion {
       if (equivalent)
         return;
       // Otherwise we need to make them equivalent
-      future_map.impl->get_all_futures(arguments);
+      std::map<DomainPoint,FutureImpl*> futures;
+      future_map.impl->get_all_futures(futures);
+      arguments.clear();
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+        arguments[it->first] = Future(it->second);
       if ((point_set != NULL) && 
           point_set->remove_base_expression_reference(RUNTIME_REF))
         delete point_set;
@@ -2123,8 +2128,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ FutureImpl* FutureImpl::unpack_future(Runtime *runtime, 
-                                Deserializer &derez, ReferenceMutator *mutator,
+    /*static*/ Future FutureImpl::unpack_future(Runtime *runtime, 
+                                Deserializer &derez,
                                 Operation *op, GenerationID op_gen,
 #ifdef LEGION_SPY
                                 UniqueID op_uid,
@@ -2135,7 +2140,7 @@ namespace Legion {
       DistributedID future_did;
       derez.deserialize(future_did);
       if (future_did == 0)
-        return NULL;
+        return Future();
       UniqueID context_uid;
       derez.deserialize(context_uid);
       size_t op_ctx_index;
@@ -2143,26 +2148,17 @@ namespace Legion {
       DomainPoint point;
       derez.deserialize(point);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      return runtime->find_or_create_future(future_did, context_uid, mutator,
+      return Future(runtime->find_or_create_future(future_did, context_uid,
                                             op_ctx_index, point, provenance,
                                             op, op_gen,
 #ifdef LEGION_SPY
                                             op_uid,
 #endif
-                                            op_depth);
+                                            op_depth));
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we are not the owner, send a gc reference back to the owner
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::notify_valid(ReferenceMutator *mutator)
+    void FutureImpl::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2170,20 +2166,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::notify_invalid(ReferenceMutator *mutator)
+    void FutureImpl::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we are not the owner, remove our gc reference
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
+      // Nothing to do
     }
 
     //--------------------------------------------------------------------------
@@ -2419,7 +2405,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(ReferenceMutator *mutator)
+    void FutureImpl::record_future_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -2428,14 +2414,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
-      registered_with_runtime = true;
       if (!is_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(mutator != NULL);
-#endif
-        mutator->record_reference_mutation_effect(send_remote_registration());
-      }
+        send_remote_registration();
+      registered_with_runtime = true;
     }
 
     //--------------------------------------------------------------------------
@@ -2553,8 +2534,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      LocalReferenceMutator mutator;
-      FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
+      Future f = FutureImpl::unpack_future(runtime, derez);
       Memory target;
       derez.deserialize(target);
       UniqueID creator_uid;
@@ -2565,12 +2545,10 @@ namespace Legion {
       derez.deserialize(source);
       size_t upper_bound_size;
       derez.deserialize(upper_bound_size);
-      RtEvent mapped = 
-        impl->request_application_instance(target, NULL, creator_uid, source,
-                            ApUserEvent::NO_AP_USER_EVENT, upper_bound_size);
-      if (mapped.exists())
-        mutator.record_reference_mutation_effect(mapped);
-      Runtime::trigger_event(mapped_event, mutator.get_done_event());
+      const RtEvent mapped = 
+        f.impl->request_application_instance(target, NULL, creator_uid, source,
+                              ApUserEvent::NO_AP_USER_EVENT, upper_bound_size);
+      Runtime::trigger_event(mapped_event, mapped);
     }
 
     //--------------------------------------------------------------------------
@@ -3405,8 +3383,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain != NULL);
 #endif
-      LocalReferenceMutator mutator;
-      future_map_domain->add_nested_valid_ref(did, &mutator);
+      future_map_domain->add_nested_valid_ref(did);
       if (provenance != NULL)
         provenance->add_reference();
 #ifdef LEGION_GC
@@ -3433,8 +3410,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain != NULL);
 #endif
-      LocalReferenceMutator mutator;
-      future_map_domain->add_nested_valid_ref(did, &mutator);
+      future_map_domain->add_nested_valid_ref(did);
       if (provenance != NULL)
         provenance->add_reference();
 #ifdef LEGION_GC
@@ -3464,8 +3440,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(future_map_domain != NULL);
 #endif
-      LocalReferenceMutator mutator;
-      future_map_domain->add_nested_valid_ref(did, &mutator);
+      future_map_domain->add_nested_valid_ref(did);
       if (provenance != NULL)
         provenance->add_reference();
 #ifdef LEGION_GC
@@ -3492,6 +3467,10 @@ namespace Legion {
     FutureMapImpl::~FutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+        if (it->second->remove_nested_resource_ref(did))
+          delete it->second;
       futures.clear();
       if (future_map_domain->remove_nested_valid_ref(did))
         delete future_map_domain;
@@ -3509,16 +3488,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we are not the owner, send a gc reference back to the owner
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureMapImpl::notify_valid(ReferenceMutator *mutator)
+    void FutureMapImpl::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3526,20 +3496,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::notify_invalid(ReferenceMutator *mutator)
+    void FutureMapImpl::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureMapImpl::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we are not the owner, remove our gc reference
-      if (!is_owner())
-        send_remote_gc_decrement(owner_space, mutator);
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+        it->second->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -3571,10 +3533,10 @@ namespace Legion {
         // See if we already have it
         {
           AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
-          std::map<DomainPoint,Future>::const_iterator finder = 
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
                                                 futures.find(point);
           if (finder != futures.end())
-            return finder->second;
+            return Future(finder->second);
         }
         // Make an event for when we have the answer
         RtUserEvent future_ready_event = Runtime::create_rt_user_event();
@@ -3596,47 +3558,49 @@ namespace Legion {
         future_ready_event.wait(); 
         // When we wake up it should be here
         AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
-        std::map<DomainPoint,Future>::const_iterator finder = 
+        std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
                                               futures.find(point);
 #ifdef DEBUG_LEGION
         assert(finder != futures.end());
 #endif
-        return finder->second;
+        return Future(finder->second);
       }
       else
       {
         AutoLock fm_lock(future_map_lock);
         // Check to see if we already have a future for the point
-        std::map<DomainPoint,Future>::const_iterator finder = 
+        std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
                                               futures.find(point);
         if (finder != futures.end())
-          return finder->second;
+          return Future(finder->second);
         // Otherwise we need a future from the context to use for
         // the point that we will fill in later
-        Future result(new FutureImpl(context, runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(), runtime->address_space,
               completion_event, op, op_gen, op_ctx_index, point,
 #ifdef LEGION_SPY
             op_uid,
 #endif
-            op_depth, provenance));
+            op_depth, provenance);
+        result->add_nested_gc_ref(did);
+        result->add_nested_resource_ref(did);
         futures[point] = result;
         if (runtime->legion_spy_enabled)
           LegionSpy::log_future_creation(op->get_unique_op_id(),
                                    ApEvent::NO_AP_EVENT, point);
-        return result;
+        return Future(result);
       }
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl,
-                                   ReferenceMutator *mutator)
+    void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl)
     //--------------------------------------------------------------------------
     {
       // Add the reference first and then set the future
-      impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
+      impl->add_nested_gc_ref(did);
+      impl->add_nested_resource_ref(did);
       AutoLock fm_lock(future_map_lock);
-      futures[point] = Future(impl, false/*need reference*/);
+      futures[point] = impl;
     }
 
     //--------------------------------------------------------------------------
@@ -3690,13 +3654,10 @@ namespace Legion {
       assert(false);
       bool result = false;
       AutoLock fm_lock(future_map_lock);
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
-      {
-        bool restart = runtime->help_reset_future(it->second);
-        if (restart)
+        if (it->second->reset_future())
           result = true;
-      }
       return result;
     }
 
@@ -3715,14 +3676,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ FutureMapImpl* FutureMapImpl::unpack_future_map(Runtime *runtime,
-               Deserializer &derez, ReferenceMutator *mutator, TaskContext *ctx)
+    /*static*/ FutureMap FutureMapImpl::unpack_future_map(Runtime *runtime,
+                                          Deserializer &derez, TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
       DistributedID future_map_did;
       derez.deserialize(future_map_did);
       if (future_map_did == 0)
-        return NULL;
+        return FutureMap();
       IndexSpace future_map_domain;
       derez.deserialize(future_map_domain);
       ApEvent completion;
@@ -3730,12 +3691,13 @@ namespace Legion {
       size_t index;
       derez.deserialize(index);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      return runtime->find_or_create_future_map(future_map_did, ctx, index,
-                        future_map_domain, completion, mutator, provenance);
+      return FutureMap(runtime->find_or_create_future_map(future_map_did, ctx, 
+                            index, future_map_domain, completion, provenance));
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::get_all_futures(std::map<DomainPoint,Future> &others)
+    void FutureMapImpl::get_all_futures(
+                                     std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3776,7 +3738,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need for the lock here since we're initializing
-      futures = others;
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+            futures.begin(); it != futures.end(); it++)
+      {
+        it->second->remove_nested_gc_ref(did);
+        if (it->second->remove_nested_resource_ref(did))
+          delete it->second;
+      }
+      futures.clear();
+      for (std::map<DomainPoint,Future>::const_iterator it =
+            others.begin(); it != others.end(); it++)
+      {
+        FutureImpl *impl = it->second.impl;
+        impl->add_nested_resource_ref(did);
+        impl->add_nested_gc_ref(did);
+        futures[it->first] = impl;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3792,7 +3769,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureMapImpl::get_shard_local_futures(
-                                           std::map<DomainPoint,Future> &others)
+                                      std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
       // This is only called on this kind of future map when we know we
@@ -3827,7 +3804,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::record_future_map_registered(ReferenceMutator *mutator)
+    void FutureMapImpl::record_future_map_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -3836,10 +3813,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
-      registered_with_runtime = true;
       if (!is_owner())
-        // Send the remote registration notice
-        mutator->record_reference_mutation_effect(send_remote_registration());
+        send_remote_registration();
+      registered_with_runtime = true;
     }
 
     //--------------------------------------------------------------------------
@@ -3896,18 +3872,13 @@ namespace Legion {
 #else
       FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
 #endif
-      std::set<RtEvent> done_events;
-      WrapperReferenceMutator mutator(done_events);
-      FutureImpl *future = FutureImpl::unpack_future(runtime, derez, &mutator);
+      Future future = FutureImpl::unpack_future(runtime, derez);
       // Add it to the map
-      impl->set_future(point, future, &mutator);
+      impl->set_future(point, future.impl);
       // Trigger the done event
       RtUserEvent done;
       derez.deserialize(done);
-      if (!done_events.empty())
-        Runtime::trigger_event(done, Runtime::merge_events(done_events));
-      else
-        Runtime::trigger_event(done);
+      Runtime::trigger_event(done);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3928,8 +3899,7 @@ namespace Legion {
         previous(prev), own_functor(false), is_functor(false)
     //--------------------------------------------------------------------------
     {
-      LocalReferenceMutator mutator;
-      prev->add_nested_gc_ref(did, &mutator);
+      prev->add_nested_gc_ref(did);
       transform.fnptr = fnptr;
     }
 
@@ -3947,8 +3917,7 @@ namespace Legion {
         previous(prev), own_functor(own_func), is_functor(true)
     //--------------------------------------------------------------------------
     {
-      LocalReferenceMutator mutator;
-      prev->add_nested_gc_ref(did, &mutator);
+      prev->add_nested_gc_ref(did);
       transform.functor = functor;
     }
 
@@ -4021,10 +3990,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TransformFutureMapImpl::get_all_futures(
-                                          std::map<DomainPoint,Future> &futures)
+                                     std::map<DomainPoint,FutureImpl*> &futures)
     //--------------------------------------------------------------------------
     {
-      std::map<DomainPoint,Future> previous_futures;
+      std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_all_futures(previous_futures);
       Domain domain, range;
       future_map_domain->get_launch_space_domain(domain);
@@ -4038,7 +4007,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(previous->future_map_domain->contains_point(transformed));
 #endif 
-          std::map<DomainPoint,Future>::const_iterator finder =
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder =
             previous_futures.find(transformed);
 #ifdef DEBUG_LEGION
           assert(finder != previous_futures.end());
@@ -4055,7 +4024,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(previous->future_map_domain->contains_point(transformed));
 #endif 
-          std::map<DomainPoint,Future>::const_iterator finder =
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder =
             previous_futures.find(transformed);
 #ifdef DEBUG_LEGION
           assert(finder != previous_futures.end());
@@ -4112,10 +4081,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TransformFutureMapImpl::get_shard_local_futures(
-                                          std::map<DomainPoint,Future> &futures)
+                                     std::map<DomainPoint,FutureImpl*> &futures)
     //--------------------------------------------------------------------------
     {
-      std::map<DomainPoint,Future> previous_futures;
+      std::map<DomainPoint,FutureImpl*> previous_futures;
       previous->get_shard_local_futures(previous_futures);
       Domain domain, range;
       future_map_domain->get_launch_space_domain(domain);
@@ -4124,7 +4093,7 @@ namespace Legion {
       {
         if (transform.functor->is_invertible())
         {
-          for (std::map<DomainPoint,Future>::const_iterator it =
+          for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
                 previous_futures.begin(); it != previous_futures.end(); it++)
           {
             const DomainPoint inverted =
@@ -4146,7 +4115,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(previous->future_map_domain->contains_point(transformed));
 #endif 
-            std::map<DomainPoint,Future>::const_iterator finder =
+            std::map<DomainPoint,FutureImpl*>::const_iterator finder =
               previous_futures.find(transformed);
             if (finder != previous_futures.end())
               futures[itr.p] = finder->second;
@@ -4164,7 +4133,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(previous->future_map_domain->contains_point(transformed));
 #endif 
-          std::map<DomainPoint,Future>::const_iterator finder =
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder =
             previous_futures.find(transformed);
           if (finder != previous_futures.end())
             futures[itr.p] = finder->second;
@@ -4196,8 +4165,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_domain != NULL);
 #endif
-      LocalReferenceMutator mutator;
-      shard_domain->add_nested_valid_ref(did, &mutator);
+      shard_domain->add_nested_valid_ref(did);
       repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
@@ -4223,8 +4191,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(shard_domain != NULL);
 #endif
-      LocalReferenceMutator mutator;
-      shard_domain->add_nested_valid_ref(did, &mutator);
+      shard_domain->add_nested_valid_ref(did);
       repl_ctx->add_reference();
       // Now register ourselves with the context
       repl_ctx->register_future_map(this);
@@ -4263,14 +4230,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::notify_inactive(ReferenceMutator *mutator)
+    void ReplFutureMapImpl::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       // Do the base version, then arrive on our barrier
-      FutureMapImpl::notify_inactive(mutator);
+      FutureMapImpl::notify_inactive();
       // Decide what to do here about our future map barrier depending
       // on whether we saw any non-trivial calls on this shard. If we 
       // did not see any non-trivial calls then neither should any of
@@ -4278,11 +4245,7 @@ namespace Legion {
       // reclamation of this future map
       if (has_non_trivial_call)
       {
-        if (!exchange_events.empty())
-          Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/,
-              Runtime::merge_events(exchange_events));
-        else
-          Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
+        Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
         if (!future_map_barrier.has_triggered())
         {
           // Add a reference to this to prevent it being collected
@@ -4319,10 +4282,10 @@ namespace Legion {
       // Do a quick check to see if we've already got it
       {
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
-        std::map<DomainPoint,Future>::const_iterator finder = 
+        std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
           futures.find(point);
         if (finder != futures.end())
-          return finder->second;
+          return Future(finder->second);
       }
       // Now we need to figure out which shard we're on, see if we know
       // the sharding function yet, if not we have to wait
@@ -4354,12 +4317,12 @@ namespace Legion {
         done_event.wait();
         // Now we can wake up see if we found it
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
-        std::map<DomainPoint,Future>::const_iterator finder = 
+        std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
           futures.find(point);
 #ifdef DEBUG_LEGION
         assert(finder != futures.end());
 #endif
-        return finder->second;
+        return Future(finder->second);
       }
       else // If we're the owner shard we can just do the normal thing
         return FutureMapImpl::get_future(point, internal, wait_on);
@@ -4367,7 +4330,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::get_all_futures(
-                                           std::map<DomainPoint,Future> &others)
+                                      std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
       has_non_trivial_call = true;
@@ -4382,7 +4345,6 @@ namespace Legion {
       // Now we've got all our local futures so we can do the exchange
       // Have to hold the lock when doing this as there might be
       // other requests for the future map
-      WrapperReferenceMutator mutator(exchange_events);
       if (!collective_performed.load())
       { 
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
@@ -4395,19 +4357,24 @@ namespace Legion {
           if (hasher.verify(__func__))
             break;
         }
-        std::map<DomainPoint,Future> local_futures;
+        std::map<DomainPoint,FutureImpl*> local_futures;
         get_shard_local_futures(local_futures);
-        FutureNameExchange collective(repl_ctx, collective_index,this,&mutator);
+        FutureNameExchange collective(repl_ctx, collective_index, this);
         collective.exchange_future_names(local_futures);
         AutoLock f_lock(future_map_lock);
         if (!collective_performed.load())
         {
           // When the collective is done we can mark that we've done it
           // and then copy the results
-          if (!futures.empty())
-            futures.insert(local_futures.begin(), local_futures.end());
-          else
-            futures.swap(local_futures);
+          for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+                local_futures.begin(); it != local_futures.end(); it++)
+          {
+            if (futures.insert(*it).second)
+            {
+              it->second->add_nested_resource_ref(did);
+              it->second->add_nested_gc_ref(did);
+            }
+          }
           collective_performed.store(true);
         }
       }
@@ -4471,7 +4438,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::get_shard_local_futures(
-                                           std::map<DomainPoint,Future> &others)
+                                      std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
       Domain sharding_domain;
@@ -4495,7 +4462,7 @@ namespace Legion {
         if (shard == local_shard)
         {
           RtEvent ready;
-          others[itr.p] = get_future(itr.p, true/*internal*/, &ready);
+          others[itr.p] = get_future(itr.p, true/*internal*/, &ready).impl;
           if (ready.exists())
             ready_events.push_back(ready);
         }
@@ -4601,14 +4568,8 @@ namespace Legion {
 #else
         ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(dc);
 #endif
-        std::set<RtEvent> preconditions;
-        WrapperReferenceMutator mutator(preconditions);
-        target->set_future(point, result.impl, &mutator);
-        if (!preconditions.empty())
-          Runtime::trigger_event(done_event,
-              Runtime::merge_events(preconditions));
-        else
-          Runtime::trigger_event(done_event);
+        target->set_future(point, result.impl);
+        Runtime::trigger_event(done_event);
       }
     }
 
@@ -4632,21 +4593,16 @@ namespace Legion {
 #else
       ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(dc);
 #endif
-      std::set<RtEvent> done_events;
-      WrapperReferenceMutator mutator(done_events);
-      FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator,
+      Future f = FutureImpl::unpack_future(runtime, derez,
                                                    target->op, target->op_gen,
 #ifdef LEGION_SPY
                                                    target->op_uid,
 #endif
                                                    target->op_depth);
-      target->set_future(point, impl, &mutator);
+      target->set_future(point, f.impl);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      if (!done_events.empty())
-        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
-      else
-        Runtime::trigger_event(done_event);
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -4699,7 +4655,7 @@ namespace Legion {
         if (leaf_region)
           references.remove_resource_references(PHYSICAL_REGION_REF);
         else
-          references.remove_valid_references(PHYSICAL_REGION_REF, NULL/*mut*/);
+          references.remove_valid_references(PHYSICAL_REGION_REF);
       }
       if ((sharded_view != NULL) && 
           sharded_view->remove_base_resource_ref(PHYSICAL_REGION_REF))
@@ -5030,7 +4986,7 @@ namespace Legion {
         if (leaf_region)
           ref.add_resource_reference(PHYSICAL_REGION_REF);
         else
-          ref.add_valid_reference(PHYSICAL_REGION_REF, NULL/*mutator*/);
+          ref.add_valid_reference(PHYSICAL_REGION_REF);
       }
     }
 
@@ -5048,7 +5004,7 @@ namespace Legion {
         if (leaf_region)
           references.add_resource_references(PHYSICAL_REGION_REF);
         else
-          references.add_valid_references(PHYSICAL_REGION_REF, NULL/*mutator*/);
+          references.add_valid_references(PHYSICAL_REGION_REF);
       }
     }
 
@@ -8359,7 +8315,6 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           if (target != NULL)
           {
             rez.serialize(target->did);
@@ -8384,24 +8339,11 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          if (acquire)
-          {
-            LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
-#else
-            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                             local_mutator.get_done_event());
-          }
+          manager->unpack_gc_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
           else
-            manager->send_remote_resource_decrement(owner_space);
-          return true;
+            return true;
         }
         else
           return false;
@@ -8427,7 +8369,7 @@ namespace Legion {
           // Do this first to add a resource reference
           result = MappingInstance(manager);
           record_created_instance(manager, acquire, mapper_id, processor,
-                                  priority, remote);
+                                  priority);
           success = true;
         }
         // Release our allocation privilege after doing the record
@@ -8462,7 +8404,6 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           if (target != NULL)
           {
             rez.serialize(target->did);
@@ -8487,24 +8428,11 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
-          if (acquire)
-          {
-            LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
-#else
-            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                             local_mutator.get_done_event());
-          }
+          manager->unpack_gc_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
           else
-            manager->send_remote_resource_decrement(owner_space);
-          return true;
+            return true;
         }
         else
           return false;
@@ -8530,7 +8458,7 @@ namespace Legion {
           // Do this first to add a resource reference
           result = MappingInstance(manager);
           record_created_instance(manager, acquire, mapper_id, processor,
-                                  priority, remote);
+                                  priority);
           success = true;
         }
         // Release our allocation privilege after doing the record
@@ -8573,7 +8501,6 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize(mapper_id);
           rez.serialize(processor);
@@ -8592,25 +8519,12 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
+          manager->unpack_gc_ref();
           created = remote_created.load();
-          if (acquire)
-          {
-            LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
-#else
-            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                             local_mutator.get_done_event());
-          }
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
           else
-            manager->send_remote_resource_decrement(owner_space);
-          return true;
+            return true;
         }
         else
           return false;
@@ -8644,7 +8558,7 @@ namespace Legion {
             // Do this first to add a resource reference
             result = MappingInstance(manager);
             record_created_instance(manager, acquire, mapper_id, processor,
-                                    priority, remote);
+                                    priority);
             // We made this instance so mark that it was created
             created = true;
           }
@@ -8691,7 +8605,6 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize(mapper_id);
           rez.serialize(processor);
@@ -8710,25 +8623,12 @@ namespace Legion {
         if (manager != NULL)
         {
           result = MappingInstance(manager);
+          manager->unpack_gc_ref();
           created = remote_created.load();
-          if (acquire)
-          {
-            LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
-#else
-            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                             local_mutator.get_done_event());
-          }
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
           else
-            manager->send_remote_resource_decrement(owner_space);
-          return true;
+            return true;
         }
         else
           return false;
@@ -8763,7 +8663,7 @@ namespace Legion {
             // Do this first to add a resource reference
             result = MappingInstance(manager);
             record_created_instance(manager, acquire, mapper_id, processor,
-                                    priority, remote);
+                                    priority);
             // We made this instance so mark that it was created
             created = true;
           }
@@ -8802,7 +8702,6 @@ namespace Legion {
           rez.serialize(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize<bool>(tight_region_bounds);
           rez.serialize(&remote_manager);
@@ -8812,24 +8711,12 @@ namespace Legion {
         PhysicalManager *manager = remote_manager.load();
         if (manager != NULL)
         {
-          if (acquire)
-          {
-            LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
-#else
-            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                             local_mutator.get_done_event());
-          }
+          result = MappingInstance(manager);
+          manager->unpack_gc_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
           else
-            manager->send_remote_resource_decrement(owner_space);
-          return true;
+            return true;
         }
         else
           return false;
@@ -8866,7 +8753,6 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize<bool>(tight_region_bounds);
           rez.serialize(&remote_manager);
@@ -8876,24 +8762,12 @@ namespace Legion {
         PhysicalManager *manager = remote_manager.load();
         if (manager != NULL)
         {
-          if (acquire)
-          {
-            LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-            const bool success =
-#endif
-            manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-            assert(success);
-#else
-            manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-            manager->send_remote_valid_decrement(owner_space, NULL,
-                                             local_mutator.get_done_event());
-          }
+          result = MappingInstance(manager);
+          manager->unpack_gc_ref();
+          if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+            return false;
           else
-            manager->send_remote_resource_decrement(owner_space);
-          return true;
+            return true;
         }
         else
           return false;
@@ -8928,7 +8802,6 @@ namespace Legion {
           rez.serialize(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           constraints.serialize(rez);
           rez.serialize<bool>(tight_region_bounds);
           rez.serialize(&remote_managers);
@@ -8938,31 +8811,16 @@ namespace Legion {
         std::vector<PhysicalManager*> *managers = remote_managers.load();
         if (managers != NULL)
         {
-          results.resize(managers->size());
-          for (unsigned idx = 0; idx < results.size(); idx++)
+          for (unsigned idx = 0; idx < managers->size(); idx++)
           {
             PhysicalManager *manager = managers->at(idx);
 #ifdef DEBUG_LEGION
             assert(manager != NULL);
 #endif
-            results[idx] = MappingInstance(manager);
-            if (acquire)
-            {
-              LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-              const bool success =
-#endif
-              manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-              assert(success);
-#else
-              manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-              manager->send_remote_valid_decrement(owner_space, NULL,
-                                               local_mutator.get_done_event());
-            }
-            else
-              manager->send_remote_resource_decrement(owner_space);
+            results.emplace_back(MappingInstance(manager));
+            manager->unpack_gc_ref();
+            if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+              results.pop_back();
           }
           delete managers;
         }
@@ -8992,7 +8850,6 @@ namespace Legion {
           rez.serialize<size_t>(regions.size());
           for (unsigned idx = 0; idx < regions.size(); idx++)
             rez.serialize(regions[idx]);
-          rez.serialize<bool>(acquire);
           rez.serialize(constraints->layout_id);
           rez.serialize<bool>(tight_region_bounds);
           rez.serialize(&remote_managers);
@@ -9002,31 +8859,16 @@ namespace Legion {
         std::vector<PhysicalManager*> *managers = remote_managers.load();
         if (managers != NULL)
         {
-          results.resize(managers->size());
-          for (unsigned idx = 0; idx < results.size(); idx++)
+          for (unsigned idx = 0; idx < managers->size(); idx++)
           {
             PhysicalManager *manager = managers->at(idx);
 #ifdef DEBUG_LEGION
             assert(manager != NULL);
 #endif
-            results[idx] = MappingInstance(manager);
-            if (acquire)
-            {
-              LocalReferenceMutator local_mutator;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-              const bool success =
-#endif
-              manager->acquire_instance(MAPPING_ACQUIRE_REF, &local_mutator);
-              assert(success);
-#else
-              manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-#endif
-              manager->send_remote_valid_decrement(owner_space, NULL,
-                                               local_mutator.get_done_event());
-            }
-            else
-              manager->send_remote_resource_decrement(owner_space);
+            results.emplace_back(MappingInstance(manager));
+            manager->unpack_gc_ref();
+            if (acquire && !manager->acquire_instance(MAPPING_ACQUIRE_REF))
+              results.pop_back();
           }
           delete managers;
         }
@@ -9135,8 +8977,6 @@ namespace Legion {
       std::vector<LogicalRegion> regions(num_regions);
       for (unsigned idx = 0; idx < num_regions; idx++)
         derez.deserialize(regions[idx]);
-      bool acquire;
-      derez.deserialize(acquire);
       switch (kind)
       {
         case CREATE_INSTANCE_CONSTRAINTS:
@@ -9180,7 +9020,7 @@ namespace Legion {
             if (collective_ready.exists() && !collective_ready.has_triggered())
               collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
-                                 result, mapper_id, processor, acquire, 
+                                 result, mapper_id, processor, false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
                                  collective, &point, creator_id,true/*remote*/);
@@ -9197,6 +9037,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
+                  manager->pack_gc_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                 }
@@ -9257,7 +9098,7 @@ namespace Legion {
             if (collective_ready.exists() && !collective_ready.has_triggered())
               collective_ready.wait();
             bool success = create_physical_instance(constraints, regions, 
-                                 result, mapper_id, processor, acquire, 
+                                 result, mapper_id, processor, false/*acquire*/,
                                  priority, tight_region_bounds,
                                  &local_kind, &local_index, &local_footprint,
                                  collective, &point, creator_id,true/*remote*/);
@@ -9273,6 +9114,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
+                  manager->pack_gc_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                 }
@@ -9320,8 +9162,8 @@ namespace Legion {
             unsigned local_index;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                regions, result, created, mapper_id, 
-                                processor, acquire, priority, tight_bounds,
+                                regions, result, created, mapper_id, processor, 
+                                false/*acquire*/, priority, tight_bounds,
                                 &local_kind, &local_index,
                                 &local_footprint, creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
@@ -9336,6 +9178,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
+                  manager->pack_gc_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                   rez.serialize(kind);
@@ -9389,8 +9232,8 @@ namespace Legion {
             unsigned local_index;
             bool created;
             bool success = find_or_create_physical_instance(constraints, 
-                                 regions, result, created, mapper_id, 
-                                 processor, acquire, priority, tight_bounds,
+                                 regions, result, created, mapper_id, processor,
+                                 false/*acquire*/, priority, tight_bounds,
                                  &local_kind, &local_index,
                                  &local_footprint, creator_id, true/*remote*/);
             if (success || (remote_footprint != NULL) ||
@@ -9405,6 +9248,7 @@ namespace Legion {
                 if (success)
                 {
                   InstanceManager *manager = result.impl;
+                  manager->pack_gc_ref();
                   rez.serialize(manager->did);
                   rez.serialize(remote_target);
                   rez.serialize(kind);
@@ -9436,10 +9280,11 @@ namespace Legion {
             derez.deserialize(remote_target);
             MappingInstance result;
             bool success = find_physical_instance(constraints, regions,
-                        result, acquire, tight_bounds, true/*remote*/);
+                        result, false/*acquire*/, tight_bounds, true/*remote*/);
             if (success)
             {
               InstanceManager *manager = result.impl;
+              manager->pack_gc_ref();
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -9475,10 +9320,11 @@ namespace Legion {
               runtime->find_layout_constraints(layout_id);
             MappingInstance result;
             bool success = find_physical_instance(constraints, regions, 
-                        result, acquire, tight_bounds, true/*remote*/);
+                        result, false/*acquire*/, tight_bounds, true/*remote*/);
             if (success)
             {
               InstanceManager *manager = result.impl;
+              manager->pack_gc_ref();
               Serializer rez;
               {
                 RezCheck z(rez);
@@ -9511,8 +9357,8 @@ namespace Legion {
             std::atomic<std::vector<PhysicalManager*>*> *remote_target;
             derez.deserialize(remote_target);
             std::vector<MappingInstance> results;
-            find_physical_instances(constraints, regions, results, acquire, 
-                                    tight_bounds, true/*remote*/);
+            find_physical_instances(constraints, regions, results,
+                false/*acqire*/, tight_bounds, true/*remote*/);
             if (!results.empty())
             {
               Serializer rez;
@@ -9527,6 +9373,7 @@ namespace Legion {
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
                   InstanceManager *manager = results[idx].impl;
+                  manager->pack_gc_ref();
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -9554,8 +9401,8 @@ namespace Legion {
             LayoutConstraints *constraints = 
               runtime->find_layout_constraints(layout_id);
             std::vector<MappingInstance> results;
-            find_physical_instances(constraints, regions, results, acquire, 
-                                    tight_bounds, true/*remote*/);
+            find_physical_instances(constraints, regions, results,
+                false/*acquire*/, tight_bounds, true/*remote*/);
             if (!results.empty())
             {
               Serializer rez;
@@ -9570,6 +9417,7 @@ namespace Legion {
                 for (unsigned idx = 0; idx < results.size(); idx++)
                 {
                   InstanceManager *manager = results[idx].impl;
+                  manager->pack_gc_ref();
                   rez.serialize(manager->did);
                 }
                 // No things for us to pass back here
@@ -9754,8 +9602,7 @@ namespace Legion {
             {
               // Check to see if we need to acquire
               // If we fail to acquire then keep going
-              if (acquire && !(*it)->acquire_instance(
-                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+              if (acquire && !(*it)->acquire_instance(MAPPING_ACQUIRE_REF))
                 continue;
               // If we make it here, we succeeded
               result = MappingInstance(*it);
@@ -9774,8 +9621,7 @@ namespace Legion {
             {
               // Check to see if we need to acquire
               // If we fail to acquire then keep going
-              if (acquire && !(*it)->acquire_instance(
-                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+              if (acquire && !(*it)->acquire_instance(MAPPING_ACQUIRE_REF))
                 continue;
               // If we make it here, we succeeded
               result = MappingInstance(*it);
@@ -9857,8 +9703,7 @@ namespace Legion {
             {
               // Check to see if we need to acquire
               // If we fail to acquire then keep going
-              if (acquire && !(*it)->acquire_instance(
-                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+              if (acquire && !(*it)->acquire_instance(MAPPING_ACQUIRE_REF))
                 continue;
               // If we make it here, we succeeded
               results.push_back(MappingInstance(*it));
@@ -9875,8 +9720,7 @@ namespace Legion {
             {
               // Check to see if we need to acquire
               // If we fail to acquire then keep going
-              if (acquire && !(*it)->acquire_instance(
-                      remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+              if (acquire && !(*it)->acquire_instance(MAPPING_ACQUIRE_REF))
                 continue;
               // If we make it here, we succeeded
               results.push_back(MappingInstance(*it));
@@ -9939,8 +9783,7 @@ namespace Legion {
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
-            if (acquire && !(*it)->acquire_instance(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL))
+            if (acquire && !(*it)->acquire_instance(MAPPING_ACQUIRE_REF))
               continue;
             // If we make it here, we succeeded
             result = MappingInstance(*it);
@@ -10039,8 +9882,7 @@ namespace Legion {
                               true/*acquire*/,
                               mapper_id,
                               target_proc,
-                              priority,
-                              false/*remote*/);
+                              priority);
       return manager;
     }
 
@@ -10356,8 +10198,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MemoryManager::record_created_instance(PhysicalManager *manager,
-                           bool acquire, MapperID mapper_id, Processor p,
-                           GCPriority priority, bool remote)
+             bool acquire, MapperID mapper_id, Processor p, GCPriority priority)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10371,14 +10212,11 @@ namespace Legion {
         const bool result =
 #endif
 #endif
-        manager->acquire_instance(
-            remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL/*mutator*/);
+        manager->acquire_instance(MAPPING_ACQUIRE_REF);
 #ifdef DEBUG_LEGION
         assert(result);
 #endif
       }
-      else if (remote)
-        manager->add_base_resource_ref(REMOTE_DID_REF);
       // Since we're going to put this in the table add a reference
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       // If we're setting the priority to min priority and this is the
@@ -14719,34 +14557,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not the owner add a remote reference
-      if (!is_owner())
-        send_remote_gc_increment(owner_space, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_inactive(ReferenceMutator *mutator)
+    void LayoutConstraints::notify_inactive(void)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
         runtime->unregister_layout(layout_id);
-      else
-        send_remote_gc_decrement(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutConstraints::notify_invalid(ReferenceMutator *mutator)
+    void LayoutConstraints::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -18137,7 +17956,7 @@ namespace Legion {
       // on the task being reported back to the mapper
       ApUserEvent result = Runtime::create_ap_user_event(NULL);
       // Add a reference to the future impl to prevent it being collected
-      f.impl->add_base_gc_ref(FUTURE_HANDLE_REF);
+      f.impl->add_base_gc_ref(META_TASK_REF);
       // Create a meta-task to return the results to the mapper
       MapperTaskArgs args(f.impl, map_id, proc, result, map_context);
       ApEvent pre = f.impl->get_ready_event();
@@ -21550,7 +21369,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_INDEX_SPACE_RETURN>(rez,
-         true/*flush*/, true/*response*/, false/*shutdown*/, send_precondition);
+                      true/*flush*/, true/*response*/, false/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21670,7 +21489,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_INDEX_PARTITION_RETURN>(rez,
-        true/*flush*/, true/*response*/, false/*shutdown*/, send_precondition);
+                        true/*flush*/, true/*response*/, false/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
@@ -26366,7 +26185,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
                                                UniqueID context_uid,
-                                               ReferenceMutator *mutator,
                                                size_t op_ctx_index,
                                                const DomainPoint &op_point,
                                                Provenance *provenance,
@@ -26412,9 +26230,7 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          if (!result->is_owner() && 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete (result);
+          delete result;
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureImpl*>(finder->second);
           assert(result != NULL);
@@ -26423,7 +26239,7 @@ namespace Legion {
 #endif
           return result;
         }
-        result->record_future_registered(mutator);
+        result->record_future_registered();
         dist_collectables[did] = result;
       }
       return result;
@@ -26432,8 +26248,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl* Runtime::find_or_create_future_map(DistributedID did,
                           TaskContext *ctx, size_t index, IndexSpace domain,
-                          ApEvent completion, ReferenceMutator *mutator,
-                          Provenance *provenance)
+                          ApEvent completion, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK;
@@ -26468,9 +26283,7 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          if (!result->is_owner() &&
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete (result);
+          delete result;
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureMapImpl*>(finder->second);
           assert(result != NULL);
@@ -26479,7 +26292,7 @@ namespace Legion {
 #endif
           return result;
         }
-        result->record_future_map_registered(mutator);
+        result->record_future_map_registered();
         dist_collectables[did] = result;
       }
       return result;
@@ -26690,19 +26503,17 @@ namespace Legion {
         }
         if (!to_remove.empty())
         {
-          WrapperReferenceMutator mutator(applied); 
           for (std::vector<LayoutConstraints*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
-            if ((*it)->remove_base_gc_ref(APPLICATION_REF, &mutator))
+            if ((*it)->remove_base_gc_ref(APPLICATION_REF))
               delete (*it);
         }
       }
       if (!redop_fill_views.empty())
       {
-        WrapperReferenceMutator mutator(applied);
         for (std::map<ReductionOpID,FillView*>::const_iterator it = 
               redop_fill_views.begin(); it != redop_fill_views.end(); it++)
-          if (it->second->remove_base_valid_ref(RUNTIME_REF, &mutator))
+          if (it->second->remove_base_valid_ref(RUNTIME_REF))
             delete it->second;
         redop_fill_views.clear();
       }
@@ -28614,13 +28425,6 @@ namespace Legion {
       return Future(new FutureImpl(ctx, this, true/*register*/,
                                    get_available_distributed_id(),address_space, 
                                    complete_event, provenance, future_size,op));
-    }
-
-    //--------------------------------------------------------------------------
-    bool Runtime::help_reset_future(const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      return f.impl->reset_future();
     }
 
     //--------------------------------------------------------------------------
@@ -31550,7 +31354,7 @@ namespace Legion {
             MapperTaskArgs *margs = (MapperTaskArgs*)args;
             runtime->process_mapper_task_result(margs);
             // Now indicate that we are done with the future
-            if (margs->future->remove_base_gc_ref(FUTURE_HANDLE_REF))
+            if (margs->future->remove_base_gc_ref(META_TASK_REF))
               delete margs->future;
             // We can also deactivate the enclosing context 
             if (margs->ctx->remove_reference())
@@ -31805,11 +31609,6 @@ namespace Legion {
             EquivalenceSet::handle_apply_state(args);
             break;
           }
-        case LG_DEFER_RELEASE_REF_TASK_ID:
-          {
-            EquivalenceSet::handle_remove_refs(args);
-            break;
-          }
         case LG_DEFER_REMOTE_REF_UPDATE_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_reference_update(
@@ -31885,11 +31684,6 @@ namespace Legion {
         case LG_DEFER_VERIFY_PARTITION_TASK_ID:
           {
             InnerContext::handle_partition_verification(args);
-            break;
-          }
-        case LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID:
-          {
-            InnerContext::handle_remove_remote_references(args);
             break;
           }
         case LG_DEFER_RELEASE_ACQUIRED_TASK_ID:

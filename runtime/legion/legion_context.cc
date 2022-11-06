@@ -10212,7 +10212,6 @@ namespace Legion {
                       const LegionVector<VersionInfo> &version_infos,
                       const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
-                      std::set<RtEvent> &applied_events,
                       std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {
@@ -10271,7 +10270,7 @@ namespace Legion {
             version_infos[idx1].get_equivalence_sets();
           // tell the version manager about these equivalence sets
           region_node->initialize_nonexclusive_virtual_analysis(ctx, user_mask,
-                                                      eq_sets, applied_events);
+                                                                eq_sets);
           continue;
         }
 #ifdef DEBUG_LEGION
@@ -10388,8 +10387,7 @@ namespace Legion {
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
-        region_node->initialize_versioning_analysis(ctx, eq_set,
-                                                    user_mask, applied_events);
+        region_node->initialize_versioning_analysis(ctx, eq_set, user_mask);
         // Each equivalence set here comes with a CONTEXT_REF that we
         // need to remove after we've registered it
         if (eq_set->remove_base_valid_ref(CONTEXT_REF))
@@ -23703,7 +23701,6 @@ namespace Legion {
                        const LegionVector<VersionInfo> &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &applied_events,
                        std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {

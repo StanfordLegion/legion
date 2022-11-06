@@ -4166,11 +4166,10 @@ namespace Legion {
                                          FieldMask &refined_partition,
                                          std::set<RtEvent> &applied_events);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
-                    const FieldMask &mask, std::set<RtEvent> &applied_events);
+                                          const FieldMask &mask);
       void initialize_nonexclusive_virtual_analysis(ContextID ctx,
                                   const FieldMask &mask,
-                                  const FieldMaskSet<EquivalenceSet> &eq_sets,
-                                  std::set<RtEvent> &applied_events);
+                                  const FieldMaskSet<EquivalenceSet> &eq_sets);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
@@ -4196,11 +4195,9 @@ namespace Legion {
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_root = false);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
-                             const FieldMask &mask,
-                             std::set<RtEvent> &applied_eventssymbolic);
+                             const FieldMask &mask);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
-                                const FieldMask &mask,
-                                std::set<RtEvent> &applied_events);
+                                const FieldMask &mask);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -4212,9 +4209,6 @@ namespace Legion {
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
       std::list<PartitionTracker*> partition_trackers;
-#ifdef DEBUG_LEGION
-      bool currently_valid;
-#endif
     };
 
     /**
@@ -4312,12 +4306,10 @@ namespace Legion {
                                  std::vector<EquivalenceSet*> &to_release,
                                  InnerContext &source_context);
       void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask,
-                                std::set<RtEvent> &applied_events);
+                                const FieldMask &mask);
       void propagate_refinement(ContextID ctx, 
                                 const std::vector<RegionNode*> &children,
-                                const FieldMask &mask,
-                                std::set<RtEvent> &applied_events);
+                                const FieldMask &mask);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 

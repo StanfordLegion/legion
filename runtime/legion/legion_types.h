@@ -1973,6 +1973,8 @@ namespace Legion {
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
+    friend class Internal::FutureImpl;                      \
+    friend class Internal::FutureMapImpl;                   \
     friend class Internal::PhysicalRegionImpl;              \
     friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \

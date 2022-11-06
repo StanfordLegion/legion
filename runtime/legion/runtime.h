@@ -613,16 +613,13 @@ namespace Legion {
       static FutureMap unpack_future_map(Runtime *runtime,
           Deserializer &derez, TaskContext *ctx);
     public:
-      virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
+      virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
-      // Dump helper method for template classes
-      static inline FutureImpl* unpack_future(const Future &future)
-        { return future.impl; }
     public:
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                     std::map<DomainPoint,Future> &futures);
+                                    std::map<DomainPoint,FutureImpl*> &futures);
     public:
       void register_dependence(Operation *consumer_op);
     public:
@@ -673,7 +670,7 @@ namespace Legion {
       virtual Future get_future(const DomainPoint &point, 
                                 bool internal_only,
                                 RtEvent *wait_on = NULL);
-      virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
+      virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
       virtual void argument_map_wrap(void);
@@ -681,7 +678,7 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                     std::map<DomainPoint,Future> &futures);
+                                    std::map<DomainPoint,FutureImpl*> &futures);
     public:
       FutureMapImpl *const previous;
       const bool own_functor;
@@ -747,7 +744,7 @@ namespace Legion {
     public:
       virtual Future get_future(const DomainPoint &point,
                                 bool internal, RtEvent *wait_on = NULL);
-      virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
+      virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
       virtual void argument_map_wrap(void) { has_non_trivial_call = true; }
@@ -755,7 +752,7 @@ namespace Legion {
       // Will return NULL if it does not exist
       virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(
-                                     std::map<DomainPoint,Future> &futures);
+                                    std::map<DomainPoint,FutureImpl*> &futures);
     public:
       void set_sharding_function(ShardingFunction *function, bool own = false);
       void handle_future_map_request(Deserializer &derez);
@@ -781,7 +778,6 @@ namespace Legion {
       const UniqueID op_uid;
     protected:
       std::vector<PendingRequest> pending_future_map_requests;
-      std::set<RtEvent> exchange_events;
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
       // Whether the future map owns the sharding function
@@ -1563,7 +1559,7 @@ namespace Legion {
                                     GCPriority priority);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     MapperID mapper_id, Processor proc,
-                                    GCPriority priority, bool remote);
+                                    GCPriority priority);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
                                   ApEvent ready_event, size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, 
@@ -4050,7 +4046,6 @@ namespace Legion {
                                 Provenance *provenance,
                                 const size_t *future_size = NULL,
                                 Operation *op = NULL);
-      bool help_reset_future(const Future &f);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:
       unsigned generate_random_integer(void);

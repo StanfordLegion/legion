@@ -750,7 +750,7 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void exchange_future_names(std::map<DomainPoint,Future> &futures);
+      void exchange_future_names(std::map<DomainPoint,FutureImpl*> &futures);
     public:
       ReplFutureMapImpl *const future_map;
     protected:
