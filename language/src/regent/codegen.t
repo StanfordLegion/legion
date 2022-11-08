@@ -7364,6 +7364,14 @@ function codegen.expr_attach_hdf5(cx, node)
        end)]
   end
 
+  if cx.variant:get_config_options().inner then
+    actions = quote
+      [actions]
+
+      c.legion_runtime_unmap_region([cx.runtime], [cx.context], [new_pr])
+    end
+  end
+
   return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 

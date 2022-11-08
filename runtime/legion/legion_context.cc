@@ -878,7 +878,7 @@ namespace Legion {
               "in task tree rooted by %s (provenance %s)", 
               it->region.index_space.id, it->region.field_space.id, 
               it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
@@ -889,7 +889,7 @@ namespace Legion {
               "Duplicate deletions were performed on field %d of "
               "field space %x in task tree rooted by %s (provenance %s)", 
               it->fid, it->space.id, get_task_name(), 
-              (it->provenance != NULL) ? it->provenance->provenance.c_str() :
+              (it->provenance != NULL) ? it->provenance->human.c_str() :
               "unknown")
         deleted_fields.clear();
       }
@@ -902,7 +902,7 @@ namespace Legion {
               "Duplicate deletions were performed on field space %x "
               "in task tree rooted by %s (provenance %s)", it->space.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
@@ -914,7 +914,7 @@ namespace Legion {
               "Duplicate deletions were performed on index space %x "
               "in task tree rooted by %s (provenance %s)", it->space.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
@@ -926,7 +926,7 @@ namespace Legion {
               "Duplicate deletions were performed on index partition %x "
               "in task tree rooted by %s (provenance %s)", it->partition.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -10768,8 +10768,9 @@ namespace Legion {
         if (!unmapped_regions.empty())
         {
           Provenance *prov = task->get_provenance();
-          remap_unmapped_regions(current_trace, unmapped_regions,
-              (prov == NULL) ? (const char*)NULL : prov->provenance.c_str());
+          char *string = (prov == NULL) ? (char*)NULL : prov->clone();
+          remap_unmapped_regions(current_trace, unmapped_regions, string);
+          free(string);
         }
       }
     }
@@ -11007,12 +11008,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTask::get_provenance_string(void) const
+    const std::string& RemoteTask::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = owner->get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }

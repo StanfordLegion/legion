@@ -236,7 +236,7 @@ namespace Realm {
     uint64_t abstime = mach_absolute_time();
     mach_port_deallocate(mach_task_self(), cclock);
     uint64_t caltime = ts.tv_sec;
-    caltime = (caltime * 100000000) + ts.tv_nsec;
+    caltime = (caltime * 1000000000) + ts.tv_nsec;
     // now ask mach for the clock ratio and we'll fake the second sample
     mach_timebase_info_data_t info;
     kern_return_t ret = mach_timebase_info(&info);
@@ -247,8 +247,8 @@ namespace Realm {
     // ns = numer/denom * ticks -> `denom` ns == `numer` ticks
     bool ok = native_to_nanoseconds.set(abstime,
                                         caltime,
-                                        abstime + info.numer,
-                                        caltime + info.denom);
+                                        abstime + info.denom,
+                                        caltime + info.numer);
     if(!ok) {
       log_timer.fatal() << "mach calibration failed: abstime=" << abstime
                         << " caltime=" << caltime

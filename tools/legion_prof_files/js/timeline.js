@@ -427,6 +427,28 @@ function getMouseOver() {
     delay = parseFloat(delay.toFixed(3))
     
     // Insert texts in reverse order
+    var provenance = get_provenance(d);
+    if (provenance != "") {
+        // provenance strings are in this form:
+        // "(human readable string)$(key1),(value1)|(key2),(value2)|..."
+        var tokens = provenance.split("\$");
+
+        // If the provenance string doesn't match the format,
+        // we render it verbatim.
+        if (tokens.length != 2) descTexts.push("Provenance: " + provenance);
+        else {
+            var to_parse = tokens[1];
+            var pairs = to_parse.split("|");
+            pairs.forEach(pair => {
+                var tokens = pair.split(",");
+                descTexts.push(tokens[0] + ": " + tokens[1]);
+            });
+        }
+    }
+    // Add a line break to separate provenance info from the rest
+    descTexts.push(" ");
+
+    // Add instances
     if ((d.instances != undefined) && d.instances != "") {
       var instances = [];
       d.instances.forEach((element) => {
@@ -435,10 +457,7 @@ function getMouseOver() {
       });
       descTexts.push("Instances: " + instances);
     }
-    var provenance = get_provenance(d);
-    if (provenance != "") {
-      descTexts.push("Provenance: " + provenance);
-    }
+
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
       descTexts.push("Ready State: " + get_time_str(delay,false));
     }

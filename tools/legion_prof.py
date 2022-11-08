@@ -5326,7 +5326,7 @@ def main() -> None:
         return
 
     # See if we need to trim out any boxes before we build the profile
-    if not print_stats and ((start_trim > 0) or (stop_trim > 0)):
+    if (start_trim > 0) or (stop_trim > 0):
         if start_trim > 0 and stop_trim > 0:
             if stop_trim > start_trim:
                 state.trim_time_ranges(float(start_trim), float(stop_trim))

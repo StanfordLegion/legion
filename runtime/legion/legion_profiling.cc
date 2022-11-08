@@ -135,7 +135,7 @@ namespace Legion {
       Provenance *prov = op->get_provenance();
       if (prov != NULL)
       {
-        inst.provenance = strdup(prov->provenance.c_str());
+        inst.provenance = prov->clone();
         owner->update_footprint(
             sizeof(OperationInstance) + strlen(inst.provenance), this);
       }

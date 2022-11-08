@@ -2449,6 +2449,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_colocation_violation(
+            const char *accessor_kind, FieldID fid, PhysicalInstance inst1,
+            PhysicalInstance inst2, const PhysicalRegion &other, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Unable to create co-location %s<%s> from multiple physical regions "
+          "for field %d in task %s because regions have different physical "
+          "instances " IDFMT " and  " IDFMT, reduction ? "ReductionAccessor" :
+            "FieldAccessor", accessor_kind, fid, context->get_task_name(),
+            inst1.id, inst2.id)
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::empty_colocation_regions(
+                         const char *accessor_kind, FieldID fid, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Attempt to create colocation %s<%s> with no physical regions for "
+          "field %d task %s. Must provide a non-empty set of regions.",
+          reduction ? "ReductionAccessor" : "FieldAccessor", accessor_kind,
+          fid, implicit_context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
                                     FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
@@ -19329,10 +19355,8 @@ namespace Legion {
       AutoLock d_lock(distributed_collectable_lock);
       std::map<DistributedID,DistributedCollectable*>::iterator finder =
         dist_collectables.find(did);
-#ifdef DEBUG_LEGION
-      assert(finder != dist_collectables.end());
-#endif
-      if (!finder->second->confirm_deletion())
+      if ((finder == dist_collectables.end()) ||
+          !finder->second->confirm_deletion())
         return false;
       dist_collectables.erase(finder);
       return true;
@@ -19657,7 +19681,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->provenance.c_str());
+            (provenance == NULL) ? NULL : provenance->human.c_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
