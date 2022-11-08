@@ -82,10 +82,22 @@ namespace Legion {
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
-      void add_base_valid_ref(ReferenceSource source, int cnt = 1);
-      void add_nested_valid_ref(DistributedID source, int cnt = 1);
-      bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
-      bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+      inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
+      inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+    protected:
+#ifndef DEBUG_LEGION_GC
+      void add_valid_reference(int cnt);
+      bool remove_valid_reference(int cnt);
+#else
+      void add_base_valid_ref_internal(ReferenceSource source, int cnt);
+      void add_nested_valid_ref_internal(DistributedID source, int cnt);
+      bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
+#endif
+      virtual void notify_valid(void) = 0;
+      virtual bool notify_invalid(void) = 0;
     public:
       static inline DistributedID encode_materialized_did(DistributedID did);
       static inline DistributedID encode_reduction_did(DistributedID did);
@@ -101,6 +113,17 @@ namespace Legion {
       RegionTreeForest *const context;
     protected:
       mutable LocalLock view_lock;
+    private:
+#ifdef DEBUG_LEGION_GC
+      int valid_references;
+#else
+      std::atomic<int> valid_references;
+#endif
+#ifdef DEBUG_LEGION_GC
+    protected:
+      std::map<ReferenceSource,int> detailed_base_valid_references;
+      std::map<DistributedID,int> detailed_nested_valid_references;
+#endif
     };
 
     /**
@@ -130,6 +153,9 @@ namespace Legion {
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
+    public:
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     public: 
       // Entry point functions for doing physical dependence analysis
       virtual void add_initial_user(ApEvent term_event,
@@ -872,6 +898,9 @@ namespace Legion {
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper) = 0;
+    public:
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     };
 
     /**
@@ -927,7 +956,7 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
-                           CopyAcrossHelper *helper);
+                           CopyAcrossHelper *helper); 
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -990,6 +1019,8 @@ namespace Legion {
       PhiView& operator=(const PhiView &rhs);
     public:
       virtual void notify_local(void);
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target);
     public:
@@ -1038,6 +1069,8 @@ namespace Legion {
       ShardedView& operator=(const ShardedView &rhs);
     public:
       virtual void notify_local(void);
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -1373,6 +1406,114 @@ namespace Legion {
           return false;
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LogicalView::add_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LogicalView::add_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), 
+                                    cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::remove_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::remove_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_nested_valid_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
     }
 
   }; // namespace Internal 

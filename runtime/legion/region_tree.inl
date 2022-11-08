@@ -1060,9 +1060,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceOperationT<DIM,T>::IndexSpaceOperationT(RegionTreeForest *ctx, 
-        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceExprID eid, DistributedID did,
         IndexSpaceOperation *origin, TypeTag tag, Deserializer &derez)
-      : IndexSpaceOperation(tag, ctx, eid, did, owner, origin),
+      : IndexSpaceOperation(tag, ctx, eid, did, origin),
         is_index_space_tight(false)
     //--------------------------------------------------------------------------
     {
@@ -1206,7 +1206,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->pack_gc_ref();
+        this->pack_global_ref();
       }
       else
       {
@@ -1216,7 +1216,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->pack_gc_ref();
+        this->pack_global_ref();
       }
     }
 
@@ -1567,7 +1567,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -1719,7 +1718,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -1879,7 +1877,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -2027,7 +2024,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -2061,9 +2057,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     RemoteExpression<DIM,T>::RemoteExpression(RegionTreeForest *forest,
-        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceExprID eid, DistributedID did,
         IndexSpaceOperation *origin, TypeTag tag, Deserializer &derez)
-      : IndexSpaceOperationT<DIM,T>(forest, eid, did, owner, origin, tag, derez)
+      : IndexSpaceOperationT<DIM,T>(forest, eid, did, origin, tag, derez)
     //--------------------------------------------------------------------------
     {
     }

@@ -244,7 +244,6 @@ namespace Legion {
       };
       enum GarbageCollectionState {
         VALID_GC_STATE,
-        ACQUIRED_GC_STATE,
         COLLECTABLE_GC_STATE,
         PENDING_COLLECTED_GC_STATE,
         COLLECTED_GC_STATE,
@@ -273,7 +272,7 @@ namespace Legion {
       // Internal valid reference counting 
 #ifndef DEBUG_LEGION_GC
       void add_valid_reference(int cnt);
-      bool remove_valid_reference( int cnt);
+      bool remove_valid_reference(int cnt);
 #else
       void add_base_valid_ref_internal(ReferenceSource source, int cnt);
       void add_nested_valid_ref_internal(DistributedID source, int cnt);

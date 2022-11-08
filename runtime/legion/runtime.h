@@ -365,7 +365,7 @@ namespace Legion {
       void perform_broadcast(void);
       void pack_future_result(Serializer &rez) const; // must be holding lock
     public:
-      void record_future_registered(void);
+      RtEvent record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
       static void handle_future_result_size(Deserializer &derez,
                                   Runtime *runtime, AddressSpaceID source);
@@ -619,7 +619,7 @@ namespace Legion {
     public:
       void register_dependence(Operation *consumer_op);
     public:
-      void record_future_map_registered(void);
+      RtEvent record_future_map_registered(void);
       static void handle_future_map_future_request(Deserializer &derez,
                               Runtime *runtime, AddressSpaceID source);
       static void handle_future_map_future_response(Deserializer &derez,
@@ -3148,7 +3148,10 @@ namespace Legion {
       void send_slice_collective_instance_response(AddressSpaceID target,
                                                    Serializer &rez);
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_unregister(AddressSpaceID target, Serializer &rez);
+      void send_did_downgrade_request(AddressSpaceID target, Serializer &rez);
+      void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
+      void send_did_downgrade_success(AddressSpaceID target, Serializer &rez);
+      void send_did_downgrade_update(AddressSpaceID target, Serializer &rez);
       void send_created_region_contexts(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_atomic_reservation_request(AddressSpaceID target, 
@@ -3382,6 +3385,8 @@ namespace Legion {
       void handle_shared_ownership(Deserializer &derez);
       void handle_index_space_request(Deserializer &derez, 
                                       AddressSpaceID source);
+      void handle_index_space_response(Deserializer &derez,
+                                       AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez,
                                      AddressSpaceID source); 
       void handle_index_space_set(Deserializer &derez, AddressSpaceID source);
@@ -3402,6 +3407,8 @@ namespace Legion {
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_request(Deserializer &derez,
                                           AddressSpaceID source);
+      void handle_index_partition_response(Deserializer &derez,
+                                           AddressSpaceID source);
       void handle_index_partition_return(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_index_partition_child_request(Deserializer &derez,
@@ -3462,7 +3469,10 @@ namespace Legion {
       void handle_slice_collective_response(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
-      void handle_did_remote_unregister(Deserializer &derez);
+      void handle_did_downgrade_request(Deserializer &derez);
+      void handle_did_downgrade_response(Deserializer &derez);
+      void handle_did_downgrade_success(Deserializer &derez);
+      void handle_did_downgrade_update(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
       void handle_send_atomic_reservation_request(Deserializer &derez,
@@ -5405,8 +5415,10 @@ namespace Legion {
           return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_INDEX_SPACE_REQUEST:
           break;
+        case SEND_INDEX_SPACE_RESPONSE:
+          return INDEX_SPACE_VIRTUAL_CHANNEL;
         case SEND_INDEX_SPACE_RETURN:
-          break;
+          return INDEX_SPACE_VIRTUAL_CHANNEL;
         case SEND_INDEX_SPACE_SET:
           break;
         case SEND_INDEX_SPACE_CHILD_REQUEST:
@@ -5431,8 +5443,10 @@ namespace Legion {
           break;
         case SEND_INDEX_PARTITION_REQUEST:
           break;
+        case SEND_INDEX_PARTITION_RESPONSE:
+          return INDEX_SPACE_VIRTUAL_CHANNEL;
         case SEND_INDEX_PARTITION_RETURN:
-          break;
+          return INDEX_SPACE_VIRTUAL_CHANNEL;
         case SEND_INDEX_PARTITION_CHILD_REQUEST:
           break;
         case SEND_INDEX_PARTITION_CHILD_RESPONSE:
@@ -5519,8 +5533,14 @@ namespace Legion {
           break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
           return REFERENCE_VIRTUAL_CHANNEL;
-        case DISTRIBUTED_UNREGISTER:
+        case DISTRIBUTED_DOWNGRADE_REQUEST:
           return REFERENCE_VIRTUAL_CHANNEL;
+        case DISTRIBUTED_DOWNGRADE_RESPONSE:
+          break;
+        case DISTRIBUTED_DOWNGRADE_SUCCESS:
+          break;
+        case DISTRIBUTED_DOWNGRADE_UPDATE:
+          break;
         case SEND_ATOMIC_RESERVATION_REQUEST:
           break;
         case SEND_ATOMIC_RESERVATION_RESPONSE:

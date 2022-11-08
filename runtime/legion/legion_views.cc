@@ -40,7 +40,7 @@ namespace Legion {
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
                              bool register_now, CollectiveMapping *map)
       : DistributedCollectable(ctx->runtime, did, register_now, map),
-        context(ctx)
+        context(ctx), valid_references(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -49,6 +49,9 @@ namespace Legion {
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(valid_references == 0);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -68,6 +71,119 @@ namespace Legion {
 #endif
       view->send_view(source);
     } 
+
+#ifdef DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    void LogicalView::add_base_valid_ref_internal(
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_loc(view_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+#endif
+      valid_references += cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      if (finder == detailed_base_valid_references.end())
+        detailed_base_valid_references[source] = cnt;
+      else
+        finder->second += cnt;
+      if (valid_reference == cnt)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalView::add_nested_valid_ref_internal (
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+#endif
+      valid_references += cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(did);
+      if (finder == detailed_nested_valid_references.end())
+        detailed_nested_valid_references[did] = cnt;
+      else
+        finder->second += cnt;
+      if (valid_references == cnt)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalView::remove_base_valid_ref_internal(
+                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+      assert(valid_references >= cnt);
+#endif
+      valid_references -= cnt;
+      std::map<ReferenceSource,int>::iterator finder = 
+        detailed_base_valid_references.find(source);
+      assert(finder != detailed_base_valid_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_base_valid_references.erase(finder);
+      if (valid_references == 0)
+        return notify_invalid();
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalView::remove_nested_valid_ref_internal(
+                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert(is_valid(false/*need lock*/));
+      assert(valid_references >= cnt);
+#endif
+      valid_references -= cnt;
+      std::map<DistributedID,int>::iterator finder = 
+        detailed_nested_valid_references.find(did);
+      assert(finder != detailed_nested_valid_references.end());
+      assert(finder->second >= cnt);
+      finder->second -= cnt;
+      if (finder->second == 0)
+        detailed_nested_valid_references.erase(finder);
+      if (valid_references == 0)
+        return notify_invalid();
+      else
+        return false;
+    }
+#else // DEBUG_LEGION_GC
+    //--------------------------------------------------------------------------
+    void LogicalView::add_valid_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+      if (valid_references.fetch_add(cnt) == 0)
+        notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalView::remove_valid_reference(int cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert(valid_references.load() >= cnt);
+#endif
+      if (valid_references.fetch_sub(cnt) == cnt)
+        return notify_invalid();
+      else
+        return false;
+    }
+#endif // DEBUG_LEGION_GC
 
     /////////////////////////////////////////////////////////////
     // InstanceView 
@@ -109,6 +225,22 @@ namespace Legion {
         }
         atomic_reservations.clear();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->add_nested_valid_ref(did);
+      add_base_gc_ref(INTERNAL_VALID_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceView::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->remove_nested_valid_ref(did);
+      return remove_base_gc_ref(INTERNAL_VALID_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3920,6 +4052,20 @@ namespace Legion {
     {
     }
 
+    //--------------------------------------------------------------------------
+    void DeferredView::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      add_base_gc_ref(INTERNAL_VALID_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool DeferredView::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_base_gc_ref(INTERNAL_VALID_REF);
+    }
+
     /////////////////////////////////////////////////////////////
     // FillView 
     /////////////////////////////////////////////////////////////
@@ -4104,6 +4250,32 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->add_nested_valid_ref(did);
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->add_nested_valid_ref(did);
+      DeferredView::notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhiView::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->remove_nested_valid_ref(did);
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->remove_nested_valid_ref(did);
+      return DeferredView::notify_invalid();
     }
 
     //--------------------------------------------------------------------------
@@ -4345,7 +4517,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardedView::ShardedView(const ShardedView &rhs)
-      : DeferredView(rhs)
+      : DeferredView(NULL, 0, false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4369,6 +4541,26 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedView::notify_valid(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        (*it)->add_nested_valid_ref(did);
+      DeferredView::notify_valid();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedView::notify_invalid(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        (*it)->remove_nested_valid_ref(did);
+      return DeferredView::notify_invalid();
     }
 
     //--------------------------------------------------------------------------

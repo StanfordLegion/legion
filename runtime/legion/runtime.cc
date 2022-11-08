@@ -2396,7 +2396,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(void)
+    RtEvent FutureImpl::record_future_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -2405,15 +2405,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
+      RtEvent result;
       if (!is_owner())
       {
         update_remote_instances(owner_space);
         // Add a base resource ref that will be held until
         // the owner node removes it with an unregister message
         add_base_resource_ref(REMOTE_DID_REF);
-        send_remote_registration();
+        result = send_remote_registration();
       }
       registered_with_runtime = true;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -3791,7 +3793,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::record_future_map_registered(void)
+    RtEvent FutureMapImpl::record_future_map_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -3800,15 +3802,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
+      RtEvent result;
       if (!is_owner())
       {
         update_remote_instances(owner_space);
         // Add a base resource ref that will be held until
         // the owner node removes it with an unregister message
         add_base_resource_ref(REMOTE_DID_REF);
-        send_remote_registration();
+        result = send_remote_registration();
       }
       registered_with_runtime = true;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11784,6 +11788,11 @@ namespace Legion {
               runtime->handle_index_space_request(derez, remote_address_space);
               break;
             }
+          case SEND_INDEX_SPACE_RESPONSE:
+            {
+              runtime->handle_index_space_response(derez, remote_address_space);
+              break;
+            }
           case SEND_INDEX_SPACE_RETURN:
             {
               runtime->handle_index_space_return(derez, remote_address_space);
@@ -11853,6 +11862,12 @@ namespace Legion {
             {
               runtime->handle_index_partition_request(derez, 
                                                       remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_RESPONSE:
+            {
+              runtime->handle_index_partition_response(derez,
+                                                       remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_RETURN:
@@ -12089,9 +12104,24 @@ namespace Legion {
                                                       remote_address_space);
               break;
             }
-          case DISTRIBUTED_UNREGISTER:
+          case DISTRIBUTED_DOWNGRADE_REQUEST:
             {
-              runtime->handle_did_remote_unregister(derez);
+              runtime->handle_did_downgrade_request(derez);
+              break;
+            }
+          case DISTRIBUTED_DOWNGRADE_RESPONSE:
+            {
+              runtime->handle_did_downgrade_response(derez);
+              break;
+            }
+          case DISTRIBUTED_DOWNGRADE_SUCCESS:
+            {
+              runtime->handle_did_downgrade_success(derez);
+              break;
+            }
+          case DISTRIBUTED_DOWNGRADE_UPDATE:
+            {
+              runtime->handle_did_downgrade_update(derez);
               break;
             }
           case SEND_ATOMIC_RESERVATION_REQUEST:
@@ -18005,7 +18035,7 @@ namespace Legion {
       if (owner_space == address_space)
       {
         FieldSpaceNode *node = forest->get_node(handle);
-        if (!node->check_active_and_increment(APPLICATION_REF))
+        if (!node->check_valid_and_increment(APPLICATION_REF))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
               "Illegal call to add shared ownership to field space %x "
               "which has already been deleted", handle.get_id())
@@ -21318,6 +21348,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_space_response(AddressSpaceID target,
+                                            Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_INDEX_SPACE_RESPONSE>(rez, 
+                                                          false/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_space_return(AddressSpaceID target,
                                      Serializer &rez)
     //--------------------------------------------------------------------------
@@ -21435,6 +21474,15 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_INDEX_PARTITION_REQUEST>(rez,
                                                               true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_INDEX_PARTITION_RESPONSE>(rez,
+                                                              false/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -21885,12 +21933,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_unregister(AddressSpaceID target, 
+    void Runtime::send_did_downgrade_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message<DISTRIBUTED_UNREGISTER>(rez,
+      find_messenger(target)->send_message<DISTRIBUTED_DOWNGRADE_REQUEST>(rez,
                                                         true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_downgrade_response(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_DOWNGRADE_RESPONSE>(rez,
+                                              true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_downgrade_success(AddressSpaceID target,
+                                             Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_DOWNGRADE_SUCCESS>(rez,
+                                                        true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_downgrade_update(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_DOWNGRADE_UPDATE>(rez,
+                                                              true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -23433,6 +23508,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_index_space_response(Deserializer &derez,
+                                              AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode::handle_node_creation(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_index_space_return(Deserializer &derez,
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -23530,6 +23613,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_request(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_response(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_creation(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -23912,10 +24003,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_unregister(Deserializer &derez)
+    void Runtime::handle_did_downgrade_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::handle_unregister_collectable(this, derez);
+      DistributedCollectable::handle_downgrade_request(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_downgrade_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_downgrade_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_downgrade_success(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_downgrade_success(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_downgrade_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_downgrade_update(this, derez);
     }
     
     //--------------------------------------------------------------------------
@@ -26095,6 +26207,7 @@ namespace Legion {
 #endif
              op_depth, provenance);
       // Retake the lock and see if we lost the race
+      RtEvent ready;
       {
         AutoLock d_lock(distributed_collectable_lock);
         std::map<DistributedID,DistributedCollectable*>::const_iterator 
@@ -26111,9 +26224,11 @@ namespace Legion {
 #endif
           return result;
         }
-        result->record_future_registered();
+        ready = result->record_future_registered();
         dist_collectables[did] = result;
       }
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       return result;
     }
 
@@ -26148,6 +26263,7 @@ namespace Legion {
       FutureMapImpl *result = new FutureMapImpl(ctx, this, domain_node, did,
            index, completion, provenance, false/*register now*/);
       // Retake the lock and see if we lost the race
+      RtEvent ready;
       {
         AutoLock d_lock(distributed_collectable_lock);
         std::map<DistributedID,DistributedCollectable*>::const_iterator 
@@ -26164,9 +26280,11 @@ namespace Legion {
 #endif
           return result;
         }
-        result->record_future_map_registered();
+        ready = result->record_future_map_registered();
         dist_collectables[did] = result;
       }
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       return result;
     }
 
@@ -31479,12 +31597,6 @@ namespace Legion {
         case LG_DEFER_APPLY_STATE_TASK_ID:
           {
             EquivalenceSet::handle_apply_state(args);
-            break;
-          }
-        case LG_DEFER_REMOTE_UNREGISTER_TASK_ID:
-          {
-            DistributedCollectable::handle_defer_remote_unregister(runtime,
-                                                                   args);
             break;
           }
         case LG_COPY_FILL_AGGREGATION_TASK_ID:

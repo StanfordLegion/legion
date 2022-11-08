@@ -381,7 +381,6 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
-      LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
@@ -502,7 +501,6 @@ namespace Legion {
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \
         "Defer Equivalence Set Apply State",                      \
-        "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
@@ -727,6 +725,7 @@ namespace Legion {
       SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_SHARED_OWNERSHIP,
       SEND_INDEX_SPACE_REQUEST,
+      SEND_INDEX_SPACE_RESPONSE,
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_SET,
       SEND_INDEX_SPACE_CHILD_REQUEST,
@@ -740,6 +739,7 @@ namespace Legion {
       SEND_INDEX_SPACE_RELEASE_COLOR,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_REQUEST,
+      SEND_INDEX_PARTITION_RESPONSE,
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
@@ -784,7 +784,10 @@ namespace Legion {
       SLICE_COLLECTIVE_REQUEST,
       SLICE_COLLECTIVE_RESPONSE,
       DISTRIBUTED_REMOTE_REGISTRATION,
-      DISTRIBUTED_UNREGISTER,
+      DISTRIBUTED_DOWNGRADE_REQUEST,
+      DISTRIBUTED_DOWNGRADE_RESPONSE,
+      DISTRIBUTED_DOWNGRADE_SUCCESS,
+      DISTRIBUTED_DOWNGRADE_UPDATE,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
@@ -945,6 +948,7 @@ namespace Legion {
         "Send Remote Task Profiling Response",                        \
         "Send Shared Ownership",                                      \
         "Send Index Space Request",                                   \
+        "Send Index Space Response",                                  \
         "Send Index Space Return",                                    \
         "Send Index Space Set",                                       \
         "Send Index Space Child Request",                             \
@@ -958,6 +962,7 @@ namespace Legion {
         "Send Index Space Release Color",                             \
         "Send Index Partition Notification",                          \
         "Send Index Partition Request",                               \
+        "Send Index Partition Response",                              \
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
@@ -1002,7 +1007,10 @@ namespace Legion {
         "Slice Collective Instance Request",                          \
         "Slice Collective Instance Response",                         \
         "Distributed Remote Registration",                            \
-        "Distributed Unregister",                                     \
+        "Distributed Downgrade Request",                              \
+        "Distributed Downgrade Response",                             \
+        "Distributed Downgrade Success",                              \
+        "Distributed Downgrade Update",                               \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Created Region Contexts",                               \

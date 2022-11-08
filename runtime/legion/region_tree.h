@@ -1653,7 +1653,7 @@ namespace Legion {
     public:
       IndexSpaceOperationT(OperationKind kind, RegionTreeForest *ctx);
       IndexSpaceOperationT(RegionTreeForest *ctx, IndexSpaceExprID eid,
-          DistributedID did, AddressSpaceID owner, IndexSpaceOperation *op,
+          DistributedID did, IndexSpaceOperation *op,
           TypeTag tag, Deserializer &derez);
       virtual ~IndexSpaceOperationT(void);
     public:
@@ -1882,7 +1882,7 @@ namespace Legion {
       static const AllocationType alloc_type = REMOTE_EXPR_ALLOC;
     public:
       RemoteExpression(RegionTreeForest *context, IndexSpaceExprID eid,
-          DistributedID did, AddressSpaceID own, IndexSpaceOperation *op,
+          DistributedID did, IndexSpaceOperation *op,
           TypeTag type_tag, Deserializer &derez);
       RemoteExpression(const RemoteExpression<DIM,T> &rhs);
       virtual ~RemoteExpression(void);
@@ -1906,8 +1906,6 @@ namespace Legion {
         creator->derez.deserialize(expr_id);
         DistributedID did;
         creator->derez.deserialize(did);
-        AddressSpaceID owner_space;
-        creator->derez.deserialize(owner_space);
         IndexSpaceOperation *origin;
         creator->derez.deserialize(origin);
 #ifdef DEBUG_LEGION
@@ -1915,7 +1913,7 @@ namespace Legion {
 #endif
         creator->operation =
             new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
-              owner_space, origin, creator->type_tag, creator->derez);
+                            origin, creator->type_tag, creator->derez);
       }
     public:
       RegionTreeForest *const forest;
@@ -3413,7 +3411,7 @@ namespace Legion {
      * pointed at by nodes in the region trees.
      */
     class FieldSpaceNode : 
-      public LegionHeapify<FieldSpaceNode>, public DistributedCollectable {
+      public LegionHeapify<FieldSpaceNode>, public ValidDistributedCollectable {
     public:
       enum FieldAllocationState {
         FIELD_ALLOC_INVALID, // field_infos is invalid
@@ -3517,6 +3515,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
     public:
       virtual void notify_local(void) { }
+      virtual void notify_invalid(void) { }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
             const void *buffer, size_t size, bool is_mutable, bool local_only);

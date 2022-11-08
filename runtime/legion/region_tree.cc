@@ -1378,7 +1378,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             FieldSpaceNode *node = get_node(handle);
-            if (node->remove_base_gc_ref(APPLICATION_REF))
+            if (node->remove_base_valid_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -1394,7 +1394,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           FieldSpaceNode *node = get_node(handle);
-          if (node->remove_base_gc_ref(APPLICATION_REF))
+          if (node->remove_base_valid_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -3981,7 +3981,7 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_gc_ref(APPLICATION_REF);
+          result->add_base_valid_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
       return result;
@@ -4017,7 +4017,7 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_gc_ref(APPLICATION_REF);
+          result->add_base_valid_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
       return result;
@@ -6718,7 +6718,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::find_remote_expression(
                                          const PendingRemoteExpression &pending)
@@ -6729,19 +6728,7 @@ namespace Legion {
         IndexSpaceNode *node = get_node(pending.handle);
         node->add_base_expression_reference(LIVE_EXPR_REF);
         if (!pending.done_ref_counting)
-        {
-          const RtEvent added = mutator.get_done_event();
-          // Special case here: if the source was the owner and we didn't
-          // just send a message to add our reference then we can buffer up
-          // our reference to be removed when we are no longer valid
-          // Be very careful here! You can only do this if the expression
-          // was sent from the source or you risk reference count cycles!
-          if ((pending.source == node->owner_space) &&
-              (!added.exists() || added.has_triggered()))
-            node->record_remote_owner_valid_reference();
-          else
-            node->send_remote_valid_decrement(pending.source,NULL/*mut*/,added);
-        }
+          node->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(node);
         return node;
       }
@@ -6763,27 +6750,13 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        LocalReferenceMutator mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        result->add_base_expression_reference(LIVE_EXPR_REF);
         if (!pending.done_ref_counting)
-        {
-          const RtEvent added = mutator.get_done_event();
-          // Special case here: if the source was the owner and we didn't
-          // just send a message to add our reference then we can buffer up
-          // our reference to be removed when we are no longer valid
-          // Be very careful here! You can only do this if the expression
-          // was sent from the source or you risk reference count cycles!
-          if ((pending.source == op->owner_space) &&
-              (!added.exists() || added.has_triggered()))
-            result->record_remote_owner_valid_reference();
-          else
-            op->send_remote_valid_decrement(pending.source, NULL/*mut*/, added);
-        }
+          op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::unregister_remote_expression(
@@ -6844,7 +6817,6 @@ namespace Legion {
       Runtime::trigger_event(done_event);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::unpack_expression_value(
                                      Deserializer &derez, AddressSpaceID source)
@@ -6857,10 +6829,7 @@ namespace Legion {
       {
         IndexSpace handle;
         derez.deserialize(handle);
-        IndexSpaceNode *result = get_node(handle);
-        // Remove the reference that we have from when this was packed
-        result->send_remote_gc_decrement(source);
-        return result;
+        return get_node(handle);
       }
       TypeTag type_tag;
       derez.deserialize(type_tag);
@@ -6871,7 +6840,6 @@ namespace Legion {
 #endif
       return creator.operation;
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Copy Across Executor
@@ -7238,7 +7206,6 @@ namespace Legion {
       return expr;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
                              Deserializer &derez, RegionTreeForest *forest, 
@@ -7261,14 +7228,8 @@ namespace Legion {
 #else
           IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-          // Make this valid and then send the removal of the 
-          // remote did expression
-          LocalReferenceMutator mutator;
-          op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-          // Always need to send this reference removal back immediately
-          // in order to avoid reference counting deadlock
-          op->send_remote_valid_decrement(source, NULL/*mutator*/,
-              mutator.get_done_event());
+          op->add_base_expression_reference(LIVE_EXPR_REF);
+          op->unpack_global_ref();
         }
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
@@ -7281,20 +7242,10 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         IndexSpaceNode *node = forest->get_node(handle);
-        LocalReferenceMutator mutator;
-        node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((source == node->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          node->record_remote_owner_valid_reference();
-        else
-          node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        node->add_base_expression_reference(LIVE_EXPR_REF);
         ImplicitReferenceTracker::record_live_expression(node);
+        // Now we can unpack the global expression reference
+        node->unpack_global_ref();
         return node;
       }
       else
@@ -7311,20 +7262,10 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        LocalReferenceMutator mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((source == op->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          result->record_remote_owner_valid_reference();
-        else
-          op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        result->add_base_expression_reference(LIVE_EXPR_REF);
         ImplicitReferenceTracker::record_live_expression(result);
+        // Unpack the global reference that we had
+        op->unpack_global_ref();
         return result;
       }
     }
@@ -7352,17 +7293,9 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        // Make this valid and then send the removal of the 
-        // remote did expression
-        LocalReferenceMutator mutator;
-        op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        op->add_base_expression_reference(LIVE_EXPR_REF);
         if (source != forest->runtime->address_space)
-        {
-          // Always need to send this reference removal back immediately
-          // in order to avoid reference counting deadlock
-          op->send_remote_valid_decrement(source, NULL/*mutator*/,
-              mutator.get_done_event());
-        }
+          op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         pending.done_ref_counting = true;
         return result;
@@ -7378,19 +7311,8 @@ namespace Legion {
           pending.source = source;
           return node;
         }
-        LocalReferenceMutator mutator;
-        node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((source == node->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          node->record_remote_owner_valid_reference();
-        else
-          node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        node->add_base_expression_reference(LIVE_EXPR_REF);
+        node->unpack_global_ref();
         pending.done_ref_counting = true;
         ImplicitReferenceTracker::record_live_expression(node);
         return node;
@@ -7412,24 +7334,12 @@ namespace Legion {
 #else
       IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-      LocalReferenceMutator mutator;
-      result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-      const RtEvent added = mutator.get_done_event();
-      // Special case here: if the source was the owner and we didn't
-      // just send a message to add our reference then we can buffer up
-      // our reference to be removed when we are no longer valid
-      // Be very careful here! You can only do this if the expression
-      // was sent from the source or you risk reference count cycles!
-      if ((source == op->owner_space) &&
-          (!added.exists() || added.has_triggered()))
-        result->record_remote_owner_valid_reference();
-      else
-        op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+      result->add_base_expression_reference(LIVE_EXPR_REF);
+      op->unpack_global_ref();
       pending.done_ref_counting = true;
       ImplicitReferenceTracker::record_live_expression(result);
       return result;
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Index Space Operation 
@@ -9363,7 +9273,6 @@ namespace Legion {
     {
       rez.serialize<bool>(true/*index space*/);
       rez.serialize(handle);
-      pack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -11650,7 +11559,7 @@ namespace Legion {
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                    DistributedID did, RtEvent init, CollectiveMapping *map,
                    ShardMapping *shard_mapping, Provenance *prov)
-      : DistributedCollectable(ctx->runtime, 
+      : ValidDistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
@@ -11691,7 +11600,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
          DistributedID did, RtEvent init, Provenance *prov, Deserializer &derez)
-      : DistributedCollectable(ctx->runtime, 
+      : ValidDistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           false/*register with runtime*/),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
