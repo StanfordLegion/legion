@@ -19579,7 +19579,7 @@ namespace Legion {
         row_source->remove_nested_valid_ref(did);
       else
         row_source->parent->remove_nested_valid_ref(did);
-      column_source->remove_nested_gc_ref(did);
+      column_source->remove_nested_valid_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -19621,7 +19621,7 @@ namespace Legion {
         row_source->add_nested_valid_ref(did);
         column_source->add_nested_resource_ref(did);
       }
-      column_source->add_nested_gc_ref(did);
+      column_source->add_nested_valid_ref(did);
       row_source->add_nested_resource_ref(did);
       registered = true;
       register_with_runtime();
@@ -21120,7 +21120,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to check for deletion since we hold resource references 
-      column_source->remove_nested_gc_ref(did);
+      column_source->remove_nested_valid_ref(did);
       row_source->remove_nested_valid_ref(did);
     }
 
@@ -21147,7 +21147,7 @@ namespace Legion {
 #endif
       row_source->add_nested_resource_ref(did);
       parent->add_nested_resource_ref(did);
-      column_source->add_nested_gc_ref(did);
+      column_source->add_nested_valid_ref(did);
       row_source->add_nested_valid_ref(did);
       parent->add_child(this);
       // Create a partition deletion tracker for this node and add it to 
