@@ -736,7 +736,8 @@ namespace Legion {
         instance_footprint(footprint), reduction_op(rop), redop(redop_id),
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
-        remaining_collection_guards(0), min_gc_priority(0), valid_references(0)
+        remaining_collection_guards(0), min_gc_priority(0), valid_references(0),
+        inside_notify_invalid(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1138,13 +1139,29 @@ namespace Legion {
     void PhysicalManager::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock i_lock(inst_lock);
-      if (deferred_deletion.exists())
+      // Detect the case that we're inside a notify_invalid callback and
+      // therefore we don't need grab the lock because we know that we
+      // are already holding it
+      if (inside_notify_invalid)
       {
+        if (deferred_deletion.exists())
+        {
 #ifdef DEBUG_LEGION
-        assert((gc_state == COLLECTED_GC_STATE) || is_external_instance());
+          assert((gc_state == COLLECTED_GC_STATE) || is_external_instance());
 #endif
-        Runtime::trigger_event(deferred_deletion);
+          Runtime::trigger_event(deferred_deletion);
+        }
+      }
+      else
+      {
+        AutoLock i_lock(inst_lock);
+        if (deferred_deletion.exists())
+        {
+#ifdef DEBUG_LEGION
+          assert((gc_state == COLLECTED_GC_STATE) || is_external_instance());
+#endif
+          Runtime::trigger_event(deferred_deletion);
+        }
       }
     }
 
@@ -1357,11 +1374,17 @@ namespace Legion {
     {
       // No need for the lock it is held by the caller
 #ifdef DEBUG_LEGION
+      assert(!inside_notify_invalid);
       assert(gc_state == VALID_GC_STATE);
 #endif
       gc_state = COLLECTABLE_GC_STATE;
       prune_gc_events();
-      return remove_base_gc_ref(INTERNAL_VALID_REF);
+      // Set the guard in case this reference removal causes us to call
+      // notify_local while we're holding the lock
+      inside_notify_invalid = true;
+      const bool result = remove_base_gc_ref(INTERNAL_VALID_REF);
+      inside_notify_invalid = false;
+      return result;
     }
 
     //--------------------------------------------------------------------------

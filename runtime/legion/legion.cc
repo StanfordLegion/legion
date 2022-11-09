@@ -2332,8 +2332,8 @@ namespace Legion {
     Future::~Future(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        impl->remove_base_gc_ref(Internal::APPLICATION_REF);
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
     }
 
     //--------------------------------------------------------------------------

@@ -2398,6 +2398,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
+      registered_with_runtime = true;
       RtEvent result;
       if (!is_owner())
       {
@@ -2407,7 +2408,6 @@ namespace Legion {
         add_base_resource_ref(REMOTE_DID_REF);
         result = send_remote_registration();
       }
-      registered_with_runtime = true;
       return result;
     }
 
@@ -3792,6 +3792,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered_with_runtime);
 #endif
+      registered_with_runtime = true;
       RtEvent result;
       if (!is_owner())
       {
@@ -3801,7 +3802,6 @@ namespace Legion {
         add_base_resource_ref(REMOTE_DID_REF);
         result = send_remote_registration();
       }
-      registered_with_runtime = true;
       return result;
     }
 

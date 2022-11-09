@@ -422,8 +422,9 @@ namespace Legion {
 #else
       std::atomic<int> valid_references;
 #endif
+      bool inside_notify_invalid;
 #ifdef DEBUG_LEGION_GC
-    protected:
+    private:
       std::map<ReferenceSource,int> detailed_base_valid_references;
       std::map<DistributedID,int> detailed_nested_valid_references;
 #endif
