@@ -1624,8 +1624,6 @@ namespace Legion {
       {
         Runtime::trigger_event(subscription_event);
         subscription_event = RtUserEvent::NO_RT_USER_EVENT;
-        if (remove_base_resource_ref(RUNTIME_REF))
-          assert(false); // should always hold reference from caller
       }
     }
 
@@ -26209,10 +26207,6 @@ namespace Legion {
           return result;
         }
       }
-      const AddressSpaceID owner_space = determine_owner(did);
-#ifdef DEBUG_LEGION
-      assert(owner_space != address_space);
-#endif
       InnerContext *context = find_context(context_uid);
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
              ApEvent::NO_AP_EVENT, op, gen, op_ctx_index, op_point,
@@ -26268,9 +26262,7 @@ namespace Legion {
           return result;
         }
       }
-      const AddressSpaceID owner_space = determine_owner(did);
 #ifdef DEBUG_LEGION
-      assert(owner_space != address_space);
       assert(domain.exists());
 #endif
       IndexSpaceNode *domain_node = forest->get_node(domain);
