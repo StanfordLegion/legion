@@ -334,7 +334,7 @@ namespace Legion {
       RtEvent subscribe(void);
       size_t get_upper_bound_size(void);
       void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
-      void pack_future(Serializer &rez) const;
+      void pack_future(Serializer &rez);
       static Future unpack_future(Runtime *runtime, 
           Deserializer &derez, Operation *op = NULL, GenerationID op_gen = 0,
 #ifdef LEGION_SPY
@@ -604,7 +604,7 @@ namespace Legion {
       // map which is mainly needed in control replication
       virtual void argument_map_wrap(void) { }
     public:
-      void pack_future_map(Serializer &rez) const;
+      void pack_future_map(Serializer &rez);
       static FutureMap unpack_future_map(Runtime *runtime,
           Deserializer &derez, TaskContext *ctx);
     public:
@@ -2713,13 +2713,17 @@ namespace Legion {
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
       void create_shared_ownership(IndexSpace handle, 
-              const bool total_sharding_collective = false);
+              const bool total_sharding_collective = false,
+              const bool unpack_reference = false);
       void create_shared_ownership(IndexPartition handle,
-              const bool total_sharding_collective = false);
+              const bool total_sharding_collective = false,
+              const bool unpack_reference = false);
       void create_shared_ownership(FieldSpace handle,
-              const bool total_sharding_collective = false);
+              const bool total_sharding_collective = false,
+              const bool unpack_reference = false);
       void create_shared_ownership(LogicalRegion handle,
-              const bool total_sharding_collective = false);
+              const bool total_sharding_collective = false,
+              const bool unpack_reference = false);
     public:
       IndexPartition get_index_partition(Context ctx, IndexSpace parent, 
                                          Color color);
@@ -3468,7 +3472,8 @@ namespace Legion {
       void handle_slice_collective_response(Deserializer &derez);
       void handle_did_remote_registration(Deserializer &derez, 
                                           AddressSpaceID source);
-      void handle_did_downgrade_request(Deserializer &derez);
+      void handle_did_downgrade_request(Deserializer &derez,
+                                        AddressSpaceID source);
       void handle_did_downgrade_response(Deserializer &derez);
       void handle_did_downgrade_success(Deserializer &derez);
       void handle_did_downgrade_update(Deserializer &derez);
@@ -5411,7 +5416,7 @@ namespace Legion {
         case SEND_REMOTE_TASK_PROFILING_RESPONSE:
           break;
         case SEND_SHARED_OWNERSHIP:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_INDEX_SPACE_REQUEST:
           break;
         case SEND_INDEX_SPACE_RESPONSE:
@@ -5437,7 +5442,7 @@ namespace Legion {
         case SEND_INDEX_SPACE_GENERATE_COLOR_RESPONSE:
           break;
         case SEND_INDEX_SPACE_RELEASE_COLOR:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_INDEX_PARTITION_NOTIFICATION:
           break;
         case SEND_INDEX_PARTITION_REQUEST:
@@ -5483,13 +5488,13 @@ namespace Legion {
         case SEND_FIELD_ALLOC_REQUEST:
           return FIELD_SPACE_VIRTUAL_CHANNEL;
         case SEND_FIELD_SIZE_UPDATE:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_FIELD_FREE:
           return FIELD_SPACE_VIRTUAL_CHANNEL;
         case SEND_FIELD_FREE_INDEXES:
           return FIELD_SPACE_VIRTUAL_CHANNEL;
         case SEND_FIELD_SPACE_LAYOUT_INVALIDATION:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_LOCAL_FIELD_ALLOC_REQUEST:
           break;
         case SEND_LOCAL_FIELD_ALLOC_RESPONSE:
@@ -5531,9 +5536,11 @@ namespace Legion {
         case SLICE_COLLECTIVE_RESPONSE:
           break;
         case DISTRIBUTED_REMOTE_REGISTRATION:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
+        // Low priority so reference counting doesn't starve
+        // out the rest of our work
         case DISTRIBUTED_DOWNGRADE_REQUEST:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          return THROUGHPUT_VIRTUAL_CHANNEL;
         case DISTRIBUTED_DOWNGRADE_RESPONSE:
           break;
         case DISTRIBUTED_DOWNGRADE_SUCCESS:
@@ -5563,7 +5570,7 @@ namespace Legion {
         case SEND_COLLECTIVE_MANAGER:
           break;
         case SEND_COLLECTIVE_MESSAGE:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_CREATE_TOP_VIEW_REQUEST:
           break;
         case SEND_CREATE_TOP_VIEW_RESPONSE:
@@ -5591,13 +5598,13 @@ namespace Legion {
         case SEND_FUTURE_RESULT:
           break;
         case SEND_FUTURE_RESULT_SIZE:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_FUTURE_SUBSCRIPTION:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_FUTURE_NOTIFICATION:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_FUTURE_BROADCAST:
-          return REFERENCE_VIRTUAL_CHANNEL;
+          break;
         case SEND_FUTURE_CREATE_INSTANCE_REQUEST:
           break;
         case SEND_FUTURE_CREATE_INSTANCE_RESPONSE:

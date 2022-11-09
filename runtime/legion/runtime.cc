@@ -709,17 +709,6 @@ namespace Legion {
       assert(((canonical_instance == NULL) && instances.empty()) ||
               (instances[canonical_instance->memory] == canonical_instance));
 #endif
-      // Remove the extra reference on a remote set future if there is one
-      if (empty.load() && (result_set_space != local_space))
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize<size_t>(0);
-        }
-        runtime->send_future_broadcast(result_set_space, rez);
-      }
       for (std::map<Memory,FutureInstance*>::const_iterator it =
             instances.begin(); it != instances.end(); it++)
         delete it->second;
@@ -1523,6 +1512,7 @@ namespace Legion {
           {
             if (((*it) == source) || ((*it) == local_space))
               continue;
+            pack_global_ref();
             runtime->send_future_result_size(*it, rez);
           }
         }
@@ -1537,6 +1527,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(size);
         }
+        pack_global_ref();
         runtime->send_future_result_size(owner_space, rez);
       }
       // Check to see if there are any pending instances to make now
@@ -1605,15 +1596,12 @@ namespace Legion {
         create_pending_instances();
       if (!is_owner())
       {
-        // Add an extra reference to prevent this from being collected
-        // until the owner is also deleted, the owner will notify us
-        // they are deleted with a broadcast of size 0 when they are deleted
-        add_base_resource_ref(RUNTIME_REF);
         // If we're the first set then we need to tell the owner
         // that we are the ones with the value
         // This is literally an empty message
         Serializer rez;
         rez.serialize(did);
+        pack_global_ref();
         runtime->send_future_notification(owner_space, rez); 
       }
       else if (!subscribers.empty())
@@ -1990,6 +1978,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize<size_t>(0);
         }
+        pack_global_ref();
         runtime->send_future_broadcast(result_set_space, rez);
       }
     }
@@ -2058,14 +2047,12 @@ namespace Legion {
         if (!subscription_event.exists())
         {
           subscription_event = Runtime::create_rt_user_event();
-          // Add a reference to prevent us from being collected
-          // until we get the result of the subscription
-          add_base_resource_ref(RUNTIME_REF);
           if (!is_owner())
           {
             // Send a request to the owner node to subscribe
             Serializer rez;
             rez.serialize(did);
+            pack_global_ref();
             runtime->send_future_subscription(owner_space, rez);
           }
           else
@@ -2113,7 +2100,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::pack_future(Serializer &rez) const
+    void FutureImpl::pack_future(Serializer &rez)
     //--------------------------------------------------------------------------
     {
       rez.serialize<DistributedID>(did);
@@ -2124,6 +2111,7 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
+      pack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2147,13 +2135,15 @@ namespace Legion {
       DomainPoint point;
       derez.deserialize(point);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      return Future(runtime->find_or_create_future(future_did, context_uid,
+      Future result(runtime->find_or_create_future(future_did, context_uid,
                                             op_ctx_index, point, provenance,
                                             op, op_gen,
 #ifdef LEGION_SPY
                                             op_uid,
 #endif
                                             op_depth));
+      result.impl->unpack_global_ref();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2247,6 +2237,7 @@ namespace Legion {
           pack_future_result(rez);
           packed = true;
         }
+        pack_global_ref();
         runtime->send_future_result(*it, rez);
       }
       targets.clear();
@@ -2280,6 +2271,7 @@ namespace Legion {
             rez.serialize<size_t>(1); // size
             rez.serialize(subscriber);
           }
+          pack_global_ref();
           runtime->send_future_broadcast(result_set_space, rez);
         }
         else
@@ -2299,6 +2291,7 @@ namespace Legion {
               rez.serialize(did);
               rez.serialize(future_size);
             }
+            pack_global_ref();
             runtime->send_future_result_size(subscriber, rez);
           }
         }
@@ -2336,6 +2329,7 @@ namespace Legion {
           // We've got the result so we can't send it back right away
           Serializer rez;
           pack_future_result(rez);
+          pack_global_ref();
           runtime->send_future_result(subscriber, rez);
         }
       }
@@ -2390,6 +2384,7 @@ namespace Legion {
                subscribers.begin(); it != subscribers.end(); it++)
             rez.serialize(*it);
         }
+        pack_global_ref();
         runtime->send_future_broadcast(remote_space, rez);
         subscribers.clear();
       }
@@ -2433,10 +2428,7 @@ namespace Legion {
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
       future->unpack_future(derez);
-      // Now we can remove the reference that we added from before we
-      // sent the subscription message
-      if (future->remove_base_resource_ref(RUNTIME_REF))
-        delete future;
+      future->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2457,6 +2449,7 @@ namespace Legion {
       size_t future_size;
       derez.deserialize(future_size);
       future->set_future_result_size(future_size, source);
+      future->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2474,6 +2467,7 @@ namespace Legion {
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
       future->record_subscription(source, true/*need lock*/);
+      future->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2491,6 +2485,7 @@ namespace Legion {
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
       future->notify_remote_set(source);
+      future->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2510,13 +2505,6 @@ namespace Legion {
 #endif
       size_t num_subscribers;
       derez.deserialize(num_subscribers);
-      // Special case for removing our final reference
-      if (num_subscribers == 0)
-      {
-        if (future->remove_base_resource_ref(RUNTIME_REF))
-          delete future;
-        return;
-      }
       std::set<AddressSpaceID> subscribers;
       for (unsigned idx = 0; idx < num_subscribers; idx++)
       {
@@ -2525,6 +2513,7 @@ namespace Legion {
         subscribers.insert(subscriber);
       }
       future->broadcast_result(subscribers, true/*need lock*/);
+      future->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -3651,7 +3640,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::pack_future_map(Serializer &rez) const
+    void FutureMapImpl::pack_future_map(Serializer &rez)
     //--------------------------------------------------------------------------
     {
       rez.serialize(did);
@@ -3662,6 +3651,7 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
+      pack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -3680,8 +3670,10 @@ namespace Legion {
       size_t index;
       derez.deserialize(index);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      return FutureMap(runtime->find_or_create_future_map(future_map_did, ctx, 
+      FutureMap result(runtime->find_or_create_future_map(future_map_did, ctx, 
                             index, future_map_domain, completion, provenance));
+      result.impl->unpack_global_ref();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -12108,7 +12100,7 @@ namespace Legion {
             }
           case DISTRIBUTED_DOWNGRADE_REQUEST:
             {
-              runtime->handle_did_downgrade_request(derez);
+              runtime->handle_did_downgrade_request(derez,remote_address_space);
               break;
             }
           case DISTRIBUTED_DOWNGRADE_RESPONSE:
@@ -17975,112 +17967,132 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(IndexSpace handle,
-                                          const bool total_sharding_collective)
+              const bool total_sharding_collective, const bool unpack_reference)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = 
-        IndexSpaceNode::get_owner_space(handle, this);
-      if (owner_space == address_space)
+      IndexSpaceNode *node = forest->get_node(handle);
+      if (!node->check_valid_and_increment(APPLICATION_REF))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to add shared ownership to index space %x "
+            "which has already been deleted", handle.get_id())
+      if (!node->is_owner())
       {
-        IndexSpaceNode *node = forest->get_node(handle);
-        if (!node->check_valid_and_increment(APPLICATION_REF))
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
-              "Illegal call to add shared ownership to index space %x "
-              "which has already been deleted", handle.get_id())
-      }
-      else if (!total_sharding_collective)
-      {
-        Serializer rez;
+#ifdef DEBUG_LEGION
+        assert(!unpack_reference);
+#endif
+        if (!total_sharding_collective)
         {
-          RezCheck z(rez);
-          rez.serialize<int>(0);
-          rez.serialize(handle);
+          node->pack_valid_ref();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<int>(0);
+            rez.serialize(handle);
+          }
+          send_shared_ownership(node->owner_space, rez);
         }
-        send_shared_ownership(owner_space, rez);
+        node->remove_base_valid_ref(APPLICATION_REF);
       }
+      else if (unpack_reference)
+        node->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(IndexPartition handle,
-                                          const bool total_sharding_collective)
+              const bool total_sharding_collective, const bool unpack_reference)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = 
-        IndexPartNode::get_owner_space(handle, this);
-      if (owner_space == address_space)
+      IndexPartNode *node = forest->get_node(handle);
+      if (!node->check_valid_and_increment(APPLICATION_REF))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to add shared ownership to index partition %x "
+            "which has already been deleted", handle.get_id())
+      if (!node->is_owner())
       {
-        IndexPartNode *node = forest->get_node(handle);
-        if (!node->check_valid_and_increment(APPLICATION_REF))
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
-              "Illegal call to add shared ownership to index partition %x "
-              "which has already been deleted", handle.get_id())
-      }
-      else if (!total_sharding_collective)
-      {
-        Serializer rez;
+#ifdef DEBUG_LEGION
+        assert(!unpack_reference);
+#endif
+        if (!total_sharding_collective)
         {
-          RezCheck z(rez);
-          rez.serialize<int>(1);
-          rez.serialize(handle);
+          node->pack_valid_ref();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<int>(1);
+            rez.serialize(handle);
+          }
+          send_shared_ownership(node->owner_space, rez);
         }
-        send_shared_ownership(owner_space, rez);
+        node->remove_base_valid_ref(APPLICATION_REF);
       }
+      else if (unpack_reference)
+        node->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(FieldSpace handle,
-                                          const bool total_sharding_collective)
+              const bool total_sharding_collective, const bool unpack_reference)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = 
-        FieldSpaceNode::get_owner_space(handle, this);
-      if (owner_space == address_space)
+      FieldSpaceNode *node = forest->get_node(handle);
+      if (!node->check_active_and_increment(APPLICATION_REF))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to add shared ownership to field space %x "
+            "which has already been deleted", handle.get_id())
+      if (!node->is_owner())
       {
-        FieldSpaceNode *node = forest->get_node(handle);
-        if (!node->check_active_and_increment(APPLICATION_REF))
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
-              "Illegal call to add shared ownership to field space %x "
-              "which has already been deleted", handle.get_id())
-      }
-      else if (!total_sharding_collective)
-      {
-        Serializer rez;
+#ifdef DEBUG_LEGION
+        assert(!unpack_reference);
+#endif
+        if (!total_sharding_collective)
         {
-          RezCheck z(rez);
-          rez.serialize<int>(2);
-          rez.serialize(handle);
+          node->pack_global_ref();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<int>(2);
+            rez.serialize(handle);
+          }
+          send_shared_ownership(node->owner_space, rez);
         }
-        send_shared_ownership(owner_space, rez);
+        node->remove_base_gc_ref(APPLICATION_REF);
       }
+      else if (unpack_reference)
+        node->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
     void Runtime::create_shared_ownership(LogicalRegion handle,
-                                          const bool total_sharding_collective)
+              const bool total_sharding_collective, const bool unpack_reference)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = 
-        RegionNode::get_owner_space(handle, this);
-      if (owner_space == address_space)
+      RegionNode *node = forest->get_node(handle);
+      if (!node->check_active_and_increment(APPLICATION_REF))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
+            "Illegal call to add shared ownership to logical region "
+            "(%x,%x,%x) which has already been deleted", 
+            handle.index_space.get_id(), handle.field_space.get_id(),
+            handle.tree_id)
+      if (!node->is_owner())
       {
-        RegionNode *node = forest->get_node(handle);
-        if (!node->check_active_and_increment(APPLICATION_REF))
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
-              "Illegal call to add shared ownership to logical region "
-              "(%x,%x,%x) which has already been deleted", 
-              handle.index_space.get_id(), handle.field_space.get_id(),
-              handle.tree_id)
-      }
-      else if (!total_sharding_collective)
-      {
-        Serializer rez;
+#ifdef DEBUG_LEGION
+        assert(!unpack_reference);
+#endif
+        if (!total_sharding_collective)
         {
-          RezCheck z(rez);
-          rez.serialize<int>(3);
-          rez.serialize(handle);
+          node->pack_global_ref();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<int>(3);
+            rez.serialize(handle);
+          }
+          send_shared_ownership(node->owner_space, rez);
         }
-        send_shared_ownership(owner_space, rez);
+        node->remove_base_gc_ref(APPLICATION_REF);
       }
+      else if (unpack_reference)
+        node->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -23472,28 +23484,28 @@ namespace Legion {
           {
             IndexSpace handle;
             derez.deserialize(handle);
-            create_shared_ownership(handle);
+            create_shared_ownership(handle, false, true);
             break;
           }
         case 1:
           {
             IndexPartition handle;
             derez.deserialize(handle);
-            create_shared_ownership(handle);
+            create_shared_ownership(handle, false, true);
             break;
           }
         case 2:
           {
             FieldSpace handle;
             derez.deserialize(handle);
-            create_shared_ownership(handle);
+            create_shared_ownership(handle, false, true);
             break;
           }
         case 3:
           {
             LogicalRegion handle;
             derez.deserialize(handle);
-            create_shared_ownership(handle);
+            create_shared_ownership(handle, false, true);
             break;
           }
         default:
@@ -24005,10 +24017,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_downgrade_request(Deserializer &derez)
+    void Runtime::handle_did_downgrade_request(Deserializer &derez,
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::handle_downgrade_request(this, derez);
+      DistributedCollectable::handle_downgrade_request(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -26003,7 +26016,6 @@ namespace Legion {
         dist_collectables.find(did);
       if (finder == dist_collectables.end())
         return NULL;
-      finder->second->add_base_resource_ref(RUNTIME_REF);
       return finder->second;
     } 
 

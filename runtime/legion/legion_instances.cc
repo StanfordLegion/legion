@@ -1281,6 +1281,7 @@ namespace Legion {
           rez.serialize(&result);
           rez.serialize(done);
         }
+        pack_global_ref();
         runtime->send_gc_debug_request(owner_space, rez);
         if (!done.has_triggered())
           done.wait();
@@ -1306,30 +1307,26 @@ namespace Legion {
       derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->weak_find_distributed_collectable(did));
-      if (manager != NULL)
+          runtime->find_distributed_collectable(did));
+      // Should be guaranteed to be able to acquire this
+      if (manager->acquire_instance(REMOTE_DID_REF))
       {
-        // Should be guaranteed to be able to acquire this
-        if (manager->acquire_instance(REMOTE_DID_REF))
+        Runtime::trigger_event(done);
+        // Remove the reference that we just got
+        manager->remove_base_valid_ref(REMOTE_DID_REF);
+      }
+      else
+      {
+        // If we get here, we failed so send the response
+        Serializer rez;
         {
-          Runtime::trigger_event(done);
-          // Remove the reference that we just got
-          manager->remove_base_valid_ref(REMOTE_DID_REF);
-          if (manager->remove_base_resource_ref(RUNTIME_REF))
-            delete manager;
-          return;
+          RezCheck z2(rez);
+          rez.serialize(target);
+          rez.serialize(done);
         }
+        runtime->send_gc_debug_response(source, rez);
       }
-      // If we get here, we failed so send the response
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(target);
-        rez.serialize(done);
-      }
-      runtime->send_gc_debug_response(source, rez);
-      if ((manager != NULL) && manager->remove_base_resource_ref(RUNTIME_REF))
-        delete manager;
+      manager->unpack_global_ref();
 #else
       assert(false); // should never get this in release mode
 #endif
@@ -1467,6 +1464,7 @@ namespace Legion {
         rez.serialize(&result);
         rez.serialize(ready);
       }
+      pack_global_ref();
       runtime->send_acquire_request(owner_space, rez);
       ready.wait();
       return result.load();
@@ -1492,32 +1490,32 @@ namespace Legion {
       derez.deserialize(ready);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->weak_find_distributed_collectable(did));
-      if (manager != NULL)
+          runtime->find_distributed_collectable(did));
+      if (manager->acquire_instance(REMOTE_DID_REF))
       {
-        if (manager->acquire_instance(REMOTE_DID_REF))
+        // We succeeded so send the response back with the reference
+        Serializer rez;
         {
-          // We succeeded so send the response back with the reference
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(remote);
-            rez.serialize(ref);
-            rez.serialize(remote_mutator);
-            rez.serialize(result);
-            rez.serialize(ready);
-          }
-          runtime->send_acquire_response(source, rez);
-          // Wait for the result to be applied and then remove
-          // the reference that we acquired on this node
-          ready.wait();
-          manager->remove_base_valid_ref(REMOTE_DID_REF);
+          RezCheck z(rez);
+          rez.serialize(remote);
+          rez.serialize(ref);
+          rez.serialize(remote_mutator);
+          rez.serialize(result);
+          rez.serialize(ready);
         }
-        if (manager->remove_base_resource_ref(RUNTIME_REF))
-          delete manager;
+        runtime->send_acquire_response(source, rez);
+        // Wait for the result to be applied and then remove
+        // the reference that we acquired on this node
+        ready.wait();
+        manager->remove_base_valid_ref(REMOTE_DID_REF);
       }
-      // We failed, so the flag is already set, just trigger the event
-      Runtime::trigger_event(ready);
+      else
+      {
+        // We failed, so the flag is already set, just trigger the event
+        Runtime::trigger_event(ready);
+        // Unpack the global reference that we added
+        manager->unpack_global_ref();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1550,6 +1548,7 @@ namespace Legion {
       result->store(true);
       // Triggering the event removes the reference we added on the remote node
       Runtime::trigger_event(ready);
+      manager->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -1595,21 +1594,7 @@ namespace Legion {
       derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->weak_find_distributed_collectable(did));
-      if (manager == NULL)
-      {
-        // This was already collected, so indicate that
-        Serializer rez;
-        {
-          RezCheck z2(rez);
-          rez.serialize(result);
-          rez.serialize(target);
-          rez.serialize(RtEvent::NO_RT_EVENT);
-          rez.serialize(done);
-        }
-        runtime->send_gc_response(source, rez);
-        return;
-      }
+          runtime->find_distributed_collectable(did));
       RtEvent ready;
       if (manager->collect(ready))
       {
@@ -1625,8 +1610,7 @@ namespace Legion {
       }
       else // Couldn't collect so we are done
         Runtime::trigger_event(done);
-      if (manager->remove_base_resource_ref(RUNTIME_REF))
-        delete manager;
+      manager->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -1894,6 +1878,7 @@ namespace Legion {
           rez.serialize(&ready);
           rez.serialize(done);
         }
+        pack_global_ref();
         runtime->send_gc_request(owner_space, rez);
         done.wait();
         return result.load();
@@ -2054,29 +2039,23 @@ namespace Legion {
       derez.deserialize(done);
 
       PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->weak_find_distributed_collectable(did));
+          runtime->find_distributed_collectable(did));
 
-      if (manager != NULL)
-      {
-        // To avoid collisiions with existing local mappers which could lead
-        // to aliasing of priority updates, we use "invalid" processor IDs
-        // here that will never conflict with existing processor IDs
-        // Note that the NO_PROC is a valid processor ID for mappers in the
-        // case where the mapper handles all the processors in a node. We
-        // therefore always add the owner address space to the source to 
-        // produce a non-zero processor ID. Note that this formulation also
-        // avoid conflicts from different remote sources.
-        const Processor fake_proc = { source + manager->owner_space };
+      // To avoid collisiions with existing local mappers which could lead
+      // to aliasing of priority updates, we use "invalid" processor IDs
+      // here that will never conflict with existing processor IDs
+      // Note that the NO_PROC is a valid processor ID for mappers in the
+      // case where the mapper handles all the processors in a node. We
+      // therefore always add the owner address space to the source to 
+      // produce a non-zero processor ID. Note that this formulation also
+      // avoid conflicts from different remote sources.
+      const Processor fake_proc = { source + manager->owner_space };
 #ifdef DEBUG_LEGION
-        assert(fake_proc.id != 0);
+      assert(fake_proc.id != 0);
 #endif
-        Runtime::trigger_event(done, manager->set_garbage_collection_priority(
-                                  0/*default mapper ID*/, fake_proc, priority));
-        if (manager->remove_base_resource_ref(RUNTIME_REF))
-          delete manager;
-      }
-      else
-        Runtime::trigger_event(done);
+      Runtime::trigger_event(done, manager->set_garbage_collection_priority(
+                                0/*default mapper ID*/, fake_proc, priority));
+      manager->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2988,6 +2967,7 @@ namespace Legion {
           rez.serialize(priority);
           rez.serialize(done);
         }
+        pack_global_ref();
         runtime->send_gc_priority_update(owner_space, rez);
         return done;
       }

@@ -303,7 +303,7 @@ namespace Legion {
       AddressSpaceID get_downgrade_target(AddressSpaceID owner) const;
     public:
       static void handle_downgrade_request(Runtime *runtime,
-                                           Deserializer &derez);
+                         Deserializer &derez, AddressSpaceID source);
       static void handle_downgrade_response(Runtime *runtime,
                                             Deserializer &derez);
       static void handle_downgrade_success(Runtime *runtime,

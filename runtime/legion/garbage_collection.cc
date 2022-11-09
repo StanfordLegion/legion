@@ -771,7 +771,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_downgrade_request(
-                                          Runtime *runtime, Deserializer &derez)
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -780,8 +780,26 @@ namespace Legion {
       AddressSpaceID downgrade_owner;
       derez.deserialize(downgrade_owner);
 
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-      dc->check_for_downgrade(downgrade_owner);
+      DistributedCollectable *dc = 
+        runtime->weak_find_distributed_collectable(did);
+      // It's possible for this to race with the creation and registration
+      // of this distributed collectable 
+      if (dc == NULL)
+      {
+        // If this hasn't even been made yet then it's not ready to be
+        // downgraded yet
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(downgrade_owner);
+          rez.serialize<uint64_t>(0); // sent global references
+          rez.serialize<uint64_t>(0); // received global references
+        }
+        runtime->send_did_downgrade_response(source, rez);
+      }
+      else
+        dc->check_for_downgrade(downgrade_owner);
     }
 
     //--------------------------------------------------------------------------

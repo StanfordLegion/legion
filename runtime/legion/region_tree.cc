@@ -8434,6 +8434,7 @@ namespace Legion {
       }
       else
       {
+        pack_valid_ref();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -9226,6 +9227,7 @@ namespace Legion {
 
       IndexSpaceNode *node = forest->get_node(handle);
       node->release_color(color);
+      node->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -13205,6 +13207,7 @@ namespace Legion {
               rez.serialize(fid);
               rez.serialize(field_size);
             }
+            pack_global_ref();
             context->runtime->send_field_size_update(*it, rez);
             update_events.insert(done_event);
           }
@@ -13227,6 +13230,7 @@ namespace Legion {
             rez.serialize(fid);
             rez.serialize(field_size);
           }
+          pack_global_ref();
           context->runtime->send_field_size_update(owner_space, rez);
           update_events.insert(done_event);
         }
@@ -14272,6 +14276,7 @@ namespace Legion {
       FieldSpaceNode *node = forest->get_node(handle);
       std::set<RtEvent> applied;
       node->invalidate_layouts(index, applied, source);
+      node->unpack_global_ref();
       if (!applied.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(applied));
       else
@@ -14390,6 +14395,7 @@ namespace Legion {
       FieldSpaceNode *node = forest->get_node(handle);
       std::set<RtEvent> done_events;
       node->update_field_size(fid, field_size, done_events, source);
+      node->unpack_global_ref();
       if (!done_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(done_events));
       else
@@ -15189,6 +15195,7 @@ namespace Legion {
               rez.serialize(index);
               rez.serialize(remote_done);
             }
+            pack_global_ref();
             runtime->send_field_space_layout_invalidation(*it, rez);
             applied.insert(remote_done);
           }
