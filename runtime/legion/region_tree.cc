@@ -1378,7 +1378,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             FieldSpaceNode *node = get_node(handle);
-            if (node->remove_base_valid_ref(APPLICATION_REF))
+            if (node->remove_base_gc_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -1394,7 +1394,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           FieldSpaceNode *node = get_node(handle);
-          if (node->remove_base_valid_ref(APPLICATION_REF))
+          if (node->remove_base_gc_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -1609,7 +1609,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             RegionNode *node = get_node(handle);
-            if (node->remove_base_valid_ref(APPLICATION_REF))
+            if (node->remove_base_gc_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -1626,7 +1626,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           RegionNode *node = get_node(handle);
-          if (node->remove_base_valid_ref(APPLICATION_REF))
+          if (node->remove_base_gc_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -3981,7 +3981,7 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF);
+          result->add_base_gc_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
       return result;
@@ -4017,7 +4017,7 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF);
+          result->add_base_gc_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
       return result;
@@ -4104,7 +4104,7 @@ namespace Legion {
           // If we're the root we get a valid reference on the owner
           // node otherwise we get a gc ref from the owner node
           if (result->is_owner())
-            result->add_base_valid_ref(APPLICATION_REF);
+            result->add_base_gc_ref(APPLICATION_REF);
         }
         result->record_registered();
       }
@@ -6563,9 +6563,9 @@ namespace Legion {
                                       IndexSpaceExpression *expr, size_t volume)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(volume > 0);
-#endif
+      // Nothing to do for empty expressions
+      if (volume == 0)
+        return;
       const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
       AutoLock c_lock(congruence_lock);
       std::set<IndexSpaceExpression*> &exprs = canonical_expressions[key];
@@ -7135,7 +7135,7 @@ namespace Legion {
           for (std::set<IndexSpaceOperation*>::const_iterator it = 
                derived_operations.begin(); it != derived_operations.end(); it++)
           {
-            (*it)->add_tree_expression_reference(did);
+            (*it)->add_nested_resource_ref(did);
             derived.push_back(*it);
           }
         }
@@ -7148,9 +7148,9 @@ namespace Legion {
           // Try to invalidate it and remove the tree reference if we did
           if ((*it)->invalidate_operation() &&
               (*it)->remove_base_gc_ref(REGION_TREE_REF))
-            assert(false); // should never delete since we have an expr ref
+            assert(false); // should never delete since we have a resource ref
           // Remove any references that we have on the parents
-          if ((*it)->remove_tree_expression_reference(did))
+          if ((*it)->remove_nested_resource_ref(did))
             delete (*it);
         }
       }
@@ -7182,6 +7182,9 @@ namespace Legion {
                                                        RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_valid());
+#endif
       IndexSpaceExpression *expr = canonical.load();
       if (expr != NULL)
         return expr;
@@ -7201,8 +7204,6 @@ namespace Legion {
       const DistributedID did = get_distributed_id();
       if (!canonical.compare_exchange_strong(expected, expr))
         expr->remove_canonical_reference(did);
-      else // We're the first so add our resource reference
-        expr->add_tree_expression_reference(did);
       return expr;
     }
 
@@ -7349,7 +7350,7 @@ namespace Legion {
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        ValidDistributedCollectable(ctx->runtime,LEGION_DISTRIBUTED_HELP_ENCODE(
+        DistributedCollectable(ctx->runtime,LEGION_DISTRIBUTED_HELP_ENCODE(
           ctx->runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC)),
         context(ctx), origin_expr(this), op_kind(kind), invalidated(0)
     //--------------------------------------------------------------------------
@@ -7364,9 +7365,8 @@ namespace Legion {
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
         IndexSpaceExprID eid, DistributedID did, IndexSpaceOperation *origin)
       : IndexSpaceExpression(tag, eid, inter_lock),
-        ValidDistributedCollectable(ctx->runtime, did), 
-        context(ctx), origin_expr(origin),
-        op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
+        DistributedCollectable(ctx->runtime, did), context(ctx),
+        origin_expr(origin), op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7382,19 +7382,6 @@ namespace Legion {
     IndexSpaceOperation::~IndexSpaceOperation(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // If we have a canonical reference that is not ourselves then 
-      // we need to remove the nested reference that we are holding on it too
-      IndexSpaceExpression *canon = canonical.load();
-      if ((canon != NULL) && (canon != this) &&
-          canon->remove_canonical_reference(did))
-        // should never actually delete it since we have a resource ref too
-        assert(false); 
     }
 
     //--------------------------------------------------------------------------
@@ -7417,7 +7404,7 @@ namespace Legion {
 #endif
           context->remove_canonical_expression(this, volume);
         }
-        else if (canon->remove_tree_expression_reference(did))
+        else if (canon->remove_canonical_reference(did))
           delete canon;
       }
     }
@@ -7455,7 +7442,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      add_base_valid_ref(source, count);
+      add_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -7463,7 +7450,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      add_nested_valid_ref(source, count);
+      add_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -7471,7 +7458,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_base_valid_ref(source, count);
+      return remove_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -7479,7 +7466,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_valid_ref(source, count);
+      return remove_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8150,13 +8137,7 @@ namespace Legion {
     void IndexSpaceNode::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      // If we have a canonical reference that is not ourselves then 
-      // we need to remove the nested reference that we are holding on it too
-      IndexSpaceExpression *canon = canonical.load();
-      if ((canon != NULL) && (canon != this) &&
-          canon->remove_canonical_reference(did))
-        // should never actually delete it since we have a resource ref too
-        assert(false);
+      // Nothing to do here currently
     }
 
     //--------------------------------------------------------------------------
@@ -8177,7 +8158,7 @@ namespace Legion {
 #endif
           context->remove_canonical_expression(this, volume);
         }
-        else if (canon->remove_tree_expression_reference(did))
+        else if (canon->remove_canonical_reference(did))
           delete canon;
       }
     }
@@ -9308,7 +9289,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      add_base_valid_ref(source, count);
+      add_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -9316,7 +9297,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      add_nested_valid_ref(source, count);
+      add_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -9324,7 +9305,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_base_valid_ref(source, count);
+      return remove_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -9332,7 +9313,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_valid_ref(source, count);
+      return remove_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -9656,6 +9637,14 @@ namespace Legion {
       }
       else
         parent->remove_nested_valid_ref(did);
+      if (!partition_trackers.empty())
+      {
+        for (std::list<PartitionTracker*>::const_iterator it = 
+              partition_trackers.begin(); it != partition_trackers.end(); it++)
+          if ((*it)->remove_partition_reference())
+            delete (*it);
+        partition_trackers.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9680,15 +9669,7 @@ namespace Legion {
             to_invalidate.begin(); it != to_invalidate.end(); it++)
         // Remove the nested valid reference on this index space node
         if ((*it)->remove_nested_valid_ref(did))
-          assert(false); // still holding resource ref so should never be hit 
-      if (!partition_trackers.empty())
-      {
-        for (std::list<PartitionTracker*>::const_iterator it = 
-              partition_trackers.begin(); it != partition_trackers.end(); it++)
-          if ((*it)->remove_partition_reference())
-            delete (*it);
-        partition_trackers.clear();
-      }
+          assert(false); // still holding resource ref so should never be hit  
       // Remove the reference on our union expression if we have one
       IndexSpaceExpression *expr = union_expr.load();
       if ((expr != NULL) && expr->remove_nested_expression_reference(did))
@@ -11559,7 +11540,7 @@ namespace Legion {
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                    DistributedID did, RtEvent init, CollectiveMapping *map,
                    ShardMapping *shard_mapping, Provenance *prov)
-      : ValidDistributedCollectable(ctx->runtime, 
+      : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
@@ -11600,7 +11581,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
          DistributedID did, RtEvent init, Provenance *prov, Deserializer &derez)
-      : ValidDistributedCollectable(ctx->runtime, 
+      : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           false/*register with runtime*/),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
@@ -15781,7 +15762,7 @@ namespace Legion {
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
        FieldSpaceNode *column_src, RtEvent init, RtEvent tree, Provenance *prov,
        DistributedID id, CollectiveMapping *map)
-      : ValidDistributedCollectable(ctx->runtime, 
+      : DistributedCollectable(ctx->runtime, 
             LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id :
               ctx->runtime->get_available_distributed_id(),
               REGION_TREE_NODE_DC), false/*register with runtime*/, map),
@@ -17860,7 +17841,7 @@ namespace Legion {
               removed_fields = true;
               if (!finder->second)
               {
-                if (next_child->remove_base_valid_ref(FIELD_STATE_REF))
+                if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
                   delete next_child;
                 state.open_children.erase(finder);
               }
@@ -18070,7 +18051,7 @@ namespace Legion {
                 removed_fields = true;
                 if (!finder->second)
                 {
-                  if (next_child->remove_base_valid_ref(FIELD_STATE_REF))
+                  if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
                     delete next_child;
                   state.open_children.erase(finder);
                 }
@@ -18549,7 +18530,7 @@ namespace Legion {
             to_delete.begin(); it != to_delete.end(); it++)
       {
         state.disjoint_complete_children.erase(*it);
-        if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+        if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
           delete (*it);
       }
       state.disjoint_complete_children.tighten_valid_mask(); 
@@ -18940,7 +18921,7 @@ namespace Legion {
           // Add a remote valid reference on these nodes to keep
           // them live until we can add on remotely. 
           if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-            it->first->pack_valid_ref();
+            it->first->pack_global_ref();
         }
       }
       rez.serialize(state.disjoint_complete_tree);
@@ -18953,7 +18934,7 @@ namespace Legion {
         rez.serialize(child_color);
         rez.serialize(it->second);
         if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-          it->first->pack_valid_ref();
+          it->first->pack_global_ref();
       }
       rez.serialize<size_t>(state.disjoint_complete_accesses.size());
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
@@ -19057,7 +19038,7 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);  
         if (state.disjoint_complete_children.insert(child, mask))
-          child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+          child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         to_traverse.insert(std::make_pair(child_color, child));
       }
       size_t num_disjoint_complete_accesses;
@@ -19111,7 +19092,7 @@ namespace Legion {
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
         it->second->unpack_logical_state(ctx, derez, source);
-        it->second->unpack_valid_ref();
+        it->second->unpack_global_ref();
       }
     }
 
@@ -19556,12 +19537,8 @@ namespace Legion {
       }
       if (registered)
       {
-        // Only need to unregister ourselves with the column if we're the top
-        if (parent == NULL)
-        {
-          if (column_source->remove_nested_resource_ref(did))
-            delete column_source;
-        }
+        if (column_source->remove_nested_resource_ref(did))
+          delete column_source;
         // Unregister oursleves with the row source
         if (row_source->remove_nested_resource_ref(did))
           delete row_source;
@@ -19572,22 +19549,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      if (parent == NULL)
-        row_source->remove_nested_valid_ref(did);
-      else
-        row_source->parent->remove_nested_valid_ref(did);
-      column_source->remove_nested_valid_ref(did);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (parent == NULL)
+      {
         context->runtime->release_tree_instances(handle.get_tree_id());
+        row_source->remove_nested_valid_ref(did);
+        column_source->remove_nested_gc_ref(did);
+      }
       if (!partition_trackers.empty())
       {
 #ifdef DEBUG_LEGION
@@ -19598,7 +19568,7 @@ namespace Legion {
           if ((*it)->remove_partition_reference())
             delete (*it);
         partition_trackers.clear();
-      } 
+      }
       for (unsigned idx = 0; idx < current_versions.max_entries(); idx++)
         if (current_versions.has_entry(idx))
           get_current_version_manager(idx).finalize_manager();
@@ -19611,20 +19581,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered);
 #endif
-      if (parent != NULL)
-      {
-        row_source->parent->add_nested_valid_ref(did);
-        parent->add_child(this);
-      }
-      else
+      if (parent == NULL)
       {
         row_source->add_nested_valid_ref(did);
-        column_source->add_nested_resource_ref(did);
+        column_source->add_nested_gc_ref(did);
       }
-      column_source->add_nested_valid_ref(did);
+      else
+        parent->add_child(this);
+      column_source->add_nested_resource_ref(did);
       row_source->add_nested_resource_ref(did);
       registered = true;
-      register_with_runtime();
+      if (parent == NULL)
+        register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
@@ -19746,7 +19714,7 @@ namespace Legion {
 #endif
       // Record the new disjoint complete tree
       if (state.disjoint_complete_children.insert(child, refinement_mask))
-        child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+        child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
       // Update the refinement tree for the full subtree
       child->update_disjoint_complete_tree(ctx, refinement_op,
                                            refinement_mask, applied_events);
@@ -20152,7 +20120,7 @@ namespace Legion {
         refined_partition |= overlap;
         // Add it to the current set
         if (state.disjoint_complete_children.insert(it->first, overlap))
-          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+          it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         // Remove it from this set
         it.filter(overlap);
         if (!it->second)
@@ -20327,7 +20295,7 @@ namespace Legion {
 #endif
         it->first->as_partition_node()->invalidate_refinement(ctx, it->second, 
                                   applied_events, to_release, source_context);
-        if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }
@@ -21116,19 +21084,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::notify_invalid(void)
-    //--------------------------------------------------------------------------
-    {
-      // No need to check for deletion since we hold resource references 
-      column_source->remove_nested_valid_ref(did);
-      row_source->remove_nested_valid_ref(did);
-    }
-
-    //--------------------------------------------------------------------------
     void PartitionNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
       parent->remove_child(row_source->color);
+      row_source->remove_nested_gc_ref(did);
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
       // be modifying these data structures at this point
@@ -21146,9 +21106,8 @@ namespace Legion {
       assert(!registered);
 #endif
       row_source->add_nested_resource_ref(did);
+      row_source->add_nested_gc_ref(did);
       parent->add_nested_resource_ref(did);
-      column_source->add_nested_valid_ref(did);
-      row_source->add_nested_valid_ref(did);
       parent->add_child(this);
       // Create a partition deletion tracker for this node and add it to 
       // both the index partition node and the root logical region for this
@@ -21690,7 +21649,7 @@ namespace Legion {
             unrefined_children.insert(child, child_overlap);
           // Add it to the current set
           if (state.disjoint_complete_children.insert(child, child_overlap))
-            child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+            child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         }
       }
       else
@@ -21721,7 +21680,7 @@ namespace Legion {
             unrefined_children.insert(child, child_overlap);
           // Add it to the current set
           if (state.disjoint_complete_children.insert(child, child_overlap))
-            child->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+            child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         }
         delete itr;
       } 
@@ -21904,7 +21863,7 @@ namespace Legion {
 #endif
         it->first->as_region_node()->invalidate_refinement(ctx, it->second, 
                   true/*self*/, source_context, applied_events, to_release);
-        if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }

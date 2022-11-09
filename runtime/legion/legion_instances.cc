@@ -1151,13 +1151,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void PhysicalManager::add_base_valid_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+                               ReferenceSource source, int cnt, bool need_check)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
-#endif
       valid_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_valid_references.find(source);
@@ -1165,38 +1162,34 @@ namespace Legion {
         detailed_base_valid_references[source] = cnt;
       else
         finder->second += cnt;
-      if (valid_reference == cnt)
-        notify_valid();
+      if (valid_references == cnt)
+        notify_valid(need_check);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_nested_valid_ref_internal (
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    void PhysicalManager::add_nested_valid_ref_internal(
+                                 DistributedID source, int cnt, bool need_check)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
-#endif
       valid_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_valid_references.find(did);
+        detailed_nested_valid_references.find(source);
       if (finder == detailed_nested_valid_references.end())
-        detailed_nested_valid_references[did] = cnt;
+        detailed_nested_valid_references[source] = cnt;
       else
         finder->second += cnt;
       if (valid_references == cnt)
-        notify_valid();
+        notify_valid(need_check);
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_base_valid_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+    bool PhysicalManager::remove_base_valid_ref_internal(
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
       assert(valid_references >= cnt);
 #endif
       valid_references -= cnt;
@@ -1214,18 +1207,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::remove_nested_valid_ref_internal(
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    bool PhysicalManager::remove_nested_valid_ref_internal(
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
       assert(valid_references >= cnt);
 #endif
       valid_references -= cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_valid_references.find(did);
+        detailed_nested_valid_references.find(source);
       assert(finder != detailed_nested_valid_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
@@ -1238,12 +1230,12 @@ namespace Legion {
     }
 #else // DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
-    void PhysicalManager::add_valid_reference(int cnt)
+    void PhysicalManager::add_valid_reference(int cnt, bool need_check)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
       if (valid_references.fetch_add(cnt) == 0)
-        notify_valid();
+        notify_valid(need_check);
     }
 
     //--------------------------------------------------------------------------
@@ -1262,7 +1254,7 @@ namespace Legion {
 #endif // DEBUG_LEGION_GC
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::notify_valid(void)
+    void PhysicalManager::notify_valid(bool need_check)
     //--------------------------------------------------------------------------
     {
       // No need for the lock, it is held by the caller
@@ -1274,7 +1266,7 @@ namespace Legion {
       // is valid as long as a copy of the manager on one node is valid
       // This way we can easily check that acquires are being done safely
       // if instance isn't already valid somewhere
-      if (!is_external_instance() || !is_owner())
+      if (need_check && (!is_external_instance() || !is_owner()))
       {
         // Should never be here if we're the owner as it indicates that
         // we tried to add a valid reference without first doing an acquire
@@ -1420,7 +1412,7 @@ namespace Legion {
             }
           case COLLECTABLE_GC_STATE:
             {
-              gc_state = VALID_GC_STATE;
+              notify_valid(false/*need check*/);
               success = true;
               break;
             }
@@ -1430,7 +1422,7 @@ namespace Legion {
               if (is_owner())
               {
                 // We're the owner so we can save this
-                gc_state = VALID_GC_STATE;
+                notify_valid(false/*need check*/);
                 success = true;
               }
               // Not the owner so we need to send a message to the
@@ -1478,13 +1470,6 @@ namespace Legion {
       runtime->send_acquire_request(owner_space, rez);
       ready.wait();
       return result.load();
-      if (result.load())
-        return true;
-      // The only reason we fail is if the instance has been collected
-      // so we can update the gc_state
-      AutoLock i_lock(inst_lock);
-      gc_state = COLLECTED_GC_STATE;
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1552,10 +1537,18 @@ namespace Legion {
       RtUserEvent ready;
       derez.deserialize(ready);
 
-      // Add the local reference with the right kind and then remove the
-      // remote distributed reference we added on the owner node
-      manager->add_base_valid_ref(ref);
+      // Add the local reference with the right kind
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, manager->did, 
+                          manager->local_space, ref, 1/*count*/);
+#endif
+#ifdef DEBUG_LEGION_GC
+      manager->add_base_valid_ref_internal(ref, 1/*count*/,false/*need check*/);
+#else
+      manager->add_valid_reference(1/*count*/, false/*need check*/);
+#endif
       result->store(true);
+      // Triggering the event removes the reference we added on the remote node
       Runtime::trigger_event(ready);
     }
 
@@ -2014,9 +2007,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION_GC
               valid_references++;
               std::map<ReferenceSource,int>::iterator finder = 
-                detailed_base_valid_references.find(source);
+                detailed_base_valid_references.find(NEVER_GC_REF);
               if (finder == detailed_base_valid_references.end())
-                detailed_base_valid_references[source] = 1;
+                detailed_base_valid_references[NEVER_GC_REF] = 1;
               else
                 finder->second++;
 #else

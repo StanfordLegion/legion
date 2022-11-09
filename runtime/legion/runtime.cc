@@ -8165,7 +8165,7 @@ namespace Legion {
         check_instance_deletions(to_delete);
       for (std::vector<PhysicalManager*>::const_iterator it =
             delete_now.begin(); it != delete_now.end(); it++)
-        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
           delete (*it);
     }
 
@@ -8202,7 +8202,7 @@ namespace Legion {
           tree_finder->second.erase(finder);
           if (tree_finder->second.empty())
             current_instances.erase(tree_finder);
-          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
             delete (*it);
         }
       }
@@ -8926,7 +8926,7 @@ namespace Legion {
         check_instance_deletions(to_delete);
       for (std::vector<PhysicalManager*>::const_iterator it =
             delete_now.begin(); it != delete_now.end(); it++)
-        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
           delete (*it);
     }
 
@@ -9958,7 +9958,7 @@ namespace Legion {
           current_finder->second.erase(finder);
           if (current_finder->second.empty())
             current_instances.erase(current_finder);
-          if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
             delete (*it);
         }
       }
@@ -10212,8 +10212,10 @@ namespace Legion {
         assert(result);
 #endif
       }
-      // Since we're going to put this in the table add a reference
-      manager->add_base_resource_ref(MEMORY_MANAGER_REF);
+      // Since we're going to put this in the table add a gc reference 
+      // which will keep this manager eligible for acquires until the 
+      // point where we actually end up deleting it
+      manager->add_base_gc_ref(MEMORY_MANAGER_REF);
       // If we're setting the priority to min priority and this is the
       // owner then add the reference for the manager
       if ((priority == LEGION_GC_NEVER_PRIORITY) && manager->is_owner())
@@ -18035,7 +18037,7 @@ namespace Legion {
       if (owner_space == address_space)
       {
         FieldSpaceNode *node = forest->get_node(handle);
-        if (!node->check_valid_and_increment(APPLICATION_REF))
+        if (!node->check_active_and_increment(APPLICATION_REF))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
               "Illegal call to add shared ownership to field space %x "
               "which has already been deleted", handle.get_id())

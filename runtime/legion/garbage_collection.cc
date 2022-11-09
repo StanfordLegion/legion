@@ -88,9 +88,8 @@ namespace Legion {
           collective_mapping->remove_reference())
         delete collective_mapping;
 #ifdef LEGION_GC
-      if (registered_with_runtime)
-        log_garbage.info("GC Deletion %lld %d", 
-            LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+      log_garbage.info("GC Deletion %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     } 
 
@@ -193,8 +192,6 @@ namespace Legion {
       log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
 #ifdef DEBUG_LEGION_GC
-      if (gc_references == 0)
-        has_gc_references = true;
       gc_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_gc_references.find(source);
@@ -238,8 +235,6 @@ namespace Legion {
       log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
 #endif
 #ifdef DEBUG_LEGION_GC
-      if (gc_references == 0)
-        has_gc_references = true;
       gc_references += cnt;
       source = LEGION_DISTRIBUTED_ID_FILTER(source);
       std::map<DistributedID,int>::iterator finder = 
@@ -257,7 +252,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_base_gc_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -274,8 +269,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::add_nested_gc_ref_internal (
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    void DistributedCollectable::add_nested_gc_ref_internal(
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -284,16 +279,16 @@ namespace Legion {
 #endif
       gc_references++;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_gc_references.find(did);
+        detailed_nested_gc_references.find(source);
       if (finder == detailed_nested_gc_references.end())
-        detailed_nested_gc_references[did] = cnt;
+        detailed_nested_gc_references[source] = cnt;
       else
         finder->second += cnt;
     }
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_base_gc_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -317,7 +312,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_nested_gc_ref_internal(
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -327,7 +322,7 @@ namespace Legion {
 #endif
       gc_references--;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_gc_references.find(did);
+        detailed_nested_gc_references.find(source);
       assert(finder != detailed_nested_gc_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
@@ -359,7 +354,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_nested_resource_ref_internal (
-                                                     DistributedID did, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -368,9 +363,9 @@ namespace Legion {
 #endif
       resource_references++;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_resource_references.find(did);
+        detailed_nested_resource_references.find(source);
       if (finder == detailed_nested_resource_references.end())
-        detailed_nested_resource_references[did] = cnt;
+        detailed_nested_resource_references[source] = cnt;
       else
         finder->second += cnt;
     }
@@ -401,7 +396,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_nested_resource_ref_internal(
-                                                     DistributedID did, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -411,7 +406,7 @@ namespace Legion {
 #endif
       resource_references -= cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_resource_references.find(did);
+        detailed_nested_resource_references.find(source);
       assert(finder != detailed_nested_resource_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
@@ -638,19 +633,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(registered_with_runtime);
       assert(current_state == GLOBAL_REF_STATE);
 #endif
+      // Downgrade the state first so that we don't duplicate the callback
       current_state = LOCAL_REF_STATE;
+      // Add a resource reference here to prevent collection while we
+      // release the lock to perform the callback
+#ifdef DEBUG_LEGION_GC
+      resource_references++;
+#else
+      resource_references.fetch_add(1);
+#endif
       gc.release();
       // Can do this without holding the lock as the remote_instances data
       // structure should no longer be changing
       send_downgrade_notifications();
       notify_local();
       // Unregister this with the runtime
-      runtime->unregister_distributed_collectable(did);
+      if (registered_with_runtime)
+        runtime->unregister_distributed_collectable(did);
       gc.reacquire();
-      return can_delete(gc);
+#ifdef DEBUG_LEGION
+      assert(resource_references > 0);
+#endif
+      // Remove the guard resource reference that we added before 
+#ifdef DEBUG_LEGION_GC
+      if (--resource_references == 0)
+#else
+      if (resource_references.fetch_sub(1) == 1)
+#endif
+        return can_delete(gc);
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -923,7 +937,8 @@ namespace Legion {
     ValidDistributedCollectable::ValidDistributedCollectable(Runtime *rt,
                  DistributedID id, bool do_registration, CollectiveMapping *map)
       : DistributedCollectable(rt, id, do_registration, map, VALID_REF_STATE),
-        sent_valid_references(0), received_valid_references(0)
+        valid_references(0), sent_valid_references(0),
+        received_valid_references(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -986,7 +1001,7 @@ namespace Legion {
 #else // ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void ValidDistributedCollectable::add_base_valid_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1003,8 +1018,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::add_nested_valid_ref_internal (
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+    void ValidDistributedCollectable::add_nested_valid_ref_internal(
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1013,16 +1028,16 @@ namespace Legion {
 #endif
       valid_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_valid_references.find(did);
+        detailed_nested_valid_references.find(source);
       if (finder == detailed_nested_valid_references.end())
-        detailed_nested_valid_references[did] = cnt;
+        detailed_nested_valid_references[source] = cnt;
       else
         finder->second += cnt;
     }
 
     //--------------------------------------------------------------------------
     bool ValidDistributedCollectable::remove_base_valid_ref_internal(
-                     ReferenceSource source, ReferenceMutator *mutator, int cnt)
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1046,7 +1061,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ValidDistributedCollectable::remove_nested_valid_ref_internal(
-                          DistributedID did, ReferenceMutator *mutator, int cnt)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1056,7 +1071,7 @@ namespace Legion {
 #endif
       valid_references -= cnt;
       std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_valid_references.find(did);
+        detailed_nested_valid_references.find(source);
       assert(finder != detailed_nested_valid_references.end());
       assert(finder->second >= cnt);
       finder->second -= cnt;
@@ -1194,14 +1209,33 @@ namespace Legion {
     {
       if (current_state == VALID_REF_STATE)
       {
-        current_state = GLOBAL_REF_STATE;
         // Send messages while holding the lock because the remote_instances
         // data structure might still be changing
         send_downgrade_notifications();
+        // Downgrade the state first so that we don't duplicate the callback
+        current_state = GLOBAL_REF_STATE;
+        // Add a gc reference here prevent downgrades from the global ref
+        // state until we are done performing the callback
+#ifdef DEBUG_LEGION_GC
+        gc_references++;
+#else
+        gc_references.fetch_add(1);
+#endif
         gc.release();
         notify_invalid();
         gc.reacquire();
-        return can_delete(gc);
+#ifdef DEBUG_LEGION
+        assert(gc_references > 0);
+#endif
+        // Remove the guard reference that we added before
+#ifdef DEBUG_LEGION_GC
+        if (--gc_references == 0)
+#else
+        if (gc_references.fetch_sub(1) == 1)
+#endif
+          return can_delete(gc);
+        else
+          return false;
       }
       else
         return DistributedCollectable::perform_downgrade(gc); 

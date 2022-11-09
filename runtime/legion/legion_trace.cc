@@ -3229,7 +3229,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
-      region->add_base_valid_ref(TRACE_REF);
+      region->add_base_gc_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3277,7 +3277,7 @@ namespace Legion {
             unique_view_expressions.end(); it++) 
         if ((*it)->remove_base_expression_reference(TRACE_REF))
           delete (*it);
-      if (region->remove_base_valid_ref(TRACE_REF))
+      if (region->remove_base_gc_ref(TRACE_REF))
         delete region;
       if (condition_expr->remove_base_expression_reference(TRACE_REF))
         delete condition_expr;

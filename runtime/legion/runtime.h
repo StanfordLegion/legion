@@ -399,7 +399,6 @@ namespace Legion {
       Provenance *const provenance;
       const ApEvent future_complete;
     private:
-      FRIEND_ALL_RUNTIME_CLASSES
       mutable LocalLock future_lock;
       RtUserEvent subscription_event;
       // On the owner node, keep track of the registered waiters

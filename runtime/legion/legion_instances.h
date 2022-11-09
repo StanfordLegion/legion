@@ -271,15 +271,17 @@ namespace Legion {
     protected:
       // Internal valid reference counting 
 #ifndef DEBUG_LEGION_GC
-      void add_valid_reference(int cnt);
+      void add_valid_reference(int cnt, bool need_check = true);
       bool remove_valid_reference(int cnt);
 #else
-      void add_base_valid_ref_internal(ReferenceSource source, int cnt);
-      void add_nested_valid_ref_internal(DistributedID source, int cnt);
+      void add_base_valid_ref_internal(ReferenceSource source, int cnt, 
+                                       bool need_check = true);
+      void add_nested_valid_ref_internal(DistributedID source, int cnt,
+                                         bool need_check = true);
       bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
       bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
 #endif
-      void notify_valid(void);
+      void notify_valid(bool need_check);
       bool notify_invalid(void);
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
@@ -808,7 +810,7 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
-      virtual void notify_local(void) { assert(false); }
+      virtual void notify_local(void) { }
     public: 
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;

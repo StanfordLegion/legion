@@ -320,7 +320,7 @@ namespace Legion {
       mutable LocalLock gc_lock;
     protected:
       State current_state;
-    private: // derived users can't see the references
+    protected:
 #ifdef DEBUG_LEGION_GC
       int gc_references;
       int resource_references;

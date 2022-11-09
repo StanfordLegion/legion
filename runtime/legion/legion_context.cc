@@ -10601,7 +10601,7 @@ namespace Legion {
       {
         if (it->first->is_owner())
           it->first->unregister_active_context(this);
-        if (it->second->remove_base_resource_ref(CONTEXT_REF))
+        if (it->second->remove_base_gc_ref(CONTEXT_REF))
           delete (it->second);
       }
       instance_top_views.clear();
@@ -10729,7 +10729,9 @@ namespace Legion {
       }
       InstanceView *result =
        manager->find_or_create_instance_top_view(this, request_source, mapping);
-      result->add_base_resource_ref(CONTEXT_REF);
+      // Use a gc reference here to ensure that the view is remains alive 
+      // everywhere until the instance is deleted or the context ends
+      result->add_base_gc_ref(CONTEXT_REF);
       // Record the result and trigger any user event to signal that the
       // view is ready
       RtUserEvent to_trigger;
@@ -10824,7 +10826,7 @@ namespace Legion {
         removed = finder->second;
         instance_top_views.erase(finder);
       }
-      if (removed->remove_base_resource_ref(CONTEXT_REF))
+      if (removed->remove_base_gc_ref(CONTEXT_REF))
         delete removed;
     }
 

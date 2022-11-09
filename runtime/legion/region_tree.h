@@ -1583,7 +1583,7 @@ namespace Legion {
     };
 
     class IndexSpaceOperation : public IndexSpaceExpression,
-                                public ValidDistributedCollectable {
+                                public DistributedCollectable {
     public:
       enum OperationKind {
         UNION_OP_KIND,
@@ -1599,7 +1599,6 @@ namespace Legion {
           IndexSpaceExprID eid, DistributedID did, IndexSpaceOperation *origin);
       virtual ~IndexSpaceOperation(void);
     public:
-      virtual void notify_invalid(void);
       virtual void notify_local(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
@@ -1614,7 +1613,7 @@ namespace Legion {
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
-        { return ValidDistributedCollectable::is_valid(); }
+        { return DistributedCollectable::is_global(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -2171,7 +2170,7 @@ namespace Legion {
     public:
 #ifdef DEBUG_LEGION
       virtual bool is_valid(void) 
-        { return ValidDistributedCollectable::is_valid(); }
+        { return ValidDistributedCollectable::is_global(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -3411,7 +3410,7 @@ namespace Legion {
      * pointed at by nodes in the region trees.
      */
     class FieldSpaceNode : 
-      public LegionHeapify<FieldSpaceNode>, public ValidDistributedCollectable {
+      public LegionHeapify<FieldSpaceNode>, public DistributedCollectable {
     public:
       enum FieldAllocationState {
         FIELD_ALLOC_INVALID, // field_infos is invalid
@@ -3515,7 +3514,6 @@ namespace Legion {
       static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
     public:
       virtual void notify_local(void) { }
-      virtual void notify_invalid(void) { }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
             const void *buffer, size_t size, bool is_mutable, bool local_only);
@@ -3778,7 +3776,7 @@ namespace Legion {
      * this kind of node making them general across
      * all kinds of node types.
      */
-    class RegionTreeNode : public ValidDistributedCollectable {
+    class RegionTreeNode : public DistributedCollectable {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column,
                      RtEvent initialized, RtEvent tree_init, 
@@ -4065,7 +4063,6 @@ namespace Legion {
     public:
       RegionNode& operator=(const RegionNode &rhs) = delete;
     public:
-      virtual void notify_invalid(void);
       virtual void notify_local(void);
     public:
       void record_registered(void);
@@ -4232,7 +4229,6 @@ namespace Legion {
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
     public:
-      virtual void notify_invalid(void);
       virtual void notify_local(void);
     public:
       void record_registered(void);

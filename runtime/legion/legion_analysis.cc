@@ -2353,7 +2353,7 @@ namespace Legion {
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
               disjoint_complete_children.begin(); it !=
               disjoint_complete_children.end(); it++)
-          if (it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete it->first;
         disjoint_complete_children.clear();
       }
@@ -2465,7 +2465,7 @@ namespace Legion {
           // Remove duplicate references if they are already there
           // Otherwise the reference flows back with the node
           if (disjoint_complete_children.insert(it->first, it->second))
-            it->first->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+            it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
         }
         src.disjoint_complete_children.clear();
       }
@@ -2816,7 +2816,7 @@ namespace Legion {
         redop = user.usage.redop;
       }
       if (open_children.insert(child, m))
-        child->add_base_valid_ref(FIELD_STATE_REF);
+        child->add_base_gc_ref(FIELD_STATE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2876,7 +2876,7 @@ namespace Legion {
     {
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
-        if (it->first->remove_base_valid_ref(FIELD_STATE_REF))
+        if (it->first->remove_base_gc_ref(FIELD_STATE_REF))
           delete it->first;
     }
 
@@ -2973,7 +2973,7 @@ namespace Legion {
               rhs.open_children.begin(); it != rhs.open_children.end(); it++)
           // Remove duplicate references if we already had it
           if (!open_children.insert(it->first, it->second))
-            it->first->remove_base_valid_ref(FIELD_STATE_REF);
+            it->first->remove_base_gc_ref(FIELD_STATE_REF);
         rhs.open_children.clear();
       }
       else
@@ -3034,7 +3034,7 @@ namespace Legion {
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             open_children.erase(*it);
-            if ((*it)->remove_base_valid_ref(FIELD_STATE_REF))
+            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
               delete (*it);
           }
         }
@@ -3043,7 +3043,7 @@ namespace Legion {
           open_children.clear();
           for (std::vector<RegionTreeNode*>::const_iterator it = 
                 to_delete.begin(); it != to_delete.end(); it++)
-            if ((*it)->remove_base_valid_ref(FIELD_STATE_REF))
+            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
               delete (*it);
         }
         open_children.tighten_valid_mask();
@@ -3056,7 +3056,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (open_children.insert(child, mask))
-        child->add_base_valid_ref(FIELD_STATE_REF);
+        child->add_base_gc_ref(FIELD_STATE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3070,7 +3070,7 @@ namespace Legion {
       assert(!finder->second);
 #endif
       open_children.erase(finder);
-      if (child->remove_base_valid_ref(FIELD_STATE_REF))
+      if (child->remove_base_gc_ref(FIELD_STATE_REF))
         delete child;
     }
 
@@ -3581,7 +3581,7 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
             {
               state.disjoint_complete_children.erase(*it);
-              if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+              if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
                 delete (*it);
             }
             state.disjoint_complete_children.tighten_valid_mask();
@@ -18081,7 +18081,7 @@ namespace Legion {
             (disjoint_complete_children[*it] * mask));
 #endif
         if (disjoint_complete_children.insert(*it, mask))
-          (*it)->add_base_valid_ref(VERSION_MANAGER_REF);
+          (*it)->add_base_gc_ref(VERSION_MANAGER_REF);
       }
       parent_mask = mask;
       if (!!disjoint_complete)
@@ -18101,7 +18101,7 @@ namespace Legion {
         // We can get duplicate propagations of refinements here because
         // of control replication. See VersionManager::compute_equivalence_sets 
         if (disjoint_complete_children.insert(child, mask))
-          child->add_base_valid_ref(VERSION_MANAGER_REF);
+          child->add_base_gc_ref(VERSION_MANAGER_REF);
       }
       parent_mask = mask;
       if (!!disjoint_complete)
@@ -18241,7 +18241,7 @@ namespace Legion {
           it.filter(overlap);
           to_traverse.insert(it->first, overlap);
           // Add a reference for to_traverse
-          it->first->add_base_valid_ref(VERSION_MANAGER_REF);
+          it->first->add_base_gc_ref(VERSION_MANAGER_REF);
           if (!it->second)
             to_delete.push_back(it->first);
         }
@@ -18251,7 +18251,7 @@ namespace Legion {
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             disjoint_complete_children.erase(*it);
-            if ((*it)->remove_base_valid_ref(VERSION_MANAGER_REF))
+            if ((*it)->remove_base_gc_ref(VERSION_MANAGER_REF))
               delete (*it);
           }
         }
@@ -18404,7 +18404,7 @@ namespace Legion {
           // Remove duplicate references if it is already there
           // otherwise the references flow to the destination
           if (!disjoint_complete_children.insert(it->first, it->second))
-            it->first->remove_base_valid_ref(VERSION_MANAGER_REF);
+            it->first->remove_base_gc_ref(VERSION_MANAGER_REF);
         }
         src.disjoint_complete_children.clear();
       }
@@ -18561,9 +18561,9 @@ namespace Legion {
         it->first->add_base_resource_ref(VERSION_MANAGER_REF);
         // Add a remote valid reference on these nodes to keep
         // them live until we can add on remotely.
-        it->first->pack_valid_ref();
+        it->first->pack_global_ref();
         if (invalidate && 
-            it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+            it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           assert(false); // should never get here
       }
       if (invalidate)
@@ -18612,8 +18612,8 @@ namespace Legion {
         derez.deserialize(child_mask);
         RegionTreeNode *child = node->get_tree_child(child_color);
         disjoint_complete_children.insert(child, child_mask);
-        child->add_base_valid_ref(VERSION_MANAGER_REF);
-        child->unpack_valid_ref();
+        child->add_base_gc_ref(VERSION_MANAGER_REF);
+        child->unpack_global_ref();
         to_traverse[child_color] = child;
       }
       if (!ready_events.empty())
