@@ -2403,9 +2403,6 @@ namespace Legion {
       if (!is_owner())
       {
         update_remote_instances(owner_space);
-        // Add a base resource ref that will be held until
-        // the owner node removes it with an unregister message
-        add_base_resource_ref(REMOTE_DID_REF);
         result = send_remote_registration();
       }
       return result;
@@ -3797,9 +3794,6 @@ namespace Legion {
       if (!is_owner())
       {
         update_remote_instances(owner_space);
-        // Add a base resource ref that will be held until
-        // the owner node removes it with an unregister message
-        add_base_resource_ref(REMOTE_DID_REF);
         result = send_remote_registration();
       }
       return result;
@@ -13165,7 +13159,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do our local check
-      runtime->confirm_runtime_shutdown(this, phase);
+      runtime->confirm_runtime_shutdown(this, 
+          (phase == CHECK_TERMINATION) || (phase == CHECK_SHUTDOWN));
 #ifdef DEBUG_SHUTDOWN_HANG
       if (!result)
       {
@@ -17590,7 +17585,6 @@ namespace Legion {
       std::vector<std::pair<FieldID,size_t> > field_sizes;
       LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
       virtual_manager = new VirtualManager(this, 0/*did*/, layout);
-      virtual_manager->add_base_resource_ref(NEVER_GC_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -17896,11 +17890,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(virtual_manager != NULL);
 #endif
-      if (virtual_manager->remove_base_resource_ref(NEVER_GC_REF))
-      {
-        delete virtual_manager;
-        virtual_manager = NULL;
-      }
+      delete virtual_manager;
+      virtual_manager = NULL;
       // Have the memory managers for deletion of all their instances
       for (std::map<Memory,MemoryManager*>::const_iterator it =
            memory_managers.begin(); it != memory_managers.end(); it++)

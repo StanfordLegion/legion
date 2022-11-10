@@ -468,12 +468,7 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       if (!is_owner())
-      {
         remote_instances.add(owner_space);
-        // Add a base resource ref that will be held until
-        // the owner node removes it with an unregister message
-        add_base_resource_ref(REMOTE_DID_REF);
-      }
       runtime->register_distributed_collectable(did, this);
     }
 
@@ -553,6 +548,10 @@ namespace Legion {
             if (!is_owner() || !remote_instances.empty() || 
                 (collective_mapping != NULL))
             {
+              // If we're already checking for a downgrade but are awaiting
+              // responses, then there is nothing to do
+              if (remaining_responses > 0)
+                return false;
               // Send messages to see if we can perform the deletion
               check_for_downgrade(downgrade_owner, false/*need lock*/);
               return false;
@@ -612,19 +611,35 @@ namespace Legion {
             runtime->send_did_downgrade_success(*it, rez);
         }
       }
-      if (is_owner() && !remote_instances.empty())
+      if (is_owner())
       {
+        if (!remote_instances.empty())
+        {
+          Serializer rez;
+          rez.serialize(did);
+          struct {
+            void apply(AddressSpaceID space)
+            { 
+              if (space != owner) 
+                runtime->send_did_downgrade_success(space, *rez); 
+            }
+            Serializer *rez;
+            Runtime *runtime;
+            AddressSpaceID owner;
+          } downgrade_functor;
+          downgrade_functor.rez = &rez;
+          downgrade_functor.runtime = runtime;
+          downgrade_functor.owner = downgrade_owner;
+          remote_instances.map(downgrade_functor);
+        }
+      }
+      else if ((downgrade_owner == local_space) && (collective_mapping == NULL))
+      {
+        // If we're the owner then we have to send it to the owner_space
+        // to get all the remote instances
         Serializer rez;
         rez.serialize(did);
-        struct {
-          void apply(AddressSpaceID space)
-            { runtime->send_did_downgrade_success(space, *rez); }
-          Serializer *rez;
-          Runtime *runtime;
-        } downgrade_functor;
-        downgrade_functor.rez = &rez;
-        downgrade_functor.runtime = runtime;
-        remote_instances.map(downgrade_functor);
+        runtime->send_did_downgrade_success(owner_space, rez);
       }
     }
 
@@ -678,13 +693,15 @@ namespace Legion {
         check_for_downgrade(owner, false/*need lock*/);
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(remaining_responses == 0);
+#endif
       // Update the downgrade owner
       downgrade_owner = owner;
       if (can_downgrade())
       {
         // We're ready to be downgraded
         // Send messages and count how many responses we expect to see
-        remaining_responses = 0;
         if ((collective_mapping != NULL) && 
             collective_mapping->contains(local_space))
         {
@@ -707,24 +724,50 @@ namespace Legion {
             remaining_responses += children.size();
           }
         }
-        if (is_owner() && !remote_instances.empty())
+        if (is_owner())
         {
+          if (!remote_instances.empty())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(owner);
+            }
+            struct {
+              void apply(AddressSpaceID space)
+              { 
+                if (space != owner) 
+                  runtime->send_did_downgrade_request(space, *rez);
+                else
+                  skipped++;
+              }
+              Serializer *rez;
+              Runtime *runtime;
+              AddressSpaceID owner;
+              unsigned skipped;
+            } downgrade_functor;
+            downgrade_functor.rez = &rez;
+            downgrade_functor.runtime = runtime;
+            downgrade_functor.owner = downgrade_owner;
+            downgrade_functor.skipped = 0;
+            remote_instances.map(downgrade_functor);
+            remaining_responses += 
+              (remote_instances.size() - downgrade_functor.skipped);
+          }
+        }
+        else if ((owner == local_space) && (collective_mapping == NULL))
+        {
+          // If we're the owner then we have to send it to the owner_space
+          // to get all the remote instances
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(owner);
           }
-          struct {
-            void apply(AddressSpaceID space)
-              { runtime->send_did_downgrade_request(space, *rez); }
-            Serializer *rez;
-            Runtime *runtime;
-          } downgrade_functor;
-          downgrade_functor.rez = &rez;
-          downgrade_functor.runtime = runtime;
-          remote_instances.map(downgrade_functor);
-          remaining_responses += remote_instances.size();
+          runtime->send_did_downgrade_request(owner_space, rez);
+          remaining_responses++;
         }
         initialize_downgrade_state(owner);
         if (remaining_responses == 0)
@@ -807,10 +850,23 @@ namespace Legion {
                                                      AddressSpaceID owner) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(owner != local_space);
+#endif
       if (collective_mapping == NULL)
-        return owner_space;
+      {
+        if (local_space == owner_space)
+          return owner;
+        else
+          return owner_space;
+      }
       if (!collective_mapping->contains(local_space))
+      {
+#ifdef DEBUG_LEGION
+        assert(!is_owner());
+#endif
         return owner_space;
+      }
       if (!collective_mapping->contains(owner))
         return collective_mapping->get_parent(owner_space, local_space);
       return collective_mapping->get_parent(owner, local_space);
@@ -931,7 +987,7 @@ namespace Legion {
 #endif
       downgrade_owner = local_space;
       if (gc_references == 0)
-        check_for_downgrade(downgrade_owner);
+        check_for_downgrade(downgrade_owner, false/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1270,7 +1326,7 @@ namespace Legion {
 #endif
         downgrade_owner = local_space;
         if (valid_references == 0)
-          check_for_downgrade(downgrade_owner);
+          check_for_downgrade(downgrade_owner, false/*need lock*/);
       }
       else
         DistributedCollectable::process_downgrade_update();

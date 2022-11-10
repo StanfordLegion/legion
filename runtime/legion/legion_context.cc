@@ -14462,12 +14462,23 @@ namespace Legion {
                                         partition_color, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // If we have any handles then we need to perform an exchange so
-      // that all the shards have all the names for the handles they need
-      if (!handles.empty())
+      // Perform the exchange of all the handle names so that we can record
+      // all the valid partition names here in this context
       {
         CrossProductCollective collective(this, COLLECTIVE_LOC_36);
         collective.exchange_partitions(handles);
+        // Record these partition handles that were created
+        AutoLock priv_lock(privilege_lock);
+        for (std::map<IndexSpace,IndexPartition>::const_iterator it =
+              handles.begin(); it != handles.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((created_index_partitions.find(it->second) ==
+                  created_index_partitions.end()) ||
+              (created_index_partitions[it->second] == 1));
+#endif
+          created_index_partitions[it->second] = 1;
+        }
       }
       // Update our allocation shard
       index_partition_allocator_shard++;

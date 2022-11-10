@@ -483,10 +483,7 @@ namespace Legion {
                                      part_color, kind, did, 
                                      provenance, domain_ready); 
           // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
+          user_handles[child_node->handle] = pid;
           if (safe.exists())
             safe_events.insert(safe);
         }
@@ -507,10 +504,7 @@ namespace Legion {
                                      part_color, kind, did, 
                                      provenance, domain_ready); 
           // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
+          user_handles[child_node->handle] = pid;
           if (safe.exists())
             safe_events.insert(safe);
         }
@@ -540,10 +534,7 @@ namespace Legion {
                                      part_color, kind, did, 
                                      provenance, domain_ready);
           // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
+          user_handles[child_node->handle] = pid;
           // Skip ahead for the next color if necessary
           for (unsigned idx = 0; idx < (total_shards-1); idx++)
           {
@@ -8779,7 +8770,7 @@ namespace Legion {
       RezCheck z(rez);
       rez.serialize(handle);
       rez.serialize(did);
-      if (recurse)
+      if (recurse && (parent != NULL))
         rez.serialize(parent->handle);
       else
         rez.serialize(IndexPartition::NO_PART);
@@ -8792,7 +8783,10 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
-      pack_index_space(rez, true/*include size*/);
+      if (index_space_set)
+        pack_index_space(rez, true/*include size*/);
+      else
+        rez.serialize<size_t>(0);
       if (collective_mapping != NULL)
         collective_mapping->pack(rez);
       else
@@ -8904,7 +8898,8 @@ namespace Legion {
       AutoProvenance provenance(Provenance::deserialize(derez));
       size_t index_space_size;
       derez.deserialize(index_space_size);
-      const void *index_space_ptr = derez.get_current_pointer();
+      const void *index_space_ptr = (index_space_size > 0) ?
+        derez.get_current_pointer() : NULL;
       derez.advance_pointer(index_space_size);
       size_t num_spaces;
       derez.deserialize(num_spaces);
@@ -8918,7 +8913,7 @@ namespace Legion {
             true/*can fail*/, true/*first*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized, provenance,
-          ready_event, expr_id, mapping, depth);
+          ready_event, expr_id, mapping, false/*add root reference*/, depth);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -9009,7 +9004,12 @@ namespace Legion {
       bool recurse;
       derez.deserialize(recurse);
       if (recurse)
-        node->unpack_valid_ref();
+      {
+        if (node->parent == NULL)
+          node->unpack_valid_ref();
+        else
+          node->parent->unpack_valid_ref();
+      }
       else
         node->unpack_global_ref();
     }

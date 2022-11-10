@@ -12330,25 +12330,18 @@ namespace Legion {
                                    std::map<IndexSpace,IndexPartition> &handles)
     //--------------------------------------------------------------------------
     {
-      // Need the lock in case we are unpacking other things here
+      // Only put the non-empty partitions into our local set
+      for (std::map<IndexSpace,IndexPartition>::const_iterator it = 
+            handles.begin(); it != handles.end(); it++)
       {
-        AutoLock c_lock(collective_lock);
-        // Only put the non-empty partitions into our local set
-        for (std::map<IndexSpace,IndexPartition>::const_iterator it = 
-              handles.begin(); it != handles.end(); it++)
-        {
-          if (!it->second.exists())
-            continue;
-          non_empty_handles.insert(*it);
-        }
+        if (!it->second.exists())
+          continue;
+        non_empty_handles.insert(*it);
       }
       // Now we do the exchange
       perform_collective_sync();
       // When we wake up we should have all the handles and no need the lock
       // to access them
-#ifdef DEBUG_LEGION
-      assert(handles.size() == non_empty_handles.size());
-#endif
       handles = non_empty_handles;
     }
 
