@@ -115,7 +115,8 @@ namespace Legion {
       InstanceManager(RegionTreeForest *forest,
                       DistributedID did, LayoutDescription *layout,
                       FieldSpaceNode *node, IndexSpaceExpression *domain,
-                      RegionTreeID tree_id, bool register_now);
+                      RegionTreeID tree_id, bool register_now,
+                      CollectiveMapping *mapping = NULL);
       virtual ~InstanceManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -799,7 +800,7 @@ namespace Legion {
                            public LegionHeapify<VirtualManager> {
     public:
       VirtualManager(Runtime *runtime, DistributedID did, 
-                     LayoutDescription *layout);
+                     LayoutDescription *layout, CollectiveMapping *mapping);
       VirtualManager(const VirtualManager &rhs);
       virtual ~VirtualManager(void);
     public:

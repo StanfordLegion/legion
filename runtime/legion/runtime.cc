@@ -17584,7 +17584,18 @@ namespace Legion {
       std::vector<CustomSerdezID> serdez;
       std::vector<std::pair<FieldID,size_t> > field_sizes;
       LayoutDescription *layout = new LayoutDescription(all_ones, constraints);
-      virtual_manager = new VirtualManager(this, 0/*did*/, layout);
+      if (total_address_spaces > 1)
+      {
+        std::vector<AddressSpaceID> all_spaces(total_address_spaces);
+        for (unsigned idx = 0; idx < total_address_spaces; idx++)
+          all_spaces[idx] = idx;
+        CollectiveMapping *mapping =
+          new CollectiveMapping(all_spaces, legion_collective_radix);
+        virtual_manager = new VirtualManager(this, 0/*did*/, layout, mapping);
+      }
+      else
+        virtual_manager = new VirtualManager(this, 0/*did*/, layout, NULL);
+      virtual_manager->add_base_gc_ref(NEVER_GC_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -17890,8 +17901,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(virtual_manager != NULL);
 #endif
-      delete virtual_manager;
-      virtual_manager = NULL;
+      if (virtual_manager->remove_base_gc_ref(NEVER_GC_REF))
+      {
+        delete virtual_manager;
+        virtual_manager = NULL;
+      }
       // Have the memory managers for deletion of all their instances
       for (std::map<Memory,MemoryManager*>::const_iterator it =
            memory_managers.begin(); it != memory_managers.end(); it++)

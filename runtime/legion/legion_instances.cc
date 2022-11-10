@@ -571,8 +571,9 @@ namespace Legion {
                                      DistributedID did, LayoutDescription *desc,
                                      FieldSpaceNode *node, 
                                      IndexSpaceExpression *domain,
-                                     RegionTreeID tid, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, register_now),
+                                     RegionTreeID tid, bool register_now,
+                                     CollectiveMapping *mapping)
+      : DistributedCollectable(ctx->runtime, did, register_now, mapping),
         context(ctx), layout(desc), field_space_node(node),
         instance_domain(domain), tree_id(tid)
     //--------------------------------------------------------------------------
@@ -4044,10 +4045,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VirtualManager::VirtualManager(Runtime *runtime, DistributedID did,
-                                   LayoutDescription *desc)
+                            LayoutDescription *desc, CollectiveMapping *mapping)
       : InstanceManager(runtime->forest, did, desc,
                         NULL/*field space node*/,NULL/*index space expression*/,
-                        0/*tree id*/, true/*register now*/)
+                        0/*tree id*/, true/*register now*/, mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
