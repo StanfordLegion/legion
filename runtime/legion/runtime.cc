@@ -17897,15 +17897,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::finalize_runtime(void)
     //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(virtual_manager != NULL);
-#endif
-      if (virtual_manager->remove_base_gc_ref(NEVER_GC_REF))
-      {
-        delete virtual_manager;
-        virtual_manager = NULL;
-      }
+    { 
       // Have the memory managers for deletion of all their instances
       for (std::map<Memory,MemoryManager*>::const_iterator it =
            memory_managers.begin(); it != memory_managers.end(); it++)
@@ -26473,6 +26465,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!prepared_for_shutdown);
+      assert(virtual_manager != NULL);
 #endif
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
@@ -26518,6 +26511,9 @@ namespace Legion {
             delete it->second;
         redop_fill_views.clear();
       }
+      if (virtual_manager->remove_base_gc_ref(NEVER_GC_REF))
+        delete virtual_manager;
+      virtual_manager = NULL;
       if (!applied.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(applied);
