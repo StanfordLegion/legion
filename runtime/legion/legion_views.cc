@@ -5499,7 +5499,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
       }

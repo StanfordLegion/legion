@@ -850,8 +850,6 @@ namespace Legion {
       // context UID since there might be several shards on this node
       if (key.first > 0)
         key.second = 0;
-      // No matter what we're going to store the context so grab a reference
-      own_ctx->add_reference();
       RtEvent wait_for;
       {
         AutoLock i_lock(inst_lock);
@@ -870,7 +868,8 @@ namespace Legion {
           assert(key.first > 0);
 #endif
           // This better be a new context so bump the reference count
-          active_contexts.insert(own_ctx);
+          if (active_contexts.insert(own_ctx).second)
+            own_ctx->add_reference();
           finder->second.second++;
           return finder->second.first;
         }
@@ -903,7 +902,8 @@ namespace Legion {
         assert(key.first > 0);
 #endif
         // This better be a new context so bump the reference count
-        active_contexts.insert(own_ctx);
+        if (active_contexts.insert(own_ctx).second)
+          own_ctx->add_reference();
         finder->second.second++;
         return finder->second.first;
       }
@@ -976,7 +976,8 @@ namespace Legion {
       ViewEntry &entry = context_views[key];
       entry.first = result;
       entry.second = 1/*only a single initial reference*/;
-      active_contexts.insert(own_ctx);
+      if (active_contexts.insert(own_ctx).second)
+        own_ctx->add_reference();
       if (key.first > 0)
       {
         std::map<ReplicationID,RtUserEvent>::iterator finder =
@@ -1303,8 +1304,18 @@ namespace Legion {
         runtime->send_gc_debug_request(owner_space, rez);
         if (!done.has_triggered())
           done.wait();
-        assert(result.load());
+        if (!result.load())
+          REPORT_LEGION_FATAL(LEGION_FATAL_GARBAGE_COLLECTION_RACE,
+                "Found an internal garbage collection race. Please "
+                "run with -lg:safe_mapper and see if it reports any "
+                "errors. If not, then please report this as a bug.")
       }
+#else
+      if (gc_state == COLLECTED_GC_STATE)
+        REPORT_LEGION_FATAL(LEGION_FATAL_GARBAGE_COLLECTION_RACE,
+                "Found an internal garbage collection race. Please "
+                "run with -lg:safe_mapper and see if it reports any "
+                "errors. If not, then please report this as a bug.")
 #endif
       gc_state = VALID_GC_STATE;
       add_base_gc_ref(INTERNAL_VALID_REF);

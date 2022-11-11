@@ -6391,7 +6391,28 @@ namespace Legion {
           mid, tag, false/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (!virtual_mapped)
+      {
+#ifdef DEBUG_LEGION
+        if (owner_task->is_remote())
+        {
+          // If the owner task is remote, then we need to acquire the 
+          // valid references first since the valid references are held
+          // on the owner node and the checking code wants to see that 
+          // these instances are already valid when adding the references
+          if (!physical_instances.acquire_valid_references(CONTEXT_REF))
+            REPORT_LEGION_FATAL(LEGION_FATAL_GARBAGE_COLLECTION_RACE,
+                "Found an internal garbage collection race. Please "
+                "run with -lg:safe_mapper and see if it reports any "
+                "errors. If not, then please report this as a bug.")
+          impl->set_references(physical_instances, true/*safe*/);
+          // Remove the references we acquired after they've been added
+          // by the physical region
+          physical_instances.remove_valid_references(CONTEXT_REF);
+        }
+        else
+#endif
         impl->set_references(physical_instances, true/*safe*/); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10909,8 +10930,11 @@ namespace Legion {
         {
           FieldAllocatorImpl *allocator =
             create_field_allocator(it->first, false/*unordered*/);
+          allocator->add_reference();
           free_fields(allocator, it->first, it->second,
               false/*unordered*/, NULL/*provenance*/);
+          if (allocator->remove_reference())
+            delete allocator;
         }
       }
       if (!index_launch_spaces.empty())

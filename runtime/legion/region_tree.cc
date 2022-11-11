@@ -8846,12 +8846,7 @@ namespace Legion {
           if (!is_owner())
           {
             runtime->send_index_space_destruction(handle, owner_space, applied);
-            // If we're part of the broadcast tree then we'll get sent back here
-            // later so we don't need to do anything now
-            if ((collective_mapping != NULL) && 
-                collective_mapping->contains(local_space))
-              return false;
-            need_broadcast = false;
+            return false;
           }
         }
       }
@@ -12463,7 +12458,7 @@ namespace Legion {
                 ready_event = Runtime::create_rt_user_event();
               outstanding_invalidations++;
               // Add a reference that will be remove when the flush returns
-              add_base_resource_ref(FIELD_ALLOCATOR_REF);
+              add_base_gc_ref(FIELD_ALLOCATOR_REF);
               // Send the invalidation and make ourselves the new 
               // pending exclusive allocator value
               Serializer rez;
@@ -12543,7 +12538,7 @@ namespace Legion {
                   const RtUserEvent done = Runtime::create_rt_user_event();
                   outstanding_invalidations++;
                   // Add a reference that will be remove when the flush returns
-                  add_base_resource_ref(FIELD_ALLOCATOR_REF);
+                  add_base_gc_ref(FIELD_ALLOCATOR_REF);
                   Serializer rez;
                   {
                     RezCheck z(rez);
@@ -12606,6 +12601,9 @@ namespace Legion {
                   available_indexes.clear();
                   rez.serialize(ready_event);
                 }
+                // Add a reference to this node to keep it alive until we 
+                // get the corresponding free operation from the remote node
+                add_base_gc_ref(FIELD_ALLOCATOR_REF);
                 runtime->send_field_space_allocator_response(source, rez); 
                 remote_field_infos.insert(source);
                 allocation_state = FIELD_ALLOC_INVALID; 
@@ -14862,12 +14860,10 @@ namespace Legion {
       derez.deserialize(ready_event);
 
       FieldSpaceNode *node = forest->get_node(handle);
-      // Add a reference to this node to keep it alive until we get the
-      // corresponding free operation from the remote node
+      
 #ifdef DEBUG_LEGION
       assert(node->is_owner());
 #endif
-      node->add_base_resource_ref(FIELD_ALLOCATOR_REF);
       node->create_allocator(source, ready_event);
     }
 
@@ -14925,7 +14921,7 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
-      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF,
+      if (node->remove_base_gc_ref(FIELD_ALLOCATOR_REF,
             (remove_free_reference ? 2 : 1)))
         delete node;
     }
@@ -14945,7 +14941,7 @@ namespace Legion {
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
       // Remove the reference that we added when we originally got the request
-      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
+      if (node->remove_base_gc_ref(FIELD_ALLOCATOR_REF))
         delete node;
     }
 

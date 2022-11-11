@@ -18852,6 +18852,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool InstanceRef::acquire_valid_reference(ReferenceSource source) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(manager != NULL);
+#endif
+      return manager->as_physical_manager()->acquire_instance(source);
+    }
+
+    //--------------------------------------------------------------------------
     void InstanceRef::add_valid_reference(ReferenceSource source) const
     //--------------------------------------------------------------------------
     {
@@ -19521,6 +19531,24 @@ namespace Legion {
         for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
           refs.multi->vector[idx].remove_resource_reference(source);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool InstanceSet::acquire_valid_references(ReferenceSource source) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+      {
+        if (refs.single != NULL)
+          return refs.single->acquire_valid_reference(source);
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
+          if (!refs.multi->vector[idx].acquire_valid_reference(source))
+            return false;
+      }
+      return true;
     }
 
     //--------------------------------------------------------------------------

@@ -1169,6 +1169,7 @@ namespace Legion {
     public:
       void add_resource_reference(ReferenceSource source) const;
       void remove_resource_reference(ReferenceSource source) const;
+      bool acquire_valid_reference(ReferenceSource source) const;
       void add_valid_reference(ReferenceSource source) const; 
       void remove_valid_reference(ReferenceSource source) const;
     public:
@@ -1253,6 +1254,7 @@ namespace Legion {
     public:
       void add_resource_references(ReferenceSource source) const;
       void remove_resource_references(ReferenceSource source) const;
+      bool acquire_valid_references(ReferenceSource source) const;
       void add_valid_references(ReferenceSource source) const;
       void remove_valid_references(ReferenceSource source) const;
     public:

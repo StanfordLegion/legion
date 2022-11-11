@@ -88,7 +88,7 @@ namespace Legion {
 
 #define REFERENCE_NAMES_ARRAY(names)                \
     const char *const names[LAST_SOURCE_REF] = {    \
-      "Future Handle Reference",                    \
+      "Internal Nested Valid Reference",            \
       "Deferred Task Reference",                    \
       "Version Manager Reference",                  \
       "Physical Analysis Reference",                \
