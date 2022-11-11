@@ -9410,7 +9410,7 @@ namespace Legion {
           enumerate_futures(index_domain);
         // Prepare any setup for performing the concurrent analysis
         if (concurrent_task)
-          initialize_concurrent_analysis();
+          initialize_concurrent_analysis(false/*replay*/);
         Operation::trigger_ready();
       }
     }
@@ -9434,12 +9434,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::initialize_concurrent_analysis(void)
+    void IndexTask::initialize_concurrent_analysis(bool replay)
     //--------------------------------------------------------------------------
     {
       // Ask the runtime to acquire the concurrent reservation
-      concurrent_precondition = 
-        runtime->acquire_concurrent_reservation(mapped_event);
+      if (replay)
+        concurrent_precondition = 
+         parent_ctx->total_hack_function_for_inorder_concurrent_replay_analysis(
+                                                                  mapped_event);
+      else
+        concurrent_precondition = 
+          runtime->acquire_concurrent_reservation(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -10657,7 +10662,7 @@ namespace Legion {
       }
       // Prepare any setup for performing the concurrent analysis
       if (concurrent_task)
-        initialize_concurrent_analysis();
+        initialize_concurrent_analysis(true/*replay*/);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;

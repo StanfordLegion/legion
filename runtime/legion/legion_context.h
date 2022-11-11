@@ -2014,6 +2014,11 @@ namespace Legion {
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC> context_locks;
       LegionDeque<ApBarrier,TASK_BARRIER_ALLOC> context_barriers;
+    public:
+      // TODO: delete this once we properly replay mapping dependences
+      RtEvent inorder_concurrent_replay_analysis;
+      RtEvent total_hack_function_for_inorder_concurrent_replay_analysis(
+                                                            RtEvent mapped);
     };
 
     /**
