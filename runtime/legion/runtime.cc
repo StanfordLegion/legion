@@ -27936,7 +27936,7 @@ namespace Legion {
     void Runtime::free_repl_tunable_op(ReplTunableOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(timing_op_lock);
+      AutoLock t_lock(tunable_op_lock);
       release_operation<false>(available_repl_tunable_ops, op);
     }
 
