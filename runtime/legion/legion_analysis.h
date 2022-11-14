@@ -3294,7 +3294,7 @@ namespace Legion {
                                std::set<RtEvent> &applied_events, bool covers);
       void update_owner(const AddressSpaceID new_logical_owner); 
       bool replicate_logical_owner_space(AddressSpaceID source, 
-                                         const CollectiveMapping *mapping);
+                             const CollectiveMapping *mapping, bool need_lock);
       void process_replication_response(AddressSpaceID owner);
       void process_replication_invalidation(std::vector<RtEvent> &applied);
     protected:

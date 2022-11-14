@@ -10194,7 +10194,7 @@ namespace Legion {
 #endif
       // If we have a collective mapping then we know that everyone agrees
       // on who the current logical owner is
-      if (mapping != NULL)
+      if ((mapping != NULL) && mapping->contains(local_space))
       {
         replicated_owner_state = new ReplicatedOwnerState(true/*valid*/);
         mapping->get_children(owner_space, local_space,
@@ -11932,7 +11932,7 @@ namespace Legion {
 #endif
         const CollectiveMapping &mapping = *analysis.get_replicated_mapping();
         // Check to see if we have a replicated owner node
-        if (!replicate_logical_owner_space(local_space, &mapping))
+        if (!replicate_logical_owner_space(local_space, &mapping,false/*lock*/))
         {
 #ifdef DEBUG_LEGION
           assert(replicated_owner_state->ready.exists());
@@ -11999,10 +11999,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::replicate_logical_owner_space(
-                        AddressSpaceID source, const CollectiveMapping *mapping)
+    bool EquivalenceSet::replicate_logical_owner_space(AddressSpaceID source, 
+                               const CollectiveMapping *mapping, bool need_lock)
     //--------------------------------------------------------------------------
     {
+      if (need_lock)
+      {
+        AutoLock eq(eq_lock);
+        return replicate_logical_owner_space(source,mapping,false/*need lock*/);
+      }
       if (replicated_owner_state == NULL)
       {
         replicated_owner_state = new ReplicatedOwnerState(is_logical_owner());
@@ -17359,7 +17364,7 @@ namespace Legion {
       }
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->replicate_logical_owner_space(source, mapping);
+      set->replicate_logical_owner_space(source, mapping, true/*need lock*/);
       if ((mapping != NULL) && mapping->remove_reference())
         delete mapping;
     }
