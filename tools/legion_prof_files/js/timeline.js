@@ -432,10 +432,9 @@ function getMouseOver() {
                 descTexts.push(tokens[0] + ": " + tokens[1]);
             });
         }
+      // Add a line break to separate provenance info from the rest
+      descTexts.push(" ");
     }
-    // Add a line break to separate provenance info from the rest
-    descTexts.push(" ");
-
     if ((d.ready != undefined) && (d.ready != "") && (delay != 0)) {
       descTexts.push("Ready State: " + get_time_str(delay,false));
     }

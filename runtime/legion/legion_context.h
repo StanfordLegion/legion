@@ -2059,6 +2059,11 @@ namespace Legion {
       // Only valid on the onwer context node
       LegionMap<RegionTreeID,
                 std::vector<CollectiveResult*> >        collective_results;
+    public:
+      // TODO: delete this once we properly replay mapping dependences
+      RtEvent inorder_concurrent_replay_analysis;
+      RtEvent total_hack_function_for_inorder_concurrent_replay_analysis(
+                                                            RtEvent mapped);
     };
 
     /**

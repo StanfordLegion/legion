@@ -2105,7 +2105,7 @@ namespace Legion {
       }
       // Prepare any setup for performing the concurrent analysis
       if (concurrent_task)
-        initialize_concurrent_analysis();
+        initialize_concurrent_analysis(false/*replay*/);
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
@@ -2205,7 +2205,7 @@ namespace Legion {
 #endif
         // Still need to do any rendezvous for concurrent analysis
         if (concurrent_task)
-          initialize_concurrent_analysis();
+          initialize_concurrent_analysis(true/*replay*/);
         // We have no local points, so we can just trigger
         if (serdez_redop_fns == NULL)
         {
@@ -2520,7 +2520,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::initialize_concurrent_analysis(void)
+    void ReplIndexTask::initialize_concurrent_analysis(bool replay)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

@@ -1649,7 +1649,7 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
-      virtual void initialize_concurrent_analysis(void);
+      virtual void initialize_concurrent_analysis(bool replay);
       virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
                                                   Processor target);
       void select_sharding_function(ReplicateContext *repl_ctx);

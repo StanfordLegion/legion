@@ -10897,13 +10897,16 @@ namespace Legion {
       }
       else
       {
-        // Technically realm could return us a null pointer here if the 
-        // instance is not directly accessible on this node, but that
-        // should never happen because all eager allocations are done
-        // locally and to memories for which loads and stores are safe
-        void *base = instance.pointer_untyped(0,0);
-        if (base != NULL)
+        if (instance.get_layout()->bytes_used > 0)
         {
+          void *base = instance.pointer_untyped(0,0);
+#ifdef DEBUG_LEGION
+          // Technically realm could return us a null pointer here if the
+          // instance is not directly accessible on this node, but that
+          // should never happen because all eager allocations are done
+          // locally and to memories for which loads and stores are safe
+          assert(base != NULL);
+#endif
           const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
           AutoLock lock(manager_lock);
           std::map<uintptr_t,size_t>::iterator finder = 
@@ -28227,7 +28230,7 @@ namespace Legion {
     void Runtime::free_repl_tunable_op(ReplTunableOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(timing_op_lock);
+      AutoLock t_lock(tunable_op_lock);
       release_operation<false>(available_repl_tunable_ops, op);
     }
 

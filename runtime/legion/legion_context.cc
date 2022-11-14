@@ -12122,6 +12122,18 @@ namespace Legion {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    RtEvent 
+      InnerContext::total_hack_function_for_inorder_concurrent_replay_analysis(
+                                                           RtEvent mapped_event)
+    //--------------------------------------------------------------------------
+    {
+      inorder_concurrent_replay_analysis =
+        runtime->acquire_concurrent_reservation(mapped_event,
+            inorder_concurrent_replay_analysis);
+      return inorder_concurrent_replay_analysis;
+    }
+
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////

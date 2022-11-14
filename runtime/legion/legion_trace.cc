@@ -6010,7 +6010,8 @@ namespace Legion {
 #endif
 #endif
         // check to see if it came after the start of the trace
-        if (coordinates[idx].context_index <= future_coords[idx].context_index)
+        unsigned last = future_coords.size() - 1;
+        if (coordinates[last].context_index <=future_coords[last].context_index)
           continue;
         // Otherwise not inside the trace and therefore we cannot
         // record the bounds for the future
