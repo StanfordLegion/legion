@@ -372,6 +372,10 @@ function context:add_codegen_context(name, context)
   self.codegen_contexts[name] = context
 end
 
+function context:remove_codegen_context(name)
+  self.codegen_contexts[name] = nil
+end
+
 function context:get_codegen_context(name)
   assert(self.codegen_contexts[name] ~= nil)
   return self.codegen_contexts[name]
@@ -8971,6 +8975,7 @@ function codegen.stat_for_list(cx, node)
 
       preamble = host_preamble
       postamble = quote [host_postamble]; [buffer_cleanups]; end
+      cx:remove_codegen_context("cuda")
     end  -- if openmp then
   end
 
