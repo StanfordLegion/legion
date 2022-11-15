@@ -1684,12 +1684,6 @@ namespace Legion {
                              const void *value, const size_t value_size,
                              bool &took_ownership);
       void notify_instance_deletion(PhysicalManager *deleted); 
-#if 0
-      static void handle_create_top_view_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_top_view_response(Deserializer &derez,
-                                                   Runtime *runtime);
-#endif
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);

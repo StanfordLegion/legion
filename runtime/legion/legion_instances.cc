@@ -749,6 +749,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(valid_references == 0);
+      assert(active_contexts.empty());
 #endif
       if (!gc_events.empty())
       {
@@ -1499,10 +1500,28 @@ namespace Legion {
         rez.serialize(&result);
         rez.serialize(ready);
       }
-      pack_global_ref();
       runtime->send_acquire_request(owner_space, rez);
       ready.wait();
-      return result.load();
+      if (!result.load())
+        return true;
+      // If we failed the acquire the set tell our contexts we're deleted
+      std::set<InnerContext*> to_notify;
+      {
+        AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+        assert((gc_state == PENDING_COLLECTED_GC_STATE) ||
+                (gc_state == COLLECTED_GC_STATE));
+#endif
+        to_notify.swap(active_contexts);
+      }
+      for (std::set<InnerContext*>::const_iterator it =
+            to_notify.begin(); it != to_notify.end(); it++)
+      {
+        (*it)->notify_instance_deletion(this);
+        if ((*it)->remove_reference())
+          delete (*it);
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -1548,8 +1567,6 @@ namespace Legion {
       {
         // We failed, so the flag is already set, just trigger the event
         Runtime::trigger_event(ready);
-        // Unpack the global reference that we added
-        manager->unpack_global_ref();
       }
     }
 
@@ -1583,7 +1600,6 @@ namespace Legion {
       result->store(true);
       // Triggering the event removes the reference we added on the remote node
       Runtime::trigger_event(ready);
-      manager->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

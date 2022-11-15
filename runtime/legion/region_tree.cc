@@ -18921,10 +18921,7 @@ namespace Legion {
           const LegionColor child_color = it->first->get_color();
           rez.serialize(child_color);
           rez.serialize(it->second);
-          // Add a remote valid reference on these nodes to keep
-          // them live until we can add on remotely. 
-          if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-            it->first->pack_global_ref();
+          to_traverse.insert(std::make_pair(child_color, it->first));
         }
       }
       rez.serialize(state.disjoint_complete_tree);
@@ -18936,8 +18933,7 @@ namespace Legion {
         const LegionColor child_color = it->first->get_color();
         rez.serialize(child_color);
         rez.serialize(it->second);
-        if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-          it->first->pack_global_ref();
+        to_traverse.insert(std::make_pair(child_color, it->first));
       }
       rez.serialize<size_t>(state.disjoint_complete_accesses.size());
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
@@ -19093,10 +19089,7 @@ namespace Legion {
       // Traverse and remove remote references after we are done
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
-      {
         it->second->unpack_logical_state(ctx, derez, source);
-        it->second->unpack_global_ref();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -19917,6 +19910,40 @@ namespace Legion {
         }
       }
       return continue_traversal;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::pack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = this;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->pack_global_ref();
+      }
+      if (row_source->parent != NULL)
+        row_source->parent->pack_valid_ref();
+      else
+        row_source->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::unpack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = this;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->unpack_global_ref();
+      }
+      if (row_source->parent != NULL)
+        row_source->parent->unpack_valid_ref();
+      else
+        row_source->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -21334,6 +21361,34 @@ namespace Legion {
         }
       }
       return continue_traversal;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::pack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = parent;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->pack_global_ref();
+      }
+      row_source->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::unpack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = parent;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->unpack_global_ref();
+      }
+      row_source->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------

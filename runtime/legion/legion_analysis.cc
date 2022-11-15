@@ -18491,6 +18491,8 @@ namespace Legion {
             {
               it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
               untrack_mask |= it->second; 
+              if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+                delete it->first;
             }
           }
         }
@@ -18517,6 +18519,8 @@ namespace Legion {
               {
                 it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
                 untrack_mask |= it->second;
+                if (it->first->remove_base_resource_ref(VERSION_MANAGER_REF))
+                  delete it->first;
               }
             }
           }
@@ -18559,9 +18563,6 @@ namespace Legion {
         to_traverse[child_color] = it->first;
         // Return reference for to_traverse
         it->first->add_base_resource_ref(VERSION_MANAGER_REF);
-        // Add a remote valid reference on these nodes to keep
-        // them live until we can add on remotely.
-        it->first->pack_global_ref();
         if (invalidate && 
             it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           assert(false); // should never get here
@@ -18613,7 +18614,6 @@ namespace Legion {
         RegionTreeNode *child = node->get_tree_child(child_color);
         disjoint_complete_children.insert(child, child_mask);
         child->add_base_gc_ref(VERSION_MANAGER_REF);
-        child->unpack_global_ref();
         to_traverse[child_color] = child;
       }
       if (!ready_events.empty())

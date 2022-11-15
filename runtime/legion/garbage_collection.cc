@@ -433,7 +433,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::update_remote_instances(
-                                     AddressSpaceID remote_inst, bool need_lock)
+                                                     AddressSpaceID remote_inst)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -441,13 +441,23 @@ namespace Legion {
       assert((collective_mapping == NULL) || 
               !collective_mapping->contains(remote_inst));
 #endif
-      if (need_lock)
+      AutoLock gc(gc_lock);
+      // Handle a very unusual case here were we weren't able to perform the
+      // deletion because there was a packed reference, but we didn't know
+      // where to send it to yet
+      if (is_owner() && remote_instances.empty() && 
+          (collective_mapping == NULL) && 
+          (sent_global_references != received_global_references))
       {
-        AutoLock gc(gc_lock);
-        remote_instances.add(remote_inst);
+#ifdef DEBUG_LEGION
+        assert(downgrade_owner == local_space);
+#endif
+        Serializer rez;
+        rez.serialize(did);
+        runtime->send_did_downgrade_update(remote_inst, rez);
+        downgrade_owner = remote_inst;
       }
-      else
-        remote_instances.add(remote_inst);
+      remote_instances.add(remote_inst);
     }
 
     //--------------------------------------------------------------------------
@@ -546,7 +556,8 @@ namespace Legion {
             // We're the downgrade owner, so start the process to check to
             // see if all the nodes are ready to perform the deletion
             if (!is_owner() || !remote_instances.empty() || 
-                (collective_mapping != NULL))
+                (collective_mapping != NULL) || 
+                (sent_global_references != received_global_references))
             {
               // If we're already checking for a downgrade but are awaiting
               // responses, then there is nothing to do
@@ -773,16 +784,31 @@ namespace Legion {
         if (remaining_responses == 0)
         {
           // Send the response now
-          const AddressSpaceID target = get_downgrade_target(owner);
-          Serializer rez;
+          if (owner != local_space)
           {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(owner); // owner is special bottom value
-            rez.serialize(total_sent_references);
-            rez.serialize(total_received_references);
+            const AddressSpaceID target = get_downgrade_target(owner);
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(owner); // owner is special bottom value
+              rez.serialize(total_sent_references);
+              rez.serialize(total_received_references);
+            }
+            runtime->send_did_downgrade_response(target, rez);
           }
-          runtime->send_did_downgrade_response(target, rez);
+#ifdef DEBUG_LEGION
+          else
+          {
+            // We only get here if we're the owner and we don't know
+            // about any remote instances yet. The only way that 
+            // should happen is if we have some sent global references
+            // There's nothing to do yet since we know we can't be
+            // deleted yet
+            assert(sent_global_references > 0);
+            assert(sent_global_references != received_global_references);
+          }
+#endif
         }
       }
       else

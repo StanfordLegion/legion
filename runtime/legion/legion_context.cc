@@ -2858,6 +2858,9 @@ namespace Legion {
         last_implicit_gen(0)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(tree_context.exists());
+#endif
       // Set some of the default values for a context
       context_configuration.max_window_size = 
         runtime->initial_task_window_size;
@@ -2872,10 +2875,6 @@ namespace Legion {
       context_configuration.max_templates_per_trace =
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
-#ifdef DEBUG_LEGION
-      assert(tree_context.exists());
-      runtime->forest->check_context_state(tree_context);
-#endif
       // If we have an owner, clone our local fields from its context
       // and also compute the coordinates for this context in the task tree
       if (owner != NULL)
@@ -10620,8 +10619,7 @@ namespace Legion {
       for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
             instance_top_views.begin(); it != instance_top_views.end(); it++)
       {
-        if (it->first->is_owner())
-          it->first->unregister_active_context(this);
+        it->first->unregister_active_context(this);
         if (it->second->remove_base_gc_ref(CONTEXT_REF))
           delete (it->second);
       }

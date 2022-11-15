@@ -3947,7 +3947,9 @@ namespace Legion {
 #endif
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
-      virtual AddressSpaceID get_owner_space(void) const = 0; 
+      virtual AddressSpaceID get_owner_space(void) const = 0;
+      virtual void pack_global_reference(bool need_root) = 0;
+      virtual void unpack_global_reference(bool need_root) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -4101,6 +4103,8 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
+      virtual void pack_global_reference(bool need_root);
+      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
@@ -4258,6 +4262,8 @@ namespace Legion {
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
+      virtual void pack_global_reference(bool need_root);
+      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
