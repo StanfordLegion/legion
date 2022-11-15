@@ -25931,11 +25931,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DistributedCollectable* Runtime::find_distributed_collectable(
-                                                              DistributedID did)
+                                                   DistributedID did, bool wait)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
-      DistributedCollectable *dc = find_distributed_collectable(did, wait_on);
+      DistributedCollectable *dc = 
+        find_distributed_collectable(did, wait_on, wait);
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
       return dc;
@@ -25943,7 +25944,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DistributedCollectable* Runtime::find_distributed_collectable(
-                                              DistributedID did, RtEvent &ready)
+                                   DistributedID did, RtEvent &ready, bool wait)
     //--------------------------------------------------------------------------
     {
       bool found = false;
@@ -25971,23 +25972,56 @@ namespace Legion {
       }
       if (!found)
       {
+        if (wait)
+        {
+          AutoLock d_lock(distributed_collectable_lock);
+          // Try again to see if we lost the race
+          std::map<DistributedID,DistributedCollectable*>::const_iterator 
+            finder = dist_collectables.find(to_find);
+          if (finder == dist_collectables.end())
+          {
+            // Check to see if it is in the pending set too
+            std::map<DistributedID,
+              std::pair<DistributedCollectable*,RtUserEvent> >::const_iterator
+                pending_finder = pending_collectables.find(to_find);
+            if (pending_finder != pending_collectables.end())
+            {
+              ready = pending_finder->second.second;
+              if (pending_finder->second.first != NULL)
+                return pending_finder->second.first;
+            }
+            else
+            {
+              // Not in the pending set so record it as pending
+              const RtUserEvent registered = Runtime::create_rt_user_event();
+              pending_collectables[to_find] =
+                std::pair<DistributedCollectable*,RtUserEvent>(NULL,registered);
+              ready = registered;
+            }
+          }
+          else
+            return finder->second;
+        }
+        else
+        {
 #ifdef DEBUG_LEGION_CALLERS
-        LG_TASK_DESCRIPTIONS(task_names);
-        LG_MESSAGE_DESCRIPTIONS(message_names);
-        log_run.error("Unable to find distributed collectable %llx "
-                      "with type %lld in %s from %s", did,
-                      LEGION_DISTRIBUTED_HELP_DECODE(did),
-                      (implicit_task_kind < LG_MESSAGE_ID) ?
-                        task_names[implicit_task_kind] :
-                        message_names[implicit_task_kind-LG_MESSAGE_ID],
-                      (implicit_task_caller < LG_MESSAGE_ID) ?
-                        task_names[implicit_task_caller] :
-                        message_names[implicit_task_caller-LG_MESSAGE_ID]);
+          LG_TASK_DESCRIPTIONS(task_names);
+          LG_MESSAGE_DESCRIPTIONS(message_names);
+          log_run.error("Unable to find distributed collectable %llx "
+                        "with type %lld in %s from %s", did,
+                        LEGION_DISTRIBUTED_HELP_DECODE(did),
+                        (implicit_task_kind < LG_MESSAGE_ID) ?
+                          task_names[implicit_task_kind] :
+                          message_names[implicit_task_kind-LG_MESSAGE_ID],
+                        (implicit_task_caller < LG_MESSAGE_ID) ?
+                          task_names[implicit_task_caller] :
+                          message_names[implicit_task_caller-LG_MESSAGE_ID]);
 #else
-        log_run.error("Unable to find distributed collectable %llx with "
-                      "type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
+          log_run.error("Unable to find distributed collectable %llx with "
+                        "type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
 #endif
-        assert(false);
+          assert(false);
+        }
       }
       // Wait for it to be ready
       ready.wait();
@@ -25999,20 +26033,6 @@ namespace Legion {
 #endif
       return finder->second;
     }
-
-    //--------------------------------------------------------------------------
-    DistributedCollectable* Runtime::weak_find_distributed_collectable(
-                                                              DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      did &= LEGION_DISTRIBUTED_ID_MASK;
-      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
-      std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
-        dist_collectables.find(did);
-      if (finder == dist_collectables.end())
-        return NULL;
-      return finder->second;
-    } 
 
     //--------------------------------------------------------------------------
     bool Runtime::find_pending_collectable_location(DistributedID did,

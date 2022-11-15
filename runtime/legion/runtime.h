@@ -3781,11 +3781,11 @@ namespace Legion {
                                             DistributedCollectable *dc);
       void unregister_distributed_collectable(DistributedID did);
       bool has_distributed_collectable(DistributedID did);
-      DistributedCollectable* find_distributed_collectable(DistributedID did);
+      DistributedCollectable* find_distributed_collectable(DistributedID did, 
+                                                           bool wait = false);
       DistributedCollectable* find_distributed_collectable(DistributedID did,
-                                                           RtEvent &ready);
-      DistributedCollectable* weak_find_distributed_collectable(
-                                                           DistributedID did);
+                                                           RtEvent &ready, 
+                                                           bool wait = false);
       bool find_pending_collectable_location(DistributedID did,void *&location);
       void record_pending_distributed_collectable(DistributedID did);
       void revoke_pending_distributed_collectable(DistributedID did);

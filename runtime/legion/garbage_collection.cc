@@ -849,26 +849,11 @@ namespace Legion {
       AddressSpaceID downgrade_owner;
       derez.deserialize(downgrade_owner);
 
+      // It's possible for this to race with the creation of this
+      // distributed collectable so wait until it is ready
       DistributedCollectable *dc = 
-        runtime->weak_find_distributed_collectable(did);
-      // It's possible for this to race with the creation and registration
-      // of this distributed collectable 
-      if (dc == NULL)
-      {
-        // If this hasn't even been made yet then it's not ready to be
-        // downgraded yet
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(downgrade_owner);
-          rez.serialize<uint64_t>(0); // sent global references
-          rez.serialize<uint64_t>(0); // received global references
-        }
-        runtime->send_did_downgrade_response(source, rez);
-      }
-      else
-        dc->check_for_downgrade(downgrade_owner);
+        runtime->find_distributed_collectable(did, true/*wait*/);
+      dc->check_for_downgrade(downgrade_owner);
     }
 
     //--------------------------------------------------------------------------
@@ -1024,7 +1009,10 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
 
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      // It's possible for this to race with the creation and registration
+      // of this distributed collectable so wait for it to be ready
+      DistributedCollectable *dc =
+        runtime->find_distributed_collectable(did, true/*wait*/);
       AutoLock gc(dc->gc_lock);
       dc->process_downgrade_update();
     }
