@@ -811,11 +811,8 @@ namespace Legion {
 #endif
         }
       }
-      else
+      else if (local_space != owner)
       {
-#ifdef DEBUG_LEGION
-        assert(local_space != owner);
-#endif
         const AddressSpaceID target = get_downgrade_target(owner);
         Serializer rez;
         {
