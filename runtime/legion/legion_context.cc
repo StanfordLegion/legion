@@ -10466,8 +10466,7 @@ namespace Legion {
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied);
       // Clean up our instance top views
-      if (!instance_top_views.empty())
-        clear_instance_top_views();
+      clear_instance_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -10644,6 +10643,7 @@ namespace Legion {
     void InnerContext::clear_instance_top_views(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock inst_lock(instance_view_lock);
       for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
             instance_top_views.begin(); it != instance_top_views.end(); it++)
       {
@@ -10867,9 +10867,8 @@ namespace Legion {
         AutoLock inst_lock(instance_view_lock);
         std::map<PhysicalManager*,InstanceView*>::iterator finder =  
           instance_top_views.find(deleted);
-#ifdef DEBUG_LEGION
-        assert(finder != instance_top_views.end());
-#endif
+        if (finder == instance_top_views.end())
+          return;
         removed = finder->second;
         instance_top_views.erase(finder);
       }
@@ -12845,8 +12844,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We know all our sibling shards are done so we can free these now
-      if (!instance_top_views.empty())
-        clear_instance_top_views();
+      clear_instance_top_views();
       InnerContext::free_region_tree_context();
     }
 
