@@ -52,8 +52,7 @@ namespace Legion {
     class LogicalView : public DistributedCollectable {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
-                  AddressSpaceID owner_proc, bool register_now,
-                  CollectiveMapping *mapping);
+                  bool register_now, CollectiveMapping *mapping);
       virtual ~LogicalView(void);
     public:
       inline bool deterministic_pointer_less(const LogicalView *rhs) const
@@ -79,14 +78,26 @@ namespace Legion {
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
-    public:
       virtual void send_view(AddressSpaceID target) = 0; 
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
+    public:
+      inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
+      inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+    protected:
+#ifndef DEBUG_LEGION_GC
+      void add_valid_reference(int cnt);
+      bool remove_valid_reference(int cnt);
+#else
+      void add_base_valid_ref_internal(ReferenceSource source, int cnt);
+      void add_nested_valid_ref_internal(DistributedID source, int cnt);
+      bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
+#endif
+      virtual void notify_valid(void) = 0;
+      virtual bool notify_invalid(void) = 0;
     public:
       static inline DistributedID encode_materialized_did(DistributedID did);
       static inline DistributedID encode_reduction_did(DistributedID did);
@@ -102,6 +113,17 @@ namespace Legion {
       RegionTreeForest *const context;
     protected:
       mutable LocalLock view_lock;
+    private:
+#ifdef DEBUG_LEGION_GC
+      int valid_references;
+#else
+      std::atomic<int> valid_references;
+#endif
+#ifdef DEBUG_LEGION_GC
+    protected:
+      std::map<ReferenceSource,int> detailed_base_valid_references;
+      std::map<DistributedID,int> detailed_nested_valid_references;
+#endif
     };
 
     /**
@@ -120,9 +142,8 @@ namespace Legion {
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       InstanceView(RegionTreeForest *ctx,DistributedID did,PhysicalManager *man,
-                   AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
-                   UniqueID owner_context, bool register_now,
-                   CollectiveMapping *mapping); 
+                   AddressSpaceID logical_owner, UniqueID owner_context,
+                   bool register_now, CollectiveMapping *mapping); 
       virtual ~InstanceView(void);
     public:
       inline bool is_logical_owner(void) const
@@ -132,6 +153,9 @@ namespace Legion {
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
+    public:
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     public: 
       // Entry point functions for doing physical dependence analysis
       virtual void add_initial_user(ApEvent term_event,
@@ -185,10 +209,7 @@ namespace Legion {
 #endif
     public:
       // Reference counting state change functions
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
+      virtual void notify_local(void);
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
@@ -253,12 +274,12 @@ namespace Legion {
     public:
       virtual ~CollectableView(void) { }
     public:
-      virtual void add_collectable_reference(ReferenceMutator *mutator) = 0;
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator) = 0;
+      virtual void add_collectable_reference(void) = 0;
+      virtual bool remove_collectable_reference(void) = 0;
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
       void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
-                              RtEvent collect,ReferenceMutator *mutator = NULL);
+                              RtEvent collect);
       static void handle_deferred_collect(CollectableView *view,
                                           const std::set<ApEvent> &to_collect);
     };
@@ -290,8 +311,8 @@ namespace Legion {
       inline bool deterministic_pointer_less(const ExprView *rhs) const
         { return view_expr->deterministic_pointer_less(rhs->view_expr); }
     public:
-      virtual void add_collectable_reference(ReferenceMutator *mutator);
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
+      virtual void add_collectable_reference(void);
+      virtual bool remove_collectable_reference(void);
       virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
       void find_user_preconditions(const RegionUsage &usage,
@@ -549,20 +570,17 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
       public:
         DeferMaterializedViewArgs(DistributedID d, PhysicalManager *m,
-            AddressSpaceID own, AddressSpaceID log, UniqueID ctx)
+                                  AddressSpaceID log, UniqueID ctx)
           : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
-            did(d), manager(m), owner_space(own), 
-            logical_owner(log), context_uid(ctx) { }
+            did(d), manager(m), logical_owner(log), context_uid(ctx) { }
       public:
         const DistributedID did;
         PhysicalManager *const manager;
-        const AddressSpaceID owner_space;
         const AddressSpaceID logical_owner;
         const UniqueID context_uid;
       };
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_proc, 
                        AddressSpaceID logical_owner, PhysicalManager *manager,
                        UniqueID owner_context, bool register_now,
                        CollectiveMapping *mapping = NULL);
@@ -636,11 +654,6 @@ namespace Legion {
                                  const FieldMask &removal_mask);
 #endif
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-    public:
       virtual void send_view(AddressSpaceID target); 
     protected:
       friend class PendingTaskUser;
@@ -671,7 +684,6 @@ namespace Legion {
       static void handle_defer_materialized_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
                                      PhysicalManager *manager,
-                                     AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
     protected: 
@@ -735,20 +747,17 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_VIEW_TASK_ID;
       public:
         DeferReductionViewArgs(DistributedID d, PhysicalManager *m,
-            AddressSpaceID own, AddressSpaceID log, UniqueID ctx)
+                               AddressSpaceID log, UniqueID ctx)
           : LgTaskArgs<DeferReductionViewArgs>(implicit_provenance),
-            did(d), manager(m), owner_space(own), 
-            logical_owner(log), context_uid(ctx) { }
+            did(d), manager(m), logical_owner(log), context_uid(ctx) { }
       public:
         const DistributedID did;
         PhysicalManager *const manager;
-        const AddressSpaceID owner_space;
         const AddressSpaceID logical_owner;
         const UniqueID context_uid;
       };
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
-                    AddressSpaceID owner_proc,
                     AddressSpaceID logical_owner, PhysicalManager *manager,
                     UniqueID owner_context, bool register_now,
                     CollectiveMapping *mapping = NULL);
@@ -828,12 +837,8 @@ namespace Legion {
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void add_collectable_reference(ReferenceMutator *mutator);
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
+      virtual void add_collectable_reference(void);
+      virtual bool remove_collectable_reference(void);
       virtual void collect_users(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
@@ -847,7 +852,6 @@ namespace Legion {
       static void handle_defer_reduction_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
                                      PhysicalManager *manager,
-                                     AddressSpaceID owner_space, 
                                      AddressSpaceID logical_owner, 
                                      UniqueID context_uid);
     public:
@@ -877,7 +881,7 @@ namespace Legion {
     class DeferredView : public LogicalView {
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
-                   AddressSpaceID owner_space, bool register_now);
+                   bool register_now);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -887,20 +891,16 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
-      virtual void notify_active(ReferenceMutator *mutator) = 0;
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-    public:
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
-    public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper) = 0;
+    public:
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     };
 
     /**
@@ -938,7 +938,6 @@ namespace Legion {
       };
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
-               AddressSpaceID owner_proc,
                FillViewValue *value, bool register_now
 #ifdef LEGION_SPY
                , UniqueID fill_op_uid
@@ -949,10 +948,7 @@ namespace Legion {
     public:
       FillView& operator=(const FillView &rhs);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void) { /*nothing to do*/ }
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -960,8 +956,7 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
-                           CopyAcrossHelper *helper);
+                           CopyAcrossHelper *helper); 
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -1015,7 +1010,7 @@ namespace Legion {
       };
     public:
       PhiView(RegionTreeForest *ctx, DistributedID did,
-              AddressSpaceID owner_proc, PredEvent true_guard,
+              PredEvent true_guard,
               PredEvent false_guard, InnerContext *owner,
               bool register_now);
       PhiView(const PhiView &rhs);
@@ -1023,10 +1018,9 @@ namespace Legion {
     public:
       PhiView& operator=(const PhiView &rhs);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void);
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target);
     public:
@@ -1034,13 +1028,10 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            EquivalenceSet *tracign_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
-      void record_true_view(LogicalView *view, const FieldMask &view_mask,
-                            ReferenceMutator *mutator);
-      void record_false_view(LogicalView *view, const FieldMask &view_mask,
-                             ReferenceMutator *mutator);
+      void record_true_view(LogicalView *view, const FieldMask &view_mask);
+      void record_false_view(LogicalView *view, const FieldMask &view_mask);
     public:
       void pack_phi_view(Serializer &rez);
       void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
@@ -1070,19 +1061,6 @@ namespace Legion {
      */
     class ShardedView : public DeferredView {
     public:
-      class RemoteDecrementFunctor {
-      public:
-        RemoteDecrementFunctor(ShardedView *v, 
-            AddressSpaceID own, ReferenceMutator *m)
-          : view(v), owner(own), mutator(m) { }
-      public:
-        void apply(AddressSpaceID space) const;
-      public:
-        ShardedView *const view;
-        const AddressSpaceID owner;
-        ReferenceMutator *const mutator;
-      };
-    public:
       ShardedView(RegionTreeForest *forest, DistributedID did,
                   AddressSpaceID owner_space, bool register_now);
       ShardedView(const ShardedView &rhs);
@@ -1090,11 +1068,9 @@ namespace Legion {
     public:
       ShardedView& operator=(const ShardedView &rhs);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-    public:
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void);
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -1102,7 +1078,6 @@ namespace Legion {
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr,
                            EquivalenceSet *tracing_eq,
-                           std::set<RtEvent> &applied,
                            CopyAcrossHelper *helper);
     public:
       void initialize(LegionMap<DistributedID,FieldMask> &views,
@@ -1431,6 +1406,114 @@ namespace Legion {
           return false;
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LogicalView::add_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void LogicalView::add_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), 
+                                    cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::remove_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::remove_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_nested_valid_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
     }
 
   }; // namespace Internal 

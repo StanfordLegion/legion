@@ -55,6 +55,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance::PhysicalInstance(PhysicalInstance &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalInstance::~PhysicalInstance(void)
     //--------------------------------------------------------------------------
     {
@@ -73,6 +81,18 @@ namespace Legion {
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance& PhysicalInstance::operator=(PhysicalInstance &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
+        delete (impl);
+      impl = rhs.impl;
+      rhs.impl = NULL;
       return *this;
     }
 

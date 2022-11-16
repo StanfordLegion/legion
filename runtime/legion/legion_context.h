@@ -580,7 +580,6 @@ namespace Legion {
           const LegionVector<VersionInfo> &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events,
           std::set<RtEvent> &execution_events) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
@@ -1016,17 +1015,6 @@ namespace Legion {
         const IndexPartition pid;
         const PartitionKind kind;
         const char *const func;
-      };
-      struct DeferRemoveRemoteReferenceArgs : 
-        public LgTaskArgs<DeferRemoveRemoteReferenceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID;
-      public:
-        DeferRemoveRemoteReferenceArgs(UniqueID uid, 
-               std::vector<DistributedCollectable*> *r) 
-          : LgTaskArgs<DeferRemoveRemoteReferenceArgs>(uid), to_remove(r) { }
-      public:
-        std::vector<DistributedCollectable*> *const to_remove;
       };
       template<typename T>
       struct QueueEntry {
@@ -1684,7 +1672,6 @@ namespace Legion {
           const LegionVector<VersionInfo> &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events,
           std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
@@ -1704,12 +1691,6 @@ namespace Legion {
                              const void *value, const size_t value_size,
                              bool &took_ownership);
       void notify_instance_deletion(PhysicalManager *deleted); 
-#if 0
-      static void handle_create_top_view_request(Deserializer &derez, 
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_top_view_response(Deserializer &derez,
-                                                   Runtime *runtime);
-#endif
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
@@ -1759,9 +1740,6 @@ namespace Legion {
     public:
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
-      static void remove_remote_references(
-                       const std::vector<DistributedCollectable*> &to_remove);
-      static void handle_remove_remote_references(const void *args);
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
@@ -3790,7 +3768,6 @@ namespace Legion {
           const LegionVector<VersionInfo> &version_infos,
           const std::vector<EquivalenceSet*> &equivalence_sets,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events, 
           std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);

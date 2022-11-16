@@ -184,29 +184,25 @@ namespace Legion {
                               CollectiveMapping *mapping = NULL,
                               IndexSpaceExprID expr_id = 0,
                               ApEvent ready = ApEvent::NO_AP_EVENT,
-                              RtEvent initialized = RtEvent::NO_RT_EVENT,
-                              std::set<RtEvent> *applied = NULL);
+                              RtEvent initialized = RtEvent::NO_RT_EVENT);
       IndexSpaceNode* create_union_space(IndexSpace handle, DistributedID did,
                               Provenance *provenance,
                               const std::vector<IndexSpace> &sources,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               CollectiveMapping *mapping = NULL,
-                              IndexSpaceExprID expr_id = 0,
-                              std::set<RtEvent> *applied = NULL);
+                              IndexSpaceExprID expr_id = 0);
       IndexSpaceNode* create_intersection_space(IndexSpace handle, 
                               DistributedID did, Provenance *provenance,
                               const std::vector<IndexSpace> &sources,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               CollectiveMapping *mapping = NULL,
-                              IndexSpaceExprID expr_id = 0,
-                              std::set<RtEvent> *applied = NULL);
+                              IndexSpaceExprID expr_id = 0);
       IndexSpaceNode* create_difference_space(IndexSpace handle,
                               DistributedID did, Provenance *provenance,
                               IndexSpace left, IndexSpace right,
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               CollectiveMapping *mapping = NULL,
-                              IndexSpaceExprID expr_id = 0,
-                              std::set<RtEvent> *applied = NULL);
+                              IndexSpaceExprID expr_id = 0);
       RtEvent create_pending_partition(TaskContext *ctx,
                                        IndexPartition pid,
                                        IndexSpace parent,
@@ -383,8 +379,7 @@ namespace Legion {
                                    Provenance *provenance,
                                    CollectiveMapping *mapping = NULL,
                                    ShardMapping *shard_mapping = NULL,
-                                   RtEvent initialized = RtEvent::NO_RT_EVENT,
-                                   std::set<RtEvent> *applied = NULL);
+                                   RtEvent initialized = RtEvent::NO_RT_EVENT);
       void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &applied,
                                const CollectiveMapping *mapping = NULL);
@@ -453,8 +448,7 @@ namespace Legion {
       RegionNode* create_logical_region(LogicalRegion handle, DistributedID did,
                                     Provenance *provenance,
                                     CollectiveMapping *mapping = NULL,
-                                    RtEvent initialized = RtEvent::NO_RT_EVENT,
-                                    std::set<RtEvent> *applied = NULL);
+                                    RtEvent initialized = RtEvent::NO_RT_EVENT);
       void destroy_logical_region(LogicalRegion handle,
                                   std::set<RtEvent> &applied,
                                   const CollectiveMapping *mapping = NULL);
@@ -494,12 +488,10 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
                                        const RegionTreePath &path,
-                                       RefinementTracker &refinement_tracker,
-                                       std::set<RtEvent> &applied_events);
+                                       RefinementTracker &refinement_tracker);
       bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
                                      const RegionTreePath &path,
-                                     std::set<RtEvent> &applied_events,
                                      bool invalidate_tree);
       // Used by dependent partition operations
       void find_open_complete_partitions(Operation *op, unsigned idx,
@@ -740,7 +732,7 @@ namespace Legion {
                                 const InstanceSet &targets,
                                 bool postmapping = false);
     public: // helper method for the above two methods
-      void perform_missing_acquires(Operation *op,
+      void perform_missing_acquires(
                                std::map<PhysicalManager*,unsigned> &acquired,
                                const std::vector<PhysicalManager*> &unacquired);
 #ifdef DEBUG_LEGION
@@ -757,15 +749,13 @@ namespace Legion {
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
                                   CollectiveMapping *mapping = NULL,
-                                  std::set<RtEvent> *applied = NULL,
-                                  bool add_root_reference = false,
+                                  const bool add_root_reference = false,
                                   unsigned depth = UINT_MAX);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode &par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
                                   Provenance *provenance, ApUserEvent is_ready,
                                   CollectiveMapping *mapping = NULL,
-                                  std::set<RtEvent> *applied = NULL,
                                   unsigned depth = UINT_MAX);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
@@ -775,8 +765,7 @@ namespace Legion {
                                   ApEvent partition_ready, 
                                   ApBarrier partial_pending, RtEvent init,
                                   CollectiveMapping *mapping = NULL,
-                                  ShardMapping *shard_mapping = NULL,
-                                  std::set<RtEvent> *applied = NULL);
+                                  ShardMapping *shard_mapping = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
@@ -785,23 +774,19 @@ namespace Legion {
                                   ApEvent partition_ready, 
                                   ApBarrier partial_pending, RtEvent init,
                                   CollectiveMapping *mapping = NULL,
-                                  ShardMapping *shard_mapping = NULL,
-                                  std::set<RtEvent> *applied = NULL);
+                                  ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent init, Provenance *provenance,
                                   CollectiveMapping *mapping = NULL,
-                                  ShardMapping *shard_mapping = NULL,
-                                  std::set<RtEvent> *applied = NULL);
+                                  ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
                                   Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
                                   RtEvent initialized, DistributedID did,
                                   Provenance *provenance = NULL,
-                                  CollectiveMapping *mapping = NULL,
-                                  std::set<RtEvent> *applied = NULL);
-      PartitionNode*  create_node(LogicalPartition p, RegionNode *par,
-                                  std::set<RtEvent> *applied = NULL);
+                                  CollectiveMapping *mapping = NULL);
+      PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
       IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL, 
                         const bool can_fail = false, const bool first = true);
@@ -950,11 +935,9 @@ namespace Legion {
       // references after the meta-task or runtime call is done executing.
 
       IndexSpaceExpression* union_index_spaces(IndexSpaceExpression *lhs,
-                                              IndexSpaceExpression *rhs,
-                                              ReferenceMutator *mutator = NULL);
+                                              IndexSpaceExpression *rhs);
       IndexSpaceExpression* union_index_spaces(
-                                 const std::set<IndexSpaceExpression*> &exprs,
-                                 ReferenceMutator *mutator = NULL);
+                                 const std::set<IndexSpaceExpression*> &exprs);
     protected:
       // Internal version
       IndexSpaceExpression* union_index_spaces(
@@ -963,19 +946,16 @@ namespace Legion {
     public:
       IndexSpaceExpression* intersect_index_spaces(
                                               IndexSpaceExpression *lhs,
-                                              IndexSpaceExpression *rhs,
-                                              ReferenceMutator *mutator = NULL);
+                                              IndexSpaceExpression *rhs);
       IndexSpaceExpression* intersect_index_spaces(
-                                 const std::set<IndexSpaceExpression*> &exprs,
-                                 ReferenceMutator *mutator = NULL);
+                                 const std::set<IndexSpaceExpression*> &exprs);
     protected:
       IndexSpaceExpression* intersect_index_spaces(
                                const std::vector<IndexSpaceExpression*> &exprs,
                                OperationCreator *creator = NULL);
     public:
       IndexSpaceExpression* subtract_index_spaces(IndexSpaceExpression *lhs,
-                  IndexSpaceExpression *rhs, OperationCreator *creator = NULL,
-                  ReferenceMutator *mutator = NULL);
+                  IndexSpaceExpression *rhs, OperationCreator *creator = NULL);
     public:
       IndexSpaceExpression* find_canonical_expression(IndexSpaceExpression *ex);
       void remove_canonical_expression(IndexSpaceExpression *expr, size_t vol);
@@ -1382,11 +1362,9 @@ namespace Legion {
       virtual bool try_add_live_reference(ReferenceSource source) = 0;
       virtual bool remove_live_reference(ReferenceSource source) = 0;
       virtual void add_base_expression_reference(ReferenceSource source,
-          ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
+                                                 unsigned count = 1) = 0;
       virtual void add_nested_expression_reference(DistributedID source,
-          std::set<RtEvent> &applied_events, unsigned count = 1) = 0;
-      virtual void add_nested_expression_reference(DistributedID source,
-          ReferenceMutator *mutator = NULL, unsigned count = 1) = 0;
+                                                   unsigned count = 1) = 0;
       virtual bool remove_base_expression_reference(ReferenceSource source,
                                                     unsigned count = 1) = 0;
       virtual bool remove_nested_expression_reference(DistributedID source,
@@ -1399,7 +1377,7 @@ namespace Legion {
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
     public:
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized,Provenance *provenance,std::set<RtEvent> *applied,
+          RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
@@ -1470,8 +1448,6 @@ namespace Legion {
       }
       inline size_t get_num_dims(void) const
         { return NT_TemplateHelper::get_dim(type_tag); }
-      inline void record_remote_owner_valid_reference(void)
-        { remote_owner_valid_references.fetch_add(1); }
     public:
       // Convert this index space expression to the canonical one that
       // represents all expressions that are all congruent
@@ -1542,7 +1518,6 @@ namespace Legion {
     protected:
       std::set<IndexSpaceOperation*> derived_operations;
       std::atomic<IndexSpaceExpression*> canonical;
-      std::atomic<unsigned> remote_owner_valid_references;
       KDTree *sparsity_map_kd_tree;
       size_t volume;
       bool has_volume;
@@ -1556,19 +1531,11 @@ namespace Legion {
     class IndexSpaceExprRef {
     public:
       IndexSpaceExprRef(void) : expr(NULL) { }
-      IndexSpaceExprRef(IndexSpaceExpression *e, ReferenceMutator *m = NULL)
+      IndexSpaceExprRef(IndexSpaceExpression *e)
         : expr(e)
       { 
         if (expr != NULL)
-        {
-          if (m == NULL)
-          {
-            LocalReferenceMutator local_mutator;
-            expr->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
-          }
-          else
-            expr->add_base_expression_reference(LIVE_EXPR_REF, m);
-        }
+          expr->add_base_expression_reference(LIVE_EXPR_REF);
       }
       IndexSpaceExprRef(const IndexSpaceExprRef &rhs) = delete;
       IndexSpaceExprRef(IndexSpaceExprRef &&rhs)
@@ -1626,28 +1593,13 @@ namespace Legion {
         INSTANCE_EXPRESSION_KIND,
       };
     public:
-      class InactiveFunctor {
-      public:
-        InactiveFunctor(IndexSpaceOperation *o, ReferenceMutator *m)
-          : op(o), mutator(m) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        IndexSpaceOperation *const op;
-        ReferenceMutator *const mutator;
-      };
-    public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
                           RegionTreeForest *ctx);
       IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
-          IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
-          IndexSpaceOperation *origin);
+          IndexSpaceExprID eid, DistributedID did, IndexSpaceOperation *origin);
       virtual ~IndexSpaceOperation(void);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void);
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
@@ -1660,7 +1612,8 @@ namespace Legion {
                                          AddressSpaceID target) = 0;
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) { return check_valid(); }
+      virtual bool is_valid(void) 
+        { return DistributedCollectable::is_global(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -1668,11 +1621,9 @@ namespace Legion {
       virtual bool try_add_live_reference(ReferenceSource source);
       virtual bool remove_live_reference(ReferenceSource source);
       virtual void add_base_expression_reference(ReferenceSource source,
-          ReferenceMutator *mutator = NULL, unsigned count = 1);
+                                                 unsigned count = 1);
       virtual void add_nested_expression_reference(DistributedID source,
-          std::set<RtEvent> &applied_events, unsigned count = 1);
-      virtual void add_nested_expression_reference(DistributedID source,
-          ReferenceMutator *mutator = NULL, unsigned count = 1);
+                                                   unsigned count = 1);
       virtual bool remove_base_expression_reference(ReferenceSource source,
                                                     unsigned count = 1);
       virtual bool remove_nested_expression_reference(DistributedID source,
@@ -1685,7 +1636,7 @@ namespace Legion {
       virtual bool invalidate_operation(void) = 0;
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized,Provenance *provenance,std::set<RtEvent> *applied,
+          RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
     public:
       RegionTreeForest *const context;
@@ -1694,10 +1645,6 @@ namespace Legion {
     protected:
       mutable LocalLock inter_lock;
       std::atomic<int> invalidated;
-#ifdef DEBUG_LEGION
-    private:
-      bool tree_active;
-#endif
     };
 
     template<int DIM, typename T>
@@ -1705,7 +1652,7 @@ namespace Legion {
     public:
       IndexSpaceOperationT(OperationKind kind, RegionTreeForest *ctx);
       IndexSpaceOperationT(RegionTreeForest *ctx, IndexSpaceExprID eid,
-          DistributedID did, AddressSpaceID owner, IndexSpaceOperation *op,
+          DistributedID did, IndexSpaceOperation *op,
           TypeTag tag, Deserializer &derez);
       virtual ~IndexSpaceOperationT(void);
     public:
@@ -1721,7 +1668,7 @@ namespace Legion {
       virtual bool invalidate_operation(void) = 0;
       virtual void remove_operation(void) = 0;
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized,Provenance *provenance,std::set<RtEvent> *applied,
+          RtEvent initialized, Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
@@ -1934,7 +1881,7 @@ namespace Legion {
       static const AllocationType alloc_type = REMOTE_EXPR_ALLOC;
     public:
       RemoteExpression(RegionTreeForest *context, IndexSpaceExprID eid,
-          DistributedID did, AddressSpaceID own, IndexSpaceOperation *op,
+          DistributedID did, IndexSpaceOperation *op,
           TypeTag type_tag, Deserializer &derez);
       RemoteExpression(const RemoteExpression<DIM,T> &rhs);
       virtual ~RemoteExpression(void);
@@ -1958,8 +1905,6 @@ namespace Legion {
         creator->derez.deserialize(expr_id);
         DistributedID did;
         creator->derez.deserialize(did);
-        AddressSpaceID owner_space;
-        creator->derez.deserialize(owner_space);
         IndexSpaceOperation *origin;
         creator->derez.deserialize(origin);
 #ifdef DEBUG_LEGION
@@ -1967,7 +1912,7 @@ namespace Legion {
 #endif
         creator->operation =
             new RemoteExpression<N::N,T>(creator->forest, expr_id, did,
-              owner_space, origin, creator->type_tag, creator->derez);
+                            origin, creator->type_tag, creator->derez);
       }
     public:
       RegionTreeForest *const forest;
@@ -2014,44 +1959,17 @@ namespace Legion {
      * \class IndexTreeNode
      * The abstract base class for nodes in the index space trees.
      */
-    class IndexTreeNode : public DistributedCollectable {
-    public:
-      struct SendNodeRecord {
-      public:
-        SendNodeRecord(IndexTreeNode *n, bool valid = false,
-            bool add = false, bool pack = false, bool has_ref = false)
-          : node(n), still_valid(valid), add_root_reference(add),
-            pack_space(pack), has_reference(has_ref) { }
-      public:
-        IndexTreeNode *node;
-        bool still_valid;
-        bool add_root_reference;
-        bool pack_space;
-        bool has_reference;
-      };
+    class IndexTreeNode : public ValidDistributedCollectable {
     public:
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
                     LegionColor color, DistributedID did,
-                    AddressSpaceID owner, RtEvent init_event,
-                    CollectiveMapping *mapping,
+                    RtEvent init_event, CollectiveMapping *mapping,
                     Provenance *provenance);
       virtual ~IndexTreeNode(void);
     public:
-      virtual void notify_active(ReferenceMutator *mutator) { }
-      virtual void notify_inactive(ReferenceMutator *mutator) { }
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
-      virtual RtEvent find_unregister_precondition(AddressSpaceID target) const;
-    public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
-      virtual bool send_node(AddressSpaceID target, RtEvent done,
-                             RtEvent &send_precondition,
-                             std::set<IndexTreeNode*> &visited,
-                             std::vector<SendNodeRecord> &nodes_to_send,
-                             const bool above = false) = 0;
-      virtual void pack_node(Serializer &rez, AddressSpaceID target,
-                             const SendNodeRecord &record) = 0;
+      virtual void send_node(AddressSpaceID target, bool recurse) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -2088,9 +2006,6 @@ namespace Legion {
       LegionMap<SemanticTag,SemanticInfo> semantic_info;
     protected:
       std::map<std::pair<LegionColor,LegionColor>,RtEvent> pending_tests;
-    protected:
-      // Map tracking send events for creating this tree node on remote nodes
-      std::map<AddressSpaceID,RtEvent> send_effects;
     };
 
     /**
@@ -2153,38 +2068,13 @@ namespace Legion {
         const AddressSpaceID source;
         Serializer &rez;
       };
-      class InactiveFunctor {
-      public:
-        InactiveFunctor(IndexSpaceNode *n, ReferenceMutator *m,
-                        std::map<AddressSpaceID,RtEvent> &effects)
-          : node(n), mutator(m), send_effects(effects) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        IndexSpaceNode *const node;
-        ReferenceMutator *const mutator;
-        std::map<AddressSpaceID,RtEvent> &send_effects;
-      };
-      class InvalidateRootFunctor {
-      public:
-        InvalidateRootFunctor(AddressSpaceID s, IndexSpaceNode *n,
-                              std::set<RtEvent> &a, Runtime *rt)
-          : source(s), node(n), runtime(rt), applied(a) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        const AddressSpaceID source;
-        IndexSpaceNode *const node;
-        Runtime *const runtime;
-        std::set<RtEvent> &applied;
-      };
     public:
       IndexSpaceNode(RegionTreeForest *ctx, IndexSpace handle,
                      IndexPartNode *parent, LegionColor color,
                      DistributedID did, ApEvent index_space_ready,
                      IndexSpaceExprID expr_id, RtEvent initialized,
                      unsigned depth, Provenance *provenance,
-                     CollectiveMapping *mapping, bool is_root);
+                     CollectiveMapping *mapping);
       IndexSpaceNode(const IndexSpaceNode &rhs) = delete;
       virtual ~IndexSpaceNode(void);
     public:
@@ -2192,10 +2082,8 @@ namespace Legion {
     public:
       inline bool is_set(void) const { return index_space_set; }
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_local(void);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -2235,14 +2123,8 @@ namespace Legion {
     public:
       static void handle_disjointness_test(const void *args);
     public:
-      virtual bool send_node(AddressSpaceID target, RtEvent done,
-                             RtEvent &send_precondition,
-                             std::set<IndexTreeNode*> &visited,
-                             std::vector<SendNodeRecord> &nodes_to_send,
-                             const bool above = false);
-      virtual void pack_node(Serializer &rez, AddressSpaceID target,
-                             const SendNodeRecord &record);
-      void invalidate_tree(void);
+      virtual void send_node(AddressSpaceID target, bool recurse);
+      void pack_node(Serializer &rez, AddressSpaceID target, bool recurse);
       bool invalidate_root(AddressSpaceID source,
                            std::set<RtEvent> &applied,
                            const CollectiveMapping *mapping);
@@ -2287,7 +2169,8 @@ namespace Legion {
       virtual void pack_expression_value(Serializer &rez,AddressSpaceID target);
     public:
 #ifdef DEBUG_LEGION
-      virtual bool is_valid(void) { return check_valid(); }
+      virtual bool is_valid(void) 
+        { return ValidDistributedCollectable::is_global(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
       virtual bool try_add_canonical_reference(DistributedID source);
@@ -2295,11 +2178,9 @@ namespace Legion {
       virtual bool try_add_live_reference(ReferenceSource source);
       virtual bool remove_live_reference(ReferenceSource source);
       virtual void add_base_expression_reference(ReferenceSource source,
-          ReferenceMutator *mutator = NULL, unsigned count = 1);
+                                                 unsigned count = 1);
       virtual void add_nested_expression_reference(DistributedID source,
-          std::set<RtEvent> &applied_events, unsigned count = 1);
-      virtual void add_nested_expression_reference(DistributedID source,
-          ReferenceMutator *mutator = NULL, unsigned count = 1);
+                                                   unsigned count = 1);
       virtual bool remove_base_expression_reference(ReferenceSource source,
                                                     unsigned count = 1);
       virtual bool remove_nested_expression_reference(DistributedID source,
@@ -2310,7 +2191,7 @@ namespace Legion {
                                                     unsigned count = 1);
     public:
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized,Provenance *provenance,std::set<RtEvent> *applied,
+          RtEvent initialized,Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0) = 0;
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                     size_t piece_list_size, IndexSpaceNode *privilege_node) = 0;
@@ -2491,22 +2372,12 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     protected:
-      unsigned                  send_references; 
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
       RtUserEvent               tight_index_space_set;
       bool                      index_space_set;
       bool                      tight_index_space;
-      // Keep track of whether we're still valid on the owner
-      bool                      tree_valid;
-#ifdef DEBUG_LEGION
-      // Keep track of whether we are active, should only happen once
-      bool                      tree_active;
-#endif
-      // Keep track of whether we've had our application 
-      // reference removed if this is a root node 
-      bool                      root_valid;
     };
 
     /**
@@ -2524,7 +2395,7 @@ namespace Legion {
                       DistributedID did, ApEvent ready_event,
                       IndexSpaceExprID expr_id, RtEvent init,
                       unsigned depth, Provenance *provenance,
-                      CollectiveMapping *mapping, bool is_root);
+                      CollectiveMapping *mapping);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs) = delete;
       virtual ~IndexSpaceNodeT(void);
     public:
@@ -2549,7 +2420,7 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
-          RtEvent initialized,Provenance *provenance,std::set<RtEvent> *applied,
+          RtEvent initialized,Provenance *provenance,
           CollectiveMapping *mapping, IndexSpaceExprID expr_id = 0);
       virtual PieceIteratorImpl* create_piece_iterator(const void *piece_list,
                       size_t piece_list_size, IndexSpaceNode *privilege_node);
@@ -3068,10 +2939,10 @@ namespace Legion {
                         bool is_dom, IndexPartNode *p, LegionColor c, 
                         DistributedID d, ApEvent a, IndexSpaceExprID e,
                         RtEvent init, unsigned dp, Provenance *prov,
-                        CollectiveMapping *m, bool r)
+                        CollectiveMapping *m)
         : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
           color(c), did(d), ready(a), expr_id(e), initialized(init), depth(dp),
-          provenance(prov), mapping(m), root(r), result(NULL) { }
+          provenance(prov), mapping(m), result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
@@ -3080,7 +2951,7 @@ namespace Legion {
             creator->space, creator->parent, creator->color, creator->bounds,
             creator->is_domain, creator->did, creator->ready, creator->expr_id,
             creator->initialized, creator->depth, creator->provenance,
-            creator->mapping, creator->root);
+            creator->mapping);
       }
     public:
       RegionTreeForest *const forest;
@@ -3096,7 +2967,6 @@ namespace Legion {
       const unsigned depth;
       Provenance *const provenance;
       CollectiveMapping *const mapping;
-      const bool root;
       IndexSpaceNode *result;
     };
 
@@ -3117,7 +2987,7 @@ namespace Legion {
       PartitionTracker& operator=(const PartitionTracker &rhs);
     public:
       bool can_prune(void);
-      bool remove_partition_reference(ReferenceMutator *mutator);
+      bool remove_partition_reference(void);
     private:
       PartitionNode *const partition;
     };
@@ -3191,18 +3061,6 @@ namespace Legion {
         Runtime *const runtime;
         std::set<AddressSpaceID> skip_shard_spaces;
       };
-      class InvalidFunctor {
-      public:
-        InvalidFunctor(IndexPartNode *n, ReferenceMutator *m,
-                       std::map<AddressSpaceID,RtEvent> &effects)
-          : node(n), mutator(m), send_effects(effects) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        IndexPartNode *const node;
-        ReferenceMutator *const mutator;
-        std::map<AddressSpaceID,RtEvent> &send_effects;
-      }; 
     protected:
       class InterferenceEntry {
       public:
@@ -3248,10 +3106,8 @@ namespace Legion {
     public:
       IndexPartNode& operator=(const IndexPartNode &rhs) = delete;
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_invalid(void);
+      virtual void notify_local(void);
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -3277,7 +3133,7 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      bool add_child(IndexSpaceNode *child);
+      void add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
       void compute_disjointness(ValueBroadcast<bool> *collective, bool owner);
@@ -3328,13 +3184,8 @@ namespace Legion {
                                                   RegionTreeForest *forest);
       static void handle_disjointness_test(const void *args);
     public:
-      virtual bool send_node(AddressSpaceID target, RtEvent done,
-                             RtEvent &send_precondition,
-                             std::set<IndexTreeNode*> &visited,
-                             std::vector<SendNodeRecord> &nodes_to_send,
-                             const bool above = false);
-      virtual void pack_node(Serializer &rez, AddressSpaceID target,
-                             const SendNodeRecord &record);
+      virtual void send_node(AddressSpaceID target, bool recurse);
+      void pack_node(Serializer &rez, AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 
                                        AddressSpaceID source);
@@ -3393,9 +3244,6 @@ namespace Legion {
       bool disjoint;
     protected:
       bool has_complete, complete;
-      bool tree_valid;
-      unsigned send_count;
-      RtUserEvent send_done;
       std::atomic<IndexSpaceExpression*> union_expr;
     protected:
       // Members for the interference cache
@@ -3665,10 +3513,7 @@ namespace Legion {
       AddressSpaceID get_owner_space(void) const; 
       static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
     public:
-      virtual void notify_active(ReferenceMutator *mutator) { }
-      virtual void notify_inactive(ReferenceMutator *mutator) { }
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void) { }
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
             const void *buffer, size_t size, bool is_mutable, bool local_only);
@@ -3939,11 +3784,6 @@ namespace Legion {
                      CollectiveMapping *mapping = NULL);
       virtual ~RegionTreeNode(void);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator) = 0;
-      virtual void notify_valid(ReferenceMutator *mutator) = 0;
-      virtual void notify_invalid(ReferenceMutator *mutator) = 0;
-    public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
       inline LogicalState& get_logical_state(ContextID ctx)
@@ -3984,7 +3824,6 @@ namespace Legion {
                                  FieldMask &first_touch_refinement,
                                  FieldMaskSet<RefinementOp> &refinements,
                                  RefinementTracker &refinement_tracker,
-                                 std::set<RtEvent> &applied_events,
                                  const bool track_disjoint_complete_below,
                                  const bool check_unversioned);
       void register_local_user(LogicalState &state,
@@ -3994,8 +3833,7 @@ namespace Legion {
                                 const ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
-                                RegionTreeNode *next_child,
-                                std::set<RtEvent> &applied_events);
+                                RegionTreeNode *next_child);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
                               const bool read_only_close);
@@ -4005,15 +3843,13 @@ namespace Legion {
                                    const FieldMask *aliased_children,
                                    bool record_close_operations,
                                    RegionTreeNode *next_child,
-                                   FieldMask &open_below,
-                                   std::set<RtEvent> &applied_events);
+                                   FieldMask &open_below);
       void siphon_logical_projection(LogicalCloser &closer,
                                      LogicalState &state,
                                      const FieldMask &closing_mask,
                                      const ProjectionInfo &proj_info,
                                      bool record_close_operations,
-                                     FieldMask &open_below,
-                                     std::set<RtEvent> &applied_events);
+                                     FieldMask &open_below);
       void flush_logical_reductions(LogicalCloser &closer,
                                     LogicalState &state,
                                     FieldMask &reduction_flush_fields,
@@ -4065,15 +3901,13 @@ namespace Legion {
                                      const RegionTreePath &path,
                                      const LogicalTraceInfo &trace_info,
                                      FieldMask &already_closed_mask,
-                                     std::set<RtEvent> &applied_events,
                                      bool invalidate_tree); 
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &current_mask,
                                    RegionTreeNode *next_child,
                                    FieldMask &open_below,
-                                   bool force_close_next,
-                                   std::set<RtEvent> &applied_events);
+                                   bool force_close_next);
       void record_close_no_dependences(ContextID ctx,
                                        const LogicalUser &user);
     public:
@@ -4081,14 +3915,12 @@ namespace Legion {
       void migrate_version_state(ContextID src, ContextID dst, 
                                  std::set<RtEvent> &applied, bool merge);
       void pack_logical_state(ContextID ctx, Serializer &rez, 
-                              const bool invalidate, 
-                              std::vector<DistributedCollectable*> &to_remove);
+                              const bool invalidate); 
       void unpack_logical_state(ContextID ctx, Deserializer &derez,
                                 AddressSpaceID source);
       void pack_version_state(ContextID ctx, Serializer &rez, 
                               const bool invalidate,
-                              std::set<RtEvent> &applied_events, 
-                              std::vector<DistributedCollectable*> &to_remove);
+                              std::set<RtEvent> &applied_events); 
       void unpack_version_state(ContextID ctx, Deserializer &derez, 
                                 AddressSpaceID source);
     public:
@@ -4115,7 +3947,9 @@ namespace Legion {
 #endif
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
-      virtual AddressSpaceID get_owner_space(void) const = 0; 
+      virtual AddressSpaceID get_owner_space(void) const = 0;
+      virtual void pack_global_reference(bool need_root) = 0;
+      virtual void unpack_global_reference(bool need_root) = 0;
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2) = 0;
@@ -4171,10 +4005,6 @@ namespace Legion {
       const RtEvent tree_initialized; // top level tree initialization
     public:
       bool registered;
-#ifdef DEBUG_LEGION
-    protected:
-      bool currently_active; // should be monotonic
-#endif
     protected:
       DynamicTable<LogicalStateAllocator> logical_states;
       DynamicTable<VersionManagerAllocator> current_versions;
@@ -4225,16 +4055,6 @@ namespace Legion {
         const RtUserEvent ready;
         const bool expr_covers;
       };
-      class InvalidFunctor {
-      public:
-        InvalidFunctor(RegionNode *n, ReferenceMutator *m)
-          : node(n), mutator(m) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        RegionNode *const node;
-        ReferenceMutator *const mutator;
-      };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
@@ -4245,9 +4065,7 @@ namespace Legion {
     public:
       RegionNode& operator=(const RegionNode &rhs) = delete;
     public:
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_local(void);
     public:
       void record_registered(void);
     public:
@@ -4285,6 +4103,8 @@ namespace Legion {
       static AddressSpaceID get_owner_space(LogicalRegion handle, Runtime *rt);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
+      virtual void pack_global_reference(bool need_root);
+      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
@@ -4339,11 +4159,10 @@ namespace Legion {
                                          FieldMask &refined_partition,
                                          std::set<RtEvent> &applied_events);
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
-                    const FieldMask &mask, std::set<RtEvent> &applied_events);
+                                          const FieldMask &mask);
       void initialize_nonexclusive_virtual_analysis(ContextID ctx,
                                   const FieldMask &mask,
-                                  const FieldMaskSet<EquivalenceSet> &eq_sets,
-                                  std::set<RtEvent> &applied_events);
+                                  const FieldMaskSet<EquivalenceSet> &eq_sets);
       void perform_versioning_analysis(ContextID ctx, 
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
@@ -4369,11 +4188,9 @@ namespace Legion {
                                  std::vector<EquivalenceSet*> &to_release,
                                  bool nonexclusive_virtual_root = false);
       void record_refinement(ContextID ctx, EquivalenceSet *set, 
-                             const FieldMask &mask,
-                             std::set<RtEvent> &applied_eventssymbolic);
+                             const FieldMask &mask);
       void propagate_refinement(ContextID ctx, PartitionNode *child,
-                                const FieldMask &mask,
-                                std::set<RtEvent> &applied_events);
+                                const FieldMask &mask);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
@@ -4385,9 +4202,6 @@ namespace Legion {
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
       std::list<PartitionTracker*> partition_trackers;
-#ifdef DEBUG_LEGION
-      bool currently_valid;
-#endif
     };
 
     /**
@@ -4419,9 +4233,7 @@ namespace Legion {
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
     public:
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
+      virtual void notify_local(void);
     public:
       void record_registered(void);
     public:
@@ -4450,6 +4262,8 @@ namespace Legion {
                                             Runtime *runtime);
       virtual bool visit_node(PathTraverser *traverser);
       virtual bool visit_node(NodeTraverser *traverser);
+      virtual void pack_global_reference(bool need_root);
+      virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
       virtual bool dominates(RegionTreeNode *other);
@@ -4486,12 +4300,10 @@ namespace Legion {
                                  std::vector<EquivalenceSet*> &to_release,
                                  InnerContext &source_context);
       void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask,
-                                std::set<RtEvent> &applied_events);
+                                const FieldMask &mask);
       void propagate_refinement(ContextID ctx, 
                                 const std::vector<RegionNode*> &children,
-                                const FieldMask &mask,
-                                std::set<RtEvent> &applied_events);
+                                const FieldMask &mask);
     public:
       // Logging calls
       virtual void print_logical_context(ContextID ctx, 
