@@ -1805,8 +1805,6 @@ namespace Legion {
 
     class Collectable;
     class Notifiable;
-    class ReferenceMutator;
-    class LocalReferenceMutator;
     class ImplicitReferenceTracker;
     class DistributedCollectable;
     class LayoutDescription;

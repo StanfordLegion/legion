@@ -1166,12 +1166,12 @@ namespace Legion {
           Runtime::trigger_event(deferred_deletion);
         }
       }
-    }
+    } 
 
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void PhysicalManager::add_base_valid_ref_internal(
-                               ReferenceSource source, int cnt, bool need_check)
+                                                ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
@@ -1183,12 +1183,12 @@ namespace Legion {
       else
         finder->second += cnt;
       if (valid_references == cnt)
-        notify_valid(need_check);
+        notify_valid(true/*need check*/);
     }
 
     //--------------------------------------------------------------------------
     void PhysicalManager::add_nested_valid_ref_internal(
-                                 DistributedID source, int cnt, bool need_check)
+                                                  DistributedID source, int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock i_lock(inst_lock);
@@ -1200,7 +1200,7 @@ namespace Legion {
       else
         finder->second += cnt;
       if (valid_references == cnt)
-        notify_valid(need_check);
+        notify_valid(true/*need check*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1248,7 +1248,17 @@ namespace Legion {
       else
         return false;
     }
-#else // DEBUG_LEGION_GC
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::add_valid_reference(int cnt, bool need_check)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+      if (valid_references == 0)
+        notify_valid(need_check);
+      valid_references += cnt;
+    }
+#else // DEBUG_LEGION_GC 
     //--------------------------------------------------------------------------
     void PhysicalManager::add_valid_reference(int cnt, bool need_check)
     //--------------------------------------------------------------------------
@@ -1271,7 +1281,7 @@ namespace Legion {
       else
         return false;
     }
-#endif // DEBUG_LEGION_GC
+#endif // !defined DEBUG_LEGION_GC
 
     //--------------------------------------------------------------------------
     void PhysicalManager::notify_valid(bool need_check)
@@ -1401,34 +1411,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::acquire_instance(ReferenceSource source)
+#ifdef DEBUG_LEGION_GC
+    template<typename T>
+    bool PhysicalManager::acquire_internal(T source, 
+                                     std::map<T,int> &detailed_valid_references)
+#else
+    bool PhysicalManager::acquire_internal(void) 
+#endif
     //--------------------------------------------------------------------------
     {
-      // Do an atomic operation to check to see if we are already valid
-      // and increment our count if we are, in this case the acquire 
-      // has succeeded and we are done, this should be the common case
-      // since we are likely already holding valid references elsewhere
-      // Note that we cannot do this for external instances as they might
-      // have been detached while still holding valid references so they
-      // have to go through the full path every time
-#ifndef DEBUG_LEGION_GC
-      if (!is_external_instance())
-      {
-        // Check to see if we can do the add without the lock first
-        int current = valid_references.load();
-        while (current > 0)
-        {
-          int next = current + 1;
-          if (valid_references.compare_exchange_weak(current, next))
-          {
-#ifdef LEGION_GC
-            log_base_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
-#endif
-            return true;
-          }
-        }
-      }
-#endif
       {
         bool success = false;
         AutoLock i_lock(inst_lock);
@@ -1469,15 +1460,12 @@ namespace Legion {
         }
         if (success)
         {
-#ifdef LEGION_GC
-          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
-#endif
 #ifdef DEBUG_LEGION_GC
           valid_references++;
-          std::map<ReferenceSource,int>::iterator finder = 
-            detailed_base_valid_references.find(source);
-          if (finder == detailed_base_valid_references.end())
-            detailed_base_valid_references[source] = 1;
+          typename std::map<T,int>::iterator finder =
+            detailed_valid_references.find(source);
+          if (finder == detailed_valid_references.end())
+            detailed_valid_references[source] = 1;
           else
             finder->second++;
 #else
@@ -1496,33 +1484,55 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(this);
-        rez.serialize(source);
         rez.serialize(&result);
         rez.serialize(ready);
       }
       runtime->send_acquire_request(owner_space, rez);
       ready.wait();
-      if (!result.load())
-        return true;
-      // If we failed the acquire the set tell our contexts we're deleted
-      std::set<InnerContext*> to_notify;
+      if (result.load())
       {
+#ifdef DEBUG_LEGION_GC
         AutoLock i_lock(inst_lock);
-#ifdef DEBUG_LEGION
-        assert((gc_state == PENDING_COLLECTED_GC_STATE) ||
-                (gc_state == COLLECTED_GC_STATE));
+        typename std::map<T,int>::iterator finder =
+          detailed_valid_references.find(source);
+        if (finder == detailed_valid_references.end())
+          detailed_valid_references[source] = 1;
+        else
+          finder->second++;
 #endif
-        to_notify.swap(active_contexts);
+        return true;
       }
-      for (std::set<InnerContext*>::const_iterator it =
-            to_notify.begin(); it != to_notify.end(); it++)
+      else
       {
-        (*it)->notify_instance_deletion(this);
-        if ((*it)->remove_reference())
-          delete (*it);
+        // If we failed the acquire the set tell our contexts we're deleted
+        std::set<InnerContext*> to_notify;
+        {
+          AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+          assert((gc_state == PENDING_COLLECTED_GC_STATE) ||
+                  (gc_state == COLLECTED_GC_STATE));
+#endif
+          gc_state = COLLECTED_GC_STATE;
+          to_notify.swap(active_contexts);
+        }
+        for (std::set<InnerContext*>::const_iterator it =
+              to_notify.begin(); it != to_notify.end(); it++)
+        {
+          (*it)->notify_instance_deletion(this);
+          if ((*it)->remove_reference())
+            delete (*it);
+        }
+        return false;
       }
-      return false;
     }
+
+#ifdef DEBUG_LEGION_GC
+    // Explicit template instantiations
+    template bool PhysicalManager::acquire_internal<ReferenceSource>(
+                            ReferenceSource, std::map<ReferenceSource,int>&);
+    template bool PhysicalManager::acquire_internal<DistributedID>(
+                            DistributedID, std::map<DistributedID,int>&);
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_acquire_request(Runtime *runtime,
@@ -1534,10 +1544,6 @@ namespace Legion {
       derez.deserialize(did);
       PhysicalManager *remote;
       derez.deserialize(remote);
-      ReferenceSource ref;
-      derez.deserialize(ref);
-      ReferenceMutator *remote_mutator;
-      derez.deserialize(remote_mutator);
       std::atomic<bool> *result;
       derez.deserialize(result);
       RtUserEvent ready;
@@ -1552,8 +1558,6 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(remote);
-          rez.serialize(ref);
-          rez.serialize(remote_mutator);
           rez.serialize(result);
           rez.serialize(ready);
         }
@@ -1578,25 +1582,13 @@ namespace Legion {
       DerezCheck z(derez);
       PhysicalManager *manager;
       derez.deserialize(manager);
-      ReferenceSource ref;
-      derez.deserialize(ref);
-      ReferenceMutator *local_mutator;
-      derez.deserialize(local_mutator);
       std::atomic<bool> *result;
       derez.deserialize(result);
       RtUserEvent ready;
       derez.deserialize(ready);
 
-      // Add the local reference with the right kind
-#ifdef LEGION_GC
-      log_base_ref<true>(VALID_REF_KIND, manager->did, 
-                          manager->local_space, ref, 1/*count*/);
-#endif
-#ifdef DEBUG_LEGION_GC
-      manager->add_base_valid_ref_internal(ref, 1/*count*/,false/*need check*/);
-#else
+      // Just add the reference for now
       manager->add_valid_reference(1/*count*/, false/*need check*/);
-#endif
       result->store(true);
       // Triggering the event removes the reference we added on the remote node
       Runtime::trigger_event(ready);

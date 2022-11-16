@@ -13369,7 +13369,15 @@ namespace Legion {
           if (acquired.find(manager) != acquired.end())
             continue;
           manager->add_base_resource_ref(INSTANCE_MAPPER_REF);
-          manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+          bool result = 
+#endif
+#endif
+          manager->acquire_instance(MAPPING_ACQUIRE_REF);
+#ifdef DEBUG_LEGION
+          assert(result);
+#endif
           acquired[manager] = 1/*count*/; 
         }
       }

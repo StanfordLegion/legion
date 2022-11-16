@@ -223,7 +223,15 @@ namespace Legion {
     void InstanceView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      bool result = 
+#endif
+      manager->acquire_instance(did);
+      assert(result);
+#else
       manager->add_nested_valid_ref(did);
+#endif
       add_base_gc_ref(INTERNAL_VALID_REF);
     }
 
