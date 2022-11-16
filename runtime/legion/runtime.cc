@@ -1966,22 +1966,6 @@ namespace Legion {
         create_pending_instances();
       Runtime::trigger_event(subscription_event);
       subscription_event = RtUserEvent::NO_RT_USER_EVENT;
-      if (is_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(result_set_space != local_space);
-#endif
-        // Send a message to the result set space future to remove its
-        // reference now that we no longer need it
-        Serializer rez;
-        {
-          RezCheck z2(rez);
-          rez.serialize(did);
-          rez.serialize<size_t>(0);
-        }
-        pack_global_ref();
-        runtime->send_future_broadcast(result_set_space, rez);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2325,7 +2309,9 @@ namespace Legion {
           }
           subscribers.insert(subscriber);  
         }
-        else
+        // Check for a latent subscription message for the future
+        // where the future was ultimately set and ignore it
+        else if (subscriber != result_set_space)
         {
           // We've got the result so we can't send it back right away
           Serializer rez;
