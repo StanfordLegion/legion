@@ -36,8 +36,8 @@
 #define CONCAT(a, b) CONCAT2(a, b)
 #define REGISTER_REALM_MODULE_STATIC(classname) \
   static Realm::ModuleRegistrar::StaticRegistration<classname> CONCAT(registration_, __LINE__)
-#define REGISTER_REALM_NETWORK_MODULE_STATIC(classname) \
-  static Realm::ModuleRegistrar::NetworkRegistration<classname> CONCAT(registration_, __LINE__)
+#define REGISTER_REALM_NETWORK_MODULE_STATIC(classname, name, order) \
+  static Realm::ModuleRegistrar::NetworkRegistration<classname> CONCAT(registration_, __LINE__)(name, order)
 
 #include "realm/runtime_impl.h"
 REGISTER_REALM_MODULE_STATIC(Realm::CoreModule);
@@ -80,17 +80,17 @@ REGISTER_REALM_MODULE_STATIC(Realm::HDF5::HDF5Module);
 
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module, "gasnet1", 1);
 #endif
 
 #ifdef REALM_USE_GASNETEX
 #include "realm/gasnetex/gasnetex_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule, "gasnetex", 2);
 #endif
 
 #if defined REALM_USE_MPI
 #include "realm/mpi/mpi_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::MPIModule);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::MPIModule, "mpi", 100);
 #endif
 
 namespace Realm {

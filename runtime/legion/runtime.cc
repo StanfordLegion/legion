@@ -1,4 +1,5 @@
 /* Copyright 2022 Stanford University, NVIDIA Corporation
+
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +35,8 @@
 #include "mappers/debug_mapper.h"
 #include "realm/cmdline.h"
 
+#include <algorithm>
+#include <stdlib.h>
 #include <unistd.h> // sleep for warnings
 
 #include <sys/mman.h>
@@ -5320,6 +5323,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::report_colocation_violation(
+            const char *accessor_kind, FieldID fid, PhysicalInstance inst1,
+            PhysicalInstance inst2, const PhysicalRegion &other, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Unable to create co-location %s<%s> from multiple physical regions "
+          "for field %d in task %s because regions have different physical "
+          "instances " IDFMT " and  " IDFMT, reduction ? "ReductionAccessor" :
+            "FieldAccessor", accessor_kind, fid, context->get_task_name(),
+            inst1.id, inst2.id)
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::empty_colocation_regions(
+                         const char *accessor_kind, FieldID fid, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_COLOCATION_VIOLATION,
+          "Attempt to create colocation %s<%s> with no physical regions for "
+          "field %d task %s. Must provide a non-empty set of regions.",
+          reduction ? "ReductionAccessor" : "FieldAccessor", accessor_kind,
+          fid, implicit_context->get_task_name())
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, 
                                     FieldID fid, PrivilegeMode mode, bool multi)
     //--------------------------------------------------------------------------
@@ -7713,6 +7742,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent ProcessorManager::find_concurrent_fence_event(ApEvent next)
+    //--------------------------------------------------------------------------
+    {
+      // This might look racy but it's not because there is synchronization
+      // provided by the runtime in the form of the concurrent_reservation
+      const ApEvent result = previous_concurrent_execution;
+      previous_concurrent_execution = next;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void ProcessorManager::perform_mapping_operations(void)
     //--------------------------------------------------------------------------
     {
@@ -8020,9 +8060,16 @@ namespace Legion {
       if (!is_owner || (capacity == 0)) 
         return;
 
+      // Override the eager allocation percentage if we were
+      // requested to do so for a particular memory kind.
+      auto alloc_percentage = runtime->eager_alloc_percentage;
+      auto override = runtime->eager_alloc_percentage_overrides.find(memory.kind());
+      if (override != runtime->eager_alloc_percentage_overrides.end()) {
+        alloc_percentage = override->second;
+      }
+
       // Allocate eager pool
-      const coord_t eager_pool_size = 
-        capacity * runtime->eager_alloc_percentage / 100;
+      const coord_t eager_pool_size = capacity * alloc_percentage / 100;
       log_eager.info("create an eager pool of size %lld on memory " IDFMT,
                      eager_pool_size, memory.id);
       const DomainT<1,coord_t> bounds(Rect<1>(0,Point<1>(eager_pool_size - 1)));
@@ -10673,7 +10720,7 @@ namespace Legion {
           collector = new GarbageCollector(collection_lock, manager_lock, 
               runtime->address_space, memory, size, 
               collectable_instances, current_instances);
-        else if (collector->collection_complete())
+        if (collector->collection_complete())
           break;
         RtEvent ready = collector->perform_collection();
         if (ready.exists() && !ready.has_triggered())
@@ -10766,13 +10813,16 @@ namespace Legion {
       }
       else
       {
-        // Technically realm could return us a null pointer here if the 
-        // instance is not directly accessible on this node, but that
-        // should never happen because all eager allocations are done
-        // locally and to memories for which loads and stores are safe
-        void *base = instance.pointer_untyped(0,0);
-        if (base != NULL)
+        if (instance.get_layout()->bytes_used > 0)
         {
+          void *base = instance.pointer_untyped(0,0);
+#ifdef DEBUG_LEGION
+          // Technically realm could return us a null pointer here if the
+          // instance is not directly accessible on this node, but that
+          // should never happen because all eager allocations are done
+          // locally and to memories for which loads and stores are safe
+          assert(base != NULL);
+#endif
           const uintptr_t ptr = reinterpret_cast<uintptr_t>(base);
           AutoLock lock(manager_lock);
           std::map<uintptr_t,size_t>::iterator finder = 
@@ -12063,6 +12113,11 @@ namespace Legion {
               runtime->handle_slice_remote_commit(derez);
               break;
             }
+          case SLICE_VERIFY_CONCURRENT_EXECUTION:
+            {
+              runtime->handle_slice_verify_concurrent_execution(derez);
+              break;
+            }
           case SLICE_FIND_INTRA_DEP:
             {
               runtime->handle_slice_find_intra_dependence(derez);
@@ -12891,6 +12946,17 @@ namespace Legion {
           case SEND_FREE_FUTURE_INSTANCE:
             {
               runtime->handle_free_future_instance(derez);
+              break;
+            }
+          case SEND_CONCURRENT_RESERVATION_CREATION:
+            {
+              runtime->handle_concurrent_reservation_creation(derez,
+                                                remote_address_space);
+              break;
+            }
+          case SEND_CONCURRENT_EXECUTION_ANALYSIS:
+            {
+              runtime->handle_concurrent_execution_analysis(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -14047,7 +14113,8 @@ namespace Legion {
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
         inner_variant(registrar.inner_variant),
         idempotent_variant(registrar.idempotent_variant),
-        replicable_variant(registrar.replicable_variant)
+        replicable_variant(registrar.replicable_variant),
+        concurrent_variant(registrar.concurrent_variant)
     //--------------------------------------------------------------------------
     { 
       if (udata != NULL)
@@ -14137,7 +14204,7 @@ namespace Legion {
              "Variant %s requested global registration without "
                          "a portable implementation.", variant_name)
       if (leaf_variant && inner_variant)
-        REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, 
+        REPORT_LEGION_ERROR(ERROR_INVALID_TASK_VARIANT_PROPERTIES,
                       "Task variant %s (ID %d) of task %s (ID %d) is not "
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
@@ -14148,18 +14215,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantImpl::VariantImpl(const VariantImpl &rhs) 
-      : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
-        global(rhs.global), has_return_type_size(rhs.has_return_type_size),
-        return_type_size(rhs.return_type_size),
-        descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     VariantImpl::~VariantImpl(void)
     //--------------------------------------------------------------------------
     {
@@ -14167,15 +14222,6 @@ namespace Legion {
         free(user_data);
       if (variant_name != NULL)
         free(variant_name);
-    }
-
-    //--------------------------------------------------------------------------
-    VariantImpl& VariantImpl::operator=(const VariantImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -15017,8 +15063,6 @@ namespace Legion {
     void ProjectionFunction::prepare_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      // This will remove the index space references we are holding
-      elide_close_results.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -15443,7 +15487,7 @@ namespace Legion {
             task->get_task_name(), task->get_unique_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15481,7 +15525,7 @@ namespace Legion {
             task->get_task_name(), task->get_unique_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15519,7 +15563,7 @@ namespace Legion {
             op->get_logging_name(), op->get_unique_op_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15557,7 +15601,7 @@ namespace Legion {
             op->get_logging_name(), op->get_unique_op_id())
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, upper_bound);
-      if (projection_depth != functor->get_depth())
+      if (projection_depth > functor->get_depth())
         REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
@@ -15795,120 +15839,41 @@ namespace Legion {
       
       }
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionFunction::ElideCloseResult::ElideCloseResult(void)
-      : node(NULL), result(false)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ProjectionFunction::ElideCloseResult::ElideCloseResult(IndexTreeNode *n,
-        const std::set<ProjectionSummary> &proj, bool res)
-      : node(n), projections(proj), result(res)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionFunction::ElideCloseResult::matches(IndexTreeNode *other,
-                     const std::set<ProjectionSummary> &other_projections) const
-    //--------------------------------------------------------------------------
-    {
-      if (node != other)
-        return false;
-      if (projections.size() != other_projections.size())
-        return false;
-      std::set<ProjectionSummary>::const_iterator it1 = projections.begin();
-      std::set<ProjectionSummary>::const_iterator it2 = 
-        other_projections.begin();
-      while (it1 != projections.end())
-      {
-        if (it1 != it2)
-          return false;
-        it1++; it2++;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool ProjectionFunction::find_elide_close_result(const ProjectionInfo &info,
-                                 const std::set<ProjectionSummary> &projections, 
-                                 RegionTreeNode *node, bool &result) const
-    //--------------------------------------------------------------------------
-    {
-      // No memoizing if we're not functional
-      if (!is_functional)
-        return false;
-      ProjectionSummary key(info);
-      IndexTreeNode *row_source = node->get_row_source();
-      AutoLock p_lock(projection_reservation,1,false/*exclusive*/);
-      std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
-        finder = elide_close_results.find(key);
-      if (finder == elide_close_results.end())
-        return false;
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        if (it->matches(row_source, projections))
-        {
-          result = it->result;
-          return true;
-        }
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void ProjectionFunction::record_elide_close_result(
-                                const ProjectionInfo &info,
-                                const std::set<ProjectionSummary> &projections,
-                                RegionTreeNode *node, bool result)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_functional)
-        return;
-      ProjectionSummary key(info);
-      IndexTreeNode *row_source = node->get_row_source();
-      AutoLock p_lock(projection_reservation);
-      std::vector<ElideCloseResult> &close_results = elide_close_results[key];
-      // See if someone else saved the result in between to avoid duplicates
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            close_results.begin(); it != close_results.end(); it++)
-        if (it->matches(row_source, projections))
-          return;
-      close_results.push_back(ElideCloseResult(row_source, projections,result));
-    }
+    } 
 
     //--------------------------------------------------------------------------
     ProjectionTree* ProjectionFunction::construct_projection_tree(Operation *op,
-                            unsigned index, RegionTreeNode *root, 
-                            IndexSpaceNode *launch_space,
+                            unsigned index, ShardID local_shard, 
+                            RegionTreeNode *root, IndexSpaceNode *launch_space,
                             ShardingFunction *sharding_function, 
                             IndexSpaceNode *sharding_space) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_functional);
+      assert(sharding_function != NULL);
 #endif
       IndexTreeNode *row_source = root->get_row_source();
-      RegionTreeForest *context = root->context;
-      ProjectionTree *result = new ProjectionTree(row_source);
+      RegionTreeForest *forest = root->context;
+      ProjectionTree *result = NULL;
+      if (!row_source->is_index_space_node())
+        result = new ProjectionTree(
+            row_source->as_index_part_node()->is_disjoint(false/*from app*/));
+      else
+        result = new ProjectionTree(false/*not all children disjoint*/);
+      IndexSpace local_space = sharding_function->find_shard_space(local_shard,
+          launch_space, sharding_space->handle, op->get_provenance());
+      if (!local_space.exists())
+        return result;
+      Domain local_domain, launch_domain;
+      forest->find_launch_space_domain(local_space, local_domain);
+      launch_space->get_launch_space_domain(launch_domain);
       std::map<IndexTreeNode*,ProjectionTree*> node_map;
       node_map[row_source] = result;
-      // Iterate over the points, compute the projections, and build the tree   
-      Domain launch_domain, sharding_domain;
-      launch_space->get_launch_space_domain(launch_domain);
-      if ((sharding_function != NULL) && (launch_space != sharding_space))
-        sharding_space->get_launch_space_domain(sharding_domain);
-      else
-        sharding_domain = launch_domain;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -15922,19 +15887,14 @@ namespace Legion {
                                          result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest, 
+                                 node_map, local_shard);
         }
       }
       else
       {
         PartitionNode *partition = root->as_partition_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -15948,13 +15908,8 @@ namespace Legion {
                                             result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest, 
+                                 node_map, local_shard);
         }
       }
       return result;
@@ -15962,8 +15917,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::construct_projection_tree(Operation *op,
-          unsigned index, RegionTreeNode *root, IndexSpaceNode *launch_space, 
-          ShardingFunction *sharding_function, IndexSpaceNode *sharding_space, 
+          unsigned index, ShardID local_shard, RegionTreeNode *root, 
+          IndexSpaceNode *launch_space, ShardingFunction *sharding_function,
+          IndexSpaceNode *sharding_space, 
           std::map<IndexTreeNode*,ProjectionTree*> &node_map) const
     //--------------------------------------------------------------------------
     {
@@ -15971,18 +15927,18 @@ namespace Legion {
       assert(is_functional);
 #endif
       IndexTreeNode *row_source = root->get_row_source();
-      RegionTreeForest *context = root->context;
-      // Iterate over the points, compute the projections, and build the tree   
-      Domain launch_domain, sharding_domain;
+      RegionTreeForest *forest = root->context;
+      IndexSpace local_space = sharding_function->find_shard_space(local_shard,
+          launch_space, sharding_space->handle, op->get_provenance());
+      if (!local_space.exists())
+        return;
+      Domain local_domain, launch_domain;
+      forest->find_launch_space_domain(local_space, local_domain);
       launch_space->get_launch_space_domain(launch_domain);
-      if ((sharding_function != NULL) && (launch_space != sharding_space))
-        sharding_space->get_launch_space_domain(sharding_domain);
-      else
-        sharding_domain = launch_domain;
       if (root->is_region())
       {
         RegionNode *region = root->as_region_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -15996,19 +15952,14 @@ namespace Legion {
                                          result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest, 
+                                 node_map, local_shard);
         }
       }
       else
       {
         PartitionNode *partition = root->as_partition_node();
-        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
         {
           LogicalRegion result;
           if (!is_exclusive)
@@ -16022,13 +15973,8 @@ namespace Legion {
                                             result, op->runtime);
           if (!result.exists())
             continue;
-          if (sharding_function != NULL)
-          {
-            ShardID own = sharding_function->find_owner(itr.p, sharding_domain);
-            add_to_projection_tree(result, row_source, context, node_map, own);
-          }
-          else
-            add_to_projection_tree(result, row_source, context, node_map);
+          add_to_projection_tree(result, row_source, forest,
+                                 node_map, local_shard);
         }
       }
     }
@@ -16046,11 +15992,12 @@ namespace Legion {
       ProjectionTree *current = NULL;
       if (finder == node_map.end())
       {
-        current = new ProjectionTree(child, owner_shard);
+        current = new ProjectionTree(false/*all children not disjoint*/);
         node_map[child] = current;
       }
       else
         current = finder->second;
+      current->users.insert(owner_shard);
       while (child != root)
       {
         // Find the next one to add this to
@@ -16059,12 +16006,16 @@ namespace Legion {
         ProjectionTree *next = NULL;
         if (finder == node_map.end())
         {
-          next = new ProjectionTree(parent);
+          if (!parent->is_index_space_node())
+            next = new ProjectionTree(
+                parent->as_index_part_node()->is_disjoint(false/*from app*/));
+          else
+            next = new ProjectionTree(false/*all children not disjoint*/);
           node_map[parent] = next;
         }
         else
           next = finder->second;
-        next->add_child(current);
+        next->children[child->color] = current;
         // Now we can walk up the tree
         child = parent;
         current = next;
@@ -16083,29 +16034,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CyclicShardingFunctor::CyclicShardingFunctor(
-                                               const CyclicShardingFunctor &rhs)
-      : ShardingFunctor()
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     CyclicShardingFunctor::~CyclicShardingFunctor(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    CyclicShardingFunctor& CyclicShardingFunctor::operator=(
-                                               const CyclicShardingFunctor &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -16170,9 +16101,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(ShardingFunctor *func, 
-              RegionTreeForest *f, ShardManager *m, ShardingID id)
+              RegionTreeForest *f, ShardManager *m, ShardingID id, bool skip)
       : functor(func), forest(f), manager(m), sharding_id(id),
-        use_points(func->use_points())
+        use_points(func->use_points()), skip_checks(skip)
     //--------------------------------------------------------------------------
     {
     }
@@ -16201,7 +16132,8 @@ namespace Legion {
                                 "'shard_points' for control replicated task.",
                                 sharding_id)
           const coord_t shard = result[0];
-          if ((shard < 0) || (manager->total_shards <= size_t(shard)))
+          if (!skip_checks && 
+              ((shard < 0) || (manager->total_shards <= size_t(shard))))
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                                 "Illegal output shard %lld from sharding "
                                 "functor %d. Shards for this index space "
@@ -16232,7 +16164,7 @@ namespace Legion {
       {
         const ShardID shard =
           functor->shard(point, sharding_space, manager->total_shards);
-        if (manager->total_shards <= shard)
+        if (!skip_checks && (manager->total_shards <= shard))
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARDING_FUNCTOR_OUTPUT,
                               "Illegal output shard %d from sharding "
                               "functor %d. Shards for this index space "
@@ -16291,6 +16223,7 @@ namespace Legion {
         initial_tasks_to_schedule(config.initial_tasks_to_schedule),
         initial_meta_task_vector_width(config.initial_meta_task_vector_width),
         eager_alloc_percentage(config.eager_alloc_percentage),
+        eager_alloc_percentage_overrides(config.eager_alloc_percentage_overrides),
         max_message_size(config.max_message_size),
         gc_epoch_size(config.gc_epoch_size),
         max_control_replication_contexts(
@@ -16342,6 +16275,7 @@ namespace Legion {
         // call from each node before we start trying to perform a shutdown
         outstanding_top_level_tasks(
             ((unique == 0) && background) ? total_address_spaces : 0),
+        concurrent_reservation(Reservation::NO_RESERVATION),
         local_procs(locals), local_utils(local_utilities),
         proc_spaces(processor_spaces),
         unique_index_space_id((unique == 0) ? runtime_stride : unique),
@@ -17125,6 +17059,12 @@ namespace Legion {
         delete it->second;
       }
       memory_managers.clear();
+      if (address_space == 0)
+      {
+        Reservation r = concurrent_reservation.load();
+        if (r.exists())
+          r.destroy_reservation();
+      }
 #ifdef DEBUG_LEGION
       if (logging_region_tree_state)
 	delete tree_state_logger;
@@ -17259,6 +17199,8 @@ namespace Legion {
           true/*was preregistered*/, NULL, true/*preregistered*/);
       // Register the attach-detach sharding functor
       ReplicateContext::register_attach_detach_sharding_functor(this);
+      // Register the universal sharding functor
+      ReplicateContext::register_universal_sharding_functor(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20031,9 +19973,10 @@ namespace Legion {
     /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      // + 1 since we use that for first one for the attach-detach functor
+      // + 2 since we use that for first one for the attach-detach functor
+      // and the second one for the universal functor
       static ShardingID current_sharding_id =
-        LEGION_MAX_APPLICATION_SHARDING_ID + 1;
+        LEGION_MAX_APPLICATION_SHARDING_ID + 2;
       return current_sharding_id;
     }
 
@@ -21894,6 +21837,15 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SLICE_REMOTE_COMMIT>(rez,
                                     true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_slice_verify_concurrent_execution(Processor target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SLICE_VERIFY_CONCURRENT_EXECUTION>(
+                                                            rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -23975,6 +23927,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_slice_verify_concurrent_execution(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      SliceTask::handle_verify_concurrent_execution(derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_slice_find_intra_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -25856,6 +25815,169 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent Runtime::acquire_concurrent_reservation(RtEvent release_event,
+                                                    RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!release_event.has_triggered());
+#endif
+      const Reservation r = find_or_create_concurrent_reservation(); 
+      Runtime::release_reservation(r, release_event);
+      return Runtime::acquire_rt_reservation(r, true/*exclusive*/,precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    Reservation Runtime::find_or_create_concurrent_reservation(void)
+    //--------------------------------------------------------------------------
+    {
+      Reservation r = concurrent_reservation.load();
+      if (r.exists())
+        return r;
+      if (address_space > 0)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event();
+        Serializer rez;
+        rez.serialize<bool>(true/*request*/);
+        rez.serialize(&concurrent_reservation);
+        rez.serialize(done);
+        find_messenger(0/*target*/)->send_message<
+          SEND_CONCURRENT_RESERVATION_CREATION>(rez, true/*flush*/);
+        done.wait();
+        r = concurrent_reservation.load();
+      }
+      else
+      {
+        Reservation fresh = Reservation::create_reservation();
+        if (!concurrent_reservation.compare_exchange_strong(r, fresh))
+          fresh.destroy_reservation();
+        else
+          r = concurrent_reservation.load();
+      }
+#ifdef DEBUG_LEGION
+      assert(r.exists());
+#endif
+      return r;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_concurrent_reservation_creation(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      bool request;
+      derez.deserialize(request);
+      std::atomic<Reservation>* target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (request)
+      {
+        const Reservation r = find_or_create_concurrent_reservation();
+        Serializer rez;
+        rez.serialize<bool>(false/*request*/);
+        rez.serialize(target);
+        rez.serialize(done);
+        rez.serialize(r);
+        find_messenger(source)->send_message<
+          SEND_CONCURRENT_RESERVATION_CREATION>(rez, true/*flush*/, 
+                                                true/*response*/);
+      }
+      else
+      {
+        Reservation r;
+        derez.deserialize(r);
+        target->store(r);
+        Runtime::trigger_event(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent Runtime::find_concurrent_fence_event(Processor target, ApEvent next,
+                                        ApEvent &previous, RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      std::map<Processor,ProcessorManager*>::const_iterator finder =
+        proc_managers.find(target);
+      if (finder == proc_managers.end())
+      {
+        // Send this to a remote node
+        const RtUserEvent done = Runtime::create_rt_user_event();
+        const ApUserEvent result = Runtime::create_ap_user_event(NULL);
+        Serializer rez;
+        rez.serialize(target);
+        rez.serialize(next);
+        rez.serialize(result);
+        rez.serialize(precondition);
+        rez.serialize(done);
+        find_messenger(target)->send_message<
+          SEND_CONCURRENT_EXECUTION_ANALYSIS>(rez, true/*flush*/);
+        previous = result;
+        return done;
+      }
+      else
+      {
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          const ApUserEvent result = Runtime::create_ap_user_event(NULL);
+          previous = result;
+          DeferConcurrentAnalysisArgs args(finder->second, next, result);
+          return issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, precondition);
+        }
+        else
+        {
+          previous = finder->second->find_concurrent_fence_event(next);
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_concurrent_execution_analysis(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Processor target;
+      derez.deserialize(target);
+      ApEvent next;
+      derez.deserialize(next);
+      ApUserEvent result;
+      derez.deserialize(result);
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::map<Processor,ProcessorManager*>::const_iterator finder =
+        proc_managers.find(target);
+#ifdef DEBUG_LEGION
+      assert(finder != proc_managers.end());
+#endif
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferConcurrentAnalysisArgs args(finder->second, next, result);
+        Runtime::trigger_event(done, issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, precondition));
+      }
+      else
+      {
+        Runtime::trigger_event(NULL, result,
+            finder->second->find_concurrent_fence_event(next));
+        Runtime::trigger_event(done);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::handle_concurrent_analysis(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferConcurrentAnalysisArgs *dargs = 
+        (const DeferConcurrentAnalysisArgs*)args;
+      Runtime::trigger_event(NULL, dargs->result,
+          dargs->manager->find_concurrent_fence_event(dargs->next));
+    }
+
+    //--------------------------------------------------------------------------
     DistributedID Runtime::get_available_distributed_id(void)
     //--------------------------------------------------------------------------
     {
@@ -26333,7 +26455,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->provenance.c_str());
+            (provenance == NULL) ? NULL : provenance->human.c_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -27642,7 +27764,7 @@ namespace Legion {
     void Runtime::free_repl_tunable_op(ReplTunableOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(timing_op_lock);
+      AutoLock t_lock(tunable_op_lock);
       release_operation<false>(available_repl_tunable_ops, op);
     }
 
@@ -29436,6 +29558,10 @@ namespace Legion {
                         config.initial_meta_task_vector_width, !filter)
         .add_option_int("-lg:eager_alloc_percentage",
                         config.eager_alloc_percentage, !filter)
+        .add_option_method("-lg:eager_alloc_percentage_override",
+                           &config,
+                           &LegionConfiguration::parse_alloc_percentage_override_argument,
+                           !filter)
         .add_option_bool("-lg:dump_free_ranges",
                          config.dump_free_ranges, !filter)
         .add_option_int("-lg:message",config.max_message_size, !filter)
@@ -29597,7 +29723,77 @@ namespace Legion {
               "LEVEL_FATAL" : "LEVEL_NONE")
       runtime_initialized = true;
       return config;
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    bool Runtime::LegionConfiguration::parse_alloc_percentage_override_argument(
+        const std::string &s) {
+    //--------------------------------------------------------------------------
+      // Some of this code is borrowed from Realm's logger initialization.
+      const char *p1 = s.c_str();
+      while (true) {
+        // Skip commas.
+        while(*p1 == ',') p1++;
+        if(!*p1) break;
+
+        // We follow a similar format as the logger's -level arguments, where
+        // users can specify for particular memory kinds the amount of eager
+        // allocation space should be used. For example:
+        // -lg:eager_alloc_percentage_overrides socket_mem=35,system_mem=20.
+        std::string mem_kind_name;
+        if (!isdigit(*p1)) {
+          const char *p2 = p1;
+          while (*p2 != '=') {
+            if (!*p2) {
+              fprintf(stderr, "ERROR: memory kind in "
+                              "-lg:eager_alloc_percentage_override "
+                              "must be followed by =.\n");
+              return false;
+            }
+            p2++;
+          }
+          mem_kind_name.assign(p1, p2 - p1);
+          p1 = p2 + 1;
+        }
+        // Parse the memory kind now. First, convert the memory
+        // string to all upper case.
+        std::transform(
+            mem_kind_name.begin(),
+            mem_kind_name.end(),
+            mem_kind_name.begin(),
+            ::toupper
+        );
+        Realm::Memory::Kind mem_kind = Memory::NO_MEMKIND;
+        #define MEM_STR_EQ(name, desc) \
+          if (strcmp(mem_kind_name.c_str(), #name) == 0) { \
+            mem_kind = Realm::Memory::name;                \
+          }
+          REALM_MEMORY_KINDS(MEM_STR_EQ)
+        #undef MEM_STR_EQ
+        if (mem_kind == Realm::Memory::NO_MEMKIND) {
+          fprintf(stderr, "ERROR: unable to parse memory kind %s.\n",
+                  mem_kind_name.c_str());
+          return false;
+        }
+
+        // Advance until we don't see any more numbers.
+        const char* p2 = p1;
+        while (*p2 && isdigit(*p2)) p2++;
+        if (!*p2 || (*p2 == ',')) {
+          std::string percentage_str(p1, p2);
+          char* pos;
+          errno = 0; // No errors from before.
+          long percentage = strtol(percentage_str.c_str(), &pos, 10);
+          if (errno != 0) {
+            fprintf(stderr, "ERROR: unable to parse percentage value.\n");
+            return false;
+          }
+          this->eager_alloc_percentage_overrides[mem_kind] = percentage;
+          p1 = p2;
+        }
+      }
+      return true;
+    }
 
     //--------------------------------------------------------------------------
     Future Runtime::launch_top_level_task(const TaskLauncher &launcher)
@@ -31748,6 +31944,11 @@ namespace Legion {
         case LG_DEFER_TRACE_UPDATE_TASK_ID:
           {
             ShardedPhysicalTemplate::handle_deferred_trace_update(args,runtime);
+            break;
+          }
+        case LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID:
+          {
+            handle_concurrent_analysis(args);
             break;
           }
         case LG_DEFER_CONSENSUS_MATCH_TASK_ID:

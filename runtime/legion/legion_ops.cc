@@ -34,22 +34,89 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     /*static*/ const std::string Provenance::no_provenance;
+    /*static*/ constexpr char Provenance::delimeter;
+
+    //--------------------------------------------------------------------------
+    Provenance::Provenance(const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      initialize(prov, strlen(prov));
+    }
+
+    //--------------------------------------------------------------------------
+    Provenance::Provenance(const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      initialize((const char*)buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    Provenance::Provenance(const std::string &prov)
+    //--------------------------------------------------------------------------
+    {
+      initialize(prov.c_str(), prov.length());
+    }
+
+    //--------------------------------------------------------------------------
+    void Provenance::initialize(const char *prov, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      unsigned split = 0;
+      while (split < size)
+      {
+        if (prov[split] == delimeter)
+          break;
+        split++;
+      }
+      if (split > 0)
+        human.assign(prov, split);
+      if ((split+1) < size)
+        machine.assign(prov+split+1, size-(split+1));
+    }
+
+    //--------------------------------------------------------------------------
+    char* Provenance::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc(
+          human.length() + (!machine.empty() ? machine.length() + 1 : 0) + 1);
+      unsigned offset = 0;
+      for (unsigned idx = 0; idx < human.length(); idx++)
+        result[offset++] = human[idx];
+      if (!machine.empty())
+      {
+        result[offset++] = delimeter; 
+        for (unsigned idx = 0; idx < machine.length(); idx++)
+          result[offset++] = machine[idx];
+      }
+      result[offset] = '\0';
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      const size_t strlen = provenance.length();
-      rez.serialize(strlen);
+      size_t strlen = human.length() + machine.length();
       if (strlen > 0)
-        rez.serialize(provenance.c_str(), strlen);
+      {
+        strlen++; // handle the delimeter
+        rez.serialize(strlen);
+        if (human.length() > 0)
+          rez.serialize(human.c_str(), human.length());
+        rez.serialize(delimeter);
+        if (machine.length() > 0)
+          rez.serialize(machine.c_str(), machine.length());
+      }
+      else
+        rez.serialize(strlen);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Provenance::serialize_null(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(0);
+      rez.serialize<size_t>(SIZE_MAX);
     }
 
     //--------------------------------------------------------------------------
@@ -58,7 +125,7 @@ namespace Legion {
     {
       size_t length;
       derez.deserialize(length);
-      if (length > 0)
+      if (length < SIZE_MAX)
       {
         Provenance *result = new Provenance(derez.get_current_pointer(),length);
         derez.advance_pointer(length);
@@ -1437,7 +1504,7 @@ namespace Legion {
         provenance->add_reference();
         if (runtime->legion_spy_enabled)
           LegionSpy::log_operation_provenance(unique_op_id,
-                                  prov->provenance.c_str());
+                                              prov->human_str());
       }
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
@@ -4040,12 +4107,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MapOp::get_provenance_string(void) const
+    const std::string& MapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -5448,10 +5515,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
-    {
-      if (runtime->check_privileges)
-        check_copy_privileges(false/*permit projection*/);
-      perform_base_dependence_analysis();
+    { 
+      perform_base_dependence_analysis(false/*permit projection*/);
       ProjectionInfo projection_info;
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -5503,9 +5568,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::perform_base_dependence_analysis(void)
+    void CopyOp::perform_base_dependence_analysis(bool permit_projection)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_copy_privileges(permit_projection);
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
@@ -6492,12 +6559,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CopyOp::get_provenance_string(void) const
+    const std::string& CopyOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -7668,10 +7735,7 @@ namespace Legion {
     void IndexCopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_copy_privileges(true/*permit projection*/);
-      // Register a dependence on our predicate
-      perform_base_dependence_analysis();
+      perform_base_dependence_analysis(true/*permit projection*/);
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -9429,7 +9493,7 @@ namespace Legion {
               if (runtime->legion_spy_enabled && owner)
                 LegionSpy::log_field_creation(field_space_node->handle.id,
                     fields[idx], *field_size, (get_provenance() == NULL) ? 
-                    NULL : get_provenance()->c_str());
+                    NULL : get_provenance()->human_str());
             }
             break;
           }
@@ -10214,12 +10278,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CloseOp::get_provenance_string(void) const
+    const std::string& CloseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -12533,12 +12597,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& AcquireOp::get_provenance_string(void) const
+    const std::string& AcquireOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -13478,12 +13542,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ReleaseOp::get_provenance_string(void) const
+    const std::string& ReleaseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -14717,12 +14781,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MustEpochOp::get_provenance_string(void) const
+    const std::string& MustEpochOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -14760,6 +14824,12 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
       parent_task = ctx->get_task();
+      if (ctx->is_concurrent_context())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
+            "Illegal nested must epoch launch inside task %s (UID %lld) "
+            "which has a concurrent ancesstor (must epoch or index task). "
+            "Nested concurrency is not supported.", 
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
@@ -14773,6 +14843,13 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
       return new FutureMapImpl(ctx, this, launch_node,
             runtime, runtime->get_available_distributed_id(), get_provenance());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MustEpochOp::get_concurrent_analysis_precondition(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->acquire_concurrent_reservation(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -15062,7 +15139,11 @@ namespace Legion {
       // Now we can invoke the mapper
       MapperManager *mapper = invoke_mapper(); 
       // Check that all the tasks have been assigned to different processors
+      // and perform the concurrent analysis on each of them so that they 
+      // all know what their starting preconditions are
       {
+        const RtEvent concurrent_precondition =
+          get_concurrent_analysis_precondition();
         std::map<Processor,SingleTask*> target_procs;
         for (unsigned idx = 0; idx < single_tasks.size(); idx++)
         {
@@ -15093,6 +15174,7 @@ namespace Legion {
           }
           target_procs[proc] = task;
           task->target_proc = proc;
+          task->perform_concurrent_analysis(proc, concurrent_precondition);
         }
       }
       std::set<RtEvent> tasks_all_mapped;
@@ -17736,12 +17818,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& DependentPartitionOp::get_provenance_string(void) const
+    const std::string& DependentPartitionOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -18690,12 +18773,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& FillOp::get_provenance_string(void) const
+    const std::string& FillOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -18751,22 +18834,29 @@ namespace Legion {
     void FillOp::trigger_dependence_analysis(void) 
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_fill_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
-      if (!wait_barriers.empty() || !arrive_barriers.empty())
-        parent_ctx->perform_barrier_dependence_analysis(this, 
-                              wait_barriers, arrive_barriers);
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
+      perform_base_dependence_analysis();
       ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
                                                    privilege_path, tracker);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->check_privileges)
+        check_fill_privilege();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      // If we are waiting on a future register a dependence
+      if (future.impl != NULL)
+        future.impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -19436,8 +19526,6 @@ namespace Legion {
     void IndexFillOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_fill_privilege();
       perform_base_dependence_analysis();
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       RefinementTracker tracker(this, map_applied_conditions);
@@ -19445,20 +19533,6 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path, tracker);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::perform_base_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!wait_barriers.empty() || !arrive_barriers.empty())
-        parent_ctx->perform_barrier_dependence_analysis(this, 
-                              wait_barriers, arrive_barriers);
-      // Register a dependence on our predicate
-      register_predicate_dependence();
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -23741,12 +23815,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteMapOp::get_provenance_string(void) const
+    const std::string& RemoteMapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -23882,12 +23956,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCopyOp::get_provenance_string(void) const
+    const std::string& RemoteCopyOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24056,12 +24130,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCloseOp::get_provenance_string(void) const
+    const std::string& RemoteCloseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24198,12 +24272,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteAcquireOp::get_provenance_string(void) const
+    const std::string& RemoteAcquireOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24325,12 +24399,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteReleaseOp::get_provenance_string(void) const
+    const std::string& RemoteReleaseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24466,12 +24540,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteFillOp::get_provenance_string(void) const
+    const std::string& RemoteFillOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24592,12 +24666,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemotePartitionOp::get_provenance_string(void) const
+    const std::string& RemotePartitionOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }

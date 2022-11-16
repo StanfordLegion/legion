@@ -527,8 +527,10 @@ namespace Realm {
   //
 
   namespace {
-    ModuleRegistrar::NetworkRegistrationBase *network_modules_head = 0;
-    ModuleRegistrar::NetworkRegistrationBase **network_modules_tail = &network_modules_head;
+    typedef std::map<std::string, ModuleRegistrar::NetworkRegistrationBase*> NetworkModuleRegistrationMap;
+    typedef std::vector<std::pair<size_t, ModuleRegistrar::NetworkRegistrationBase*> > NetworkModuleOrderedRegistrationList;
+    NetworkModuleRegistrationMap *registered_network_modules = NULL;
+    NetworkModuleOrderedRegistrationList *registered_ordered_network_modules = NULL;
   };
 
 #ifdef REALM_USE_DLFCN
@@ -611,11 +613,11 @@ namespace Realm {
       NetworkModule *m = ((NetworkModule *(*)(RuntimeImpl *, int *, const char ***))sym)(runtime, argc, argv);
       if(m) {
         modules.push_back(m);
-#ifndef REALM_USE_MULTIPLE_NETWORKS
-        assert(Network::single_network == 0);
-#endif
         Network::single_network = m;
         count++;
+#ifndef REALM_USE_MULTIPLE_NETWORKS
+        break;  // Found a network module that works, no need to load the rest
+#endif
       }
     }
 
@@ -628,22 +630,54 @@ namespace Realm {
 					       int *argc, const char ***argv)
   {
     // iterate over the network module list, trying to create each module
+    // if need_loopback == false, it means a network module has been created
     bool need_loopback = true;
-    for(const NetworkRegistrationBase *nreg = network_modules_head;
-	nreg;
-	nreg = nreg->next) {
-      NetworkModule *m = nreg->create_network_module(runtime, argc, argv);
-      if(m) {
-	modules.push_back(m);
+
+    // this is for -ll:networks none, and we do not enable any network, but use LoopbackNetworkModule
+    bool disable_network = false;
+
+    // TODO: Check for the argument, if it exists, tokenize it and load each module
+    // else, load each module and pick the first one that works
+    if (registered_network_modules != NULL) {
+      CommandLineParser cp;
+      std::vector<std::string> network_list;
+      cp.add_option_stringlist("-ll:networks", network_list);
+      if (!cp.parse_command_line(*argc, *argv)) {
+        std::cerr << "Unable to parse network command line" << std::endl;
+        abort();
+      }
+      for (const std::string& name : network_list) {
+
+        // if -ll:networks is none, do not enable any networks
+        if (name == "none") {
+          // make sure none is not passed with other values
+          if (network_list.size() != 1) {
+            std::cerr << "Cannot specify both 'none' and another value in -ll:networks" << std::endl;
+            abort();
+          }
+          disable_network = true;
+          break;
+        }
+        NetworkModuleRegistrationMap::const_iterator it = registered_network_modules->find(name);
+        if (it == registered_network_modules->end()) {
+          std::cerr << "Unable to find specified registered network module '" << name << '\'' << std::endl;
+          abort();
+        }
+        NetworkModule *m = it->second->create_network_module(runtime, argc, argv);
+        if (m == NULL) {
+          std::cerr << "Unable to create specified registered network module '" << name << '\'' << std::endl;
+          abort();
+        }
+        modules.push_back(m);
+        Network::single_network = m;
+        need_loopback = false;
 #ifndef REALM_USE_MULTIPLE_NETWORKS
-	assert(Network::single_network == 0);
+        break;  // Found one network backend that works, no need to create the rest
 #endif
-	Network::single_network = m;
-	need_loopback = false;
       }
     }
 
-    {
+    if (need_loopback && !disable_network) {
       const char *e = getenv("REALM_DYNAMIC_NETWORK_MODULES");
       if(e) {
 #ifdef REALM_USE_DLFCN
@@ -665,6 +699,24 @@ namespace Realm {
       }
     }
 
+    // networks were not specified on command-line,
+    // so fallback to loading all the modules and
+    // picking the first one
+    if (need_loopback && !disable_network && (registered_ordered_network_modules != NULL)) {
+      for (const NetworkModuleOrderedRegistrationList::value_type &v :
+          *registered_ordered_network_modules) {
+        NetworkModule *m = v.second->create_network_module(runtime, argc, argv);
+        if (m) {
+          modules.push_back(m);
+          Network::single_network = m;
+          need_loopback = false;
+#ifndef REALM_USE_MULTIPLE_NETWORKS
+          break;  // Found one network backend that works, no need to create the rest
+#endif
+        }
+      }
+    }
+
     if(need_loopback) {
       NetworkModule *m = LoopbackNetworkModule::create_network_module(runtime, argc, argv);
       assert(m != 0);
@@ -674,12 +726,26 @@ namespace Realm {
     }
   }
 
-  /*static*/ void ModuleRegistrar::add_network_registration(NetworkRegistrationBase *reg)
-  {
-    // done during init, so single-threaded
-    *network_modules_tail = reg;
-    network_modules_tail = &(reg->next);
-  }
-  
+  /*static*/ void
+  ModuleRegistrar::add_network_registration(NetworkRegistrationBase *reg,
+                                            const std::string &name,
+                                            size_t order /*= 9999*/ ) {
+    // Enforce a constructor order for the global network registration
+    // map by defining it static here and capture a global pointer to it.
+    static NetworkModuleRegistrationMap registered_network_module_map;
+    static NetworkModuleOrderedRegistrationList ordered_network_modules;
+    registered_network_modules = &registered_network_module_map;
+    registered_ordered_network_modules = &ordered_network_modules;
 
+    if (!registered_network_modules->insert(std::make_pair(name, reg)).second) {
+      std::cerr << "Failed to register network module " << name << std::endl;
+      abort();
+    }
+    // Insert in order based on the order given
+    NetworkModuleOrderedRegistrationList::value_type p = std::make_pair(order, reg);
+    ordered_network_modules.insert(
+      std::upper_bound(ordered_network_modules.begin(), ordered_network_modules.end(), p),
+      p
+    );
+  }
 };
