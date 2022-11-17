@@ -8654,6 +8654,13 @@ namespace Legion {
     FilterAnalysis::~FilterAnalysis(void)
     //--------------------------------------------------------------------------
     {
+      if (previous != original_source)
+      {
+        if (inst_view != NULL)
+          inst_view->unpack_global_ref();
+        if (registration_view != NULL)
+          registration_view->unpack_global_ref();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8721,11 +8728,17 @@ namespace Legion {
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
           if (inst_view != NULL)
+          {
+            inst_view->pack_global_ref();
             rez.serialize(inst_view->did);
+          }
           else
             rez.serialize<DistributedID>(0);
           if (registration_view != NULL)
+          {
+            registration_view->pack_global_ref();
             rez.serialize(registration_view->did);
+          }
           else
             rez.serialize<DistributedID>(0);
           rez.serialize(remove_restriction);
