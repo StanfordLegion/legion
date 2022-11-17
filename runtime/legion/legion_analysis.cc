@@ -8654,7 +8654,9 @@ namespace Legion {
     FilterAnalysis::~FilterAnalysis(void)
     //--------------------------------------------------------------------------
     {
-      if (previous != original_source)
+      // If we're "remote" then unpack the references we sent
+      if ((runtime->address_space != original_source) ||
+          (previous != original_source))
       {
         if (inst_view != NULL)
           inst_view->unpack_global_ref();
