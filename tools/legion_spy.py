@@ -5255,7 +5255,7 @@ class EquivalenceSet(object):
     def remove_restriction(self, op, req, filter_inst):
         if filter_inst is None:
             self.restricted_instances.clear()
-        else:
+        elif filter_inst in self.restricted_instances:
             self.restricted_instances.remove(filter_inst)
         if filter_inst in self.valid_instances:
             self.valid_instances.remove(filter_inst)
