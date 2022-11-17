@@ -454,8 +454,21 @@ namespace Legion {
       // so we need to make sure we make the right kind of collective ID
       const CollectiveID id =
         repl_ctx->get_next_collective_index(COLLECTIVE_LOC_19, true/*logical*/);
-      collective_view_rendezvous[key] = 
+      CollectiveViewRendezvous *rendezvous =
         new CollectiveViewRendezvous(id, repl_ctx, this, this, key, tid);
+      collective_view_rendezvous[key] = rendezvous;
+      // If this is the owner save the completeion event for the collective 
+      // in the  map_applied_conditions as this fixes a race where the the
+      // collective finishes but when calling 'finalize_collective_mapping'
+      // it first completes all the local points and they execute and we 
+      // then try to clean up the collective object before we finish the
+      // finalize method and that can lead to data corruption
+      if (rendezvous->is_target())
+      {
+        const RtEvent done = rendezvous->get_done_event();
+        if (done.exists())
+          this->map_applied_conditions.insert(done);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8698,7 +8711,16 @@ namespace Legion {
         complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
-        complete_execution(collective_done);
+        std::set<RtEvent> done_events;
+        shard_off_collective_view_rendezvous(done_events);
+        if (!done_events.empty())
+        {
+          if (collective_done.exists() && ! collective_done.has_triggered())
+            done_events.insert(collective_done);
+          complete_execution(Runtime::merge_events(done_events));
+        }
+        else
+          complete_execution(collective_done);
       }
       else
         IndexAttachOp::trigger_ready();
@@ -8880,7 +8902,16 @@ namespace Legion {
         complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
-        complete_execution(collective_done);
+        std::set<RtEvent> done_events;
+        shard_off_collective_view_rendezvous(done_events);
+        if (!done_events.empty())
+        {
+          if (collective_done.exists() && ! collective_done.has_triggered())
+            done_events.insert(collective_done);
+          complete_execution(Runtime::merge_events(done_events));
+        }
+        else
+          complete_execution(collective_done);
       }
       else
         IndexDetachOp::trigger_ready();
