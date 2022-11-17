@@ -2,7 +2,6 @@
 #SBATCH --constraint=gpu
 #SBATCH --time=00:30:00
 #SBATCH --mail-type=ALL
-#SBATCH -A d108
 
 root_dir="$PWD"
 
