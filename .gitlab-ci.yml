@@ -166,6 +166,7 @@ variables:
   USE_LLVM: "1"
 .cuda: &cuda
   USE_CUDA: "1"
+  USE_NVTX: "1"
 .cuda_dynamic: &cuda_dynamic
   EXTRA_CMAKE_ARGS: "-DLegion_CUDA_DYNAMIC_LOAD=ON -DLegion_HIJACK_CUDART=OFF"
 .gasnet1_mpi: &gasnet1_mpi
@@ -368,6 +369,7 @@ before_script:
     if [[ "$USE_CUDA" -eq 1 ]]; then
       # make sure dynamic loading finds the right libcudart.so
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
+      export PATH=$PATH:${CUDA}/bin
     fi
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
@@ -531,18 +533,21 @@ before_script:
   CUDA: "/usr/local/cuda-10.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-10.2"
   CUDAHOSTCXX: "g++-8"
+  USE_NVTX: "1"
 
 .p100_cuda110: &p100_cuda110
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.0"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.0"
   CUDAHOSTCXX: "g++-9"
+  USE_NVTX: "1"
 
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
   CUDAHOSTCXX: "g++-9"
+  USE_NVTX: "1"
 
 ###
 ### Docker Image
