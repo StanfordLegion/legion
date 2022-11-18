@@ -3024,6 +3024,7 @@ namespace Legion {
           return result;
         }
         term_events.swap(finder->second.term_events);
+        expr = finder->second.expr;
 #ifdef DEBUG_LEGION
         assert(finder->second.remote_ready_events.empty());
 #endif
@@ -3071,6 +3072,8 @@ namespace Legion {
         else
           Runtime::trigger_event(applied);
       }
+      if (expr->remove_nested_expression_reference(did))
+        delete expr;
       delete result_info;
       return result;
     }
@@ -8100,6 +8103,7 @@ namespace Legion {
               global_applied = finder->second.global_applied;
               local_ready_events.swap(finder->second.ready_events);
               local_term_events.swap(finder->second.local_term_events);
+              expr = finder->second.expr;
               // We can erase this from the data structure now
               rendezvous_users.erase(finder);
             }
@@ -8402,6 +8406,8 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(local_applied);
+      if (expr->remove_nested_expression_reference(did))
+        delete expr;
       delete trace_info;
     }
 
