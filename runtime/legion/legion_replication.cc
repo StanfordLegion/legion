@@ -15132,6 +15132,7 @@ namespace Legion {
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())
             continue;
+          manager->add_base_resource_ref(MAPPER_REF);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
           bool result = 
@@ -15422,6 +15423,7 @@ namespace Legion {
           // then we don't need to add any additional ones
           if (acquired.find(manager) != acquired.end())
             continue;
+          manager->add_base_resource_ref(MAPPER_REF);
           manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
           acquired[manager] = 1/*count*/;
         }

@@ -2963,6 +2963,8 @@ namespace Legion {
             : analysis_mapping->count_children(origin, local_space);
           rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
           rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
+          rendezvous.expr = expr;
+          expr->add_nested_expression_reference(did);
           rendezvous.registered = Runtime::create_rt_user_event();
           rendezvous.applied = Runtime::create_rt_user_event();
         }
@@ -2977,6 +2979,8 @@ namespace Legion {
           finder->second.ready_event =
             Runtime::create_ap_user_event(&trace_info);
           finder->second.trace_info = new PhysicalTraceInfo(trace_info);
+          finder->second.expr = expr;
+          expr->add_nested_expression_reference(did);
           if (!finder->second.remote_ready_events.empty())
           {
             for (std::map<ApUserEvent,PhysicalTraceInfo*>::const_iterator it =
@@ -3014,8 +3018,6 @@ namespace Legion {
               // Save our state for performing the registration later
               finder->second.usage = usage;
               finder->second.mask = new FieldMask(user_mask);
-              finder->second.expr = expr;
-              expr->add_nested_expression_reference(did);
               finder->second.op_id = op_id;
               finder->second.collect_event = collect_event;
               finder->second.symbolic = symbolic;
@@ -8005,6 +8007,8 @@ namespace Legion {
             rendezvous.ready_events[idx] =
               Runtime::create_ap_user_event(&trace_info);
           rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
+          rendezvous.expr = expr;
+          expr->add_nested_expression_reference(did);
           rendezvous.local_registered = Runtime::create_rt_user_event();
           rendezvous.global_registered = Runtime::create_rt_user_event();
           rendezvous.local_applied = Runtime::create_rt_user_event();
@@ -8025,6 +8029,8 @@ namespace Legion {
             finder->second.ready_events[idx] =
               Runtime::create_ap_user_event(&trace_info);
           finder->second.trace_info = new PhysicalTraceInfo(trace_info);
+          finder->second.expr = expr;
+          expr->add_nested_expression_reference(did);
           finder->second.remaining_local_arrivals = local_collective_arrivals;
           finder->second.local_initialized = true;
         } 
@@ -8051,9 +8057,7 @@ namespace Legion {
           {
             // Save the state that we need for finalization later
             finder->second.usage = usage;
-            finder->second.mask = new FieldMask(user_mask);
-            finder->second.expr = expr;
-            expr->add_nested_expression_reference(did);
+            finder->second.mask = new FieldMask(user_mask); 
             finder->second.op_id = op_id;
             finder->second.collect_event = collect_event;
             finder->second.symbolic = symbolic;
