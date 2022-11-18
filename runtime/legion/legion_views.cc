@@ -6386,7 +6386,7 @@ namespace Legion {
         // See the get_analysis_space function for why we check this
         assert((*it)->logical_owner == (*it)->get_manager()->owner_space);
 #endif
-        (*it)->add_nested_resource_ref(did);
+        //(*it)->add_nested_resource_ref(did);
         (*it)->add_nested_gc_ref(did);
         // Record ourselves with each of our local views so they can 
         // notify us when they are deleted
@@ -6399,10 +6399,12 @@ namespace Legion {
     CollectiveView::~CollectiveView(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       for (std::vector<IndividualView*>::const_iterator it =
             local_views.begin(); it != local_views.end(); it++)
-        if ((*it)->remove_nested_resource_ref(did))
+        if ((*it)->remove_nested_gc_ref(did))
           delete (*it);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6411,7 +6413,8 @@ namespace Legion {
     {
       for (std::vector<IndividualView*>::const_iterator it =
             local_views.begin(); it != local_views.end(); it++)
-        (*it)->remove_nested_gc_ref(did);
+        if ((*it)->remove_nested_gc_ref(did))
+          delete (*it);
       for (std::map<PhysicalManager*,IndividualView*>::const_iterator it =
             remote_instances.begin(); it != remote_instances.end(); it++)
         if (it->second->remove_nested_gc_ref(did))
@@ -7204,7 +7207,7 @@ namespace Legion {
       {
         PhysicalManager *manager = (*it)->get_manager();
         if (remote_instances.insert(std::make_pair(manager, *it)).second)
-          (*it)->add_nested_resource_ref(did);
+          (*it)->add_nested_gc_ref(did);
       }
       remote_instance_responses.add(src);
     }

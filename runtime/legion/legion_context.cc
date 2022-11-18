@@ -10906,7 +10906,7 @@ namespace Legion {
               ctx_uid, local_views, individual_dids,
               false/*register now*/, mapping);
         if (view->is_owner())
-          view->add_base_resource_ref(CONTEXT_REF);
+          view->add_base_gc_ref(CONTEXT_REF);
         view->register_with_runtime();
         if (!done_events.empty())
           return Runtime::merge_events(done_events);
@@ -11045,7 +11045,7 @@ namespace Legion {
             runtime->find_distributed_collectable(collective_did));
         // Now remove the resource reference that was added by the 
         // constructor for the collective view
-        if (view->remove_base_resource_ref(CONTEXT_REF))
+        if (view->remove_base_gc_ref(CONTEXT_REF))
           delete view;
       }
     }

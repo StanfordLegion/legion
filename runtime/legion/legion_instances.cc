@@ -2400,23 +2400,27 @@ namespace Legion {
                   std::vector<AddressSpaceID> children;
                   collective_mapping->get_children(owner_space, local_space,
                                                    children);
-                  for (std::vector<AddressSpaceID>::const_iterator it =
-                        children.begin(); it != children.end(); it++)
+                  if (!children.empty())
                   {
-                    Serializer rez;
+                    pack_global_ref(children.size());
+                    for (std::vector<AddressSpaceID>::const_iterator it =
+                          children.begin(); it != children.end(); it++)
                     {
-                      RezCheck z(rez);
-                      rez.serialize(did);
+                      Serializer rez;
+                      {
+                        RezCheck z(rez);
+                        rez.serialize(did);
+                      }
+                      runtime->send_gc_notify(*it, rez);
                     }
-                    runtime->send_gc_notify(*it, rez);
                   }
                 }
                 const size_t needed_guards = count_remote_instances();
                 if (needed_guards > 0)
                 {
                   struct NotifyFunctor {
-                    NotifyFunctor(DistributedID d, Runtime *rt)
-                      : did(d), runtime(rt){ }
+                    NotifyFunctor(DistributedID d, Runtime *rt) 
+                      : did(d), runtime(rt), count(0) { }
                     inline void apply(AddressSpaceID target)
                     {
                       if (target == runtime->address_space)
@@ -2427,12 +2431,16 @@ namespace Legion {
                         rez.serialize(did);
                       }
                       runtime->send_gc_notify(target, rez);
+                      count++;
                     }
                     const DistributedID did;
                     Runtime *const runtime;
+                    unsigned count;
                   };
                   NotifyFunctor functor(did, runtime);
                   map_over_remote_instances(functor);
+                  if (functor.count > 0)
+                    pack_global_ref(functor.count);
                 }
                 // Now that the lock is released we can notify the subscribers
                 if (!to_notify.empty())

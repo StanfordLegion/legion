@@ -10179,6 +10179,7 @@ namespace Legion {
       assert(restricted_instances.empty());
       assert(!restricted_fields);
       assert(released_instances.empty());
+      assert(collective_instances.empty());
       assert(tracing_preconditions == NULL);
       assert(tracing_anticonditions == NULL);
       assert(tracing_postconditions == NULL);
@@ -10283,6 +10284,15 @@ namespace Legion {
           rit->second.clear();
         }
         released_instances.clear();
+      }
+      if (!collective_instances.empty())
+      {
+        for (FieldMaskSet<CollectiveView>::const_iterator it =
+              collective_instances.begin(); it != 
+              collective_instances.end(); it++)
+          if (it->first->remove_nested_resource_ref(did))
+            delete it->first;
+        collective_instances.clear();
       }
       if (tracing_preconditions != NULL)
       {
