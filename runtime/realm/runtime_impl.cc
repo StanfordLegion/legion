@@ -42,6 +42,10 @@
 #include "realm/kokkos_interop.h"
 #endif
 
+#ifdef REALM_USE_NVTX
+#include "realm/nvtx.h"
+#endif
+
 #include <string.h>
 
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
@@ -1227,6 +1231,20 @@ namespace Realm {
         assert(ok);
       }
       Clock::calibrate(use_cpu_tsc, force_cpu_tsq_freq);
+
+#ifdef REALM_USE_NVTX
+      // need to init nvtx at the very beginning
+      std::vector<std::string> nvtx_module_list;
+      {
+        CommandLineParser cp;
+        // modules are defined as the key of the nvtx_categories_predefined in nvtx.cc
+        //   if all is passed, all modules will be enabled. 
+        cp.add_option_stringlist("-ll:nvtx_modules", nvtx_module_list);
+        bool ok = cp.parse_command_line(cmdline);
+        assert(ok);
+      }
+      init_nvtx(nvtx_module_list);
+#endif
 
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
@@ -2455,6 +2473,11 @@ namespace Realm {
       if (Config::path_cache_lru_size) {
         finalize_path_cache();
       }
+
+#ifdef REALM_USE_NVTX
+      // finalize nvtx
+      finalize_nvtx();
+#endif
 
       return shutdown_result_code;
     }
