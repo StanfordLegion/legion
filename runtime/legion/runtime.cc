@@ -8160,7 +8160,7 @@ namespace Legion {
             to_delete.begin(); it != to_delete.end(); it++)
       {
         RtEvent deletion_done;
-        if (!(*it)->collect(deletion_done))
+        if ((*it)->is_external_instance() || !(*it)->collect(deletion_done))
           continue;
         deleted.push_back(*it);
       }

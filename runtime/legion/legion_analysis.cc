@@ -9079,6 +9079,7 @@ namespace Legion {
     FilterAnalysis::~FilterAnalysis(void)
     //--------------------------------------------------------------------------
     {
+      // If we're "remote" then unpack the references we sent
       if ((runtime->address_space != original_source) ||
           (previous != original_source))
       {
