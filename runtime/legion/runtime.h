@@ -3902,6 +3902,8 @@ namespace Legion {
       DistributedCollectable* find_distributed_collectable(DistributedID did,
                                                            RtEvent &ready, 
                                                            bool wait = false);
+      DistributedCollectable* weak_find_distributed_collectable(
+                                                           DistributedID did);
       bool find_pending_collectable_location(DistributedID did,void *&location);
       void* find_or_create_pending_collectable_location(DistributedID did, 
                                                         size_t size);

@@ -3201,10 +3201,10 @@ namespace Legion {
               Runtime::merge_events(applied_events));
         else
           Runtime::trigger_event(to_perform.applied);
-        if (to_perform.expr->remove_nested_expression_reference(did))
-          delete to_perform.expr;
         delete to_perform.mask;
       }
+      if (to_perform.expr->remove_nested_expression_reference(did))
+        delete to_perform.expr;
       delete to_perform.trace_info;
     }
 
@@ -6532,9 +6532,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(tid);
-            rez.serialize(owner_context);
           }
-          pack_global_ref();
           runtime->send_collective_view_deletion(ctx_space, rez);
         }
         else
@@ -6580,10 +6578,15 @@ namespace Legion {
       derez.deserialize(did);
       RegionTreeID tid;
       derez.deserialize(tid);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-      CollectiveView *view = static_cast<CollectiveView*>(dc);
-      view->notify_instance_deletion(tid);
-      view->unpack_global_ref();
+      DistributedCollectable *dc = 
+        runtime->weak_find_distributed_collectable(did);
+      if (dc != NULL)
+      {
+        CollectiveView *view = static_cast<CollectiveView*>(dc);
+        view->notify_instance_deletion(tid);
+        if (view->remove_base_resource_ref(RUNTIME_REF))
+          delete view;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8042,6 +8045,7 @@ namespace Legion {
         // The result will be the ready event
         ApEvent result = finder->second.ready_events[target_index];
         result_info = finder->second.trace_info;
+        expr = finder->second.expr;
 #ifdef DEBUG_LEGION
         assert(finder->second.local_initialized);
         assert(finder->second.remaining_local_arrivals > 0);
@@ -8107,7 +8111,6 @@ namespace Legion {
               global_applied = finder->second.global_applied;
               local_ready_events.swap(finder->second.ready_events);
               local_term_events.swap(finder->second.local_term_events);
-              expr = finder->second.expr;
               // We can erase this from the data structure now
               rendezvous_users.erase(finder);
             }
@@ -8246,8 +8249,6 @@ namespace Legion {
         all_applied = Runtime::merge_events(to_perform.remote_applied);
       }
       Runtime::trigger_event(to_perform.global_applied, all_applied);
-      if (to_perform.expr->remove_nested_expression_reference(did))
-        delete to_perform.expr;
       delete to_perform.mask;
     }
 
@@ -8311,8 +8312,6 @@ namespace Legion {
           to_perform.symbolic);
       Runtime::trigger_event(to_perform.global_registered, registered);
       Runtime::trigger_event(to_perform.global_applied, applied);
-      if (to_perform.expr->remove_nested_expression_reference(did))
-        delete to_perform.expr;
       delete to_perform.mask;
     }
 

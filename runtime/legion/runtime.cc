@@ -26336,6 +26336,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DistributedCollectable* Runtime::weak_find_distributed_collectable(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+          dist_collectables.find(to_find);
+      if (finder == dist_collectables.end())
+        return NULL;
+      finder->second->add_base_resource_ref(RUNTIME_REF);
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::find_pending_collectable_location(DistributedID did,
                                                     void *&location)
     //--------------------------------------------------------------------------
