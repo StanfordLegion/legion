@@ -21,6 +21,10 @@
 #include "realm/faults.h"
 #include "realm/operation.h"
 
+#ifdef REALM_USE_NVTX
+#include "realm/nvtx.h"
+#endif
+
 #ifdef DEBUG_USWITCH
 #include <stdio.h>
 #endif
@@ -747,6 +751,9 @@ namespace Realm {
 #ifdef REALM_USE_PTHREADS
   /*static*/ void *KernelThread::pthread_entry(void *data)
   {
+#ifdef REALM_USE_NVTX
+    init_nvtx_thread("RealmKernalThread");
+#endif
     KernelThread *thread = (KernelThread *)data;
 
 #ifdef REALM_USE_ALTSTACK
@@ -804,7 +811,11 @@ namespace Realm {
     // this is last so that the scheduler can delete us if it wants to
     if(thread->scheduler)
       thread->scheduler->thread_terminating(thread);
-    
+
+#ifdef REALM_USE_NVTX
+    finalize_nvtx_thread();
+#endif
+
     return 0;
   }
 #endif
@@ -812,6 +823,9 @@ namespace Realm {
 #ifdef REALM_ON_WINDOWS
   /*static*/ DWORD WINAPI KernelThread::winthread_entry(LPVOID data)
   {
+#ifdef REALM_USE_NVTX
+    init_nvtx_thread("RealmKernalThread");
+#endif    
     KernelThread *thread = (KernelThread *)data;
 
     // set up TLS so people can find us
@@ -833,6 +847,10 @@ namespace Realm {
     // this is last so that the scheduler can delete us if it wants to
     if (thread->scheduler)
       thread->scheduler->thread_terminating(thread);
+
+#ifdef REALM_USE_NVTX
+    finalize_nvtx_thread();
+#endif
 
     return 0;
   }

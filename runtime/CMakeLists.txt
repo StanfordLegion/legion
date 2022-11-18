@@ -172,6 +172,13 @@ if(REALM_USE_MPI)
   )
 endif()
 
+if(REALM_USE_NVTX)
+  list(APPEND REALM_SRC
+    realm/nvtx.h
+    realm/nvtx.cc
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
@@ -608,6 +615,11 @@ if(Legion_USE_OpenMP)
   if(Legion_OpenMP_SYSTEM_RUNTIME)
     target_link_libraries(RealmRuntime PUBLIC OpenMP::OpenMP_CXX)
   endif()
+endif()
+
+if(REALM_USE_NVTX)
+  target_include_directories(RealmRuntime PRIVATE ${NVTX_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ${NVTX_LIBRARIES})
 endif()
 
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")

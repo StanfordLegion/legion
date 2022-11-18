@@ -101,7 +101,8 @@ LoggingWrapper::LoggingWrapper(Mapper* mapper, Logger* _logger)
   mem_query.local_address_space();
   for (Machine::MemoryQuery::iterator it = mem_query.begin();
        it != mem_query.end(); ++it) {
-    buf.line() << "  " << *it << " (" << to_string(it->kind()) << ")";
+    buf.line() << "  " << *it << " (" << to_string(it->kind()) << "): "
+               << it->capacity() << " bytes";
   }
   buf.line() << "Processors on rank " << rank << ":";
   Machine::ProcessorQuery proc_query(machine);
