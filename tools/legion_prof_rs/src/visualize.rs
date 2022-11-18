@@ -127,16 +127,21 @@ pub struct OperationInstInfoDumpInstVec<'a>(pub &'a Vec<OperationInstInfo>, pub 
 
 impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        for (i, elt) in self.0.iter().enumerate() {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for (_, elt) in self.0.iter().enumerate() {
             let inst = self.1.find_inst(elt.inst_uid).unwrap();
+            insts_set.insert(inst);
+        }
+        write!(f, "[")?;
+        for (i, inst) in insts_set.iter().enumerate() {
             write!(
                 f,
                 "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
                 inst.base.prof_uid.0
             )?;
-            if i < self.0.len() - 1 {
+            if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
         }
@@ -444,19 +449,23 @@ pub struct CopyInstInfoDumpInstVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State)
 
 impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        for (i, elt) in self.0.iter().enumerate() {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for (_, elt) in self.0.iter().enumerate() {
             let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
             let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            insts_set.insert(src_inst);
+            insts_set.insert(dst_inst);
+        }
+        write!(f, "[")?;
+        for (i, inst) in insts_set.iter().enumerate() {
             write!(
                 f,
-                "[\"0x{:x}\",{}],[\"0x{:x}\",{}]",
-                src_inst.inst_id.unwrap().0,
-                src_inst.base.prof_uid.0,
-                dst_inst.inst_id.unwrap().0,
-                dst_inst.base.prof_uid.0
+                "[\"0x{:x}\",{}]",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
             )?;
-            if i < self.0.len() - 1 {
+            if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
         }
@@ -500,16 +509,21 @@ pub struct FillInstInfoDumpInstVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State)
 
 impl fmt::Display for FillInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for (_, elt) in self.0.iter().enumerate() {
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            insts_set.insert(dst_inst);
+        }
         write!(f, "[")?;
-        for (i, elt) in self.0.iter().enumerate() {
-            let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+        for (i, inst) in insts_set.iter().enumerate() {
             write!(
                 f,
                 "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
                 inst.base.prof_uid.0
             )?;
-            if i < self.0.len() - 1 {
+            if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
         }
@@ -638,15 +652,15 @@ impl Chan {
             ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
         };
         let ready_timestamp = match point.entry {
-            ChanEntry::Copy(_, _) => time_range.ready,
-            ChanEntry::Fill(_, _) => None,
+            ChanEntry::Copy(_) => time_range.ready,
+            ChanEntry::Fill(_) => time_range.ready,
             ChanEntry::DepPart(_, _) => None,
         };
 
-        let initiation = match point.entry {
-            ChanEntry::Copy(op_id, _) => op_id,
-            ChanEntry::Fill(op_id, _) => op_id,
-            ChanEntry::DepPart(op_id, _) => op_id,
+        let initiation = match entry {
+            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
+            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
+            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
         };
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
@@ -660,7 +674,7 @@ impl Chan {
             ChanEntryRef::Fill(_, fill) => {
                 format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, &state))
             }
-            ChanEntryRef::DepPart(_, deppart) => format!(""),
+            ChanEntryRef::DepPart(_, _deppart) => format!(""),
         };
 
         f.serialize(DataRecord {
@@ -692,16 +706,32 @@ impl Chan {
                 .get(&mem_id)
                 .map_or(MemKind::NoMemKind, |mem| mem.kind)
         };
-        let slug = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
-                "({}_Memory_0x{:x},_{}_Memory_0x{:x})",
+        let slug = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_type,
+        ) {
+            (Some(src), Some(dst), channel_type) => format!(
+                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_{})",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
-                &dst
+                &dst,
+                channel_type
             ),
-            (None, Some(dst)) => format!("{}_Memory_0x{:x}", mem_kind(dst), dst),
-            (None, None) => format!("None"),
+            (None, Some(dst), channel_type) => format!(
+                "(None,_{}_Memory_0x{:x},_{})",
+                mem_kind(dst),
+                dst,
+                channel_type
+            ),
+            (Some(src), None, channel_type) => format!(
+                "({}_Memory_0x{:x},_None,_{})",
+                mem_kind(src),
+                src,
+                channel_type
+            ),
+            (None, None, _) => format!("(None,_None,_4)"),
             _ => unreachable!(),
         };
 
@@ -718,8 +748,12 @@ impl Chan {
             _ => unreachable!(),
         };
 
-        let short_name = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
+        let short_name = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_type,
+        ) {
+            (Some(src), Some(dst), _) => format!(
                 "{} to {}",
                 MemShort(
                     mem_kind(src),
@@ -734,16 +768,36 @@ impl Chan {
                     state
                 )
             ),
-            (None, Some(dst)) => format!(
-                "{}",
+            (None, Some(dst), channel_type) => {
+                let channel_str = match channel_type {
+                    1 => "Fill",
+                    2 => "Gather",
+                    0_u32 | 3_u32..=u32::MAX => {
+                        assert!(false, "wrong channel type");
+                        ""
+                    }
+                };
+                format!(
+                    "{} {}",
+                    channel_str,
+                    MemShort(
+                        mem_kind(dst),
+                        state.mems.get(&dst),
+                        state.mem_proc_affinity.get(&dst),
+                        state
+                    )
+                )
+            }
+            (Some(src), None, _) => format!(
+                "Scatter {}",
                 MemShort(
-                    mem_kind(dst),
-                    state.mems.get(&dst),
-                    state.mem_proc_affinity.get(&dst),
+                    mem_kind(src),
+                    state.mems.get(&src),
+                    state.mem_proc_affinity.get(&src),
                     state
                 )
             ),
-            (None, None) => format!("Dependent Partition Channel"),
+            (None, None, _) => format!("Dependent Partition Channel"),
             _ => unreachable!(),
         };
 

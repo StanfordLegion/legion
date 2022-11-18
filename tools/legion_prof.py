@@ -203,6 +203,9 @@ def get_prof_uid() -> int:
     prof_uid_ctr += 1
     return prof_uid_ctr
 
+def by_prof_uid(element: Tuple) ->int:
+  return element[1]
+
 @typecheck
 def data_tsv_str(level: int, level_ready: Union[int, None], 
                  ready: Union[float, None], 
@@ -1438,7 +1441,8 @@ class Operation(ProcOperation):
         for node in self.operation_inst_infos:
             assert node.instance is not None
             instances_set.add((hex(node.instance.inst_id), node.instance.prof_uid))
-        instances = dump_json(list(instances_set))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
         return instances
 
     @typecheck
@@ -2116,7 +2120,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val = self.__copy_type_to_str() + ' size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ' type=' + str(self.copy_type)
+        val = self.__copy_type_to_str() + ' size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
         cnt = 0
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -2137,7 +2141,8 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                 instances_set.add((hex(node.src_instance.inst_id), node.src_instance.prof_uid))
             if node.dst_instance is not None:
                 instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
-        instances = dump_json(list(instances_set))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
         return instances
 
     @typeassert(base_level=int, max_levels=int,
@@ -2273,7 +2278,8 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         for node in self.fill_inst_infos:
             assert node.dst_instance is not None
             instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
-        instances = dump_json(list(instances_set))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
         return instances
 
     @typeassert(base_level=int, max_levels=int,
@@ -3065,18 +3071,31 @@ class Memory(object):
 
 class Channel(object):
     __slots__ = [
-        'src', 'dst', 'channel_type', 'copies', 'time_points', 'max_live_copies', 'last_time'
+        'src', 'dst', 'channel_type', 'channel_type_str', 'copies', 'time_points', 'max_live_copies', 'last_time'
     ]
 
     @typecheck
     def __init__(self, 
                  src: Union[Memory, None], 
                  dst: Union[Memory, None],
-                 channel_type: str
+                 channel_type: int
     ) -> None:
         self.src = src
         self.dst = dst
         self.channel_type = channel_type
+        if channel_type == 0:
+            self.channel_type_str = "Copy"
+        elif channel_type == 1:
+            self.channel_type_str = "Fill"
+        elif channel_type == 2:
+            self.channel_type_str = "Gather"
+        elif channel_type == 3:
+            self.channel_type_str = "Scatter"
+        elif channel_type == 4:
+            self.channel_type_str = "DepPart"
+        else:
+            self.channel_type_str = ""
+            assert 0
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_copies = 0
@@ -3147,16 +3166,16 @@ class Channel(object):
         elif self.src is None:
             assert self.dst is not None
             if self.dst.affinity is not None:
-                return self.channel_type + " " + self.dst.affinity.get_short_text()
+                return self.channel_type_str + " " + self.dst.affinity.get_short_text()
             else:
-                return self.channel_type + " Channel"
+                return self.channel_type_str + " Channel"
         # scatter channel
         elif self.dst is None:
             assert self.src is not None
             if self.src.affinity is not None:
-                return self.channel_type + " " + self.src.affinity.get_short_text()
+                return self.channel_type_str + " " + self.src.affinity.get_short_text()
             else:
-                return self.channel_type + " Channel"
+                return self.channel_type_str + " Channel"
         # normal channels
         elif self.src is not None and self.dst is not None:
             return self.mem_str(self.src) + " to " + self.mem_str(self.dst)
@@ -3266,7 +3285,7 @@ class Channel(object):
         if self.src is None and self.dst is None:
             return 'Dependent Partition Channel'
         if self.src is None or self.dst is None:
-            return self.channel_type + ' ' + self.dst.__repr__() + ' Channel'
+            return self.channel_type_str + ' ' + self.dst.__repr__() + ' Channel'
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
@@ -3378,7 +3397,7 @@ class State(object):
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
-        self.channels: Dict[Tuple[Union[Memory, None], Union[Memory, None], str], Channel] = {}
+        self.channels: Dict[Tuple[Union[Memory, None], Union[Memory, None], int], Channel] = {}
         self.task_kinds: Dict[int, TaskKind] = {}
         self.variants: Dict[Tuple[int, int], Variant] = {}
         self.meta_variants: Dict[int, Variant] = {}
@@ -3687,7 +3706,7 @@ class State(object):
         copy.add_copy_inst_info(entry)
         if copy.is_inchannel == False:
             copy.copy_type = 0
-            channel = self.find_or_create_channel(src_mem, dst_mem, "Copy")
+            channel = self.find_or_create_copy_channel(src_mem, dst_mem)
             channel.add_copy(copy)
             copy.is_inchannel = True
         else:
@@ -3729,10 +3748,10 @@ class State(object):
             if copy.is_inchannel == False:
                 if copy.copy_type == 1:
                     # gather
-                    channel = self.find_or_create_channel(None, dst_mem, "Gather")
+                    channel = self.find_or_create_gather_channel(dst_mem)
                 elif copy.copy_type == 2:
                     # scatter
-                    channel = self.find_or_create_channel(src_mem, None, "Scatter")
+                    channel = self.find_or_create_scatter_channel(src_mem)
                 else:
                     assert 0
                 channel.add_copy(copy)
@@ -3776,7 +3795,7 @@ class State(object):
         fill.add_fill_inst_info(entry)
         if fill.is_inchannel == False:
             fill.add_mem(dst_mem)
-            channel = self.find_or_create_channel(None, dst_mem, "Fill")
+            channel = self.find_or_create_fill_channel(dst_mem)
             channel.add_copy(fill)
             fill.is_inchannel = True
         else:
@@ -3806,7 +3825,7 @@ class State(object):
         deppart = self.create_deppart(part_op, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_or_create_channel(None, None, "DepPart")
+        channel = self.find_or_create_deppart_channel()
         channel.add_copy(deppart)
 
     # UserInfo (Not used?)
@@ -4035,26 +4054,48 @@ class State(object):
         return self.mem_proc_affinity[mem_id]
 
     @typecheck
-    def find_or_create_channel(self, 
-                               src: Union[Memory, None], 
-                               dst: Union[Memory, None],
-                               channel_type: str
+    def find_or_create_copy_channel(self, 
+                                    src: Memory, 
+                                    dst: Memory
     ) -> Channel:
-        # src, dst is not None: normal copy
-        # dst is None: scatter
-        # src is None: gather/fill
-        # src,dst are None: deppart
-        if src is not None and dst is not None:
-            assert channel_type == "Copy"
-        elif src is None and dst is not None:
-            assert (channel_type == "Fill") or (channel_type == "Gather")
-        elif src is not None and dst is None:
-            assert channel_type == "Scatter"
-        else:
-            assert channel_type == "DepPart"
-        key = (src, dst, channel_type)
+        key = (src, dst, 0)
         if key not in self.channels:
-            self.channels[key] = Channel(src, dst, channel_type)
+            self.channels[key] = Channel(src, dst, 0)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_fill_channel(self, 
+                                    dst: Memory
+    ) -> Channel:
+        key = (None, dst, 1)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, dst, 1)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_gather_channel(self,
+                                      dst: Memory,
+    ) -> Channel:
+        key = (None, dst, 2)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, dst, 2)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_scatter_channel(self,
+                                       src: Memory,
+    ) -> Channel:
+        key = (src, None, 3)
+        if key not in self.channels:
+            self.channels[key] = Channel(src, None, 3)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_deppart_channel(self
+    ) -> Channel:
+        key = (None, None, 4)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, None, 4)
         return self.channels[key]
 
     @typecheck
@@ -4504,7 +4545,7 @@ class State(object):
                 sum = 0.0
                 cnt = 0
                 bandwidth = 0.0
-                channel = self.find_or_create_channel(src, dst, "Copy")
+                channel = self.find_or_create_copy_channel(src, dst)
                 for copy in channel.copies:
                     time = copy.stop - copy.start
                     sum = sum + time * 1e-6
