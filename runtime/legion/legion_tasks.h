@@ -38,8 +38,7 @@ namespace Legion {
       ExternalTask(void);
     public:
       void pack_external_task(Serializer &rez, AddressSpaceID target) const;
-      void unpack_external_task(Deserializer &derez, Runtime *runtime,
-                                ReferenceMutator *mutator);
+      void unpack_external_task(Deserializer &derez, Runtime *runtime);
     public:
       static void pack_output_requirement(
           const OutputRequirement &req, Serializer &rez);
@@ -155,8 +154,7 @@ namespace Legion {
       void unpack_base_task(Deserializer &derez,
                             std::set<RtEvent> &ready_events);
       void pack_base_external_task(Serializer &rez, AddressSpaceID target);
-      void unpack_base_external_task(Deserializer &derez,
-                                     ReferenceMutator *mutator);
+      void unpack_base_external_task(Deserializer &derez);
     public:
       void mark_stolen(void);
       void initialize_base_task(InnerContext *ctx, bool track,
@@ -343,7 +341,7 @@ namespace Legion {
                                   std::map<unsigned,PhysicalManager*> &points);
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
-      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+      virtual void unpack(Deserializer &derez);
     };
 
     /**
@@ -791,8 +789,6 @@ namespace Legion {
       virtual void handle_misspeculation(void);
       virtual void prepare_map_must_epoch(void);
     public:
-      virtual void record_reference_mutation_effect(RtEvent event);
-    public:
       virtual bool pack_task(Serializer &rez, AddressSpaceID target);
       virtual bool unpack_task(Deserializer &derez, Processor current,
                                std::set<RtEvent> &ready_events);
@@ -920,8 +916,6 @@ namespace Legion {
       void initialize_point(SliceTask *owner, const DomainPoint &point,
                             const FutureMap &point_arguments, bool eager,
                             const std::vector<FutureMap> &point_futures);
-    public:
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       // From MemoizableOp
       virtual void complete_replay(ApEvent pre, ApEvent completion_event);
@@ -1241,7 +1235,6 @@ namespace Legion {
                                                  const DomainPoint &next,
                                                  RtEvent point_mapped);
     public:
-      virtual void record_reference_mutation_effect(RtEvent event);
       void record_origin_mapped_slice(SliceTask *local_slice);
     protected:
       // Virtual so can be overridden by ReplIndexTask
@@ -1407,8 +1400,6 @@ namespace Legion {
       virtual void trigger_complete(void);
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
-    public:
-      virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,

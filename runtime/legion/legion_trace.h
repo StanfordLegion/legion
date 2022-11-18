@@ -556,14 +556,12 @@ namespace Legion {
       TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,
                    RegionNode *region);
       TraceViewSet(RegionTreeForest *forest, TraceViewSet &source,
-                   DistributedID owner_did, RegionNode *region,
-                   std::set<RtEvent> &applied_events);
+                   DistributedID owner_did, RegionNode *region);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
-                  const FieldMask &mask,
-                  ReferenceMutator &mutator);
+                  const FieldMask &mask);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
@@ -590,14 +588,12 @@ namespace Legion {
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                                         FieldMaskSet<LogicalView> > &target,
-                              std::set<IndexSpaceExpression*> &unique_exprs,
-                              ReferenceMutator &mutator) const;
+                          std::set<IndexSpaceExpression*> &unique_exprs) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
-                         const bool expr_covers, const FieldMask &mask,
-                         ReferenceMutator &mutator) const;
+                         const bool expr_covers, const FieldMask &mask) const;
       bool empty(void) const;
     public:
-      void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
+      void merge(TraceViewSet &target) const;
       void pack(Serializer &rez, AddressSpaceID target) const;
       void unpack(Deserializer &derez, size_t num_views,
                   AddressSpaceID source, std::set<RtEvent> &ready_events);
@@ -662,8 +658,7 @@ namespace Legion {
       };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        RegionNode *region, const FieldMask &mask,
-                        std::vector<RtEvent> &ready_events);
+                        RegionNode *region, const FieldMask &mask);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:

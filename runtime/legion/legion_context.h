@@ -580,7 +580,6 @@ namespace Legion {
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events,
           std::set<RtEvent> &execution_events) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
@@ -1016,17 +1015,6 @@ namespace Legion {
         const IndexPartition pid;
         const PartitionKind kind;
         const char *const func;
-      };
-      struct DeferRemoveRemoteReferenceArgs : 
-        public LgTaskArgs<DeferRemoveRemoteReferenceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID;
-      public:
-        DeferRemoveRemoteReferenceArgs(UniqueID uid, 
-               std::vector<DistributedCollectable*> *r) 
-          : LgTaskArgs<DeferRemoveRemoteReferenceArgs>(uid), to_remove(r) { }
-      public:
-        std::vector<DistributedCollectable*> *const to_remove;
       };
       template<typename T>
       struct QueueEntry {
@@ -1685,7 +1673,6 @@ namespace Legion {
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events,
           std::set<RtEvent> &execution_events);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
@@ -1702,19 +1689,14 @@ namespace Legion {
       virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
     public:
-      void record_fill_view_creation(FillView *view, ReferenceMutator &mutator);
-      void record_fill_view_creation(DistributedID future_did, FillView *view,
-                                     ReferenceMutator &mutator);
+      void record_fill_view_creation(FillView *view);
+      void record_fill_view_creation(DistributedID future_did, FillView *view);
       FillView* find_or_create_fill_view(FillOp *op, 
-                             std::set<RtEvent> &map_applied_events,
                              const void *value, size_t value_size);
       FillView* find_or_create_fill_view(FillOp *op,
-                             std::set<RtEvent> &map_applied_events,
                              const Future &future, bool &set_value);
-      FillView* find_fill_view(const void *value, size_t value_size,
-                               std::set<RtEvent> &map_applied_events);
-      FillView* find_fill_view(const Future &future,
-                               std::set<RtEvent> &map_applied_events);
+      FillView* find_fill_view(const void *value, size_t value_size);
+      FillView* find_fill_view(const Future &future);
     public:
       virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void add_subscriber_reference(PhysicalManager *manager) 
@@ -1770,9 +1752,6 @@ namespace Legion {
     public:
       static void handle_compute_equivalence_sets_request(Deserializer &derez,
                                      Runtime *runtime, AddressSpaceID source);
-      static void remove_remote_references(
-                       const std::vector<DistributedCollectable*> &to_remove);
-      static void handle_remove_remote_references(const void *args);
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
@@ -3905,7 +3884,6 @@ namespace Legion {
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
           const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &applied_events, 
           std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);

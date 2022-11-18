@@ -43,7 +43,7 @@ namespace Legion {
       // structure from being collected, it doesn't change if 
       // the actual instance itself can be collected or not
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -60,7 +60,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -68,7 +68,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
     }
 
@@ -77,7 +77,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -89,11 +89,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
       return *this;
     }
 
@@ -322,7 +322,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->add_base_resource_ref(Internal::MAPPER_REF);
+      impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -339,7 +339,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -347,7 +347,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) &&
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete impl;
     }
 
@@ -356,7 +356,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) &&
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete impl;
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -368,11 +368,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) &&
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete impl;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
       return *this;
     }
 

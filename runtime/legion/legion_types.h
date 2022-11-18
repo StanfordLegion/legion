@@ -380,9 +380,6 @@ namespace Legion {
       LG_DELETE_TEMPLATE_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
-      LG_DEFER_RELEASE_REF_TASK_ID,
-      LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
-      LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
@@ -405,7 +402,6 @@ namespace Legion {
       LG_DEFER_PHYSICAL_MANAGER_TASK_ID,
       LG_DEFER_DELETE_PHYSICAL_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
-      LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
@@ -507,9 +503,6 @@ namespace Legion {
         "Delete Physical Template",                               \
         "Defer Equivalence Set Make Owner",                       \
         "Defer Equivalence Set Apply State",                      \
-        "Defer Equivalence Set Remove References",                \
-        "Defer Remote Reference Update",                          \
-        "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
@@ -532,7 +525,6 @@ namespace Legion {
         "Defer Physical Manager Registration",                    \
         "Defer Physical Manager Deletion",                        \
         "Defer Verify Partition",                                 \
-        "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Disjoint Complete Response",                       \
@@ -719,6 +711,7 @@ namespace Legion {
       // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1, 
       TASK_VIRTUAL_CHANNEL = 2,
+      INDEX_SPACE_VIRTUAL_CHANNEL = 3,
       FIELD_SPACE_VIRTUAL_CHANNEL = 4,
       REFERENCE_VIRTUAL_CHANNEL = 6,
       UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority
@@ -740,6 +733,7 @@ namespace Legion {
       SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_SHARED_OWNERSHIP,
       SEND_INDEX_SPACE_REQUEST,
+      SEND_INDEX_SPACE_RESPONSE,
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_SET,
       SEND_INDEX_SPACE_CHILD_REQUEST,
@@ -753,6 +747,7 @@ namespace Legion {
       SEND_INDEX_SPACE_RELEASE_COLOR,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_REQUEST,
+      SEND_INDEX_PARTITION_RESPONSE,
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
@@ -797,12 +792,10 @@ namespace Legion {
       SLICE_RECORD_INTRA_DEP,
       SLICE_REMOTE_COLLECTIVE_RENDEZVOUS,
       DISTRIBUTED_REMOTE_REGISTRATION,
-      DISTRIBUTED_VALID_UPDATE,
-      DISTRIBUTED_GC_UPDATE,
-      DISTRIBUTED_RESOURCE_UPDATE,
-      DISTRIBUTED_CREATE_ADD,
-      DISTRIBUTED_CREATE_REMOVE,
-      DISTRIBUTED_UNREGISTER,
+      DISTRIBUTED_DOWNGRADE_REQUEST,
+      DISTRIBUTED_DOWNGRADE_RESPONSE,
+      DISTRIBUTED_DOWNGRADE_SUCCESS,
+      DISTRIBUTED_DOWNGRADE_UPDATE,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
@@ -994,6 +987,7 @@ namespace Legion {
         "Send Remote Task Profiling Response",                        \
         "Send Shared Ownership",                                      \
         "Send Index Space Request",                                   \
+        "Send Index Space Response",                                  \
         "Send Index Space Return",                                    \
         "Send Index Space Set",                                       \
         "Send Index Space Child Request",                             \
@@ -1007,6 +1001,7 @@ namespace Legion {
         "Send Index Space Release Color",                             \
         "Send Index Partition Notification",                          \
         "Send Index Partition Request",                               \
+        "Send Index Partition Response",                              \
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
@@ -1051,12 +1046,10 @@ namespace Legion {
         "Slice Record Intra-Space Dependence",                        \
         "Slice Remote Collective Rendezvous",                         \
         "Distributed Remote Registration",                            \
-        "Distributed Valid Update",                                   \
-        "Distributed GC Update",                                      \
-        "Distributed Resource Update",                                \
-        "Distributed Create Add",                                     \
-        "Distributed Create Remove",                                  \
-        "Distributed Unregister",                                     \
+        "Distributed Downgrade Request",                              \
+        "Distributed Downgrade Response",                             \
+        "Distributed Downgrade Success",                              \
+        "Distributed Downgrade Update",                               \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Created Region Contexts",                               \
@@ -1885,8 +1878,6 @@ namespace Legion {
 
     class Collectable;
     class Notifiable;
-    class ReferenceMutator;
-    class LocalReferenceMutator;
     class ImplicitReferenceTracker;
     class DistributedCollectable;
     class LayoutDescription;
@@ -2053,6 +2044,8 @@ namespace Legion {
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
+    friend class Internal::FutureImpl;                      \
+    friend class Internal::FutureMapImpl;                   \
     friend class Internal::PhysicalRegionImpl;              \
     friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \
