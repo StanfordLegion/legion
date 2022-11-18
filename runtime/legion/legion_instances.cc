@@ -948,7 +948,7 @@ namespace Legion {
           // If we're on the owner node we need to produce the expression
           // that actually describes this points in this space
           // On remote nodes we'll already have it from the owner
-          (owner_space == ctx->runtime->address_space) && 
+          (ctx->runtime->determine_owner(did) == ctx->runtime->address_space) &&
             (k != UNBOUND_INSTANCE_KIND) ?
             instance_domain->create_layout_expression(pl, pl_size) : 
             instance_domain, tree_id, register_now, mapping), 
