@@ -11699,20 +11699,18 @@ namespace Legion {
       log_migration.info("Migrating Equivalence Set %llx from %d to %d",
           did, local_space, new_logical_owner);
       logical_owner_space = new_logical_owner;
-      const RtUserEvent done_migration = Runtime::create_rt_user_event();
       const FieldMask all_ones(LEGION_FIELD_MASK_FIELD_ALL_ONES);
       // Do the migration
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(done_migration);
         pack_state(rez, logical_owner_space, set_expr, true/*covers*/,
                     all_ones, true/*pack guards*/);
       }
+      pack_global_ref();
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones);
-      applied_events.insert(done_migration);
       // If we have any replicated state then we need to invalidate that
       // Note that this is only safe because we know that there is an
       // exclusive user here without any collective mapping which means that
@@ -17392,6 +17390,7 @@ namespace Legion {
             Runtime::merge_events(ready_events));
       else
         set->make_owner(runtime->address_space);
+      set->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
