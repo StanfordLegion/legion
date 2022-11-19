@@ -897,6 +897,7 @@ namespace Legion {
       SEND_GC_ACQUIRED,
       SEND_GC_DEBUG_REQUEST,
       SEND_GC_DEBUG_RESPONSE,
+      SEND_GC_RECORD_EVENT,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_BROADCAST,
@@ -1123,6 +1124,7 @@ namespace Legion {
         "Send GC Acquire Response",                                   \
         "Send GC Debug Request",                                      \
         "Send GC Debug Response",                                     \
+        "Send GC Record Event",                                       \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Task Variant Broadcast",                                \

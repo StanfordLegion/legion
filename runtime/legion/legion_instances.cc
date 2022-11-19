@@ -1025,33 +1025,73 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::record_instance_user(ApEvent user_event)
+    void PhysicalManager::record_instance_user(ApEvent user_event,
+                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
 #ifdef DEBUG_LEGION
-#ifndef ENABLE_VIEW_REPLICATION
-      assert(is_owner());    
-#endif
       assert(gc_state != COLLECTED_GC_STATE);
       assert(added_gc_events < runtime->gc_epoch_size);
 #endif
-      if (gc_events.insert(user_event).second && 
-          (++added_gc_events == runtime->gc_epoch_size))
+      if (is_owner() || (gc_state != PENDING_COLLECTED_GC_STATE))
       {
-        // Go through and prune out any events that have triggered
-        for (std::set<ApEvent>::iterator it = gc_events.begin();
-              it != gc_events.end(); /*nothing*/)
+        if (gc_events.insert(user_event).second && 
+            (++added_gc_events == runtime->gc_epoch_size))
         {
-          if (it->has_triggered_faultignorant())
+          // Go through and prune out any events that have triggered
+          for (std::set<ApEvent>::iterator it = gc_events.begin();
+                it != gc_events.end(); /*nothing*/)
           {
-            std::set<ApEvent>::iterator to_delete = it++;
-            gc_events.erase(to_delete);
+            if (it->has_triggered_faultignorant())
+            {
+              std::set<ApEvent>::iterator to_delete = it++;
+              gc_events.erase(to_delete);
+            }
+            else
+              it++;
           }
-          else
-            it++;
+          added_gc_events = 0;
         }
       }
+      else
+      {
+        const RtEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(user_event);
+          rez.serialize(applied);
+        }
+        pack_global_ref();
+        runtime->send_gc_record_event(owner_space, rez);
+        applied_events.insert(applied);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_record_event(Runtime *runtime,
+                                                         Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      ApEvent user_event;
+      derez.deserialize(user_event);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->find_distributed_collectable(did));
+      std::set<RtEvent> applied;
+      manager->record_instance_user(user_event, applied);
+      manager->unpack_global_ref();
+      if (!applied.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -1631,6 +1671,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(target);
           rez.serialize(done);
+          manager->pack_gc_events(rez);
         }
         runtime->send_gc_acquired(source, rez);
       }
@@ -1643,7 +1684,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalManager::handle_garbage_collection_acquired(
-                                                            Deserializer &derez)
+                                          Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -1651,7 +1692,16 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent done;
       derez.deserialize(done);
-
+      size_t num_gc_events;
+      derez.deserialize(num_gc_events);
+      if (num_gc_events > 0)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->find_distributed_collectable(did));
+        manager->unpack_gc_events(num_gc_events, derez);
+      }
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const unsigned prev =
@@ -1662,6 +1712,50 @@ namespace Legion {
       assert(prev > 0);
 #endif
       Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::pack_gc_events(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock inst(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(gc_state != COLLECTED_GC_STATE);
+#endif
+      if (gc_state == PENDING_COLLECTED_GC_STATE)
+      {
+        if (!gc_events.empty())
+        {
+          rez.serialize<size_t>(gc_events.size());
+          rez.serialize(did);
+          for (std::set<ApEvent>::const_iterator it =
+                gc_events.begin(); it != gc_events.end(); it++)
+            rez.serialize(*it);
+        }
+        else
+          rez.serialize<size_t>(0);
+      }
+      else
+        rez.serialize<size_t>(0);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unpack_gc_events(size_t num_events, 
+                                           Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock inst(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(gc_state != COLLECTED_GC_STATE);
+#endif
+      for (unsigned idx = 0; idx < num_events; idx++)
+      {
+        ApEvent event;
+        derez.deserialize(event);
+        gc_events.insert(event);
+      }
     }
 
     //--------------------------------------------------------------------------

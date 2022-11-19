@@ -299,6 +299,8 @@ namespace Legion {
     public:
       bool can_collect(AddressSpaceID source, bool &already_collected);
       bool collect(RtEvent &collected);
+      void pack_gc_events(Serializer &rez);
+      void unpack_gc_events(size_t num_events, Deserializer &derez);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
                                               Processor p, GCPriority priority);
       virtual void get_instance_pointers(Memory memory, 
@@ -326,7 +328,7 @@ namespace Legion {
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
-      void record_instance_user(ApEvent term_event);
+      void record_instance_user(ApEvent term_event, std::set<RtEvent> &applied);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -356,12 +358,14 @@ namespace Legion {
       static void handle_garbage_collection_response(Deserializer &derez);
       static void handle_garbage_collection_acquire(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_acquired(Deserializer &derez);
+      static void handle_garbage_collection_acquired(Runtime *runtime,
+                                                     Deserializer &derez);
       static void handle_garbage_collection_priority_update(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_request(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_response(Deserializer &derez);
+      static void handle_record_event(Runtime *runtime, Deserializer &derez);
     public:
       size_t instance_footprint;
       const ReductionOp *reduction_op;

@@ -3333,6 +3333,7 @@ namespace Legion {
       void send_gc_acquired(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
+      void send_gc_record_event(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
@@ -3632,6 +3633,7 @@ namespace Legion {
       void handle_gc_acquired(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_debug_response(Deserializer &derez);
+      void handle_gc_record_event(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
       void handle_acquire_response(Deserializer &derez, AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -5786,6 +5788,8 @@ namespace Legion {
         case SEND_GC_DEBUG_REQUEST:
           break;
         case SEND_GC_DEBUG_RESPONSE:
+          break;
+        case SEND_GC_RECORD_EVENT:
           break;
         case SEND_ACQUIRE_REQUEST:
           break;

@@ -12739,6 +12739,11 @@ namespace Legion {
               runtime->handle_gc_debug_response(derez);
               break;
             }
+          case SEND_GC_RECORD_EVENT:
+            {
+              runtime->handle_gc_record_event(derez);
+              break;
+            }
           case SEND_ACQUIRE_REQUEST:
             {
               runtime->handle_acquire_request(derez, remote_address_space);
@@ -22857,6 +22862,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_gc_record_event(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_RECORD_EVENT>(rez,
+                                                        true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_acquire_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24879,7 +24892,7 @@ namespace Legion {
     void Runtime::handle_gc_acquired(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_garbage_collection_acquired(derez);
+      PhysicalManager::handle_garbage_collection_acquired(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24896,6 +24909,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_debug_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_record_event(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_record_event(this, derez);
     }
 
     //--------------------------------------------------------------------------

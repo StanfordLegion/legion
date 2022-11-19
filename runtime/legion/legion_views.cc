@@ -1860,9 +1860,15 @@ namespace Legion {
       }
       if (!to_collect.empty())
       {
+        std::set<RtEvent> wait_for;
         for (std::set<ApEvent>::const_iterator it = 
               to_collect.begin(); it != to_collect.end(); it++)
-          manager->record_instance_user(*it);
+          manager->record_instance_user(*it, wait_for);
+        if (!wait_for.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(wait_for);
+          wait_on.wait();
+        }
       }
     }
 
@@ -2907,7 +2913,7 @@ namespace Legion {
         // Add our local user
         add_internal_task_user(usage, user_expr, user_mask, term_event, 
                                op_id, index, trace_info.recording);
-        manager->record_instance_user(term_event);
+        manager->record_instance_user(term_event, applied_events);
         // At this point tasks shouldn't be allowed to wait on themselves
 #ifdef DEBUG_LEGION
         if (term_event.exists())
@@ -3246,7 +3252,7 @@ namespace Legion {
             (redop > 0) ? LEGION_ATOMIC : LEGION_EXCLUSIVE, redop);
         add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
                                op_id, index, trace_recording);
-        manager->record_instance_user(term_event);
+        manager->record_instance_user(term_event, applied_events);
       }
     }
 
@@ -4764,7 +4770,7 @@ namespace Legion {
         // Add our local user
         add_user(reduce_usage, user_expr, user_mask,
                  term_event, op_id, index, false/*copy*/);
-        manager->record_instance_user(term_event);
+        manager->record_instance_user(term_event, applied_events);
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
         else
@@ -4880,7 +4886,7 @@ namespace Legion {
             (redop > 0) ? LEGION_ATOMIC : LEGION_EXCLUSIVE, redop);
         add_user(usage, copy_expr, copy_mask, term_event, 
                  op_id, index, true/*copy*/);
-        manager->record_instance_user(term_event);
+        manager->record_instance_user(term_event, applied_events);
       }
     }
 
