@@ -2078,7 +2078,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         self.num_hops = 0
         self.request_type = 0
         self.fevent = fevent
-        self.copy_type = 0 # 0 is normal, 1 is gather, 2 is scatter, 3 is gather with scatter
+        self.copy_type: Optional[int] = None # 0 is normal, 1 is gather, 2 is scatter, 3 is gather with scatter
         self.is_inchannel = False
         self.copy_inst_infos: List[CopyInstInfo] = list()
 
@@ -3680,18 +3680,18 @@ class State(object):
         # src_inst and dst_inst are inst_uid
         indirect = bool(indirect)
         copy = self.find_or_create_copy(fevent)
-        if copy.copy_type != 0:
+        if copy.copy_type is not None and copy.copy_type != 0:
             # even if indirect is False, it is still a indirect copy
             self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
             assert copy.is_inchannel == True
         else:
-          if indirect == False:
-              self.__log_copy_inst_info_normal(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, copy)
-          else:
-              # this is the first time we see this copy
-              self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
-              # we are not able to push the indirect copy into a channel
-              assert copy.is_inchannel == False
+            if indirect == False:
+                self.__log_copy_inst_info_normal(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, copy)
+            else:
+                # this is the first time we see this copy, it should be a meta copy
+                self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
+                # we are not able to push the indirect copy into a channel
+                assert copy.is_inchannel == False
             
 
     def __log_copy_inst_info_normal(self, src: int, dst: int,
@@ -3719,24 +3719,35 @@ class State(object):
                                       src_inst: int, dst_inst: int, 
                                       fevent: int, indirect: bool, copy: Copy
     ) -> None:
+        src_mem = None
+        dst_mem = None
         if indirect:
+            # this is the copy inst info for points of a indirect copy (meta copy)
             if dst == 0:
-                # gather
-                copy.copy_type = 1
+                # gather (src points)
+                if copy.copy_type is None:
+                    copy.copy_type = 1
+                else:
+                    assert copy.copy_type == 1
                 src_mem = self.find_or_create_memory(src)
-                dst_mem = None
             elif src == 0:
-                # scatter
-                copy.copy_type = 2
-                src_mem = None
+                # scatter (dst points)
+                if copy.copy_type is None:
+                    copy.copy_type = 2
+                else:
+                    assert copy.copy_type == 1
                 dst_mem = self.find_or_create_memory(dst)
             else:
                 # gather with scatter
                 print(hex(src), hex(dst), hex(fevent), indirect)
-                copy.copy_type = 3
+                if copy.copy_type is None:
+                    copy.copy_type = 3
+                else:
+                    assert copy.copy_type == 3
                 assert 0
         else:
             # indirect = false for indirect copy
+            # this is the real copy of each point data within a indirect copy
             src_mem = self.find_or_create_memory(src)
             dst_mem = self.find_or_create_memory(dst)
         entry = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
@@ -3744,7 +3755,7 @@ class State(object):
 
         # we will create a channel here
         if indirect == False:
-            assert copy.copy_type != 0
+            assert copy.copy_type is not None and copy.copy_type != 0
             if copy.is_inchannel == False:
                 if copy.copy_type == 1:
                     # gather

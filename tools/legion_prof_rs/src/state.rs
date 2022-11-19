@@ -1545,8 +1545,8 @@ impl From<spy::serialize::EventID> for EventID {
 
 #[derive(Debug)]
 pub struct CopyInstInfo {
-    _src: MemID,
-    _dst: MemID,
+    _src: Option<MemID>,
+    _dst: Option<MemID>,
     pub src_fid: FieldID,
     pub dst_fid: FieldID,
     pub src_inst_uid: InstUID,
@@ -1565,7 +1565,7 @@ pub struct Copy {
     pub size: u64,
     pub num_hops: u32,
     pub request_type: u32,
-    pub copy_type: u32,
+    pub copy_type: Option<u32>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
@@ -1580,7 +1580,7 @@ impl Copy {
             size: 0,
             num_hops: 0,
             request_type: 0,
-            copy_type: 0,
+            copy_type: None,
             copy_inst_infos: Vec::new(),
         }
     }
@@ -1996,9 +1996,13 @@ impl State {
     }
 
     pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
-        let mem_id = self.insts.get(&inst_uid).unwrap();
-        let mem = self.mems.get(&mem_id).unwrap();
-        mem.insts.get(&inst_uid)
+        let mem_id = self.insts.get(&inst_uid);
+        if mem_id != None {
+            let mem = self.mems.get(&mem_id.unwrap()).unwrap();
+            return mem.insts.get(&inst_uid);
+        } else {
+            return None;
+        }
     }
 
     fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
@@ -2573,6 +2577,111 @@ impl SpyState {
     }
 }
 
+fn process_copy_inst_info_normal(
+    copy: &mut Copy,
+    src: MemID,
+    dst: MemID,
+    src_fid: FieldID,
+    dst_fid: FieldID,
+    src_inst: InstUID,
+    dst_inst: InstUID,
+    fevent: EventID,
+    indirect: bool,
+) {
+    let copy_inst_info = CopyInstInfo {
+        _src: Some(src),
+        _dst: Some(dst),
+        src_fid: src_fid,
+        dst_fid: dst_fid,
+        src_inst_uid: src_inst,
+        dst_inst_uid: dst_inst,
+        _fevent: fevent,
+        indirect: indirect,
+    };
+    copy.copy_inst_infos.push(copy_inst_info);
+    if copy.chan_id == None {
+        copy.copy_type = Some(0);
+        let chan_id = ChanID::new_copy(src, dst);
+        copy.chan_id = Some(chan_id);
+    }
+}
+
+fn process_copy_inst_info_indirect(
+    copy: &mut Copy,
+    src: MemID,
+    dst: MemID,
+    src_fid: FieldID,
+    dst_fid: FieldID,
+    src_inst: InstUID,
+    dst_inst: InstUID,
+    fevent: EventID,
+    indirect: bool,
+) {
+    let mut src_mem = None;
+    let mut dst_mem = None;
+    if indirect == true {
+        // this is the copy inst info for points of a indirect copy (meta copy)
+        if dst == MemID(0) {
+            // gather (src points)
+            if copy.copy_type == None {
+                copy.copy_type = Some(1);
+            } else {
+                assert_eq!(copy.copy_type.unwrap(), 1);
+            }
+            src_mem = Some(src);
+        } else if src == MemID(0) {
+            // scatter (dst points)
+            if copy.copy_type == None {
+                copy.copy_type = Some(2);
+            } else {
+                assert_eq!(copy.copy_type.unwrap(), 2);
+            }
+            dst_mem = Some(dst);
+        } else {
+            // gather with scatter
+            if copy.copy_type == None {
+                copy.copy_type = Some(3);
+            } else {
+                assert_eq!(copy.copy_type.unwrap(), 3);
+            }
+            assert!(false);
+        }
+    } else {
+        // this is the real copy of each point data within a indirect copy
+        src_mem = Some(src);
+        dst_mem = Some(dst);
+    }
+    let copy_inst_info = CopyInstInfo {
+        _src: src_mem,
+        _dst: dst_mem,
+        src_fid: src_fid,
+        dst_fid: dst_fid,
+        src_inst_uid: src_inst,
+        dst_inst_uid: dst_inst,
+        _fevent: fevent,
+        indirect: indirect,
+    };
+    copy.copy_inst_infos.push(copy_inst_info);
+    // we will create a channel here
+    if indirect == false {
+        assert_ne!(copy.copy_type, None);
+        assert_ne!(copy.copy_type.unwrap(), 0);
+        if copy.chan_id == None {
+            if copy.copy_type.unwrap() == 1 {
+                // gather
+                let chan_id = ChanID::new_gather(dst_mem.unwrap());
+                copy.chan_id = Some(chan_id);
+            } else if copy.copy_type.unwrap() == 2 {
+                // scatter
+                let chan_id = ChanID::new_scatter(src_mem.unwrap());
+                copy.chan_id = Some(chan_id);
+            } else {
+                assert!(false);
+            }
+        }
+    }
+}
+
 fn process_record(
     record: &Record,
     state: &mut State,
@@ -2946,24 +3055,28 @@ fn process_record(
             dst_inst,
             fevent,
             indirect,
-            ..
         } => {
-            let copy_inst_info = CopyInstInfo {
-                _src: *src,
-                _dst: *dst,
-                src_fid: *src_fid,
-                dst_fid: *dst_fid,
-                src_inst_uid: *src_inst,
-                dst_inst_uid: *dst_inst,
-                _fevent: *fevent,
-                indirect: *indirect,
-            };
             let mut copy = state.find_or_create_copy(*fevent, copies);
-            copy.copy_inst_infos.push(copy_inst_info);
-            if copy.chan_id == None {
-                copy.copy_type = 0;
-                let chan_id = ChanID::new_copy(*src, *dst);
-                copy.chan_id = Some(chan_id);
+            if copy.copy_type != None && copy.copy_type.unwrap() != 0 {
+                process_copy_inst_info_indirect(
+                    copy, *src, *dst, *src_fid, *dst_fid, *src_inst, *dst_inst, *fevent, *indirect,
+                );
+                assert_ne!(copy.chan_id, None);
+            } else {
+                if *indirect == false {
+                    process_copy_inst_info_normal(
+                        copy, *src, *dst, *src_fid, *dst_fid, *src_inst, *dst_inst, *fevent,
+                        *indirect,
+                    );
+                } else {
+                    // this is the first time we see this copy, it should be a meta copy
+                    process_copy_inst_info_indirect(
+                        copy, *src, *dst, *src_fid, *dst_fid, *src_inst, *dst_inst, *fevent,
+                        *indirect,
+                    );
+                    // we are not able to push the indirect copy into a channel
+                    assert_eq!(copy.chan_id, None);
+                }
             }
         }
         Record::FillInfo {
@@ -2986,7 +3099,6 @@ fn process_record(
             fid,
             dst_inst,
             fevent,
-            ..
         } => {
             let fill_inst_info = FillInstInfo {
                 _dst: *dst,

@@ -410,18 +410,32 @@ impl fmt::Display for SizePretty {
 
 #[derive(Debug)]
 pub struct CopyInstInfoDisplay<'a>(
-    pub &'a Inst, // src_inst
-    pub &'a Inst, // src_dst
+    pub Option<&'a Inst>, // src_inst
+    pub Option<&'a Inst>, // src_dst
 );
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "src_inst=0x{:x}, dst_inst=0x{:x}",
-            self.0.inst_id.unwrap().0,
-            self.1.inst_id.unwrap().0
-        )
+        if self.0 != None && self.1 != None {
+            write!(
+                f,
+                "src_inst=0x{:x}, dst_inst=0x{:x}",
+                self.0.unwrap().inst_id.unwrap().0,
+                self.1.unwrap().inst_id.unwrap().0
+            )
+        } else if self.0 == None {
+            write!(
+                f,
+                "Scatter: dst_indirect_inst=0x{:x}",
+                self.1.unwrap().inst_id.unwrap().0
+            )
+        } else {
+            write!(
+                f,
+                "Gather: src_indirect_inst=0x{:x}",
+                self.0.unwrap().inst_id.unwrap().0
+            )
+        }
     }
 }
 
@@ -431,8 +445,8 @@ pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
 impl fmt::Display for CopyInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            let src_inst = self.1.find_inst(elt.src_inst_uid);
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
             write!(
                 f,
                 "$req[{}]: {}",
@@ -452,10 +466,14 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for (_, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
-            insts_set.insert(src_inst);
-            insts_set.insert(dst_inst);
+            let src_inst = self.1.find_inst(elt.src_inst_uid);
+            if src_inst != None {
+                insts_set.insert(src_inst.unwrap());
+            }
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
+            if dst_inst != None {
+                insts_set.insert(dst_inst.unwrap());
+            }
         }
         write!(f, "[")?;
         for (i, inst) in insts_set.iter().enumerate() {
@@ -626,9 +644,19 @@ impl Chan {
         let name = match entry {
             ChanEntryRef::Copy(_, copy) => {
                 let nreqs = copy.copy_inst_infos.len();
+                let copy_type_str = match copy.copy_type.unwrap() {
+                    0 => "Copy",
+                    1 => "Gather",
+                    2 => "Scatter",
+                    3_u32..=u32::MAX => {
+                        assert!(false, "wrong channel type");
+                        ""
+                    }
+                };
                 if nreqs > 0 {
                     format!(
-                        "Copy: size={}, num reqs={}{}",
+                        "{}: size={}, num reqs={}{}",
+                        copy_type_str,
                         SizePretty(copy.size),
                         nreqs,
                         CopyInstInfoVec(&copy.copy_inst_infos, &state)
@@ -735,16 +763,36 @@ impl Chan {
             _ => unreachable!(),
         };
 
-        let long_name = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
+        let long_name = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_type,
+        ) {
+            (Some(src), Some(dst), _) => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
                 &dst
             ),
-            (None, Some(dst)) => format!("Fill {} Memory 0x{:x} Channel", mem_kind(dst), dst),
-            (None, None) => format!("Dependent Partition Channel"),
+            (None, Some(dst), channel_type) => {
+                let channel_str = match channel_type {
+                    1 => "Fill",
+                    2 => "Gather",
+                    0_u32 | 3_u32..=u32::MAX => {
+                        assert!(false, "wrong channel type");
+                        ""
+                    }
+                };
+                format!(
+                    "{} {} Memory 0x{:x} Channel",
+                    channel_str,
+                    mem_kind(dst),
+                    dst
+                )
+            }
+            (Some(src), None, _) => format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src),
+            (None, None, _) => format!("Dependent Partition Channel"),
             _ => unreachable!(),
         };
 
