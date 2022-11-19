@@ -69,21 +69,6 @@ namespace Legion {
     {
     }
 
-#ifdef ENABLE_VIEW_REPLICATION
-    //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
-                               UniqueID id, unsigned x, RtEvent collect,
-                               bool cpy, bool cov)
-      : usage(u), expr(e), op_id(id), index(x), collect_event(collect),
-        copy_user(cpy), covers(cov)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(expr != NULL);
-#endif
-      expr->add_base_expression_reference(PHYSICAL_USER_REF);
-    }
-#else
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
                                UniqueID id, unsigned x, bool cpy, bool cov)
@@ -95,14 +80,10 @@ namespace Legion {
 #endif
       expr->add_base_expression_reference(PHYSICAL_USER_REF);
     }
-#endif
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
       : usage(rhs.usage), expr(rhs.expr), op_id(rhs.op_id), index(rhs.index),
-#ifdef ENABLE_VIEW_REPLICATION
-        collect_event(rhs.collect_event),
-#endif
         copy_user(rhs.copy_user), covers(rhs.covers)
     //--------------------------------------------------------------------------
     {
@@ -136,9 +117,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
-#ifdef ENABLE_VIEW_REPLICATION
-      rez.serialize(collect_event);
-#endif
       rez.serialize(usage);
       expr->pack_expression(rez, target);
       rez.serialize(op_id);
@@ -153,10 +131,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-#ifdef ENABLE_VIEW_REPLICATION
-      RtEvent collect_event;
-      derez.deserialize(collect_event);
-#endif
       RegionUsage usage;
       derez.deserialize(usage);
       IndexSpaceExpression *expr = 
@@ -168,12 +142,7 @@ namespace Legion {
       bool copy_user, covers;
       derez.deserialize<bool>(copy_user);
       derez.deserialize<bool>(covers);
-#ifdef ENABLE_VIEW_REPLICATION
-      return new PhysicalUser(usage, expr, op_id, index, collect_event,
-                              copy_user, covers);
-#else
       return new PhysicalUser(usage, expr, op_id, index, copy_user, covers);
-#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -329,10 +298,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RemoteTraceRecorder::RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,
                                  AddressSpaceID local, const TraceLocalID &tlid,
-                                 PhysicalTemplate *tpl, RtUserEvent applied,
-                                 RtEvent collect)
+                                 PhysicalTemplate *tpl, RtUserEvent applied)
       : runtime(rt), origin_space(origin), local_space(local),
-        remote_tpl(tpl), applied_event(applied), collect_event(collect)
+        remote_tpl(tpl), applied_event(applied)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -374,7 +342,6 @@ namespace Legion {
       rez.serialize(remote_tpl);
       RtUserEvent remote_applied = Runtime::create_rt_user_event();
       rez.serialize(remote_applied);
-      rez.serialize(collect_event);
       // Only need to store this one locally since we already hooked our whole 
       // chain of events into the operations applied set on the origin node
       // See PhysicalTemplate::pack_recorder
@@ -1067,11 +1034,9 @@ namespace Legion {
       derez.deserialize(remote_tpl);
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
-      RtEvent collect_event;
-      derez.deserialize(collect_event);
       return new RemoteTraceRecorder(runtime, origin_space, 
                                      runtime->address_space, tlid,
-                                     remote_tpl, applied_event, collect_event);
+                                     remote_tpl, applied_event);
     }
 
     //--------------------------------------------------------------------------

@@ -2183,7 +2183,6 @@ namespace Legion {
       // no-event (happens with post-mapping and copies)
       if (analysis->term_event.exists())
       {
-        const RtEvent collect_event = trace_info.get_collect_event();
         // Perform the registration
         IndexSpaceNode *local_expr = analysis->node->row_source;
         const UniqueID op_id = analysis->op->get_unique_op_id();
@@ -2197,7 +2196,7 @@ namespace Legion {
             const FieldMask &inst_mask = ref.get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
-                analysis->term_event, collect_event,
+                analysis->term_event,
                 user_applied, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             ref.set_ready_event(ready);
@@ -2225,7 +2224,7 @@ namespace Legion {
             const FieldMask &inst_mask = ref.get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
-                analysis->term_event, collect_event, map_applied_events, 
+                analysis->term_event, map_applied_events, 
                 trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             ref.set_ready_event(ready);
@@ -2383,7 +2382,6 @@ namespace Legion {
       unsigned inst_index = 0;
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      const RtEvent collect_event = trace_info.get_collect_event();
       // Now add users for all the instances
       for (FieldMaskSet<LogicalView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++, inst_index++)
@@ -2395,7 +2393,7 @@ namespace Legion {
         restricted_instances[inst_index] = 
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
-            local_expr, op_id, index, term_event, collect_event,
+            local_expr, op_id, index, term_event,
             map_applied_events, trace_info, runtime->address_space);
         if (ready.exists())
           acquired_events.insert(ready);
@@ -2467,7 +2465,6 @@ namespace Legion {
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      const RtEvent collect_event = trace_info.get_collect_event();
       std::set<ApEvent> released_events;
       if (known_targets)
       {
@@ -2481,7 +2478,7 @@ namespace Legion {
         {
           const FieldMask &mask = restricted_instances[idx].get_valid_fields();
           ApEvent ready = target_views[idx]->register_user(usage, mask,
-              local_expr, op_id, index, term_event, collect_event,
+              local_expr, op_id, index, term_event,
               map_applied_events, trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
@@ -2511,7 +2508,7 @@ namespace Legion {
           restricted_instances[inst_index] = 
             InstanceRef(inst_view->get_manager(), it->second);
           ApEvent ready = inst_view->register_user(usage, it->second,
-              local_expr, op_id, index, term_event, collect_event,
+              local_expr, op_id, index, term_event,
               map_applied_events, trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
@@ -3311,14 +3308,13 @@ namespace Legion {
       // that we have some remote equivalence sets
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
-      const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> ready_events;
       for (std::vector<InstanceView*>::const_iterator it =
             local_views.begin(); it != local_views.end(); it++)
       {
         const ApEvent ready = (*it)->register_user(usage, ext_mask,
                     region_node->row_source, op_id, index, termination_event,
-                    collect_event, registration_applied, trace_info, 
+                    registration_applied, trace_info, 
                     runtime->address_space);
         if (ready.exists())
           ready_events.push_back(ready);
@@ -3377,12 +3373,10 @@ namespace Legion {
       const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
       const UniqueID op_id = detach_op->get_unique_op_id();
       const ApEvent term_event = detach_op->get_completion_event();
-      const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                      region_node->row_source,
                                                      op_id, index, term_event,
-                                                     collect_event, 
                                                      map_applied_events, 
                                                      trace_info,
                                                      runtime->address_space);

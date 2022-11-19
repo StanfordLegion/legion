@@ -49,7 +49,7 @@ namespace Legion {
       PHYSICAL_ANALYIS_REF = 3,
       PENDING_UNBOUND_REF = 4,
       PHYSICAL_REGION_REF = 5,
-      PENDING_GC_REF = 6,
+      //PENDING_GC_REF = 6,
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,

@@ -2891,8 +2891,6 @@ namespace Legion {
         { return execution_fence_barrier.next(this); }
       inline RtBarrier get_next_resource_return_barrier(void)
         { return resource_return_barrier.next(this); }
-      inline RtBarrier get_next_trace_recording_barrier(void)
-        { return trace_recording_barrier.next(this); }
       inline RtBarrier get_next_summary_fence_barrier(void)
         { return summary_fence_barrier.next(this); }
       inline RtBarrier get_next_deletion_ready_barrier(void)
@@ -3087,7 +3085,6 @@ namespace Legion {
       RtLogicalBar detach_resource_barrier;
       RtLogicalBar mapping_fence_barrier;
       RtReplBar resource_return_barrier;
-      RtLogicalBar trace_recording_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
       ApReplSingleBar attach_broadcast_barrier;

@@ -31453,15 +31453,6 @@ namespace Legion {
             InnerContext::handle_deferred_commit_queue(args);
             break;
           }
-        case LG_DEFERRED_COLLECT_ID:
-          {
-            const PhysicalManager::GarbageCollectionArgs *collect_args =
-              (const PhysicalManager::GarbageCollectionArgs*)args;
-            CollectableView::handle_deferred_collect(collect_args->view,
-                                                    *collect_args->to_collect);
-            delete collect_args->to_collect;
-            break;
-          }
         case LG_PRE_PIPELINE_ID:
           {
             InnerContext::handle_prepipeline_stage(args);

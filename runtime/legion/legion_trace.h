@@ -1089,11 +1089,6 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_transitive_reduction(const void *args);
       static void handle_delete_template(const void *args);
-    public:
-      RtEvent get_recording_done(void) const
-        { return recording_done; }
-      virtual void trigger_recording_done(void);
-      virtual RtEvent get_collect_event(void) const { return recording_done; }
     protected:
       unsigned find_memo_entry(const TraceLocalID &tlid);
       void record_memo_entry(const TraceLocalID &tlid, unsigned entry,
@@ -1182,7 +1177,6 @@ namespace Legion {
       // A cache of the specific last user results for individual instances
       std::map<UniqueInst,std::deque<LastUserResult> > instance_last_users;
     protected:
-      RtUserEvent recording_done;
       RtEvent transitive_reduction_done;
       std::atomic<std::vector<unsigned>*> pending_inv_topo_order;
       std::atomic<
@@ -1368,8 +1362,6 @@ namespace Legion {
       virtual IndexSpace find_local_space(unsigned trace_local_id);
       virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
-      virtual void trigger_recording_done(void);
-    public:
       void prepare_collective_barrier_replay(
                             const std::pair<size_t,size_t> &key, ApBarrier bar);
     public:
@@ -1450,8 +1442,6 @@ namespace Legion {
       RtUserEvent update_advances_ready;
       // An event for chainging deferrals of update tasks
       std::atomic<Realm::Event::id_t> next_deferral_precondition;
-      // Barrier for signaliing when we are done recording our template
-      RtBarrier recording_barrier;
     protected:
       // Count how many times we've done recurrent replay so we know when we're
       // going to run out of phase barrier generations
