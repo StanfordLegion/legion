@@ -1747,7 +1747,6 @@ namespace Legion {
     {
       AutoLock inst(inst_lock);
 #ifdef DEBUG_LEGION
-      assert(is_owner());
       assert(gc_state != COLLECTED_GC_STATE);
 #endif
       for (unsigned idx = 0; idx < num_events; idx++)
