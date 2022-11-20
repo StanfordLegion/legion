@@ -17869,9 +17869,7 @@ namespace Legion {
     void DependentPartitionOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_dependent_op(); 
-      if (remove_launch_space_reference(launch_space))
-        delete launch_space;
+      deactivate_dependent_op();  
       runtime->free_dependent_partition_op(this);
     }
 
@@ -17885,6 +17883,8 @@ namespace Legion {
         delete thunk;
         thunk = NULL;
       }
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
       privilege_path = RegionTreePath();
       version_info.clear();
       map_applied_conditions.clear();

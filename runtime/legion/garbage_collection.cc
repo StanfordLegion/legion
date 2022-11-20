@@ -517,6 +517,14 @@ namespace Legion {
               !collective_mapping->contains(remote_inst));
 #endif
       AutoLock gc(gc_lock);
+      update_instances_internal(remote_inst); 
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::update_instances_internal(
+                                                     AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
       // Handle a very unusual case here were we weren't able to perform the
       // deletion because there was a packed reference, but we didn't know
       // where to send it to yet
@@ -1058,7 +1066,11 @@ namespace Legion {
       DistributedID did;
       derez.deserialize(did);
 
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      // Can get a race here where this arrives before the object is created
+      // in the case of ValidDistributedCollectable objects that are no
+      // longer valid and send this to update the object
+      DistributedCollectable *dc = 
+        runtime->find_distributed_collectable(did, true/*wait*/);
       if (dc->process_downgrade_success())
         delete dc;
     }
@@ -1509,6 +1521,25 @@ namespace Legion {
       }
       else
         DistributedCollectable::initialize_downgrade_state(owner);
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidDistributedCollectable::update_instances_internal(
+                                                     AddressSpaceID remote_inst)
+    //--------------------------------------------------------------------------
+    {
+      if (current_state != VALID_REF_STATE)
+      {
+#ifdef DEBUG_LEGION
+        assert(current_state == GLOBAL_REF_STATE);
+#endif
+        // We're no longer valid so make sure that this new instance also
+        // knows that we're no longer valid either
+        Serializer rez;
+        rez.serialize(did);
+        runtime->send_did_downgrade_success(remote_inst, rez);
+      }
+      DistributedCollectable::update_instances_internal(remote_inst);
     }
 
   }; // namespace Internal 

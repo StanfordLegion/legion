@@ -8922,31 +8922,15 @@ namespace Legion {
       {
         // See if we're going to be sending the whole tree or not
         bool recurse = true;
-        if (target->parent == NULL)
+        if (target->check_valid_and_increment(REGION_TREE_REF))
         {
-          if (target->check_valid_and_increment(REGION_TREE_REF))
-          {
-            target->pack_valid_ref();
-            target->remove_base_valid_ref(REGION_TREE_REF);
-          }
-          else
-          {
-            target->pack_global_ref();
-            recurse = false;
-          }
+          target->pack_valid_ref();
+          target->remove_base_valid_ref(REGION_TREE_REF);
         }
         else
         {
-          if (target->parent->check_valid_and_increment(REGION_TREE_REF))
-          {
-            target->parent->pack_valid_ref();
-            target->parent->remove_base_valid_ref(REGION_TREE_REF);
-          }
-          else
-          {
-            target->pack_global_ref();
-            recurse = false;
-          }
+          target->pack_global_ref();
+          recurse = false;
         }
         target->send_node(source, recurse);
         // Now send back the results
@@ -8978,12 +8962,7 @@ namespace Legion {
       bool recurse;
       derez.deserialize(recurse);
       if (recurse)
-      {
-        if (node->parent == NULL)
-          node->unpack_valid_ref();
-        else
-          node->parent->unpack_valid_ref();
-      }
+        node->unpack_valid_ref();
       else
         node->unpack_global_ref();
     }
@@ -9612,6 +9591,14 @@ namespace Legion {
       }
       else
         parent->remove_nested_valid_ref(did);
+      // Remove valid references on all owner children and any trackers
+      // We should not need a lock at this point since nobody else should
+      // be modifying the color map
+      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+            color_map.begin(); it != color_map.end(); it++)
+        // Remove the nested valid reference on this index space node
+        if (it->second->remove_nested_valid_ref(did))
+          assert(false); // still holding resource ref so should never be hit
       if (!partition_trackers.empty())
       {
         for (std::list<PartitionTracker*>::const_iterator it = 
@@ -9626,25 +9613,7 @@ namespace Legion {
     void IndexPartNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      // Finally remove valid references on all owner children and any trackers
-      // We should not need a lock at this point since nobody else should
-      // be modifying these data structures at this point
-      // We still hold resource references to the node so we don't need to
-      // worry about the child nodes being deleted
-      parent->remove_child(color);
-      std::vector<IndexSpaceNode*> to_invalidate;
-      {
-        AutoLock n_lock(node_lock);
-        to_invalidate.reserve(color_map.size());
-        for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-              color_map.begin(); it != color_map.end(); it++)
-          to_invalidate.push_back(it->second);
-      }
-      for (std::vector<IndexSpaceNode*>::const_iterator it =
-            to_invalidate.begin(); it != to_invalidate.end(); it++)
-        // Remove the nested valid reference on this index space node
-        if ((*it)->remove_nested_valid_ref(did))
-          assert(false); // still holding resource ref so should never be hit  
+      parent->remove_child(color);  
       // Remove the reference on our union expression if we have one
       IndexSpaceExpression *expr = union_expr.load();
       if ((expr != NULL) && expr->remove_nested_expression_reference(did))
