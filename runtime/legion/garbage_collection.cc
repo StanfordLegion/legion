@@ -1318,6 +1318,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(this);
+        rez.serialize(cnt);
         rez.serialize(&result);
         rez.serialize(ready);
       }
