@@ -790,6 +790,10 @@ namespace Legion {
       DISTRIBUTED_DOWNGRADE_RESPONSE,
       DISTRIBUTED_DOWNGRADE_SUCCESS,
       DISTRIBUTED_DOWNGRADE_UPDATE,
+      DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST,
+      DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE,
+      DISTRIBUTED_VALID_ACQUIRE_REQUEST,
+      DISTRIBUTED_VALID_ACQUIRE_RESPONSE,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
@@ -1017,6 +1021,10 @@ namespace Legion {
         "Distributed Downgrade Response",                             \
         "Distributed Downgrade Success",                              \
         "Distributed Downgrade Update",                               \
+        "Distributed Global Acquire Request",                         \
+        "Distributed Global Acquire Response",                        \
+        "Distributed Valid Acquire Request",                          \
+        "Distributed Valid Acquire Response",                         \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Created Region Contexts",                               \

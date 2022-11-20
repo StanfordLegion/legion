@@ -108,7 +108,6 @@ namespace Legion {
                 (current_state == GLOBAL_REF_STATE);
     }
 
-#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_gc_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -117,9 +116,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_global(false/*need lock*/));
 #endif
+#ifdef DEBUG_LEGION_GC
+      gc_references += cnt;
+#else
       gc_references.fetch_add(cnt);
+#endif
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     bool DistributedCollectable::remove_gc_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -163,90 +167,161 @@ namespace Legion {
 #endif // not defined DEBUG_LEGION_GC 
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_active_and_increment(
-                                                ReferenceSource source, int cnt)
+#ifdef DEBUG_LEGION_GC
+    template<typename T>
+    bool DistributedCollectable::acquire_global(int cnt,
+                              T source, std::map<T,int> &detailed_gc_references)
+#else
+    bool DistributedCollectable::acquire_global(int cnt)
+#endif
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifndef DEBUG_LEGION_GC
-      // Check to see if we can do the add without the lock first
-      int current = gc_references.load();
-      while (current > 0)
+      if (is_owner())
       {
-        int next = current + cnt;
-        if (gc_references.compare_exchange_weak(current, next))
+        AutoLock gc(gc_lock);
+        switch (current_state)
         {
-#ifdef LEGION_GC
-          log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+          case GLOBAL_REF_STATE:
+          case VALID_REF_STATE:
+            {
+#ifdef DEBUG_LEGION_GC
+              gc_references += cnt;
+              typename std::map<T,int>::iterator finder =
+                detailed_gc_references.find(source);
+              if (finder == detailed_gc_references.end())
+                detailed_gc_references[source] = cnt;
+              else
+                finder->second += cnt;
+#else
+              gc_references.fetch_add(cnt);
 #endif
+              return true;
+            }
+          case LOCAL_REF_STATE:
+          case DELETED_REF_STATE:
+            {
+              return false;
+            }
+          default:
+            assert(false);
+        }
+      }
+#ifdef DEBUG_LEGION_GC
+      else
+      {
+        AutoLock gc(gc_lock);
+        if (gc_references > 0)
+        {
+          gc_references += cnt;
+          typename std::map<T,int>::iterator finder =
+            detailed_gc_references.find(source);
+          if (finder == detailed_gc_references.end())
+            detailed_gc_references[source] = cnt;
+          else
+            finder->second += cnt;
           return true;
         }
       }
 #endif
-      AutoLock gc(gc_lock);
-      if (!is_global(false/*need lock*/))
-        return false;
-#ifdef LEGION_GC
-      log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
 #endif
+      // Send the message to the owner to try to acquire the reference
+      std::atomic<bool> result(false);
+      const RtUserEvent ready = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(this);
+        rez.serialize(cnt);
+        rez.serialize(&result);
+        rez.serialize(ready);
+      }
+      runtime->send_did_acquire_global_request(owner_space, rez);
+      ready.wait();
+      if (result.load())
+      {
 #ifdef DEBUG_LEGION_GC
-      gc_references += cnt;
-      std::map<ReferenceSource,int>::iterator finder = 
-        detailed_base_gc_references.find(source);
-      if (finder == detailed_base_gc_references.end())
-        detailed_base_gc_references[source] = cnt;
-      else
-        finder->second += cnt;
-#else
-      gc_references.fetch_add(cnt);
+        AutoLock gc(gc_lock);
+        typename std::map<T,int>::iterator finder =
+          detailed_gc_references.find(source);
+        if (finder == detailed_gc_references.end())
+          detailed_gc_references[source] = cnt;
+        else
+          finder->second += cnt;
 #endif
-      return true;
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::check_active_and_increment(
-                                                  DistributedID source, int cnt)
+    /*static*/ void DistributedCollectable::handle_global_acquire_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifndef DEBUG_LEGION_GC
-      // Check to see if we can do the add without the lock first
-      int current = gc_references.load();
-      while (current > 0)
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *remote;
+      derez.deserialize(remote);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      DistributedCollectable *dc = 
+        runtime->weak_find_distributed_collectable(did);
+      if ((dc != NULL) && dc->check_global_and_increment(REMOTE_DID_REF))
       {
-        int next = current + cnt;
-        if (gc_references.compare_exchange_weak(current, next))
+        Serializer rez;
         {
-#ifdef LEGION_GC
-          log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
-#endif
-          return true;
+          RezCheck z2(rez);
+          rez.serialize(remote);
+          rez.serialize(count);
+          rez.serialize(result);
+          rez.serialize(ready);
         }
+        runtime->send_did_acquire_global_response(source, rez);
+        // Wait for the event to be triggered and then remove
+        // the remote did ref that we added
+        ready.wait();
+        dc->remove_base_gc_ref(REMOTE_DID_REF);
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
       }
-#endif
-      AutoLock gc(gc_lock);
-      if (!is_global(false/*need lock*/))
-        return false;
-#ifdef LEGION_GC
-      log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifdef DEBUG_LEGION_GC
-      gc_references += cnt;
-      source = LEGION_DISTRIBUTED_ID_FILTER(source);
-      std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_gc_references.find(source);
-      if (finder == detailed_nested_gc_references.end())
-        detailed_nested_gc_references[source] = cnt;
       else
-        finder->second += cnt;
-#else
-      gc_references.fetch_add(cnt);
-#endif
-      return true;
+      {
+        // Failed so trigger the event
+        Runtime::trigger_event(ready);
+        if ((dc != NULL) && dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void DistributedCollectable::handle_global_acquire_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedCollectable *local;
+      derez.deserialize(local);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      // Just add the valid reference for now
+      local->add_gc_reference(count);
+      result->store(true);
+      Runtime::trigger_event(ready);
     }
 
 #ifdef DEBUG_LEGION_GC
@@ -902,7 +977,9 @@ namespace Legion {
         if (downgrade_owner == local_space)
         {
           // See if it safe to downgrade
-          if ((notready_owner == downgrade_owner) && 
+          // Make sure to check ourselves again to handle any 
+          // check_*_and_increment methods
+          if (can_downgrade() && (notready_owner == downgrade_owner) &&
               (total_sent_references == total_received_references))
           {
             // Then perform our local downgrade
@@ -1057,7 +1134,6 @@ namespace Legion {
         return (current_state == VALID_REF_STATE);
     }
 
-#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void ValidDistributedCollectable::add_valid_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -1066,9 +1142,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_valid(false/*need lock*/));
 #endif
+#ifdef DEBUG_LEGION_GC
+      valid_references += cnt;
+#else
       valid_references.fetch_add(cnt);
+#endif
     }
 
+#ifndef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     bool ValidDistributedCollectable::remove_valid_reference(int cnt)
     //--------------------------------------------------------------------------
@@ -1170,90 +1251,161 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    bool ValidDistributedCollectable::check_valid_and_increment(
-                                                ReferenceSource source, int cnt)
+#ifdef DEBUG_LEGION_GC
+    template<typename T>
+    bool ValidDistributedCollectable::acquire_valid(int cnt,
+                           T source, std::map<T,int> &detailed_valid_references)
+#else
+    bool ValidDistributedCollectable::acquire_valid(int cnt)
+#endif
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifndef DEBUG_LEGION_GC
-      // Check to see if we can do the add without the lock first
-      int current = valid_references.load();
-      while (current > 0)
+      if (is_owner())
       {
-        int next = current + cnt;
-        if (valid_references.compare_exchange_weak(current, next))
+        AutoLock gc(gc_lock);
+        switch (current_state)
         {
-#ifdef LEGION_GC
-          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+          case VALID_REF_STATE:
+            {
+#ifdef DEBUG_LEGION_GC
+              valid_references += cnt;
+              typename std::map<T,int>::iterator finder =
+                detailed_valid_references.find(source);
+              if (finder == detailed_valid_references.end())
+                detailed_valid_references[source] = cnt;
+              else
+                finder->second += cnt;
+#else
+              valid_references.fetch_add(cnt);
 #endif
+              return true;
+            }
+          case GLOBAL_REF_STATE:
+          case LOCAL_REF_STATE:
+          case DELETED_REF_STATE:
+            {
+              return false;
+            }
+          default:
+            assert(false);
+        }
+      }
+#ifdef DEBUG_LEGION_GC
+      else
+      {
+        AutoLock gc(gc_lock);
+        if (valid_references > 0)
+        {
+          valid_references += cnt;
+          typename std::map<T,int>::iterator finder =
+            detailed_valid_references.find(source);
+          if (finder == detailed_valid_references.end())
+            detailed_valid_references[source] = cnt;
+          else
+            finder->second += cnt;
           return true;
         }
       }
 #endif
-      AutoLock gc(gc_lock);
-      if (!is_valid(false/*need lock*/))
-        return false;
-#ifdef LEGION_GC
-      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
 #endif
+      // Send the message to the owner to try to acquire the reference
+      std::atomic<bool> result(false);
+      const RtUserEvent ready = Runtime::create_rt_user_event();
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(this);
+        rez.serialize(&result);
+        rez.serialize(ready);
+      }
+      runtime->send_did_acquire_valid_request(owner_space, rez);
+      ready.wait();
+      if (result.load())
+      {
 #ifdef DEBUG_LEGION_GC
-      valid_references += cnt;
-      std::map<ReferenceSource,int>::iterator finder = 
-        detailed_base_valid_references.find(source);
-      if (finder == detailed_base_valid_references.end())
-        detailed_base_valid_references[source] = cnt;
-      else
-        finder->second += cnt;
-#else
-      valid_references.fetch_add(cnt);
+        AutoLock gc(gc_lock);
+        typename std::map<T,int>::iterator finder =
+          detailed_valid_references.find(source);
+        if (finder == detailed_valid_references.end())
+          detailed_valid_references[source] = cnt;
+        else
+          finder->second += cnt;
 #endif
-      return true;
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
-    bool ValidDistributedCollectable::check_valid_and_increment(
-                                                  DistributedID source, int cnt)
+    /*static*/ void ValidDistributedCollectable::handle_valid_acquire_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifndef DEBUG_LEGION_GC
-      // Check to see if we can do the add without the lock first
-      int current = valid_references.load();
-      while (current > 0)
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      ValidDistributedCollectable *remote;
+      derez.deserialize(remote);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      ValidDistributedCollectable *dc = 
+        static_cast<ValidDistributedCollectable*>(
+            runtime->weak_find_distributed_collectable(did));
+      if ((dc != NULL) && dc->check_valid_and_increment(REMOTE_DID_REF))
       {
-        int next = current + cnt;
-        if (valid_references.compare_exchange_weak(current, next))
+        Serializer rez;
         {
-#ifdef LEGION_GC
-          log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
-#endif
-          return true;
+          RezCheck z2(rez);
+          rez.serialize(remote);
+          rez.serialize(count);
+          rez.serialize(result);
+          rez.serialize(ready);
         }
+        runtime->send_did_acquire_valid_response(source, rez);
+        // Wait for the event to be triggered and then remove
+        // the remote did ref that we added
+        ready.wait();
+        dc->remove_base_valid_ref(REMOTE_DID_REF);
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
       }
-#endif
-      AutoLock gc(gc_lock);
-      if (!is_valid(false/*need lock*/))
-        return false;
-#ifdef LEGION_GC
-      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifdef DEBUG_LEGION_GC
-      valid_references += cnt;
-      source = LEGION_DISTRIBUTED_ID_FILTER(source);
-      std::map<DistributedID,int>::iterator finder = 
-        detailed_nested_valid_references.find(source);
-      if (finder == detailed_nested_valid_references.end())
-        detailed_nested_valid_references[source] = cnt;
       else
-        finder->second += cnt;
-#else
-      valid_references.fetch_add(cnt);
-#endif
-      return true;
+      {
+        // Failed so trigger the event
+        Runtime::trigger_event(ready);
+        if ((dc != NULL) && dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ValidDistributedCollectable::handle_valid_acquire_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ValidDistributedCollectable *local;
+      derez.deserialize(local);
+      int count;
+      derez.deserialize(count);
+      std::atomic<bool> *result;
+      derez.deserialize(result);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      // Just add the valid reference for now
+      local->add_valid_reference(count);
+      result->store(true);
+      Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------

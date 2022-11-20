@@ -3162,6 +3162,14 @@ namespace Legion {
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_success(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_update(AddressSpaceID target, Serializer &rez);
+      void send_did_acquire_global_request(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_did_acquire_global_response(AddressSpaceID target,
+                                            Serializer &rez);
+      void send_did_acquire_valid_request(AddressSpaceID target,
+                                          Serializer &rez);
+      void send_did_acquire_valid_response(AddressSpaceID target,
+                                           Serializer &rez);
       void send_created_region_contexts(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_atomic_reservation_request(AddressSpaceID target, 
@@ -3486,6 +3494,12 @@ namespace Legion {
       void handle_did_downgrade_response(Deserializer &derez);
       void handle_did_downgrade_success(Deserializer &derez);
       void handle_did_downgrade_update(Deserializer &derez);
+      void handle_did_global_acquire_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_did_global_acquire_response(Deserializer &derez);
+      void handle_did_valid_acquire_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_did_valid_acquire_response(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
       void handle_send_atomic_reservation_request(Deserializer &derez,
@@ -3807,6 +3821,8 @@ namespace Legion {
       DistributedCollectable* find_distributed_collectable(DistributedID did,
                                                            RtEvent &ready, 
                                                            bool wait = false);
+      DistributedCollectable* weak_find_distributed_collectable(
+                                                           DistributedID did);
       bool find_pending_collectable_location(DistributedID did,void *&location);
       void record_pending_distributed_collectable(DistributedID did);
       void revoke_pending_distributed_collectable(DistributedID did);
@@ -5574,6 +5590,14 @@ namespace Legion {
         case DISTRIBUTED_DOWNGRADE_SUCCESS:
           break;
         case DISTRIBUTED_DOWNGRADE_UPDATE:
+          break;
+        case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
+          break;
+        case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
+          break;
+        case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
+          break;
+        case DISTRIBUTED_VALID_ACQUIRE_RESPONSE:
           break;
         case SEND_ATOMIC_RESERVATION_REQUEST:
           break;
