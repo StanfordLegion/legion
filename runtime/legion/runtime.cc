@@ -12151,6 +12151,28 @@ namespace Legion {
               runtime->handle_did_downgrade_update(derez);
               break;
             }
+          case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
+            {
+              runtime->handle_did_global_acquire_request(derez, 
+                                          remote_address_space);
+              break;
+            }
+          case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
+            {
+              runtime->handle_did_global_acquire_response(derez);
+              break;
+            }
+          case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
+            {
+              runtime->handle_did_valid_acquire_request(derez,
+                                        remote_address_space);
+              break;
+            }
+          case DISTRIBUTED_VALID_ACQUIRE_RESPONSE:
+            {
+              runtime->handle_did_valid_acquire_response(derez);
+              break;
+            }
           case SEND_ATOMIC_RESERVATION_REQUEST:
             {
               runtime->handle_send_atomic_reservation_request(derez,
@@ -12737,6 +12759,11 @@ namespace Legion {
           case SEND_GC_DEBUG_RESPONSE:
             {
               runtime->handle_gc_debug_response(derez);
+              break;
+            }
+          case SEND_GC_RECORD_EVENT:
+            {
+              runtime->handle_gc_record_event(derez);
               break;
             }
           case SEND_ACQUIRE_REQUEST:
@@ -17958,7 +17985,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *node = forest->get_node(handle);
-      if (!node->check_active_and_increment(APPLICATION_REF))
+      if (!node->check_global_and_increment(APPLICATION_REF))
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
             "Illegal call to add shared ownership to field space %x "
             "which has already been deleted", handle.get_id())
@@ -17990,7 +18017,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RegionNode *node = forest->get_node(handle);
-      if (!node->check_active_and_increment(APPLICATION_REF))
+      if (!node->check_global_and_increment(APPLICATION_REF))
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_SHARED_OWNERSHIP,
             "Illegal call to add shared ownership to logical region "
             "(%x,%x,%x) which has already been deleted", 
@@ -21916,6 +21943,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_did_acquire_global_request(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_acquire_global_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE>(
+                                          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_acquire_valid_request(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_VALID_ACQUIRE_REQUEST>(
+                                                            rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_did_acquire_valid_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<DISTRIBUTED_VALID_ACQUIRE_RESPONSE>(
+                                          rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_created_region_contexts(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22854,6 +22917,14 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_GC_DEBUG_RESPONSE>(rez,
                                        true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_record_event(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_RECORD_EVENT>(rez,
+                                                        true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -23984,6 +24055,37 @@ namespace Legion {
     {
       DistributedCollectable::handle_downgrade_update(this, derez);
     }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_global_acquire_request(Deserializer &derez,
+                                                    AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_global_acquire_request(this, derez,source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_global_acquire_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedCollectable::handle_global_acquire_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_valid_acquire_request(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ValidDistributedCollectable::handle_valid_acquire_request(this, derez,
+                                                                source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_did_valid_acquire_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ValidDistributedCollectable::handle_valid_acquire_response(derez);
+    }
     
     //--------------------------------------------------------------------------
     void Runtime::handle_created_region_contexts(Deserializer &derez,
@@ -24879,7 +24981,7 @@ namespace Legion {
     void Runtime::handle_gc_acquired(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_garbage_collection_acquired(derez);
+      PhysicalManager::handle_garbage_collection_acquired(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24896,6 +24998,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_debug_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_record_event(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_record_event(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -26139,6 +26248,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != dist_collectables.end());
 #endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedCollectable* Runtime::weak_find_distributed_collectable(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
+      AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+      std::map<DistributedID,DistributedCollectable*>::const_iterator finder =
+        dist_collectables.find(to_find);
+      if (finder == dist_collectables.end())
+        return NULL;
+      finder->second->add_base_resource_ref(RUNTIME_REF);
       return finder->second;
     }
 
@@ -31451,15 +31575,6 @@ namespace Legion {
         case LG_DEFERRED_COMMIT_ID:
           {
             InnerContext::handle_deferred_commit_queue(args);
-            break;
-          }
-        case LG_DEFERRED_COLLECT_ID:
-          {
-            const PhysicalManager::GarbageCollectionArgs *collect_args =
-              (const PhysicalManager::GarbageCollectionArgs*)args;
-            CollectableView::handle_deferred_collect(collect_args->view,
-                                                    *collect_args->to_collect);
-            delete collect_args->to_collect;
             break;
           }
         case LG_PRE_PIPELINE_ID:

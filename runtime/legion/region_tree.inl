@@ -882,23 +882,17 @@ namespace Legion {
         expressions.insert(this);
         return this;
       }
+      else if (expressions.find(this) != expressions.end())
+        return this;
       Realm::IndexSpace<DIM,T> local_space;
       // No need to wait for the event, we know it is already triggered
       // because we called get_volume on this before we got here
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
-      const DistributedID local_did = get_distributed_id();
       size_t local_rect_count = 0;
       KDNode<DIM,T,void> *local_tree = NULL;
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             expressions.begin(); it != expressions.end(); it++)
       {
-        // We can get duplicates here
-        if ((*it) == this)
-        {
-          if (local_tree != NULL)
-            delete local_tree;
-          return this;
-        }
         Realm::IndexSpace<DIM,T> other_space;
         // No need to wait for the event here either, we know that if it is
         // in the 'expressions' data structure then wait has already been
@@ -911,16 +905,14 @@ namespace Legion {
         if (local_space.sparsity == other_space.sparsity)
         {
           // We know that things are the same here
-          // Try to add the expression reference, we can race with deletions
-          // here though so handle the case we're we can't add a reference
-          if ((*it)->try_add_canonical_reference(local_did))
+          // Check to see if they have the expression is still alive and
+          // can be used as a canonical expression
+          if ((*it)->try_add_live_reference())
           {
             if (local_tree != NULL)
               delete local_tree;
             return (*it);
           }
-          else
-            continue;
         }
         if (!local_space.sparsity.exists() || !other_space.sparsity.exists())
         {
@@ -1001,7 +993,7 @@ namespace Legion {
         // If we get here that means we are congruent
         // Try to add the expression reference, we can race with deletions
         // here though so handle the case we're we can't add a reference
-        if ((*it)->try_add_canonical_reference(local_did))
+        if ((*it)->try_add_live_reference())
         {
           if (local_tree != NULL)
             delete local_tree;

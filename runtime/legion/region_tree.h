@@ -1357,10 +1357,9 @@ namespace Legion {
       virtual bool is_valid(void) = 0;
 #endif
       virtual DistributedID get_distributed_id(void) const = 0;
-      virtual bool try_add_canonical_reference(DistributedID source) = 0;
+      virtual void add_canonical_reference(DistributedID source) = 0;
       virtual bool remove_canonical_reference(DistributedID source) = 0;
-      virtual bool try_add_live_reference(ReferenceSource source) = 0;
-      virtual bool remove_live_reference(ReferenceSource source) = 0;
+      virtual bool try_add_live_reference(void) = 0;
       virtual void add_base_expression_reference(ReferenceSource source,
                                                  unsigned count = 1) = 0;
       virtual void add_nested_expression_reference(DistributedID source,
@@ -1616,10 +1615,9 @@ namespace Legion {
         { return DistributedCollectable::is_global(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
-      virtual bool try_add_canonical_reference(DistributedID source);
+      virtual void add_canonical_reference(DistributedID source);
       virtual bool remove_canonical_reference(DistributedID source);
-      virtual bool try_add_live_reference(ReferenceSource source);
-      virtual bool remove_live_reference(ReferenceSource source);
+      virtual bool try_add_live_reference(void);
       virtual void add_base_expression_reference(ReferenceSource source,
                                                  unsigned count = 1);
       virtual void add_nested_expression_reference(DistributedID source,
@@ -2173,10 +2171,9 @@ namespace Legion {
         { return ValidDistributedCollectable::is_global(); }
 #endif
       virtual DistributedID get_distributed_id(void) const { return did; }
-      virtual bool try_add_canonical_reference(DistributedID source);
+      virtual void add_canonical_reference(DistributedID source);
       virtual bool remove_canonical_reference(DistributedID source);
-      virtual bool try_add_live_reference(ReferenceSource source);
-      virtual bool remove_live_reference(ReferenceSource source);
+      virtual bool try_add_live_reference(void);
       virtual void add_base_expression_reference(ReferenceSource source,
                                                  unsigned count = 1);
       virtual void add_nested_expression_reference(DistributedID source,

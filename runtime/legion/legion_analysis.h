@@ -210,7 +210,6 @@ namespace Legion {
       virtual bool remove_recorder_reference(void) = 0;
       virtual void pack_recorder(Serializer &rez, 
                                  std::set<RtEvent> &applied) = 0; 
-      virtual RtEvent get_collect_event(void) const = 0;
     public:
       virtual void record_get_term_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
@@ -343,7 +342,7 @@ namespace Legion {
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
                           const TraceLocalID &tlid, PhysicalTemplate *tpl, 
-                          RtUserEvent applied_event, RtEvent collect_event);
+                          RtUserEvent applied_event);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs) = delete;
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -354,7 +353,6 @@ namespace Legion {
       virtual bool remove_recorder_reference(void);
       virtual void pack_recorder(Serializer &rez, 
                                  std::set<RtEvent> &applied);
-      virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
       virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
                                          const TraceLocalID &tlid);
@@ -470,7 +468,6 @@ namespace Legion {
       const RtUserEvent applied_event;
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
-      const RtEvent collect_event;
     };
 
     /**
@@ -565,14 +562,6 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_reservations(tlid, reservations, applied);
-        }
-    public:
-      inline RtEvent get_collect_event(void) const 
-        {
-          if (!recording)
-            return RtEvent::NO_RT_EVENT;
-          else
-            return rec->get_collect_event();
         }
     protected:
       inline void base_sanity_check(void) const
@@ -781,14 +770,8 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-#ifdef ENABLE_VIEW_REPLICATION
-      PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, RtEvent collect_event,
-                   bool copy, bool covers);
-#else
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
                    UniqueID op_id, unsigned index, bool copy, bool covers);
-#endif
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -802,9 +785,6 @@ namespace Legion {
       IndexSpaceExpression *const expr;
       const UniqueID op_id;
       const unsigned index; // region requirement index
-#ifdef ENABLE_VIEW_REPLICATION
-      const RtEvent collect_event;
-#endif
       const bool copy_user; // is this from a copy or an operation
       const bool covers; // whether the expr covers the ExprView its in
     };  
