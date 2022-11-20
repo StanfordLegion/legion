@@ -19510,7 +19510,10 @@ namespace Legion {
       if (parent == NULL)
       {
         context->runtime->release_tree_instances(handle.get_tree_id());
-        row_source->remove_nested_valid_ref(did);
+        if (row_source->parent == NULL)
+          row_source->remove_nested_valid_ref(did);
+        else
+          row_source->parent->remove_nested_valid_ref(did);
         column_source->remove_nested_gc_ref(did);
       }
       if (!partition_trackers.empty())
@@ -19538,7 +19541,10 @@ namespace Legion {
 #endif
       if (parent == NULL)
       {
-        row_source->add_nested_valid_ref(did);
+        if (row_source->parent == NULL)
+          row_source->add_nested_valid_ref(did);
+        else
+          row_source->parent->add_nested_valid_ref(did);
         column_source->add_nested_gc_ref(did);
       }
       else
