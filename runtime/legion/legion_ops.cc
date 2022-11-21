@@ -2091,7 +2091,8 @@ namespace Legion {
       const OpKind op_kind = get_operation_kind();
       if ((op_kind != TASK_OP_KIND) && (op_kind != MAP_OP_KIND) &&
           (op_kind != ACQUIRE_OP_KIND) && (op_kind != RELEASE_OP_KIND) &&
-          (op_kind != DEPENDENT_PARTITION_OP_KIND))
+          (op_kind != DEPENDENT_PARTITION_OP_KIND) &&
+          (op_kind != DETACH_OP_KIND))
       {
         ApEvent effects_done;
         if (!completion_effects.empty())
@@ -24405,14 +24406,13 @@ namespace Legion {
                                          filter_precondition, flush);
       Runtime::trigger_event(&trace_info, detach_post, detach_event);
       record_completion_effect(detach_post);
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, detach_event,detach_post);
+#endif
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
                                               requirement, references);
-      // Also tell the runtime to detach the external instance from memory
-      // This has to be done before we can consider this mapped
-      RtEvent detached_event = manager->detach_external_instance();
-      if (detached_event.exists())
-        map_applied_conditions.insert(detached_event);
       if (!map_applied_conditions.empty())
         complete_mapping(finalize_complete_mapping(
               Runtime::merge_events(map_applied_conditions)));
@@ -24445,10 +24445,14 @@ namespace Legion {
 #endif
       const InstanceRef &reference = references[0];
       PhysicalManager *manager = reference.get_physical_manager();
+      // It's only safe to actually perform the detach after the mapping
+      // is performed to know that all the updates to the instance have
+      // been mapped
+      const RtEvent detached_event = manager->detach_external_instance();
       // We can remove the acquire reference that we added after we're mapped
       if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
         delete manager;
-      complete_operation();
+      complete_operation(detached_event);
     }
 
     //--------------------------------------------------------------------------
@@ -24729,6 +24733,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       result.impl->set_result(NULL, 0, true/*own*/);
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+      {
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        ApEvent effects_done;
+        if (!effects.empty())
+          effects_done = Runtime::merge_events(NULL, effects);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        get_completion_event());
+      }
+#endif
       complete_operation();
     }
 
