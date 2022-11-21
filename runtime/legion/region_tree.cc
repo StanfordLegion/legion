@@ -6901,9 +6901,16 @@ namespace Legion {
       if (expr == this)
       {
         // If we're our own canonical expression then the forest didn't
-        // give us a reference to ourself, so just write it, everyone will
-        // write the same value so there's no risk here
-        canonical.store(expr);
+        // give us a reference to ourself, but we do need to check to see
+        // if we're the first one to write to see if we need to remove any
+        // references from a prior expression
+        IndexSpaceExpression *prev = canonical.exchange(expr);
+        if ((prev != NULL) && (prev != expr))
+        {
+          const DistributedID did = get_distributed_id();
+          if (prev->remove_canonical_reference(did))
+            delete prev;
+        }
         return expr;
       }
       // If the canonical expression is not ourself, then the region tree
