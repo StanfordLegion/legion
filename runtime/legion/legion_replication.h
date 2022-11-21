@@ -715,8 +715,7 @@ namespace Legion {
     class FutureNameExchange : public AllGatherCollective<false> {
     public:
       FutureNameExchange(ReplicateContext *ctx, CollectiveID id, 
-                         ReplFutureMapImpl *future_map,
-                         ReferenceMutator *mutator);
+                         ReplFutureMapImpl *future_map);
       FutureNameExchange(const FutureNameExchange &rhs);
       virtual ~FutureNameExchange(void);
     public:
@@ -725,10 +724,9 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void exchange_future_names(std::map<DomainPoint,Future> &futures);
+      void exchange_future_names(std::map<DomainPoint,FutureImpl*> &futures);
     public:
       ReplFutureMapImpl *const future_map;
-      ReferenceMutator *const mutator;
     protected:
       std::map<DomainPoint,Future> results;
     };
@@ -1379,7 +1377,7 @@ namespace Legion {
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
-      virtual void initialize_concurrent_analysis(void);
+      virtual void initialize_concurrent_analysis(bool replay);
       virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
                                                   Processor target);
       void select_sharding_function(ReplicateContext *repl_ctx);

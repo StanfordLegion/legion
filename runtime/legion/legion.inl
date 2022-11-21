@@ -15536,7 +15536,7 @@ namespace Legion {
       }
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d",
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d\n",
                 kind);
         assert(false);
       }
@@ -16039,7 +16039,7 @@ namespace Legion {
       }
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d",
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d\n",
                 kind);
         assert(false);
       }

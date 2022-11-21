@@ -112,10 +112,11 @@ namespace Legion {
         COLLECTIVE_CODE = 0x40,
       };
     public:
-      InstanceManager(RegionTreeForest *forest, AddressSpaceID owner, 
+      InstanceManager(RegionTreeForest *forest,
                       DistributedID did, LayoutDescription *layout,
                       FieldSpaceNode *node, IndexSpaceExpression *domain,
-                      RegionTreeID tree_id, bool register_now);
+                      RegionTreeID tree_id, bool register_now,
+                      CollectiveMapping *mapping = NULL);
       virtual ~InstanceManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -219,32 +220,8 @@ namespace Legion {
         UNBOUND_INSTANCE_KIND,
       };
     public:
-      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
-      public:
-        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect)
-          : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
-            view(v), to_collect(collect) { }
-      public:
-        CollectableView *const view;
-        std::set<ApEvent> *const to_collect;
-      };
-    public:
-      struct CollectableInfo {
-      public:
-        CollectableInfo(void) : events_added(0) { }
-      public:
-        std::set<ApEvent> view_events;
-        // This event tracks when tracing is completed and it is safe
-        // to resume pruning of users from this view
-        RtEvent collect_event;
-        // Events added since the last collection of view events
-        unsigned events_added;
-      };
       enum GarbageCollectionState {
         VALID_GC_STATE,
-        ACQUIRED_GC_STATE,
         COLLECTABLE_GC_STATE,
         PENDING_COLLECTED_GC_STATE,
         COLLECTED_GC_STATE,
@@ -264,6 +241,29 @@ namespace Legion {
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
                      const std::vector<LogicalRegion> &regions) const; 
+    public:
+      inline void add_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
+      inline bool acquire_instance(ReferenceSource source);
+      inline bool acquire_instance(DistributedID source);
+      inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
+      inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+    protected:
+      // Internal valid reference counting 
+      void add_valid_reference(int cnt, bool need_check = true);
+#ifdef DEBUG_LEGION_GC
+      void add_base_valid_ref_internal(ReferenceSource source, int cnt); 
+      void add_nested_valid_ref_internal(DistributedID source, int cnt);
+      bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
+      bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
+      template<typename T>
+      bool acquire_internal(T source, std::map<T,int> &valid_references);
+#else
+      bool acquire_internal(void);
+      bool remove_valid_reference(int cnt);
+#endif
+      void notify_valid(bool need_check);
+      bool notify_invalid(void);
     public:
       virtual ApEvent fill_from(FillView *fill_view, InstanceView *dst_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -295,14 +295,12 @@ namespace Legion {
       static void handle_manager_request(Deserializer &derez, 
                           Runtime *runtime, AddressSpaceID source);
     public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void);
     public:
-      bool acquire_instance(ReferenceSource source, ReferenceMutator *mutator);
       bool can_collect(AddressSpaceID source, bool &already_collected);
       bool collect(RtEvent &collected);
+      void pack_gc_events(Serializer &rez);
+      void unpack_gc_events(size_t num_events, Deserializer &derez);
       RtEvent set_garbage_collection_priority(MapperID mapper_id,
                                               Processor p, GCPriority priority);
       virtual void get_instance_pointers(Memory memory, 
@@ -330,9 +328,7 @@ namespace Legion {
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
-      void defer_collect_user(CollectableView *view, ApEvent term_event,
-                              RtEvent collect, std::set<ApEvent> &to_collect, 
-                              bool &add_ref, bool &remove_ref);
+      void record_instance_user(ApEvent term_event, std::set<RtEvent> &applied);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -340,7 +336,6 @@ namespace Legion {
       bool meets_expression(IndexSpaceExpression *expr, 
                             bool tight_bounds = false) const;
     protected:
-      void prune_gc_events(void);
       void pack_garbage_collection_state(Serializer &rez,
                                          AddressSpaceID target, bool need_lock);
       void initialize_remote_gc_state(GarbageCollectionState state);
@@ -363,12 +358,14 @@ namespace Legion {
       static void handle_garbage_collection_response(Deserializer &derez);
       static void handle_garbage_collection_acquire(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
-      static void handle_garbage_collection_acquired(Deserializer &derez);
+      static void handle_garbage_collection_acquired(Runtime *runtime,
+                                                     Deserializer &derez);
       static void handle_garbage_collection_priority_update(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_request(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_response(Deserializer &derez);
+      static void handle_record_event(Runtime *runtime, Deserializer &derez);
     public:
       size_t instance_footprint;
       const ReductionOp *reduction_op;
@@ -392,15 +389,27 @@ namespace Legion {
       unsigned pending_changes;
       std::atomic<unsigned> remaining_collection_guards;
       RtEvent collection_ready;
-      RtUserEvent deferred_deletion;
-      bool currently_active;
       // Garbage collection priorities
       GCPriority min_gc_priority;
       RtEvent priority_update_done;
       std::map<std::pair<MapperID,Processor>,GCPriority> mapper_gc_priorities;
+    protected:
+      // Events for application users of this instance that must trigger
+      // before we could possibly do a deferred deletion
+      std::set<ApEvent> gc_events;
+      // The number of events added since the last time we pruned the list
+      unsigned added_gc_events;
     private:
-      // Events that have to trigger before we can remove our GC reference
-      std::map<CollectableView*,CollectableInfo> gc_events;
+#ifdef DEBUG_LEGION_GC
+      int valid_references;
+#else
+      std::atomic<int> valid_references;
+#endif
+#ifdef DEBUG_LEGION_GC
+    private:
+      std::map<ReferenceSource,int> detailed_base_valid_references;
+      std::map<DistributedID,int> detailed_nested_valid_references;
+#endif
     };
 
     /**
@@ -772,7 +781,7 @@ namespace Legion {
                            public LegionHeapify<VirtualManager> {
     public:
       VirtualManager(Runtime *runtime, DistributedID did, 
-                     LayoutDescription *layout);
+                     LayoutDescription *layout, CollectiveMapping *mapping);
       VirtualManager(const VirtualManager &rhs);
       virtual ~VirtualManager(void);
     public:
@@ -784,11 +793,7 @@ namespace Legion {
       virtual LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>
           get_field_accessor(FieldID fid) const;
-    public:
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_local(void) { }
     public: 
       virtual ApEvent get_use_event(void) const;
       virtual ApEvent get_use_event(ApEvent user) const;
@@ -990,6 +995,184 @@ namespace Legion {
 #endif
       return 
         static_cast<CollectiveManager*>(const_cast<InstanceManager*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline void PhysicalManager::add_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void PhysicalManager::add_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_nested_valid_ref_internal(LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = valid_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::acquire_instance(ReferenceSource source) 
+    //--------------------------------------------------------------------------
+    {
+#ifndef DEBUG_LEGION_GC
+      // Note that we cannot do this for external instances as they might
+      // have been detached while still holding valid references so they
+      // have to go through the full path every time
+      if (!is_external_instance())
+      {
+        // Check to see if we can do the add without the lock first
+        int current = valid_references.load();
+        while (current > 0)
+        {
+          int next = current + 1;
+          if (valid_references.compare_exchange_weak(current, next))
+          {
+#ifdef LEGION_GC
+            log_base_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+            return true;
+          }
+        }
+      }
+      bool result = acquire_internal();
+#else
+      bool result = acquire_internal(source, detailed_base_valid_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_base_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::acquire_instance(DistributedID source) 
+    //--------------------------------------------------------------------------
+    {
+#ifndef DEBUG_LEGION_GC
+      // Note that we cannot do this for external instances as they might
+      // have been detached while still holding valid references so they
+      // have to go through the full path every time
+      if (!is_external_instance())
+      {
+        // Check to see if we can do the add without the lock first
+        int current = valid_references.load();
+        while (current > 0)
+        {
+          int next = current + 1;
+          if (valid_references.compare_exchange_weak(current, next))
+          {
+#ifdef LEGION_GC
+            log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+            return true;
+          }
+        }
+      }
+      bool result = acquire_internal();
+#else
+      bool result = acquire_internal(LEGION_DISTRIBUTED_ID_FILTER(source),
+                                     detailed_nested_valid_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, 1);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::remove_base_valid_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_base_valid_ref_internal(source, cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool PhysicalManager::remove_nested_valid_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<false>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_nested_valid_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = valid_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (valid_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_valid_reference(cnt);
+#endif
     }
 
   }; // namespace Internal 

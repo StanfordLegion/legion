@@ -557,14 +557,12 @@ namespace Legion {
       TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,
                    RegionNode *region);
       TraceViewSet(RegionTreeForest *forest, TraceViewSet &source,
-                   DistributedID owner_did, RegionNode *region,
-                   std::set<RtEvent> &applied_events);
+                   DistributedID owner_did, RegionNode *region);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
-                  const FieldMask &mask,
-                  ReferenceMutator &mutator);
+                  const FieldMask &mask);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
@@ -591,14 +589,12 @@ namespace Legion {
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                                         FieldMaskSet<LogicalView> > &target,
-                              std::set<IndexSpaceExpression*> &unique_exprs,
-                              ReferenceMutator &mutator) const;
+                          std::set<IndexSpaceExpression*> &unique_exprs) const;
       void find_overlaps(TraceViewSet &target, IndexSpaceExpression *expr,
-                         const bool expr_covers, const FieldMask &mask,
-                         ReferenceMutator &mutator) const;
+                         const bool expr_covers, const FieldMask &mask) const;
       bool empty(void) const;
     public:
-      void merge(TraceViewSet &target, std::set<RtEvent> &applied_events) const;
+      void merge(TraceViewSet &target) const;
       void pack(Serializer &rez, AddressSpaceID target) const;
       void unpack(Deserializer &derez, size_t num_views,
                   AddressSpaceID source, std::set<RtEvent> &ready_events);
@@ -663,8 +659,7 @@ namespace Legion {
       };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        RegionNode *region, const FieldMask &mask,
-                        std::vector<RtEvent> &ready_events);
+                        RegionNode *region, const FieldMask &mask);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
@@ -1094,11 +1089,6 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_transitive_reduction(const void *args);
       static void handle_delete_template(const void *args);
-    public:
-      RtEvent get_recording_done(void) const
-        { return recording_done; }
-      virtual void trigger_recording_done(void);
-      virtual RtEvent get_collect_event(void) const { return recording_done; }
     protected:
       unsigned find_memo_entry(const TraceLocalID &tlid);
       void record_memo_entry(const TraceLocalID &tlid, unsigned entry,
@@ -1187,7 +1177,6 @@ namespace Legion {
       // A cache of the specific last user results for individual instances
       std::map<UniqueInst,std::deque<LastUserResult> > instance_last_users;
     protected:
-      RtUserEvent recording_done;
       RtEvent transitive_reduction_done;
       std::atomic<std::vector<unsigned>*> pending_inv_topo_order;
       std::atomic<
@@ -1373,8 +1362,6 @@ namespace Legion {
       virtual IndexSpace find_local_space(unsigned trace_local_id);
       virtual ShardingFunction* find_sharding_function(unsigned trace_local_id);
     public:
-      virtual void trigger_recording_done(void);
-    public:
       void prepare_collective_barrier_replay(
                             const std::pair<size_t,size_t> &key, ApBarrier bar);
     public:
@@ -1455,8 +1442,6 @@ namespace Legion {
       RtUserEvent update_advances_ready;
       // An event for chainging deferrals of update tasks
       std::atomic<Realm::Event::id_t> next_deferral_precondition;
-      // Barrier for signaliing when we are done recording our template
-      RtBarrier recording_barrier;
     protected:
       // Count how many times we've done recurrent replay so we know when we're
       // going to run out of phase barrier generations

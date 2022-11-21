@@ -2643,7 +2643,7 @@ namespace Legion {
       // Otherwise check to see if we have a value
       const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-        runtime->get_available_distributed_id(), runtime->address_space,
+        runtime->get_available_distributed_id(),
         ApEvent::NO_AP_EVENT, provenance, &future_size);
       if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
@@ -2669,7 +2669,7 @@ namespace Legion {
       IndexSpaceNode *launch_node = runtime->forest->get_node(launch_space);
       FutureMapImpl *result = new FutureMapImpl(this, runtime,
           launch_node, runtime->get_available_distributed_id(), context_index,
-          runtime->address_space, ApEvent::NO_AP_EVENT, provenance);
+          ApEvent::NO_AP_EVENT, provenance);
       if (launcher.predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical = 
@@ -2732,7 +2732,7 @@ namespace Legion {
       // Otherwise check to see if we have a value
       const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
-        runtime->get_available_distributed_id(), runtime->address_space, 
+        runtime->get_available_distributed_id(),
         ApEvent::NO_AP_EVENT, provenance, &future_size);
       if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
@@ -2873,6 +2873,9 @@ namespace Legion {
         last_implicit_gen(0)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(tree_context.exists());
+#endif
       // Set some of the default values for a context
       context_configuration.max_window_size = 
         runtime->initial_task_window_size;
@@ -2887,10 +2890,6 @@ namespace Legion {
       context_configuration.max_templates_per_trace =
         LEGION_DEFAULT_MAX_TEMPLATES_PER_TRACE;
       context_configuration.mutable_priority = false;
-#ifdef DEBUG_LEGION
-      assert(tree_context.exists());
-      runtime->forest->check_context_state(tree_context);
-#endif
       // If we have an owner, clone our local fields from its context
       // and also compute the coordinates for this context in the task tree
       if (owner != NULL)
@@ -3913,7 +3912,7 @@ namespace Legion {
         EquivalenceSet *new_set = 
           it->first->compute_refinement(source, runtime, applied_events);
         FieldMask dummy_parent;
-        target->record_refinement(new_set,overlap,dummy_parent,applied_events);
+        target->record_refinement(new_set, overlap, dummy_parent);
         it.filter(overlap);
         // Filter the valid mask too
         finder->second.filter_valid_mask(overlap);
@@ -6407,7 +6406,28 @@ namespace Legion {
           mid, tag, false/*leaf region*/, virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
       if (!virtual_mapped)
+      {
+#ifdef DEBUG_LEGION
+        if (owner_task->is_remote())
+        {
+          // If the owner task is remote, then we need to acquire the 
+          // valid references first since the valid references are held
+          // on the owner node and the checking code wants to see that 
+          // these instances are already valid when adding the references
+          if (!physical_instances.acquire_valid_references(CONTEXT_REF))
+            REPORT_LEGION_FATAL(LEGION_FATAL_GARBAGE_COLLECTION_RACE,
+                "Found an internal garbage collection race. Please "
+                "run with -lg:safe_mapper and see if it reports any "
+                "errors. If not, then please report this as a bug.")
+          impl->set_references(physical_instances, true/*safe*/);
+          // Remove the references we acquired after they've been added
+          // by the physical region
+          physical_instances.remove_valid_references(CONTEXT_REF);
+        }
+        else
+#endif
         impl->set_references(physical_instances, true/*safe*/); 
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6517,7 +6537,7 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT, provenance,
+          ApEvent::NO_AP_EVENT, provenance,
           &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
@@ -6559,8 +6579,7 @@ namespace Legion {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
           runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT, prov,
-          &reduction_op->sizeof_rhs);
+          ApEvent::NO_AP_EVENT, prov, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6591,9 +6610,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *launch_node = runtime->forest->get_node(space);
       FutureMapImpl *impl = new FutureMapImpl(this, runtime, launch_node, did,
-          total_children_count++, runtime->address_space, ApEvent::NO_AP_EVENT,
-          provenance);
-      LocalReferenceMutator mutator;
+          total_children_count++, ApEvent::NO_AP_EVENT, provenance);
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -6604,10 +6621,10 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->get_available_distributed_id(),
             ApEvent::NO_AP_EVENT, provenance, &future_size);
         future->set_local(it->second.get_ptr(), future_size);
-        impl->set_future(it->first, future, &mutator);
+        impl->set_future(it->first, future);
       }
       return FutureMap(impl);
     }
@@ -6648,7 +6665,7 @@ namespace Legion {
             "in task %s (UID %lld)", futures.size(), launch_node->get_volume(),
             get_task_name(), get_unique_id())
       FutureMapImpl *impl = new FutureMapImpl(this, creation_op, launch_node,
-                            runtime, did, runtime->address_space, provenance);
+                            runtime, did, provenance);
       add_to_dependence_queue(creation_op);
       impl->set_all_futures(futures);
       return FutureMap(impl);
@@ -10241,7 +10258,6 @@ namespace Legion {
                       const LegionVector<VersionInfo> &version_infos,
                       const std::vector<EquivalenceSet*> &equivalence_sets,
                       const std::vector<ApUserEvent> &unmap_events,
-                      std::set<RtEvent> &applied_events,
                       std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {
@@ -10300,7 +10316,7 @@ namespace Legion {
             version_infos[idx1].get_equivalence_sets();
           // tell the version manager about these equivalence sets
           region_node->initialize_nonexclusive_virtual_analysis(ctx, user_mask,
-                                                      eq_sets, applied_events);
+                                                                eq_sets);
           continue;
         }
 #ifdef DEBUG_LEGION
@@ -10396,7 +10412,7 @@ namespace Legion {
           const bool restricted = 
             IS_SIMULT(regions[idx1]) || IS_REDUCE(regions[idx1]);
           eq_set->initialize_set(usage, user_mask, restricted, sources,
-                                 corresponding, applied_events);
+                                 corresponding);
         }
         else
         {
@@ -10417,11 +10433,10 @@ namespace Legion {
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
-        region_node->initialize_versioning_analysis(ctx, eq_set,
-                                                    user_mask, applied_events);
+        region_node->initialize_versioning_analysis(ctx, eq_set, user_mask);
         // Each equivalence set here comes with a CONTEXT_REF that we
         // need to remove after we've registered it
-        if (eq_set->remove_base_valid_ref(CONTEXT_REF))
+        if (eq_set->remove_base_gc_ref(CONTEXT_REF))
           assert(false); // should never hit this
       }
     }
@@ -10451,8 +10466,7 @@ namespace Legion {
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, applied);
       // Clean up our instance top views
-      if (!instance_top_views.empty())
-        clear_instance_top_views();
+      clear_instance_top_views();
     }
 
     //--------------------------------------------------------------------------
@@ -10466,7 +10480,7 @@ namespace Legion {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               invalidated_refinements.begin(); it != 
               invalidated_refinements.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         invalidated_refinements.clear();
       }
@@ -10629,12 +10643,12 @@ namespace Legion {
     void InnerContext::clear_instance_top_views(void)
     //--------------------------------------------------------------------------
     {
+      AutoLock inst_lock(instance_view_lock);
       for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
             instance_top_views.begin(); it != instance_top_views.end(); it++)
       {
-        if (it->first->is_owner())
-          it->first->unregister_active_context(this);
-        if (it->second->remove_base_resource_ref(CONTEXT_REF))
+        it->first->unregister_active_context(this);
+        if (it->second->remove_base_gc_ref(CONTEXT_REF))
           delete (it->second);
       }
       instance_top_views.clear();
@@ -10668,28 +10682,6 @@ namespace Legion {
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
                                           region, mask, opid, original_source);
       Runtime::trigger_event(ready_event, done);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::remove_remote_references(
-                          const std::vector<DistributedCollectable*> &to_remove)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<DistributedCollectable*>::const_iterator it = 
-            to_remove.begin(); it != to_remove.end(); it++)
-        if ((*it)->remove_base_valid_ref(REMOTE_DID_REF))
-          delete (*it);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_remove_remote_references(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferRemoveRemoteReferenceArgs *dargs = 
-        (const DeferRemoveRemoteReferenceArgs*)args;
-      InnerContext::remove_remote_references(*(dargs->to_remove));
-      delete dargs->to_remove;
     }
 
     //--------------------------------------------------------------------------
@@ -10784,7 +10776,9 @@ namespace Legion {
       }
       InstanceView *result =
        manager->find_or_create_instance_top_view(this, request_source, mapping);
-      result->add_base_resource_ref(CONTEXT_REF);
+      // Use a gc reference here to ensure that the view is remains alive 
+      // everywhere until the instance is deleted or the context ends
+      result->add_base_gc_ref(CONTEXT_REF);
       // Record the result and trigger any user event to signal that the
       // view is ready
       RtUserEvent to_trigger;
@@ -10818,7 +10812,6 @@ namespace Legion {
       // Two versions of this method depending on whether we are doing 
       // Legion Spy or not, Legion Spy wants to know exactly which op
       // made each fill view so we can't cache them
-      WrapperReferenceMutator mutator(map_applied_events);
 #ifndef LEGION_SPY
       // See if we can find this in the cache first
       AutoLock f_lock(fill_view_lock);
@@ -10832,7 +10825,7 @@ namespace Legion {
         // Move it back to the front of the list
         fill_view_cache.erase(it);
         fill_view_cache.push_front(result);
-        result->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+        result->add_base_valid_ref(MAPPING_ACQUIRE_REF);
         took_ownership = false;
         return result;
       }
@@ -10842,17 +10835,16 @@ namespace Legion {
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        new FillView(runtime->forest, did, runtime->address_space,
-                     fill_value, true/*register now*/
+        new FillView(runtime->forest, did, fill_value, true/*register now*/
 #ifdef LEGION_SPY
                      , op->get_unique_op_id()
 
 #endif
                      );
-      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF);
 #ifndef LEGION_SPY
       // Add it to the cache since we're not doing Legion Spy
-      fill_view->add_base_valid_ref(CONTEXT_REF, &mutator);
+      fill_view->add_base_valid_ref(CONTEXT_REF);
       fill_view_cache.push_front(fill_view);
       if (fill_view_cache.size() > MAX_FILL_VIEW_CACHE_SIZE)
       {
@@ -10875,13 +10867,12 @@ namespace Legion {
         AutoLock inst_lock(instance_view_lock);
         std::map<PhysicalManager*,InstanceView*>::iterator finder =  
           instance_top_views.find(deleted);
-#ifdef DEBUG_LEGION
-        assert(finder != instance_top_views.end());
-#endif
+        if (finder == instance_top_views.end())
+          return;
         removed = finder->second;
         instance_top_views.erase(finder);
       }
-      if (removed->remove_base_resource_ref(CONTEXT_REF))
+      if (removed->remove_base_gc_ref(CONTEXT_REF))
         delete removed;
     }
 
@@ -10964,8 +10955,11 @@ namespace Legion {
         {
           FieldAllocatorImpl *allocator =
             create_field_allocator(it->first, false/*unordered*/);
+          allocator->add_reference();
           free_fields(allocator, it->first, it->second,
               false/*unordered*/, NULL/*provenance*/);
+          if (allocator->remove_reference())
+            delete allocator;
         }
       }
       if (!index_launch_spaces.empty())
@@ -11634,6 +11628,18 @@ namespace Legion {
           0/*idx*/, LEGION_TRUE_DEPENDENCE);
     }
 #endif
+
+    //--------------------------------------------------------------------------
+    RtEvent 
+      InnerContext::total_hack_function_for_inorder_concurrent_replay_analysis(
+                                                           RtEvent mapped_event)
+    //--------------------------------------------------------------------------
+    {
+      inorder_concurrent_replay_analysis =
+        runtime->acquire_concurrent_reservation(mapped_event,
+            inorder_concurrent_replay_analysis);
+      return inorder_concurrent_replay_analysis;
+    }
 
     /////////////////////////////////////////////////////////////
     // Top Level Context 
@@ -12838,8 +12844,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We know all our sibling shards are done so we can free these now
-      if (!instance_top_views.empty())
-        clear_instance_top_views();
+      clear_instance_top_views();
       InnerContext::free_region_tree_context();
     }
 
@@ -12864,38 +12869,18 @@ namespace Legion {
       rez.serialize(runtime->address_space);
       rez.serialize<size_t>(num_shards);
       rez.serialize<size_t>(created_state.size());
-      std::vector<DistributedCollectable*> remove_remote_references;
       for (std::vector<RegionNode*>::const_iterator it = 
             created_state.begin(); it != created_state.end(); it++)
       {
         rez.serialize((*it)->handle);
-        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/, 
-                                  remove_remote_references);
+        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/); 
         (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/,
-                                applied_events, remove_remote_references);
+                                  applied_events);
       }
       std::set<RtEvent> broadcast_events;
       shard_manager->broadcast_created_region_contexts(owner_shard, rez,
                                                        broadcast_events);
-      if (!remove_remote_references.empty())
-      {
-        RtEvent precondition;
-        if (!broadcast_events.empty())
-          precondition = Runtime::merge_events(broadcast_events);
-        if (precondition.exists() && !precondition.has_triggered())
-        {
-          std::vector<DistributedCollectable*> *to_remove =
-            new std::vector<DistributedCollectable*>();
-          to_remove->swap(remove_remote_references);
-          DeferRemoveRemoteReferenceArgs args(context_uid, to_remove);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, precondition);
-          applied_events.insert(precondition);
-        }
-        else
-          InnerContext::remove_remote_references(remove_remote_references);
-      }
-      else if (!broadcast_events.empty())
+      if (!broadcast_events.empty())
         applied_events.insert(broadcast_events.begin(), broadcast_events.end());
       receive_replicate_created_region_contexts(ctx, created_state,
                                                 applied_events, num_shards);
@@ -12952,16 +12937,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did, 
             provenance, &collective_mapping, value.expr_id,
-            ApEvent::NO_AP_EVENT, creation_bar, &applied);
-        // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+            ApEvent::NO_AP_EVENT, creation_bar);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -12986,16 +12965,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_index_space(handle, domain, value.did,
             provenance, &collective_mapping, value.expr_id,
-            ApEvent::NO_AP_EVENT, creation_bar, &applied);
+            ApEvent::NO_AP_EVENT, creation_bar);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -13104,16 +13078,11 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, type_tag);
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did, 
                                 provenance, &collective_mapping, value.expr_id,
-                                ready, creation_bar, &applied);
+                                ready, creation_bar);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13138,16 +13107,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         node = runtime->forest->create_index_space(handle, NULL, value.did,
                                 provenance, &collective_mapping, value.expr_id,
-                                ready, creation_bar, &applied);
+                                ready, creation_bar);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       creator_op->initialize_index_space(this, node, future, provenance,
           shard_manager->is_first_local_shard(owner_shard), 
@@ -13294,15 +13258,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, provenance,
-            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
+            spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13327,15 +13286,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_union_space(handle, value.did, provenance,
-            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
+            spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -13399,15 +13353,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid,spaces[0].get_type_tag());
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
-            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
+            spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13432,15 +13381,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_intersection_space(handle, value.did,provenance,
-            spaces, creation_bar, &collective_mapping, value.expr_id, &applied);
+            spaces,creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -13494,16 +13438,10 @@ namespace Legion {
         const ISBroadcast value = collective.first->get_value(false);
         handle = IndexSpace(value.space_id, value.tid, left.get_type_tag());
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, provenance,
-            left, right, creation_bar, &collective_mapping,
-            value.expr_id, &applied);
+            left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_index_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -13528,16 +13466,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_difference_space(handle, value.did, provenance,
-            left, right, creation_bar, &collective_mapping,
-            value.expr_id, &applied);
+            left, right, creation_bar, &collective_mapping, value.expr_id);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_index_spaces.pop_front();
@@ -14520,12 +14452,23 @@ namespace Legion {
                                         partition_color, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
-      // If we have any handles then we need to perform an exchange so
-      // that all the shards have all the names for the handles they need
-      if (!handles.empty())
+      // Perform the exchange of all the handle names so that we can record
+      // all the valid partition names here in this context
       {
         CrossProductCollective collective(this, COLLECTIVE_LOC_36);
         collective.exchange_partitions(handles);
+        // Record these partition handles that were created
+        AutoLock priv_lock(privilege_lock);
+        for (std::map<IndexSpace,IndexPartition>::const_iterator it =
+              handles.begin(); it != handles.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((created_index_partitions.find(it->second) ==
+                  created_index_partitions.end()) ||
+              (created_index_partitions[it->second] == 1));
+#endif
+          created_index_partitions[it->second] = 1;
+        }
       }
       // Update our allocation shard
       index_partition_allocator_shard++;
@@ -14730,7 +14673,7 @@ namespace Legion {
       const DistributedID did = runtime->get_available_distributed_id();
       IndexSpaceNode *color_node = runtime->forest->get_node(color_space); 
       FutureMap future_map(new FutureMapImpl(this, runtime, color_node, did,
-            total_children_count++, runtime->address_space, 
+            total_children_count++,
             ApEvent::NO_AP_EVENT, provenance, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
@@ -15856,15 +15799,10 @@ namespace Legion {
         space = FieldSpace(value.space_id);
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
-        std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_bar, &applied);
+            &collective_mapping, &shard_mapping, creation_bar);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
         runtime->revoke_pending_distributed_collectable(value.did);
 #ifdef DEBUG_LEGION
@@ -15889,15 +15827,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(space.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_bar, &applied);
+            &collective_mapping, &shard_mapping, creation_bar);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_field_spaces.pop_front();
@@ -16879,16 +16812,11 @@ namespace Legion {
         const LRBroadcast value = collective.first->get_value(false);
         handle.tree_id = value.tid;
         double_buffer = value.double_buffer;
-        std::set<RtEvent> applied;
         // Have to register this before doing the broadcast
         runtime->forest->create_logical_region(handle, value.did, provenance,
-            &collective_mapping, creation_bar, &applied);
+            &collective_mapping, creation_bar);
         // Arrive on the creation barrier
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         runtime->forest->revoke_pending_region_tree(value.tid);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -16915,15 +16843,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        std::set<RtEvent> applied;
         runtime->forest->create_logical_region(handle, value.did, provenance,
-            &collective_mapping, creation_bar, &applied);
+            &collective_mapping, creation_bar);
         // Signal that we are done our creation
-        if (!applied.empty())
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/,
-              Runtime::merge_events(applied));
-        else
-          Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
+        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }
       delete collective.first;
       pending_region_trees.pop_front();
@@ -17591,7 +17514,7 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(), runtime->address_space,
+          runtime->get_available_distributed_id(),
           ApEvent::NO_AP_EVENT, provenance, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
@@ -17649,8 +17572,7 @@ namespace Legion {
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          runtime->address_space, ApEvent::NO_AP_EVENT,
+          runtime->get_available_distributed_id(), ApEvent::NO_AP_EVENT,
           provenance, &reduction_op->sizeof_rhs);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
@@ -17708,8 +17630,7 @@ namespace Legion {
       {
         ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, runtime,
             domain_node, domain_node, runtime->get_available_distributed_id(),
-            total_children_count++, runtime->address_space,
-            ApEvent::NO_AP_EVENT, provenance);
+            total_children_count++, ApEvent::NO_AP_EVENT, provenance);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17746,10 +17667,8 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, runtime, domain_node, did,
-              total_children_count++, runtime->address_space,
-              ApEvent::NO_AP_EVENT, provenance));
+              total_children_count++, ApEvent::NO_AP_EVENT, provenance));
       }
-      LocalReferenceMutator mutator;
       for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
             data.begin(); it != data.end(); it++)
       {
@@ -17760,10 +17679,10 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), runtime->address_space,
+            runtime->get_available_distributed_id(),
             ApEvent::NO_AP_EVENT, provenance, &future_size);
         future->set_local(it->second.get_ptr(), future_size);
-        result.impl->set_future(it->first, future, &mutator);
+        result.impl->set_future(it->first, future);
       }
       return result;
     }
@@ -17812,8 +17731,7 @@ namespace Legion {
         // Make one future map for all the shards
         ReplFutureMapImpl *repl_impl =
           new ReplFutureMapImpl(this, creation_op, domain_node, domain_node,
-              runtime, runtime->get_available_distributed_id(),
-              runtime->address_space, provenance);
+              runtime, runtime->get_available_distributed_id(),  provenance);
         result = FutureMap(repl_impl);
         ShardingFunction *function = NULL;
         if (implicit)
@@ -17852,7 +17770,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const DistributedID did = runtime->get_available_distributed_id();
         result = FutureMap(new FutureMapImpl(this, creation_op, domain_node,
-                          runtime, did, runtime->address_space, provenance));
+                          runtime, did, provenance));
       }
       add_to_dependence_queue(creation_op);
       result.impl->set_all_futures(futures);
@@ -19610,13 +19528,11 @@ namespace Legion {
       {
         // local case
         FieldMask dummy_parent, covered_mask;
-        std::set<RtEvent> applied_events;
         for (FieldMaskSet<EquivalenceSet>::const_iterator it =
               result_sets.begin(); it != result_sets.end(); it++)
         {
           covered_mask |= it->second;
-          target->record_refinement(it->first, it->second, 
-                                    dummy_parent, applied_events);
+          target->record_refinement(it->first, it->second, dummy_parent);
         }
         if (covered_mask != result_sets.get_valid_mask())
         {
@@ -19628,11 +19544,7 @@ namespace Legion {
           FieldMask empty_mask = result_sets.get_valid_mask() - covered_mask;
           target->record_empty_refinement(empty_mask);
         }
-        if (!applied_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(applied_events));
-        else
-          Runtime::trigger_event(done_event);
+        Runtime::trigger_event(done_event);
       }
       else
       {
@@ -21524,7 +21436,6 @@ namespace Legion {
                            std::set<RtEvent> &applied_events, size_t num_shards)
     //--------------------------------------------------------------------------
     {
-      std::vector<DistributedCollectable*> remove_remote_references;
       const RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
       {
@@ -21536,30 +21447,15 @@ namespace Legion {
               created_state.begin(); it != created_state.end(); it++)
         {
           rez.serialize((*it)->handle);
-          (*it)->pack_logical_state(ctx.get_id(), rez, true/*invalidate*/, 
-                                    remove_remote_references);
+          (*it)->pack_logical_state(ctx.get_id(), rez, true/*invalidate*/); 
           (*it)->pack_version_state(ctx.get_id(), rez, true/*invalidate*/,
-                                applied_events, remove_remote_references);
+                                    applied_events);
         }
         rez.serialize(done_event);
       }
       const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
       runtime->send_created_region_contexts(target, rez);
       applied_events.insert(done_event);
-      if (!remove_remote_references.empty())
-      { 
-        if (!done_event.has_triggered())
-        {
-          std::vector<DistributedCollectable*> *to_remove = 
-            new std::vector<DistributedCollectable*>();
-          to_remove->swap(remove_remote_references);
-          DeferRemoveRemoteReferenceArgs args(context_uid, to_remove);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, done_event); 
-        }
-        else
-          InnerContext::remove_remote_references(remove_remote_references);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -21619,8 +21515,7 @@ namespace Legion {
       // If we're the top-level context then we're already done
       if (top_level_context)
         return;
-      WrapperReferenceMutator mutator(preconditions);
-      remote_task.unpack_external_task(derez, runtime, &mutator);
+      remote_task.unpack_external_task(derez, runtime);
       local_parent_req_indexes.resize(remote_task.regions.size()); 
       for (unsigned idx = 0; idx < local_parent_req_indexes.size(); idx++)
         derez.deserialize(local_parent_req_indexes[idx]);
@@ -23664,7 +23559,6 @@ namespace Legion {
                        const LegionVector<VersionInfo> &version_infos,
                        const std::vector<EquivalenceSet*> &equivalence_sets,
                        const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &applied_events,
                        std::set<RtEvent> &execution_events)
     //--------------------------------------------------------------------------
     {

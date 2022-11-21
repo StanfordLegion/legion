@@ -210,7 +210,6 @@ namespace Legion {
       virtual bool remove_recorder_reference(void) = 0;
       virtual void pack_recorder(Serializer &rez, 
                                  std::set<RtEvent> &applied) = 0; 
-      virtual RtEvent get_collect_event(void) const = 0;
     public:
       virtual void record_get_term_event(ApEvent lhs,
                              unsigned op_kind, const TraceLocalID &tlid) = 0;
@@ -343,7 +342,7 @@ namespace Legion {
     public:
       RemoteTraceRecorder(Runtime *rt, AddressSpaceID origin,AddressSpace local,
                           const TraceLocalID &tlid, PhysicalTemplate *tpl, 
-                          RtUserEvent applied_event, RtEvent collect_event);
+                          RtUserEvent applied_event);
       RemoteTraceRecorder(const RemoteTraceRecorder &rhs) = delete;
       virtual ~RemoteTraceRecorder(void);
     public:
@@ -354,7 +353,6 @@ namespace Legion {
       virtual bool remove_recorder_reference(void);
       virtual void pack_recorder(Serializer &rez, 
                                  std::set<RtEvent> &applied);
-      virtual RtEvent get_collect_event(void) const { return collect_event; }
     public:
       virtual void record_get_term_event(ApEvent lhs, unsigned op_kind,
                                          const TraceLocalID &tlid);
@@ -470,7 +468,6 @@ namespace Legion {
       const RtUserEvent applied_event;
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
-      const RtEvent collect_event;
     };
 
     /**
@@ -565,14 +562,6 @@ namespace Legion {
         {
           base_sanity_check();
           rec->record_reservations(tlid, reservations, applied);
-        }
-    public:
-      inline RtEvent get_collect_event(void) const 
-        {
-          if (!recording)
-            return RtEvent::NO_RT_EVENT;
-          else
-            return rec->get_collect_event();
         }
     protected:
       inline void base_sanity_check(void) const
@@ -781,14 +770,8 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-#ifdef ENABLE_VIEW_REPLICATION
-      PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, RtEvent collect_event,
-                   bool copy, bool covers);
-#else
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
                    UniqueID op_id, unsigned index, bool copy, bool covers);
-#endif
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -802,9 +785,6 @@ namespace Legion {
       IndexSpaceExpression *const expr;
       const UniqueID op_id;
       const unsigned index; // region requirement index
-#ifdef ENABLE_VIEW_REPLICATION
-      const RtEvent collect_event;
-#endif
       const bool copy_user; // is this from a copy or an operation
       const bool covers; // whether the expr covers the ExprView its in
     };  
@@ -821,9 +801,8 @@ namespace Legion {
       ProjectionSummary(IndexSpaceNode *is, 
                         ProjectionFunction *p, 
                         ShardingFunction *s,
-                        IndexSpaceNode *sd,
-                        std::set<RtEvent> &applied);
-      ProjectionSummary(const ProjectionInfo &info, std::set<RtEvent> &applied);
+                        IndexSpaceNode *sd);
+      ProjectionSummary(const ProjectionInfo &info);
       ProjectionSummary(ProjectionSummary &&rhs);
       ProjectionSummary(const ProjectionSummary &rhs);
       ~ProjectionSummary(void);
@@ -834,10 +813,9 @@ namespace Legion {
       bool operator==(const ProjectionSummary &rhs) const;
       bool operator!=(const ProjectionSummary &rhs) const;
     public:
-      void pack_summary(Serializer &rez,
-                        std::vector<DistributedCollectable*> &to_remove) const;
+      void pack_summary(Serializer &rez) const;
       static ProjectionSummary unpack_summary(Deserializer &derez,
-                        RegionTreeForest *context, std::set<RtEvent> &applied);
+                        RegionTreeForest *context);
     public:
       IndexSpaceNode *domain;
       ProjectionFunction *projection;
@@ -852,7 +830,7 @@ namespace Legion {
      */
     struct RefProjectionSummary : public ProjectionSummary, public Collectable {
     public:
-      RefProjectionSummary(const ProjectionInfo &info, std::set<RtEvent> &ap);
+      RefProjectionSummary(const ProjectionInfo &info);
       RefProjectionSummary(ProjectionSummary &&rhs);
       RefProjectionSummary(const RefProjectionSummary &rhs);
       ~RefProjectionSummary(void);
@@ -876,12 +854,11 @@ namespace Legion {
     public:
       FieldState(void);
       FieldState(const GenericUser &u, const FieldMask &m, 
-                 RegionTreeNode *child, std::set<RtEvent> &applied);
+                 RegionTreeNode *child);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
                  ShardingFunction *sharding_function, 
                  IndexSpaceNode *sharding_space,
-                 std::set<RtEvent> &applied,
                  RegionTreeNode *node);
       FieldState(const FieldState &rhs);
       FieldState(FieldState &&rhs) noexcept;
@@ -899,17 +876,18 @@ namespace Legion {
       void merge(FieldState &rhs, RegionTreeNode *node);
       bool filter(const FieldMask &mask);
       void add_child(RegionTreeNode *child,
-          const FieldMask &mask, std::set<RtEvent> &applied);
+                     const FieldMask &mask);
       void remove_child(RegionTreeNode *child);
     public:
       bool can_elide_close_operation(LogicalState &state,
                                      Operation *op, unsigned index,
                                      const ProjectionInfo &info,
-                                     RegionTreeNode *node,
-                                     std::set<RtEvent> &applied_events) const;
+                                     RegionTreeNode *node) const;
       void record_projection_summary(const ProjectionInfo &info,
                                      RegionTreeNode *node,
-                                     std::set<RtEvent> &applied_events);
+                                     bool reduction) const;
+      void record_projection_summary(const ProjectionInfo &info,
+                                     RegionTreeNode *node);
     protected:
       bool elide_singular_same_shard(const ProjectionSummary &prev,
                                      const ProjectionInfo &info) const;
@@ -997,11 +975,9 @@ namespace Legion {
       void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
     public:
       bool find_elide_close_result(const ProjectionInfo &info, 
-                  const std::set<ProjectionSummary> &projections, 
-                  bool &result, std::set<RtEvent> &applied_events) const;
+            const std::set<ProjectionSummary> &projections, bool &result) const;
       void record_elide_close_result(const ProjectionInfo &info,
-                  const std::set<ProjectionSummary> &projections,
-                  bool result, std::set<RtEvent> &applied_events);
+                  const std::set<ProjectionSummary> &projections, bool result);
     public:
       RegionTreeNode *const owner;
     public:
@@ -1206,10 +1182,9 @@ namespace Legion {
     public:
       void add_resource_reference(ReferenceSource source) const;
       void remove_resource_reference(ReferenceSource source) const;
-      void add_valid_reference(ReferenceSource source, 
-                               ReferenceMutator *mutator) const;
-      void remove_valid_reference(ReferenceSource source,
-                                  ReferenceMutator *mutator) const;
+      bool acquire_valid_reference(ReferenceSource source) const;
+      void add_valid_reference(ReferenceSource source) const; 
+      void remove_valid_reference(ReferenceSource source) const;
     public:
       Memory get_memory(void) const;
       PhysicalManager* get_physical_manager(void) const;
@@ -1292,10 +1267,9 @@ namespace Legion {
     public:
       void add_resource_references(ReferenceSource source) const;
       void remove_resource_references(ReferenceSource source) const;
-      void add_valid_references(ReferenceSource source,
-                                ReferenceMutator *mutator) const;
-      void remove_valid_references(ReferenceSource source,
-                                   ReferenceMutator *mutator) const;
+      bool acquire_valid_references(ReferenceSource source) const;
+      void add_valid_references(ReferenceSource source) const;
+      void remove_valid_references(ReferenceSource source) const;
     public:
       void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
     public:
@@ -1376,8 +1350,7 @@ namespace Legion {
      * then merges them together into the biggest possible copies
      * that can be issued together.
      */
-    class CopyFillAggregator : public WrapperReferenceMutator, 
-                               public CopyFillGuard,
+    class CopyFillAggregator : public CopyFillGuard,
                                public LegionHeapify<CopyFillAggregator> {
     public:
       static const AllocationType alloc_type = COPY_FILL_AGGREGATOR_ALLOC;
@@ -1501,7 +1474,6 @@ namespace Legion {
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
-                          std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_updates(InstanceView *dst_view, 
@@ -1509,7 +1481,6 @@ namespace Legion {
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
-                          std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       void record_partial_updates(InstanceView *dst_view,
@@ -1518,7 +1489,6 @@ namespace Legion {
                           const FieldMask &src_mask,
                           IndexSpaceExpression *expr,
                           EquivalenceSet *tracing_eq,
-                          std::set<RtEvent> &applied,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
       // Neither fills nor reductions should have a redop across as they
@@ -1528,7 +1498,6 @@ namespace Legion {
                        const FieldMask &fill_mask,
                        IndexSpaceExpression *expr,
                        EquivalenceSet *tracing_eq,
-                       std::set<RtEvent> &applied,
                        CopyAcrossHelper *across_helper = NULL);
       void record_reductions(InstanceView *dst_view,
                              const std::list<std::pair<ReductionView*,
@@ -1536,7 +1505,6 @@ namespace Legion {
                              const unsigned src_fidx,
                              const unsigned dst_fidx,
                              EquivalenceSet *tracing_eq,
-                             std::set<RtEvent> &applied,
                              CopyAcrossHelper *across_helper = NULL);
       void issue_updates(const PhysicalTraceInfo &trace_info, 
                          ApEvent precondition,
@@ -1554,8 +1522,7 @@ namespace Legion {
       void resize_reductions(size_t new_size);
       void update_tracing_valid_views(EquivalenceSet *tracing_eq,
             LogicalView *src, LogicalView *dst, const FieldMask &mask,
-            IndexSpaceExpression *expr, ReductionOpID redop,
-            std::set<RtEvent> &applied_events) const;
+            IndexSpaceExpression *expr, ReductionOpID redop) const;
       void perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> > &updates,
                            const PhysicalTraceInfo &trace_info,
@@ -2414,19 +2381,6 @@ namespace Legion {
     class EquivalenceSet : public DistributedCollectable,
                            public LegionHeapify<EquivalenceSet> {
     public:
-      template<bool INC>
-      class ValidityFunctor {
-      public:
-        ValidityFunctor(EquivalenceSet *s, ReferenceMutator *m)
-          : set(s), mutator(m) { }
-      public:
-        void apply(AddressSpaceID target)
-          { if (INC) set->send_remote_gc_increment(target, mutator);
-            else set->send_remote_gc_decrement(target, mutator); }
-      public:
-        EquivalenceSet *const set;
-        ReferenceMutator *const mutator;
-      };
       class UpdateReplicatedFunctor {
       public:
         UpdateReplicatedFunctor(DistributedID did, const FieldMask &mask,
@@ -2517,19 +2471,8 @@ namespace Legion {
         const RtUserEvent done_event;
         const bool forward_to_owner;
       };
-      struct DeferReleaseRefArgs : public LgTaskArgs<DeferReleaseRefArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_RELEASE_REF_TASK_ID;
-      public:
-        DeferReleaseRefArgs(DistributedID did);
-      public:
-        const DistributedID did;
-        std::map<LogicalView*,unsigned> *const view_refs_to_remove;
-        std::map<IndexSpaceExpression*,unsigned> *const expr_refs_to_remove;
-      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
-                     AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
                      RegionNode *region_node,
                      bool register_now, 
@@ -2548,18 +2491,15 @@ namespace Legion {
         { return replicated_states.get_valid_mask(); }
     public:
       // From distributed collectable
-      virtual void notify_active(ReferenceMutator *mutator);
-      virtual void notify_inactive(ReferenceMutator *mutator);
-      virtual void notify_valid(ReferenceMutator *mutator);
-      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_invalid(void) { assert(false); }
+      virtual void notify_local(void);
     public:
       // Analysis methods
       void initialize_set(const RegionUsage &usage,
                           const FieldMask &user_mask,
                           const bool restricted,
                           const InstanceSet &sources,
-            const std::vector<InstanceView*> &corresponding,
-                          std::set<RtEvent> &applied_events);
+            const std::vector<InstanceView*> &corresponding);
       void find_valid_instances(ValidInstAnalysis &analysis,
                                 IndexSpaceExpression *expr,
                                 const bool expr_covers, 
@@ -2640,12 +2580,10 @@ namespace Legion {
                                       IndexSpaceExpression *expr,
                                       const RegionUsage &usage,
                                       const FieldMask &user_mask,
-                                      const bool invalidates,
-                                      std::set<RtEvent> &applied);
+                                      const bool invalidates);
       void update_tracing_anti_views(LogicalView *view,
                                      IndexSpaceExpression *expr,
-                                     const FieldMask &user_mask,
-                                     std::set<RtEvent> &applied);
+                                     const FieldMask &user_mask);
       RtEvent capture_trace_conditions(TraceConditionSet *target,
                                        AddressSpaceID target_space,
                                        IndexSpaceExpression *expr,
@@ -2677,35 +2615,29 @@ namespace Legion {
                                   std::set<RtEvent> &applied_events) const;
       void update_initialized_data(IndexSpaceExpression *expr, 
                                    const bool expr_covers,
-                                   const FieldMask &user_mask,
-                                   ReferenceMutator &mutator);
+                                   const FieldMask &user_mask);
       template<typename T>
       void record_instances(IndexSpaceExpression *expr, const bool expr_covers,
                             const FieldMask &record_mask, 
-                            const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator);
+                            const FieldMaskSet<T> &new_views);
       template<typename T>
       void record_unrestricted_instances(IndexSpaceExpression *expr,
                             const bool expr_covers, FieldMask record_mask, 
-                            const FieldMaskSet<T> &new_views,
-                                  ReferenceMutator &mutator);
+                            const FieldMaskSet<T> &new_views);
       bool record_partial_valid_instance(LogicalView *instance,
                                          IndexSpaceExpression *expr,
                                          FieldMask valid_mask,
-                                         ReferenceMutator &mutator,
                                          bool check_total_valid = true);
       void filter_valid_instances(IndexSpaceExpression *expr, 
                                   const bool expr_covers, 
                                   const FieldMask &filter_mask,
-                                  ReferenceMutator &mutator,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void filter_unrestricted_instances(IndexSpaceExpression *expr,
                                          const bool expr_covers, 
-                                         FieldMask filter_mask,
-                                         ReferenceMutator &mutator);
+                                         FieldMask filter_mask);
       void filter_reduction_instances(IndexSpaceExpression *expr,
-           const bool covers, const FieldMask &mask, ReferenceMutator &mutator,
+           const bool covers, const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
            std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void update_set_internal(CopyFillAggregator *&input_aggregator,
@@ -2718,7 +2650,6 @@ namespace Legion {
                                const FieldMaskSet<InstanceView> &target_insts,
                                const std::vector<InstanceView*> &source_insts,
                                const PhysicalTraceInfo &trace_info,
-                               std::set<RtEvent> &applied_events,
                                const bool record_valid);
       void make_instances_valid(CopyFillAggregator *&aggregator,
                                 CopyFillGuard *previous_guard,
@@ -2730,7 +2661,6 @@ namespace Legion {
                                 const FieldMaskSet<InstanceView> &target_insts,
                                 const std::vector<InstanceView*> &source_insts,
                                 const PhysicalTraceInfo &trace_info,
-                                std::set<RtEvent> &applied_events,
                                 const bool skip_check = false,
                                 const int dst_index = -1,
                                 const ReductionOpID redop = 0,
@@ -2745,7 +2675,6 @@ namespace Legion {
                                          const bool expr_covers,
                                          FieldMask update_mask,
                                          const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &applied_events,
                                          const int dst_index,
                                          const ReductionOpID redop,
                                          CopyAcrossHelper *across_helper);
@@ -2757,7 +2686,6 @@ namespace Legion {
                             Operation *op, const unsigned index, 
                             const bool track_events,
                             const PhysicalTraceInfo &trace_info,
-                            std::set<RtEvent> &applied_events,
                             FieldMaskSet<IndexSpaceExpression> *applied_exprs,
                             CopyAcrossHelper *across_helper = NULL);
       template<typename T>
@@ -2766,27 +2694,24 @@ namespace Legion {
                     const FieldMaskSet<T> &src_views,
                     Operation *op, const unsigned index,
                     const PhysicalTraceInfo &trace_info,
-                    std::set<RtEvent> &applied_events,
                     CopyFillAggregator *&aggregator);
       void record_restriction(IndexSpaceExpression *expr, 
                               const bool expr_covers,
                               const FieldMask &restrict_mask,
-                              InstanceView *restricted_view,
-                              ReferenceMutator &mutator);
-      void update_reductions(const unsigned fidx, ReferenceMutator &mutator,
+                              InstanceView *restricted_view);
+      void update_reductions(const unsigned fidx,
           std::list<std::pair<ReductionView*,IndexSpaceExpression*> > &updates);
       void update_released(IndexSpaceExpression *expr, const bool expr_covers,
-                FieldMaskSet<InstanceView> &updates, ReferenceMutator &mutator);
+                FieldMaskSet<InstanceView> &updates);
       void filter_initialized_data(IndexSpaceExpression *expr, 
           const bool expr_covers, const FieldMask &filter_mask, 
-          ReferenceMutator &mutator, 
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL);
       void filter_restricted_instances(IndexSpaceExpression *expr, 
-          const bool covers, const FieldMask &mask, ReferenceMutator &mutator,
+          const bool covers, const FieldMask &mask,
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
       void filter_released_instances(IndexSpaceExpression *expr, 
-          const bool covers, const FieldMask &mask, ReferenceMutator &mutator, 
+          const bool covers, const FieldMask &mask,
           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
     protected:
@@ -2820,7 +2745,7 @@ namespace Legion {
           const AddressSpaceID source, const bool forward_to_owner,
           std::set<RtEvent> &ready_events);
       void invalidate_state(IndexSpaceExpression *expr, const bool expr_covers,
-                            const FieldMask &mask, RtEvent remove_ref_event);
+                            const FieldMask &mask);
       void clone_to_local(EquivalenceSet *dst, FieldMask mask,
                           std::set<RtEvent> &applied_events,
                           const bool invalidate_overlap,
@@ -2844,8 +2769,7 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
-            TraceViewSet *&postcondition_updates,
-            ReferenceMutator &mutator) const;
+            TraceViewSet *&postcondition_updates) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
@@ -2881,12 +2805,11 @@ namespace Legion {
       static void handle_make_owner(const void *args);
       static void handle_pending_replication(const void *args);
       static void handle_apply_state(const void *args);
-      static void handle_remove_refs(const void *args);
     public:
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
+                                                  Runtime *runtime);
       static void handle_migration(Deserializer &derez, 
                                    Runtime *runtime, AddressSpaceID source);
       static void handle_owner_update(Deserializer &derez, Runtime *rt);
@@ -2961,13 +2884,6 @@ namespace Legion {
         user_samples[MIGRATION_EPOCHS];
       unsigned migration_index;
       unsigned sample_count;
-    protected:
-      bool init_collective_refs;
-#ifdef DEBUG_LEGION
-    protected:
-      // Make sure that each equivalence set only becomes active once
-      bool active_once;
-#endif
     };
 
     /**
@@ -2996,10 +2912,8 @@ namespace Legion {
     public:
       PendingEquivalenceSet& operator=(const PendingEquivalenceSet &rhs);
     public:
-      void record_previous(EquivalenceSet *set, const FieldMask &mask,
-                           std::set<RtEvent> &applied_events);
-      void record_all(VersionInfo &version_info, 
-                      std::set<RtEvent> &applied_events);
+      void record_previous(EquivalenceSet *set, const FieldMask &mask);
+      void record_all(VersionInfo &version_info); 
     public:
       EquivalenceSet* compute_refinement(AddressSpaceID suggested_owner,
                       Runtime *runtime, std::set<RtEvent> &ready_events);
@@ -3094,10 +3008,9 @@ namespace Legion {
     public:
       // Call these from region nodes
       void initialize_versioning_analysis(EquivalenceSet *set,
-              const FieldMask &mask, std::set<RtEvent> &applied_events);
+                                          const FieldMask &mask);
       void initialize_nonexclusive_virtual_analysis(const FieldMask &mask,
-                                    const FieldMaskSet<EquivalenceSet> &sets,
-                                    std::set<RtEvent> &applied_events);
+                                    const FieldMaskSet<EquivalenceSet> &sets);
       void compute_equivalence_sets(const ContextID ctx,
                                     IndexSpaceExpression *expr,
                                     EqSetTracker *target, 
@@ -3118,8 +3031,7 @@ namespace Legion {
       static void handle_compute_equivalence_sets_response(
                   Deserializer &derez, Runtime *runtime, AddressSpaceID source);
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
-                             FieldMask &parent_mask,
-                             std::set<RtEvent> &applied_events);
+                             FieldMask &parent_mask);
       void record_empty_refinement(const FieldMask &mask);
     public:
       // Call these from partition nodes
@@ -3128,14 +3040,12 @@ namespace Legion {
                                     FieldMask &children_traversal) const;
       void propagate_refinement(const std::vector<RegionNode*> &children,
                                 const FieldMask &child_mask, 
-                                FieldMask &parent_mask,
-                                std::set<RtEvent> &applied_events);
+                                FieldMask &parent_mask);
     public:
       // Call these from either type of region tree node
       void propagate_refinement(RegionTreeNode *child, 
                                 const FieldMask &child_mask, 
-                                FieldMask &parent_mask,
-                                std::set<RtEvent> &applied_events);
+                                FieldMask &parent_mask);
       void invalidate_refinement(InnerContext &context,
                                  const FieldMask &mask, bool invalidate_self,
                                  FieldMaskSet<RegionTreeNode> &to_traverse,
@@ -3149,8 +3059,7 @@ namespace Legion {
               LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void pack_manager(Serializer &rez, const bool invalidate, 
                 std::map<LegionColor,RegionTreeNode*> &to_traverse,
-                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers,
-                std::vector<DistributedCollectable*> &to_remove);
+                LegionMap<AddressSpaceID,SubscriberInvalidations> &subscribers);
       void unpack_manager(Deserializer &derez, AddressSpaceID source,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse);
       void filter_refinement_subscriptions(const FieldMask &mask,

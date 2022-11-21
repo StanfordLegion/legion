@@ -100,7 +100,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ExternalTask::unpack_external_task(Deserializer &derez,
-                                    Runtime *runtime, ReferenceMutator *mutator)
+                                            Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -124,13 +124,7 @@ namespace Legion {
       derez.deserialize(num_futures);
       futures.resize(num_futures);
       for (unsigned idx = 0; idx < futures.size(); idx++)
-      {
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, mutator);
-        if (impl == NULL)
-          continue;
-        impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
-        futures[idx] = Future(impl, false/*need reference*/);
-      }
+        futures[idx] = FutureImpl::unpack_future(runtime, derez);
       size_t num_grants;
       derez.deserialize(num_grants);
       grants.resize(num_grants);
@@ -484,7 +478,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, UNPACK_BASE_TASK_CALL);
       // unpack all the user facing data
-      unpack_external_task(derez, runtime, this); 
+      unpack_external_task(derez, runtime); 
       DerezCheck z(derez);
       size_t num_indexes;
       derez.deserialize(num_indexes);
@@ -2236,11 +2230,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteTaskOp::unpack(Deserializer &derez,
-                              ReferenceMutator &mutator)
+    void RemoteTaskOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      unpack_external_task(derez, runtime, &mutator);
+      unpack_external_task(derez, runtime);
       unpack_profiling_requests(derez);
     }
 
@@ -2442,16 +2435,6 @@ namespace Legion {
           // Clear it once we've packed it up
           deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
-        if (memo_state == MEMO_RECORD)
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl != NULL);
-#endif
-          if (is_remote())
-            rez.serialize(remote_collect_event);
-          else
-            rez.serialize(tpl->get_collect_event());
-        }
       }
     }
 
@@ -2525,13 +2508,6 @@ namespace Legion {
       {
         derez.deserialize(deferred_complete_mapping);
         version_infos.resize(logical_regions.size());
-        if (memo_state == MEMO_RECORD)
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl != NULL);
-#endif
-          derez.deserialize(remote_collect_event);
-        }
       }
       update_no_access_regions();
     } 
@@ -4011,7 +3987,7 @@ namespace Legion {
         const RtUserEvent remote_applied = Runtime::create_rt_user_event();
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
             orig_proc.address_space(), runtime->address_space, 
-            get_trace_local_id(), tpl, remote_applied, remote_collect_event);
+            get_trace_local_id(), tpl, remote_applied);
         remote_trace_recorder->add_recorder_reference();
         map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION
@@ -4755,7 +4731,7 @@ namespace Legion {
         std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
                                 version_infos, equivalence_sets, unmap_events,
-                                map_applied_conditions, execution_events);
+                                execution_events);
         // Execution events come from copying over virtual mapping state
         // which needs to be done before the child task starts
         if (!execution_events.empty())
@@ -5236,10 +5212,9 @@ namespace Legion {
       RegionNode *node = runtime->forest->get_node(regions[idx].region);
       EquivalenceSet *result =
         new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, runtime->address_space, node,
-            true/*register now*/);
+            runtime->address_space, node, true/*register now*/);
       // Add a context ref that will be removed after this is registered
-      result->add_base_valid_ref(CONTEXT_REF);
+      result->add_base_gc_ref(CONTEXT_REF);
       return result;
     } 
 
@@ -5728,8 +5703,7 @@ namespace Legion {
       assert(launch_space == NULL);
 #endif
       launch_space = runtime->forest->get_node(launch_handle);
-      WrapperReferenceMutator mutator(ready_events);
-      launch_space->add_base_valid_ref(CONTEXT_REF, &mutator);
+      launch_space->add_base_valid_ref(CONTEXT_REF);
       derez.deserialize(sliced);
       derez.deserialize(redop);
       if (redop > 0)
@@ -6049,8 +6023,7 @@ namespace Legion {
         elide_future_return = true;
       else
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), 
-              runtime->address_space, get_completion_event(), 
+              runtime->get_available_distributed_id(), get_completion_event(),
               this, gen, context_index, index_point,
 #ifdef LEGION_SPY
               unique_op_id,
@@ -6190,8 +6163,7 @@ namespace Legion {
                                                      logical_regions[idx], 
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -6687,13 +6659,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     bool IndividualTask::pack_task(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -6779,17 +6744,9 @@ namespace Legion {
       }
       if (!elide_future_return)
       {
-        WrapperReferenceMutator mutator(ready_events);
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
-        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-        result = Future(impl, false/*need reference*/);
+        result = FutureImpl::unpack_future(runtime, derez);
         // Unpack the predicate false infos
-        impl = FutureImpl::unpack_future(runtime, derez, &mutator);
-        if (impl != NULL)
-        {
-          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-          predicate_false_future = Future(impl, false/*need reference*/);
-        }
+        predicate_false_future = FutureImpl::unpack_future(runtime, derez);
         derez.deserialize(predicate_false_size);
         if (predicate_false_size > 0)
         {
@@ -7575,13 +7532,6 @@ namespace Legion {
       FutureInstance *instance = elide_future_return ? NULL : 
         slice_owner->get_predicate_false_result(current_proc,metadata,metasize);
       execution_context->end_misspeculation(instance, metadata, metasize);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -9064,7 +9014,7 @@ namespace Legion {
                              launcher.predicate_false_result);
       reduction_future = Future(new FutureImpl(parent_ctx, runtime,
           true/*register*/, runtime->get_available_distributed_id(), 
-          runtime->address_space, get_completion_event(), provenance,
+          get_completion_event(), provenance,
           (serdez_redop_fns == NULL) ? &reduction_op->sizeof_rhs : NULL, this));
       check_empty_field_requirements();
       if (concurrent_task && parent_ctx->is_concurrent_context())
@@ -9192,8 +9142,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, req,
                                                      projection_info,
                                                      privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
       }
     }
 
@@ -9410,7 +9359,7 @@ namespace Legion {
           enumerate_futures(index_domain);
         // Prepare any setup for performing the concurrent analysis
         if (concurrent_task)
-          initialize_concurrent_analysis();
+          initialize_concurrent_analysis(false/*replay*/);
         Operation::trigger_ready();
       }
     }
@@ -9434,12 +9383,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::initialize_concurrent_analysis(void)
+    void IndexTask::initialize_concurrent_analysis(bool replay)
     //--------------------------------------------------------------------------
     {
       // Ask the runtime to acquire the concurrent reservation
-      concurrent_precondition = 
-        runtime->acquire_concurrent_reservation(mapped_event);
+      if (replay)
+        concurrent_precondition = 
+         parent_ctx->total_hack_function_for_inorder_concurrent_replay_analysis(
+                                                                  mapped_event);
+      else
+        concurrent_precondition = 
+          runtime->acquire_concurrent_reservation(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -10160,8 +10114,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return new FutureMapImpl(ctx, this, this->launch_space, runtime,
-          runtime->get_available_distributed_id(), runtime->address_space,
-          get_provenance());
+          runtime->get_available_distributed_id(), get_provenance());
     }
 
     //--------------------------------------------------------------------------
@@ -10206,14 +10159,6 @@ namespace Legion {
       }
       else
         intra_space_dependences[point] = point_mapped;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -10657,7 +10602,7 @@ namespace Legion {
       }
       // Prepare any setup for performing the concurrent analysis
       if (concurrent_task)
-        initialize_concurrent_analysis();
+        initialize_concurrent_analysis(true/*replay*/);
       // Mark that this is origin mapped effectively in case we
       // have any remote tasks, do this before we clone it
       map_origin = true;
@@ -11411,17 +11356,11 @@ namespace Legion {
         parent_ctx = index_owner->parent_ctx;
       if (!elide_future_return)
       {
-        WrapperReferenceMutator mutator(ready_events);
         if (redop == 0)
-          future_map = FutureMap(FutureMapImpl::unpack_future_map(runtime, 
-                                              derez, &mutator, parent_ctx));
+          future_map = FutureMapImpl::unpack_future_map(runtime, derez, 
+                                                        parent_ctx);
         // Unpack the predicate false infos
-        FutureImpl *impl = FutureImpl::unpack_future(runtime, derez, &mutator);
-        if (impl != NULL)
-        {
-          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-          predicate_false_future = Future(impl, false/*need reference*/);
-        }
+        predicate_false_future = FutureImpl::unpack_future(runtime, derez);
         derez.deserialize(predicate_false_size);
         if (predicate_false_size > 0)
         {
@@ -11449,31 +11388,16 @@ namespace Legion {
       }
       if (num_points == 0)
       {
-        WrapperReferenceMutator mutator(ready_events);
-        {
-          FutureMapImpl *impl = FutureMapImpl::unpack_future_map(runtime,
-              derez, &mutator, parent_ctx);
-          if (impl != NULL)
-          {
-            impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-            point_arguments = FutureMap(impl, false/*need reference*/);
-          }
-        }
+        point_arguments = FutureMapImpl::unpack_future_map(runtime, derez, 
+                                                           parent_ctx);
         size_t num_point_futures;
         derez.deserialize(num_point_futures);
         if (num_point_futures > 0)
         {
           point_futures.resize(num_point_futures);
           for (unsigned idx = 0; idx < num_point_futures; idx++)
-          {
-            FutureMapImpl *impl = FutureMapImpl::unpack_future_map(
-                runtime, derez, &mutator, parent_ctx);
-            if (impl != NULL)
-            {
-              impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
-              point_futures[idx] = FutureMap(impl, false/*need reference*/);
-            }
-          }
+            point_futures[idx] = FutureMapImpl::unpack_future_map(runtime, 
+                                                        derez, parent_ctx);
         }
         derez.deserialize(concurrent_precondition);
       }
@@ -11672,9 +11596,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != future_handles->handles.end());
 #endif
-        LocalReferenceMutator mutator;
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->get_context_uid(), &mutator, context_index, point,
+            parent_ctx->get_context_uid(), context_index, point,
             get_provenance());
         if (functor != NULL)
         {
@@ -11688,12 +11611,6 @@ namespace Legion {
         {
           impl->set_result(instance, metadata, metasize);
           metadata = NULL; // no longer own the allocation
-        }
-        const RtEvent applied = mutator.get_done_event();
-        if (applied.exists() && !applied.has_triggered())
-        {
-          AutoLock o_lock(op_lock);
-          complete_preconditions.insert(applied);
         }
       }
       if (metadata != NULL)
@@ -11853,13 +11770,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::return_privileges(TaskContext *point_context,
                                       std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -11980,10 +11890,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != handles.end());
 #endif
-      WrapperReferenceMutator mutator(applied_conditions);
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->get_context_uid(), &mutator, context_index, point,
-        get_provenance());
+        parent_ctx->get_context_uid(), context_index, point, get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 

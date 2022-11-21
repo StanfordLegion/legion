@@ -164,13 +164,12 @@ namespace Legion {
                                         CollectiveMapping *mapping,
                                         IndexSpaceExprID expr_id,
                                         ApEvent ready /*=ApEvent::NO_AP_EVENT*/,
-                                        RtEvent init /*= RtEvent::NO_RT_EVENT*/,
-                                        std::set<RtEvent> *applied /*= NULL*/)
+                                        RtEvent init /*= RtEvent::NO_RT_EVENT*/)
     //--------------------------------------------------------------------------
     {
       return create_node(handle, domain, true/*is domain*/, NULL/*parent*/, 
                          0/*color*/, did, init, provenance, ready, expr_id,
-                         mapping, applied, true/*add root reference*/);
+                         mapping, true/*add root reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -178,7 +177,7 @@ namespace Legion {
                     DistributedID did, Provenance *provenance,
                     const std::vector<IndexSpace> &sources, 
                     RtEvent initialized, CollectiveMapping *collective_mapping,
-                    IndexSpaceExprID expr_id, std::set<RtEvent> *applied)
+                    IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -194,7 +193,7 @@ namespace Legion {
       assert(!exprs.empty());
 #endif
       IndexSpaceExpression *expr = union_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, provenance, applied,
+      return expr->create_node(handle, did, initialized, provenance,
                                collective_mapping, expr_id);
     }
 
@@ -205,8 +204,7 @@ namespace Legion {
                                         const std::vector<IndexSpace> &sources,
                                         RtEvent initialized, 
                                         CollectiveMapping *collective_mapping,
-                                        IndexSpaceExprID expr_id, 
-                                        std::set<RtEvent> *applied)
+                                        IndexSpaceExprID expr_id) 
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -222,7 +220,7 @@ namespace Legion {
       assert(!exprs.empty());
 #endif
       IndexSpaceExpression *expr = intersect_index_spaces(exprs);
-      return expr->create_node(handle, did, initialized, provenance, applied,
+      return expr->create_node(handle, did, initialized, provenance,
                                collective_mapping, expr_id);
     }
 
@@ -233,8 +231,7 @@ namespace Legion {
                                          IndexSpace left, IndexSpace right, 
                                          RtEvent initialized, 
                                          CollectiveMapping *collective_mapping,
-                                         IndexSpaceExprID expr_id,
-                                         std::set<RtEvent> *applied)
+                                         IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -243,10 +240,10 @@ namespace Legion {
       IndexSpaceNode *lhs = get_node(left);
       if (!right.exists())
         return lhs->create_node(handle, did, initialized, provenance,
-                                applied, collective_mapping);
+                                collective_mapping);
       IndexSpaceNode *rhs = get_node(right);
       IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
-      return expr->create_node(handle, did, initialized, provenance, applied,
+      return expr->create_node(handle, did, initialized, provenance,
                                collective_mapping, expr_id);
     }
 
@@ -290,7 +287,6 @@ namespace Legion {
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
-      std::set<RtEvent> applied;
       if ((part_kind == LEGION_COMPUTE_KIND) || 
           (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
           (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
@@ -302,11 +298,9 @@ namespace Legion {
                          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         IndexPartNode *node = create_node(pid, parent_node, color_node, 
             partition_color, disjointness_event, complete, did, provenance,
-            partition_ready, partial_pending, RtEvent::NO_RT_EVENT, 
-            NULL/*mapping*/, NULL/*shard mapping*/, &applied);
-        WrapperReferenceMutator mutator(applied);
+            partition_ready, partial_pending, RtEvent::NO_RT_EVENT); 
         // Get a reference for the node to hold until disjointness is computed
-        node->add_base_valid_ref(APPLICATION_REF, &mutator);
+        node->add_base_valid_ref(APPLICATION_REF);
         IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
         Runtime::trigger_event(disjointness_event,
             runtime->issue_runtime_meta_task(args, 
@@ -330,7 +324,7 @@ namespace Legion {
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color, disjoint,
                     complete, did, provenance, partition_ready, partial_pending,
-                    RtEvent::NO_RT_EVENT, NULL, NULL, &applied);
+                    RtEvent::NO_RT_EVENT);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
@@ -340,12 +334,6 @@ namespace Legion {
 						    partition_color);
       }
       ctx->register_index_partition_creation(pid);
-      if (!applied.empty())
-      {
-        if (parent_notified.exists())
-          applied.insert(parent_notified);
-        return Runtime::merge_events(applied);
-      }
       return parent_notified;
     }
 
@@ -495,10 +483,7 @@ namespace Legion {
                                      part_color, kind, did, 
                                      provenance, domain_ready); 
           // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
+          user_handles[child_node->handle] = pid;
           if (safe.exists())
             safe_events.insert(safe);
         }
@@ -519,10 +504,7 @@ namespace Legion {
                                      part_color, kind, did, 
                                      provenance, domain_ready); 
           // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
+          user_handles[child_node->handle] = pid;
           if (safe.exists())
             safe_events.insert(safe);
         }
@@ -552,10 +534,7 @@ namespace Legion {
                                      part_color, kind, did, 
                                      provenance, domain_ready);
           // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
+          user_handles[child_node->handle] = pid;
           // Skip ahead for the next color if necessary
           for (unsigned idx = 0; idx < (total_shards-1); idx++)
           {
@@ -634,7 +613,6 @@ namespace Legion {
           assert(part_result == NULL);
 #endif
         IndexPartNode *part_node;
-        std::set<RtEvent> applied;
         if ((part_kind != LEGION_COMPUTE_KIND) && 
             (part_kind != LEGION_COMPUTE_COMPLETE_KIND) && 
             (part_kind != LEGION_COMPUTE_INCOMPLETE_KIND))
@@ -650,7 +628,7 @@ namespace Legion {
                           (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, provenance, partition_ready,
-            partial_pending, creation_ready, mapping, shard_mapping, &applied);
+            partial_pending, creation_ready, mapping, shard_mapping);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
                 complete, partition_color, runtime->address_space,
@@ -669,7 +647,7 @@ namespace Legion {
                                   disjointness_event, complete, did, provenance,
                                   partition_ready, partial_pending,
                                   creation_ready, mapping, 
-                                  shard_mapping, &applied);
+                                  shard_mapping);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
                 complete, partition_color, runtime->address_space,
@@ -678,8 +656,7 @@ namespace Legion {
         if (disjointness_event.exists())
         {
           // Hold a reference on the node until disjointness is performed
-          WrapperReferenceMutator mutator(applied);
-          part_node->add_base_valid_ref(APPLICATION_REF, &mutator);
+          part_node->add_base_valid_ref(APPLICATION_REF);
           IndexPartNode::DisjointnessArgs args(pid, part_result, true/*owner*/);
           // Don't do the disjointness test until all the partition
           // is ready and has been created on all the nodes
@@ -690,12 +667,6 @@ namespace Legion {
                   Runtime::protect_event(partition_ready))));
         }
         ctx->register_index_partition_creation(pid);
-        if (!applied.empty())
-        {
-          if (parent_notified.exists())
-            applied.insert(parent_notified);
-          return Runtime::merge_events(applied);
-        }
         return parent_notified;
       }
       else
@@ -721,7 +692,6 @@ namespace Legion {
           assert(part_result == NULL);
 #endif
         IndexPartNode *part_node;
-        std::set<RtEvent> applied;
         if ((part_kind != LEGION_COMPUTE_KIND) && 
             (part_kind != LEGION_COMPUTE_COMPLETE_KIND) && 
             (part_kind != LEGION_COMPUTE_INCOMPLETE_KIND))
@@ -737,7 +707,7 @@ namespace Legion {
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, provenance, partition_ready,
-            partial_pending, creation_ready, mapping, shard_mapping, &applied);
+            partial_pending, creation_ready, mapping, shard_mapping);
         }
         else
         {
@@ -748,8 +718,7 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did, provenance,
                                   partition_ready, partial_pending,
-                                  creation_ready, mapping,
-                                  shard_mapping, &applied);
+                                  creation_ready, mapping, shard_mapping);
         }
         if (disjointness_event.exists())
         {
@@ -765,8 +734,6 @@ namespace Legion {
         ctx->register_index_partition_creation(pid);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
-        if (!applied.empty())
-          return Runtime::merge_events(applied);
         return RtEvent::NO_RT_EVENT;
       }
     }
@@ -785,7 +752,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::destroy_index_partition(IndexPartition handle,
-                                               std::set<RtEvent> &applied,
+                                                   std::set<RtEvent> &applied,
                                                const CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
@@ -799,8 +766,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             IndexPartNode *node = get_node(handle);
-            WrapperReferenceMutator mutator(applied);
-            if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+            if (node->remove_base_valid_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -817,8 +783,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           IndexPartNode *node = get_node(handle);
-          WrapperReferenceMutator mutator(applied);
-          if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+          if (node->remove_base_valid_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -1381,12 +1346,11 @@ namespace Legion {
                                                     Provenance *provenance,
                                                     CollectiveMapping *mapping,
                                                     ShardMapping *shard_mapping,
-                                                    RtEvent initialized,
-                                                    std::set<RtEvent> *applied)
+                                                    RtEvent initialized)
     //--------------------------------------------------------------------------
     {
       return create_node(handle, did, initialized, provenance, 
-                         mapping, shard_mapping, applied); 
+                         mapping, shard_mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -1405,8 +1369,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             FieldSpaceNode *node = get_node(handle);
-            WrapperReferenceMutator mutator(applied);
-            if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+            if (node->remove_base_gc_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -1422,8 +1385,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           FieldSpaceNode *node = get_node(handle);
-          WrapperReferenceMutator mutator(applied);
-          if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+          if (node->remove_base_gc_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -1615,12 +1577,11 @@ namespace Legion {
                                                      DistributedID did,
                                                      Provenance *provenance,
                                                      CollectiveMapping *mapping,
-                                                     RtEvent initialized,
-                                                     std::set<RtEvent> *applied)
+                                                     RtEvent initialized)
     //--------------------------------------------------------------------------
     {
       return create_node(handle, NULL/*parent*/, initialized, did,
-                         provenance, mapping, applied);
+                         provenance, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -1639,8 +1600,7 @@ namespace Legion {
           if (owner_space == runtime->address_space)
           {
             RegionNode *node = get_node(handle);
-            WrapperReferenceMutator mutator(applied);
-            if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+            if (node->remove_base_gc_ref(APPLICATION_REF))
               delete node;
           }
         }
@@ -1657,8 +1617,7 @@ namespace Legion {
         if (owner_space == runtime->address_space)
         {
           RegionNode *node = get_node(handle);
-          WrapperReferenceMutator mutator(applied);
-          if (node->remove_base_valid_ref(APPLICATION_REF, &mutator))
+          if (node->remove_base_gc_ref(APPLICATION_REF))
             delete node;
         }
         else
@@ -1832,8 +1791,7 @@ namespace Legion {
                                         const RegionRequirement &req,
                                         const ProjectionInfo &projection_info,
                                         const RegionTreePath &path,
-                                        RefinementTracker &refinement_tracker,
-                                        std::set<RtEvent> &applied_events)
+                                        RefinementTracker &refinement_tracker)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1873,7 +1831,7 @@ namespace Legion {
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                      projection_info, unopened_mask, already_closed_mask, 
                      written_disjoint_complete, first_touch_refinement, 
-                     refinements, refinement_tracker, applied_events,
+                     refinements, refinement_tracker,
                      true/*track disjoint complete below*/, 
                      check_for_unversioned);
 #ifdef DEBUG_LEGION
@@ -1901,7 +1859,6 @@ namespace Legion {
                                                  unsigned idx,
                                                  RegionRequirement &req,
                                                  const RegionTreePath &path,
-                                                 std::set<RtEvent> &applied,
                                                  bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
@@ -1935,7 +1892,7 @@ namespace Legion {
       // Do the traversal
       FieldMask already_closed_mask;
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask,
-          path, trace_info, already_closed_mask, applied, invalidate_tree);
+          path, trace_info, already_closed_mask, invalidate_tree);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -2226,7 +2183,6 @@ namespace Legion {
       // no-event (happens with post-mapping and copies)
       if (analysis->term_event.exists())
       {
-        const RtEvent collect_event = trace_info.get_collect_event();
         // Perform the registration
         IndexSpaceNode *local_expr = analysis->node->row_source;
         const UniqueID op_id = analysis->op->get_unique_op_id();
@@ -2240,7 +2196,7 @@ namespace Legion {
             const FieldMask &inst_mask = ref.get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
-                analysis->term_event, collect_event,
+                analysis->term_event,
                 user_applied, trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             ref.set_ready_event(ready);
@@ -2268,7 +2224,7 @@ namespace Legion {
             const FieldMask &inst_mask = ref.get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
-                analysis->term_event, collect_event, map_applied_events, 
+                analysis->term_event, map_applied_events, 
                 trace_info, local_space, symbolic);
             // Record the event as the precondition for the task
             ref.set_ready_event(ready);
@@ -2426,7 +2382,6 @@ namespace Legion {
       unsigned inst_index = 0;
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      const RtEvent collect_event = trace_info.get_collect_event();
       // Now add users for all the instances
       for (FieldMaskSet<LogicalView>::const_iterator it = 
             instances.begin(); it != instances.end(); it++, inst_index++)
@@ -2438,7 +2393,7 @@ namespace Legion {
         restricted_instances[inst_index] = 
           InstanceRef(inst_view->get_manager(), it->second);
         ApEvent ready = inst_view->register_user(usage, it->second,
-            local_expr, op_id, index, term_event, collect_event,
+            local_expr, op_id, index, term_event,
             map_applied_events, trace_info, runtime->address_space);
         if (ready.exists())
           acquired_events.insert(ready);
@@ -2510,7 +2465,6 @@ namespace Legion {
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
-      const RtEvent collect_event = trace_info.get_collect_event();
       std::set<ApEvent> released_events;
       if (known_targets)
       {
@@ -2524,7 +2478,7 @@ namespace Legion {
         {
           const FieldMask &mask = restricted_instances[idx].get_valid_fields();
           ApEvent ready = target_views[idx]->register_user(usage, mask,
-              local_expr, op_id, index, term_event, collect_event,
+              local_expr, op_id, index, term_event,
               map_applied_events, trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
@@ -2554,7 +2508,7 @@ namespace Legion {
           restricted_instances[inst_index] = 
             InstanceRef(inst_view->get_manager(), it->second);
           ApEvent ready = inst_view->register_user(usage, it->second,
-              local_expr, op_id, index, term_event, collect_event,
+              local_expr, op_id, index, term_event,
               map_applied_events, trace_info, runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
@@ -2590,9 +2544,8 @@ namespace Legion {
 #endif 
       RegionNode *src_node = get_node(src_req.region);
       RegionNode *dst_node = get_node(dst_req.region);
-      WrapperReferenceMutator mutator(map_applied_events);
       IndexSpaceExpression *copy_expr = intersect_index_spaces(
-          src_node->row_source, dst_node->row_source, &mutator);
+          src_node->row_source, dst_node->row_source);
       // Quick out if there is nothing to copy to
       if (copy_expr->is_empty())
         return ApEvent::NO_AP_EVENT;
@@ -3355,14 +3308,13 @@ namespace Legion {
       // that we have some remote equivalence sets
       std::set<RtEvent> registration_applied;
       const UniqueID op_id = attach_op->get_unique_op_id();
-      const RtEvent collect_event = trace_info.get_collect_event();
       std::vector<ApEvent> ready_events;
       for (std::vector<InstanceView*>::const_iterator it =
             local_views.begin(); it != local_views.end(); it++)
       {
         const ApEvent ready = (*it)->register_user(usage, ext_mask,
                     region_node->row_source, op_id, index, termination_event,
-                    collect_event, registration_applied, trace_info, 
+                    registration_applied, trace_info, 
                     runtime->address_space);
         if (ready.exists())
           ready_events.push_back(ready);
@@ -3421,12 +3373,10 @@ namespace Legion {
       const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
       const UniqueID op_id = detach_op->get_unique_op_id();
       const ApEvent term_event = detach_op->get_completion_event();
-      const RtEvent collect_event = trace_info.get_collect_event();
       const RegionUsage usage(req);
       const ApEvent done = local_view->register_user(usage, ext_mask, 
                                                      region_node->row_source,
                                                      op_id, index, term_event,
-                                                     collect_event, 
                                                      map_applied_events, 
                                                      trace_info,
                                                      runtime->address_space);
@@ -3527,7 +3477,7 @@ namespace Legion {
       }
       if (!unacquired.empty())
       {
-        perform_missing_acquires(op, *acquired, unacquired);
+        perform_missing_acquires(*acquired, unacquired);
         unsigned unacquired_index = 0;
         for (std::vector<PhysicalManager*>::iterator it = 
               result.begin(); it != result.end(); /*nothing*/)
@@ -3637,7 +3587,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(acquired != NULL);
 #endif
-        perform_missing_acquires(op, *acquired, unacquired); 
+        perform_missing_acquires(*acquired, unacquired); 
       }
       return -1; // no composite index
     }
@@ -3694,7 +3644,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(acquired != NULL);
 #endif
-        perform_missing_acquires(op, *acquired, unacquired);
+        perform_missing_acquires(*acquired, unacquired);
       }
       return has_composite;
     }
@@ -3735,7 +3685,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_missing_acquires(Operation *op,
+    void RegionTreeForest::perform_missing_acquires(
                                 std::map<PhysicalManager*,unsigned> &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
@@ -3743,7 +3693,7 @@ namespace Legion {
       // Try and do the acquires for any instances that weren't acquired
       for (std::vector<PhysicalManager*>::const_iterator it = 
             unacquired.begin(); it != unacquired.end(); it++)
-        if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF, op))
+        if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF))
           acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
     }
 
@@ -3773,31 +3723,18 @@ namespace Legion {
                                                   ApEvent is_ready,
                                                   IndexSpaceExprID expr_id,
                                                   CollectiveMapping *mapping,
-                                                  std::set<RtEvent> *applied,
-                                                  bool add_root_reference,
+                                                  const bool add_root_reference,
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        initialized = local_initialized;
-      }
       IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
                                 did, is_ready, expr_id, initialized, depth,
-                                provenance, mapping, add_root_reference);
+                                provenance, mapping);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3806,61 +3743,22 @@ namespace Legion {
           index_nodes.find(sp);
         if (it != index_nodes.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // If we are remote we always have a GC ref from the owner
-        // If we are the root then the valid ref comes from the application
-        // Otherwise the valid ref comes from parent partition
-        if (!result->is_owner())
-          // Always add a base gc ref for all index spaces
-          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime();
         if (parent != NULL)
         {
 #ifdef DEBUG_LEGION
           assert(!add_root_reference);
 #endif
-          // Always add a valid reference from the parent
-          result->add_nested_valid_ref(parent->did, &mutator);
-          // Check to see if the parent is still tree valid
-          if (!parent->add_child(result))
-          {
-            result->invalidate_tree();
-            // If the parent is tree invalid then remove the reference
-            result->remove_nested_valid_ref(parent->did, &mutator);
-          }
+          parent->add_child(result);
         }
         else if (add_root_reference)
-        {
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          // Check to see if we have a collective mapping and we're part of it
-          if ((mapping != NULL) && mapping->contains(result->local_space))
-          {
-            std::vector<AddressSpaceID> children;
-            mapping->get_children(result->owner_space,
-                                  result->local_space, children);
-            if (!children.empty())
-              result->add_base_valid_ref(REMOTE_DID_REF, &mutator,
-                                         children.size());
-          }
-        }
-      }
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
-        else
-          Runtime::trigger_event(local_initialized);
+          result->add_base_valid_ref(APPLICATION_REF);
+        result->register_with_runtime();
       }
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
@@ -3881,30 +3779,17 @@ namespace Legion {
                                                   Provenance *provenance,
                                                   ApUserEvent is_ready,
                                                   CollectiveMapping *mapping,
-                                                  std::set<RtEvent> *applied,
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        initialized = local_initialized;
-      }
       IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, &parent,
                                 color, did, is_ready, 0/*expr id*/, initialized,
-                                depth, provenance, mapping, false/*root*/);
+                                depth, provenance, mapping);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -3913,43 +3798,17 @@ namespace Legion {
           index_nodes.find(sp);
         if (it != index_nodes.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
-          // Need to remove resource reference if not owner
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           // Free up the event since we didn't use it
           Runtime::trigger_event(NULL, is_ready);
           return it->second;
         }
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
-        // If we are remote we always have a GC ref from the owner
-        // If we are the root then the valid ref comes from the application
-        // Otherwise the valid ref comes from parent partition
-        if (!result->is_owner())
-          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime();
         // Always add a valid reference from the parent
-        result->add_nested_valid_ref(parent.did, &mutator);
-        // Check to see if the parent is still tree valid
-        if (!parent.add_child(result))
-        {
-          result->invalidate_tree();
-          // If the parent is tree invalid then remove the reference
-          result->remove_nested_valid_ref(parent.did, &mutator);
-        }
+        parent.add_child(result);
+        result->register_with_runtime();
       } 
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
-        else
-          Runtime::trigger_event(local_initialized);
-      }
       // If we had a realm index space issue the tighten now since
       // we know that we'll probably need it later
       // We have to do this after we've added our reference in case
@@ -3971,20 +3830,9 @@ namespace Legion {
                                                  ApBarrier pending,
                                                  RtEvent initialized,
                                                  CollectiveMapping *mapping,
-                                                 ShardMapping *shard_mapping,
-                                                 std::set<RtEvent> *applied)
+                                                 ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        initialized = local_initialized;
-      }
       IndexPartCreator creator(this, p, parent, color_space, color, disjoint,
                                complete, did, part_ready, pending, initialized,
                                mapping, shard_mapping, provenance);
@@ -3993,9 +3841,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -4004,35 +3850,27 @@ namespace Legion {
           index_parts.find(p);
         if (it != index_parts.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
-          // Need to remove resource reference if not owner
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         index_parts[p] = result;
         index_part_requests.erase(p);
         // If we're the owner add a valid reference that will be removed
-        // when we are deleted, otherwise we're remote so we add a gc 
-        // reference that will be removed by the owner when we can be
-        // safely collected
+        // when we are deleted, 
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        else
-          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime();
+          result->add_base_valid_ref(APPLICATION_REF);
         parent->add_child(result);
-      }
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
+        // Add it to the partition of our parent if it exists, otherwise
+        // our parent index space is a root so we add the reference there
+        if (parent->parent != NULL)
+          parent->parent->add_nested_valid_ref(did);
         else
-          Runtime::trigger_event(local_initialized);
+          parent->add_nested_valid_ref(did);
+        if (color_space->parent != NULL)
+          color_space->parent->add_nested_valid_ref(did);
+        else
+          color_space->add_nested_valid_ref(did);
+        result->register_with_runtime();
       }
       return result;
     }
@@ -4050,20 +3888,9 @@ namespace Legion {
                                                  ApBarrier pending,
                                                  RtEvent initialized,
                                                  CollectiveMapping *mapping,
-                                                 ShardMapping *shard_mapping,
-                                                 std::set<RtEvent> *applied)
+                                                 ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        initialized = local_initialized;
-      }
       IndexPartCreator creator(this, p, parent, color_space, color, 
                                disjointness_ready, complete, did, part_ready, 
                                pending, initialized, mapping, shard_mapping,
@@ -4073,9 +3900,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent != NULL);
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Check to see if someone else has already made it
       {
         // Hold the lookup lock while modifying the lookup table
@@ -4084,35 +3909,28 @@ namespace Legion {
           index_parts.find(p);
         if (it != index_parts.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
           // Need to remove resource reference if not owner
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         index_parts[p] = result;
         index_part_requests.erase(p);
         // If we're the owner add a valid reference that will be removed
-        // when we are deleted, otherwise we're remote so we add a gc 
-        // reference that will be removed by the owner when we can be
-        // safely collected
+        // when we are deleted, 
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
-        else
-          result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-        result->register_with_runtime();
+          result->add_base_valid_ref(APPLICATION_REF);
         parent->add_child(result);
-      }
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
+        // Add it to the partition of our parent if it exists, otherwise
+        // our parent index space is a root so we add the reference there
+        if (parent->parent != NULL)
+          parent->parent->add_nested_valid_ref(did);
         else
-          Runtime::trigger_event(local_initialized);
+          parent->add_nested_valid_ref(did);
+        if (color_space->parent != NULL)
+          color_space->parent->add_nested_valid_ref(did);
+        else
+          color_space->add_nested_valid_ref(did);
+        result->register_with_runtime();
       }
       return result;
     }
@@ -4123,27 +3941,14 @@ namespace Legion {
                                                   RtEvent initialized,
                                                   Provenance *provenance,
                                                   CollectiveMapping *mapping,
-                                                  ShardMapping *shard_mapping,
-                                                  std::set<RtEvent> *applied)
+                                                  ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        initialized = local_initialized;
-      }
       FieldSpaceNode *result = new FieldSpaceNode(space, this, did,
           initialized, mapping, shard_mapping, provenance);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Hold the lookup lock while modifying the lookup table
       {
         AutoLock l_lock(lookup_lock);
@@ -4151,13 +3956,7 @@ namespace Legion {
           field_nodes.find(space);
         if (it != field_nodes.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
-          // Need to remove resource reference if not owner
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         field_nodes[space] = result;
@@ -4167,16 +3966,8 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          result->add_base_gc_ref(APPLICATION_REF);
         result->register_with_runtime();
-      }
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
-        else
-          Runtime::trigger_event(local_initialized);
       }
       return result;
     }
@@ -4189,17 +3980,11 @@ namespace Legion {
                                                   Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> local_applied;
-      RtUserEvent local_initialized = Runtime::create_rt_user_event();
-      if (initialized.exists())
-        local_applied.insert(initialized);
-      initialized = local_initialized;
       FieldSpaceNode *result = 
         new FieldSpaceNode(space, this, did, initialized, provenance, derez);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      WrapperReferenceMutator mutator(local_applied);
       // Hold the lookup lock while modifying the lookup table
       {
         AutoLock l_lock(lookup_lock);
@@ -4207,13 +3992,7 @@ namespace Legion {
           field_nodes.find(space);
         if (it != field_nodes.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
-          // Need to remove resource reference if not owner
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         field_nodes[space] = result;
@@ -4223,14 +4002,9 @@ namespace Legion {
         // reference that will be removed by the owner when we can be
         // safely collected
         if (result->is_owner())
-          result->add_base_valid_ref(APPLICATION_REF, &mutator);
+          result->add_base_gc_ref(APPLICATION_REF);
         result->register_with_runtime();
       }
-      if (!local_applied.empty())
-        Runtime::trigger_event(local_initialized,
-            Runtime::merge_events(local_applied));
-      else
-        Runtime::trigger_event(local_initialized);
       return result;
     }
 
@@ -4240,8 +4014,7 @@ namespace Legion {
                                               RtEvent initialized,
                                               DistributedID did,
                                               Provenance *provenance,
-                                              CollectiveMapping *mapping,
-                                              std::set<RtEvent> *applied)
+                                              CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4279,30 +4052,14 @@ namespace Legion {
         col_ready = RtEvent::NO_RT_EVENT;
       }
       
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        if (row_ready.exists())
-          local_applied.insert(row_ready);
-        if (col_ready.exists())
-          local_applied.insert(col_ready);
-        initialized = local_initialized;
-      }
-      else if (row_ready.exists() || col_ready.exists())
+      if (row_ready.exists() || col_ready.exists())
         initialized = Runtime::merge_events(initialized, row_ready, col_ready); 
       RegionNode *result = new RegionNode(r, parent, row_src, col_src, this,did,
         initialized, (parent == NULL) ? initialized : parent->tree_initialized,
         mapping, provenance);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Special case here in case multiple clients attempt to
       // make the node at the same time
       {
@@ -4313,14 +4070,9 @@ namespace Legion {
           region_nodes.find(r);
         if (it != region_nodes.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
           // It already exists, delete our copy and return
           // the one that has already been made
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         // Now we can add it to the map
@@ -4337,30 +4089,16 @@ namespace Legion {
           // If we're the root we get a valid reference on the owner
           // node otherwise we get a gc ref from the owner node
           if (result->is_owner())
-            result->add_base_valid_ref(APPLICATION_REF, &mutator);
-          else
-            result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-          result->register_with_runtime();
+            result->add_base_gc_ref(APPLICATION_REF);
         }
-        else // not a root so we get a gc ref from our parent
-          result->add_nested_gc_ref(parent->did, &mutator);
         result->record_registered();
-      }
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
-        else
-          Runtime::trigger_event(local_initialized);
       }
       return result;
     }
 
     //--------------------------------------------------------------------------
     PartitionNode* RegionTreeForest::create_node(LogicalPartition p,
-                                                 RegionNode *parent,
-                                                 std::set<RtEvent> *applied)
+                                                 RegionNode *parent)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4384,29 +4122,13 @@ namespace Legion {
         col_ready = RtEvent::NO_RT_EVENT;
       }
       RtEvent initialized = parent->tree_initialized;
-      RtUserEvent local_initialized;
-      std::set<RtEvent> local_applied;
-      if (applied == NULL)
-      {
-        applied = &local_applied;
-        local_initialized = Runtime::create_rt_user_event();
-        if (initialized.exists())
-          local_applied.insert(initialized);
-        if (row_ready.exists())
-          local_applied.insert(row_ready);
-        if (col_ready.exists())
-          local_applied.insert(col_ready);
-        initialized = local_initialized;
-      }
-      else if (row_ready.exists() || col_ready.exists())
+      if (row_ready.exists() || col_ready.exists())
         initialized = Runtime::merge_events(initialized, row_ready, col_ready);
       PartitionNode *result = new PartitionNode(p, parent, row_src, col_src, 
                                   this, initialized, parent->tree_initialized);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
-      assert(applied != NULL);
 #endif
-      WrapperReferenceMutator mutator(*applied);
       // Special case here in case multiple clients attempt
       // to make the node at the same time
       {
@@ -4416,30 +4138,17 @@ namespace Legion {
           part_nodes.find(p);
         if (it != part_nodes.end())
         {
-          // Free up our user event since we don't need it
-          if (local_initialized.exists())
-            Runtime::trigger_event(local_initialized);
           // It already exists, delete our copy and
           // return the one that has already been made
-          if (result->is_owner() || 
-              result->remove_base_resource_ref(REMOTE_DID_REF))
-            delete result;
+          delete result;
           return it->second;
         }
         // Now we can put the node in the map
         part_nodes[p] = result;
         // Add gc ref that will be removed when either the root region node
         // or the index partition node has been destroyed
-        result->add_base_gc_ref(REGION_TREE_REF, &mutator);
+        result->add_base_gc_ref(REGION_TREE_REF);
         result->record_registered();
-      }
-      if (local_initialized.exists())
-      {
-        if (!local_applied.empty())
-          Runtime::trigger_event(local_initialized,
-              Runtime::merge_events(local_applied));
-        else
-          Runtime::trigger_event(local_initialized);
       }
       return result;
     }
@@ -6155,8 +5864,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::union_index_spaces(
-                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
-                           ReferenceMutator *mutator)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6185,27 +5893,12 @@ namespace Legion {
         exprs[0] = rhs_canon;
         exprs[1] = lhs_canon;
       }
-      IndexSpaceExpression *result = union_index_spaces(exprs);
-      // Add the live reference 
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
-      }
-      else
-        result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-      // Save it in the implicit live expression references
-      ImplicitReferenceTracker::record_live_expression(result);
-      // Remove the gc reference that comes back from finding it in the tree
-      if (result->remove_live_reference(REGION_TREE_REF))
-        assert(false); // should never hit this
-      return result;
+      return union_index_spaces(exprs);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::union_index_spaces(
-                                   const std::set<IndexSpaceExpression*> &exprs,
-                                   ReferenceMutator *mutator)
+                                   const std::set<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6227,16 +5920,12 @@ namespace Legion {
       }
       if (expressions.empty())
         return *(exprs.begin());
-      LocalReferenceMutator local_mutator;
       if (expressions.size() == 1)
       {
         IndexSpaceExpression *result = expressions.back();
         if (exprs.find(result) == exprs.end())
         {
-          if (mutator == NULL)
-            result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
-          else
-            result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+          result->add_base_expression_reference(LIVE_EXPR_REF);
           ImplicitReferenceTracker::record_live_expression(result);
         }
         return result;
@@ -6257,11 +5946,7 @@ namespace Legion {
           IndexSpaceExpression *result = expressions.back();
           if (exprs.find(result) == exprs.end())
           {
-            if (mutator == NULL)
-              result->add_base_expression_reference(LIVE_EXPR_REF,
-                                                    &local_mutator);
-            else
-              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            result->add_base_expression_reference(LIVE_EXPR_REF);
             ImplicitReferenceTracker::record_live_expression(result);
           }
           return expressions.back();
@@ -6287,25 +5972,14 @@ namespace Legion {
                 break;
             }
             IndexSpaceExpression *expr = union_index_spaces(temp_expressions);
-            if (mutator == NULL)
-              expr->add_base_expression_reference(REGION_TREE_REF,
-                                                  &local_mutator);
-            else
-              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
-            // Remove the gc ref that comes back from the union call
-            if (expr->remove_live_reference(REGION_TREE_REF))
-              assert(false); // should never hit this
+            expr->add_base_expression_reference(REGION_TREE_REF);
             next_expressions.push_back(expr);
           }
           else
           {
             IndexSpaceExpression *expr = expressions.back();
             expressions.pop_back();
-            if (mutator == NULL)
-              expr->add_base_expression_reference(REGION_TREE_REF, 
-                                                  &local_mutator);
-            else
-              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
+            expr->add_base_expression_reference(REGION_TREE_REF);
             next_expressions.push_back(expr);
           }
         }
@@ -6327,13 +6001,7 @@ namespace Legion {
           IndexSpaceExpression *expr = expressions[idx];
           IndexSpaceExpression *unique = expr->get_canonical_expression(this);
           if (unique_expressions.insert(unique).second)
-          {
-            if (mutator == NULL)
-              unique->add_base_expression_reference(REGION_TREE_REF, 
-                                                    &local_mutator);
-            else
-              unique->add_base_expression_reference(REGION_TREE_REF, mutator);
-          }
+            unique->add_base_expression_reference(REGION_TREE_REF);
         }
         // Remove the expression references
         for (std::vector<IndexSpaceExpression*>::const_iterator it =
@@ -6345,11 +6013,7 @@ namespace Legion {
           IndexSpaceExpression *result = *(unique_expressions.begin());
           if (exprs.find(result) == exprs.end())
           {
-            if (mutator == NULL)
-              result->add_base_expression_reference(LIVE_EXPR_REF,
-                                                    &local_mutator);
-            else
-              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            result->add_base_expression_reference(LIVE_EXPR_REF);
             ImplicitReferenceTracker::record_live_expression(result);
           }
           // Remove the extra expression reference we added
@@ -6367,15 +6031,9 @@ namespace Legion {
       IndexSpaceExpression *result = union_index_spaces(expressions);
       if (exprs.find(result) == exprs.end())
       {
-        if (mutator == NULL)
-          result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
-        else
-          result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+        result->add_base_expression_reference(LIVE_EXPR_REF);
         ImplicitReferenceTracker::record_live_expression(result);
       }
-      // Remove the reference added by the trie traversal
-      if (result->remove_live_reference(REGION_TREE_REF))
-        assert(false); // should never hit this deletion
       if (!first_pass)
       {
         // Remove the extra references on the expression vector we added
@@ -6409,7 +6067,7 @@ namespace Legion {
           IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next) &&
-              result->try_add_live_reference(REGION_TREE_REF))
+              result->try_add_live_reference())
             return result;
           if (creator == NULL)
           {
@@ -6466,8 +6124,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
-                           ReferenceMutator *mutator)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6496,27 +6153,12 @@ namespace Legion {
         exprs[0] = rhs_canon;
         exprs[1] = lhs_canon;
       }
-      IndexSpaceExpression *result = intersect_index_spaces(exprs);
-      // Add the live reference 
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
-      }
-      else
-        result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-      // Save it in the implicit live expression references
-      ImplicitReferenceTracker::record_live_expression(result);
-      // Remove the gc reference that comes back with the trie traversal
-      if (result->remove_live_reference(REGION_TREE_REF))
-        assert(false); // should never hit this
-      return result;
+      return intersect_index_spaces(exprs);
     }
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-                                   const std::set<IndexSpaceExpression*> &exprs,
-                                   ReferenceMutator *mutator)
+                                   const std::set<IndexSpaceExpression*> &exprs)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6542,7 +6184,6 @@ namespace Legion {
       // remove duplicates
       std::vector<IndexSpaceExpression*>::iterator last =
         std::unique(expressions.begin(), expressions.end());
-      LocalReferenceMutator local_mutator;
       if (last != expressions.end())
       {
         expressions.erase(last, expressions.end());
@@ -6554,11 +6195,7 @@ namespace Legion {
           IndexSpaceExpression *result = expressions.back();
           if (exprs.find(result) == exprs.end())
           {
-            if (mutator == NULL)
-              result->add_base_expression_reference(LIVE_EXPR_REF,
-                                                    &local_mutator);
-            else
-              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            result->add_base_expression_reference(LIVE_EXPR_REF);
             ImplicitReferenceTracker::record_live_expression(result);
           }
           return result;
@@ -6585,25 +6222,14 @@ namespace Legion {
             }
             IndexSpaceExpression *expr =
               intersect_index_spaces(temp_expressions);
-            if (mutator == NULL)
-              expr->add_base_expression_reference(REGION_TREE_REF,
-                                                  &local_mutator);
-            else
-              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
-            // Remove the gc ref that comes back from the union call
-            if (expr->remove_live_reference(REGION_TREE_REF))
-              assert(false); // should never hit this
+            expr->add_base_expression_reference(REGION_TREE_REF);
             next_expressions.push_back(expr);
           }
           else
           {
             IndexSpaceExpression *expr = expressions.back();
             expressions.pop_back();
-            if (mutator == NULL)
-              expr->add_base_expression_reference(REGION_TREE_REF,
-                                                  &local_mutator);
-            else
-              expr->add_base_expression_reference(REGION_TREE_REF, mutator);
+            expr->add_base_expression_reference(REGION_TREE_REF);
             next_expressions.push_back(expr);
           }
         }
@@ -6629,11 +6255,7 @@ namespace Legion {
             // Add a reference to the unique expression
             if (exprs.find(unique) == exprs.end())
             {
-              if (mutator == NULL)
-                unique->add_base_expression_reference(LIVE_EXPR_REF,
-                                                      &local_mutator);
-              else
-                unique->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+              unique->add_base_expression_reference(LIVE_EXPR_REF);
               ImplicitReferenceTracker::record_live_expression(unique);
             }
             // Remove references on all the things we no longer need
@@ -6649,13 +6271,7 @@ namespace Legion {
             return unique;
           }
           if (unique_expressions.insert(unique).second)
-          {
-            if (mutator == NULL)
-              unique->add_base_expression_reference(REGION_TREE_REF, 
-                                                    &local_mutator);
-            else
-              unique->add_base_expression_reference(REGION_TREE_REF, mutator);
-          }
+            unique->add_base_expression_reference(REGION_TREE_REF);
         }
         // Remove the expression references
         for (std::vector<IndexSpaceExpression*>::const_iterator it =
@@ -6667,11 +6283,7 @@ namespace Legion {
           IndexSpaceExpression *result = *(unique_expressions.begin());
           if (exprs.find(result) == exprs.end())
           {
-            if (mutator == NULL)
-              result->add_base_expression_reference(LIVE_EXPR_REF,
-                                                    &local_mutator);
-            else
-              result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+            result->add_base_expression_reference(LIVE_EXPR_REF);
             ImplicitReferenceTracker::record_live_expression(result);
           }
           // Remove the extra expression reference we added
@@ -6689,15 +6301,9 @@ namespace Legion {
       IndexSpaceExpression *result = intersect_index_spaces(expressions);
       if (exprs.find(result) == exprs.end())
       {
-        if (mutator == NULL)
-          result->add_base_expression_reference(LIVE_EXPR_REF,&local_mutator);
-        else
-          result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
+        result->add_base_expression_reference(LIVE_EXPR_REF);
         ImplicitReferenceTracker::record_live_expression(result);
       }
-      // Remove the reference added by the trie traversal
-      if (result->remove_live_reference(REGION_TREE_REF))
-        assert(false); // should never hit this deletion
       if (!first_pass)
       {
         // Remove the extra references on the expression vector we added
@@ -6731,7 +6337,7 @@ namespace Legion {
           IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next) &&
-              result->try_add_live_reference(REGION_TREE_REF))
+              result->try_add_live_reference())
             return result;
           if (creator == NULL)
           {
@@ -6792,8 +6398,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(
                            IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
-                           OperationCreator *creator/*=NULL*/,
-                           ReferenceMutator *mutator/*=NULL*/)
+                           OperationCreator *creator/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6824,7 +6429,7 @@ namespace Legion {
           IndexSpaceExpression *expr = NULL;
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, expr, next) &&
-              expr->try_add_live_reference(REGION_TREE_REF))
+              expr->try_add_live_reference())
             result = expr;
           if (result == NULL)
           {
@@ -6887,17 +6492,6 @@ namespace Legion {
           result = node->find_or_create_operation(expressions, *creator);
         }
       }
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &local_mutator);
-      }
-      else
-        result->add_base_expression_reference(LIVE_EXPR_REF, mutator);
-      ImplicitReferenceTracker::record_live_expression(result);
-      // Remove the gc reference that comes back from finding it in the tree
-      if (result->remove_live_reference(REGION_TREE_REF))
-        assert(false); // should never hit this
       return result;
     }
 
@@ -6921,9 +6515,9 @@ namespace Legion {
                                       IndexSpaceExpression *expr, size_t volume)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(volume > 0);
-#endif
+      // Nothing to do for empty expressions
+      if (volume == 0)
+        return;
       const std::pair<size_t,TypeTag> key(volume, expr->type_tag);
       AutoLock c_lock(congruence_lock);
       std::set<IndexSpaceExpression*> &exprs = canonical_expressions[key];
@@ -7084,22 +6678,9 @@ namespace Legion {
       if (pending.is_index_space)
       {
         IndexSpaceNode *node = get_node(pending.handle);
-        LocalReferenceMutator mutator;
-        node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        node->add_base_expression_reference(LIVE_EXPR_REF);
         if (!pending.done_ref_counting)
-        {
-          const RtEvent added = mutator.get_done_event();
-          // Special case here: if the source was the owner and we didn't
-          // just send a message to add our reference then we can buffer up
-          // our reference to be removed when we are no longer valid
-          // Be very careful here! You can only do this if the expression
-          // was sent from the source or you risk reference count cycles!
-          if ((pending.source == node->owner_space) &&
-              (!added.exists() || added.has_triggered()))
-            node->record_remote_owner_valid_reference();
-          else
-            node->send_remote_valid_decrement(pending.source,NULL/*mut*/,added);
-        }
+          node->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(node);
         return node;
       }
@@ -7121,22 +6702,9 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        LocalReferenceMutator mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        result->add_base_expression_reference(LIVE_EXPR_REF);
         if (!pending.done_ref_counting)
-        {
-          const RtEvent added = mutator.get_done_event();
-          // Special case here: if the source was the owner and we didn't
-          // just send a message to add our reference then we can buffer up
-          // our reference to be removed when we are no longer valid
-          // Be very careful here! You can only do this if the expression
-          // was sent from the source or you risk reference count cycles!
-          if ((pending.source == op->owner_space) &&
-              (!added.exists() || added.has_triggered()))
-            result->record_remote_owner_valid_reference();
-          else
-            op->send_remote_valid_decrement(pending.source, NULL/*mut*/, added);
-        }
+          op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
       }
@@ -7213,10 +6781,7 @@ namespace Legion {
       {
         IndexSpace handle;
         derez.deserialize(handle);
-        IndexSpaceNode *result = get_node(handle);
-        // Remove the reference that we have from when this was packed
-        result->send_remote_gc_decrement(source);
-        return result;
+        return get_node(handle);
       }
       TypeTag type_tag;
       derez.deserialize(type_tag);
@@ -7429,8 +6994,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceExpression::IndexSpaceExpression(LocalLock &lock)
       : type_tag(0), expr_id(0), expr_lock(lock), canonical(NULL),
-        remote_owner_valid_references(0), sparsity_map_kd_tree(NULL),
-        volume(0), has_volume(false), empty(false), has_empty(false)
+        sparsity_map_kd_tree(NULL), volume(0), has_volume(false),
+        empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7439,9 +7004,8 @@ namespace Legion {
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, Runtime *rt,
                                                LocalLock &lock)
       : type_tag(tag), expr_id(rt->get_unique_index_space_expr_id()), 
-        expr_lock(lock), canonical(NULL), remote_owner_valid_references(0),
-        sparsity_map_kd_tree(NULL), volume(0), has_volume(false), empty(false),
-        has_empty(false)
+        expr_lock(lock), canonical(NULL), sparsity_map_kd_tree(NULL),
+        volume(0), has_volume(false), empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7450,8 +7014,8 @@ namespace Legion {
     IndexSpaceExpression::IndexSpaceExpression(TypeTag tag, IndexSpaceExprID id,
                                                LocalLock &lock)
       : type_tag(tag), expr_id(id), expr_lock(lock), canonical(NULL),
-        remote_owner_valid_references(0), sparsity_map_kd_tree(NULL),
-        volume(0), has_volume(false), empty(false), has_empty(false)
+        sparsity_map_kd_tree(NULL), volume(0), has_volume(false),
+        empty(false), has_empty(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -7523,7 +7087,7 @@ namespace Legion {
           for (std::set<IndexSpaceOperation*>::const_iterator it = 
                derived_operations.begin(); it != derived_operations.end(); it++)
           {
-            (*it)->add_tree_expression_reference(did);
+            (*it)->add_nested_resource_ref(did);
             derived.push_back(*it);
           }
         }
@@ -7536,9 +7100,9 @@ namespace Legion {
           // Try to invalidate it and remove the tree reference if we did
           if ((*it)->invalidate_operation() &&
               (*it)->remove_base_gc_ref(REGION_TREE_REF))
-            assert(false); // should never delete since we have an expr ref
+            assert(false); // should never delete since we have a resource ref
           // Remove any references that we have on the parents
-          if ((*it)->remove_tree_expression_reference(did))
+          if ((*it)->remove_nested_resource_ref(did))
             delete (*it);
         }
       }
@@ -7570,9 +7134,22 @@ namespace Legion {
                                                        RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_valid());
+#endif
       IndexSpaceExpression *expr = canonical.load();
       if (expr != NULL)
-        return expr;
+      {
+        // If we're our own canonical expression then assume we're
+        // still alive and don't need to add a live expression
+        if (expr == this)
+          return expr;
+        // If we're not our own canonical expression, we need to make sure
+        // that it is still alive and can be used
+        if (expr->try_add_live_reference())
+          return expr;
+        // Fall through and compute a new canonical expression
+      }
       expr = forest->find_canonical_expression(this);
       if (expr == this)
       {
@@ -7583,14 +7160,21 @@ namespace Legion {
         return expr;
       }
       // If the canonical expression is not ourself, then the region tree
-      // forest has given us a reference back on it, see if we're the first
-      // ones to write it, if not we can remove the reference now
-      IndexSpaceExpression *expected = NULL;
-      const DistributedID did = get_distributed_id();
-      if (!canonical.compare_exchange_strong(expected, expr))
-        expr->remove_canonical_reference(did);
-      else // We're the first so add our resource reference
-        expr->add_tree_expression_reference(did);
+      // forest has given us a live reference back on it so we know it
+      // can't be collected, but we need to update the canonical result
+      // and add a nested reference if we're the first ones to perform 
+      // the update
+      IndexSpaceExpression *prev = canonical.exchange(expr); 
+      if (prev != expr)
+      {
+        const DistributedID did = get_distributed_id();
+        // We're the first to store this result so remove the reference
+        // from the previous one if it existed
+        if ((prev != NULL) && prev->remove_canonical_reference(did))
+          delete prev;
+        // Add a nested resource reference for the new one
+        expr->add_canonical_reference(did);
+      }
       return expr;
     }
 
@@ -7616,14 +7200,8 @@ namespace Legion {
 #else
           IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-          // Make this valid and then send the removal of the 
-          // remote did expression
-          LocalReferenceMutator mutator;
-          op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-          // Always need to send this reference removal back immediately
-          // in order to avoid reference counting deadlock
-          op->send_remote_valid_decrement(source, NULL/*mutator*/,
-              mutator.get_done_event());
+          op->add_base_expression_reference(LIVE_EXPR_REF);
+          op->unpack_global_ref();
         }
         ImplicitReferenceTracker::record_live_expression(result);
         return result;
@@ -7636,20 +7214,10 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         IndexSpaceNode *node = forest->get_node(handle);
-        LocalReferenceMutator mutator;
-        node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((source == node->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          node->record_remote_owner_valid_reference();
-        else
-          node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        node->add_base_expression_reference(LIVE_EXPR_REF);
         ImplicitReferenceTracker::record_live_expression(node);
+        // Now we can unpack the global expression reference
+        node->unpack_global_ref();
         return node;
       }
       else
@@ -7666,20 +7234,10 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        LocalReferenceMutator mutator;
-        result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((source == op->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          result->record_remote_owner_valid_reference();
-        else
-          op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        result->add_base_expression_reference(LIVE_EXPR_REF);
         ImplicitReferenceTracker::record_live_expression(result);
+        // Unpack the global reference that we had
+        op->unpack_global_ref();
         return result;
       }
     }
@@ -7707,17 +7265,9 @@ namespace Legion {
 #else
         IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-        // Make this valid and then send the removal of the 
-        // remote did expression
-        LocalReferenceMutator mutator;
-        op->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
+        op->add_base_expression_reference(LIVE_EXPR_REF);
         if (source != forest->runtime->address_space)
-        {
-          // Always need to send this reference removal back immediately
-          // in order to avoid reference counting deadlock
-          op->send_remote_valid_decrement(source, NULL/*mutator*/,
-              mutator.get_done_event());
-        }
+          op->unpack_global_ref();
         ImplicitReferenceTracker::record_live_expression(result);
         pending.done_ref_counting = true;
         return result;
@@ -7733,19 +7283,8 @@ namespace Legion {
           pending.source = source;
           return node;
         }
-        LocalReferenceMutator mutator;
-        node->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-        const RtEvent added = mutator.get_done_event();
-        // Special case here: if the source was the owner and we didn't
-        // just send a message to add our reference then we can buffer up
-        // our reference to be removed when we are no longer valid
-        // Be very careful here! You can only do this if the expression
-        // was sent from the source or you risk reference count cycles!
-        if ((source == node->owner_space) &&
-            (!added.exists() || added.has_triggered()))
-          node->record_remote_owner_valid_reference();
-        else
-          node->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+        node->add_base_expression_reference(LIVE_EXPR_REF);
+        node->unpack_global_ref();
         pending.done_ref_counting = true;
         ImplicitReferenceTracker::record_live_expression(node);
         return node;
@@ -7767,19 +7306,8 @@ namespace Legion {
 #else
       IndexSpaceOperation *op = static_cast<IndexSpaceOperation*>(result);
 #endif
-      LocalReferenceMutator mutator;
-      result->add_base_expression_reference(LIVE_EXPR_REF, &mutator);
-      const RtEvent added = mutator.get_done_event();
-      // Special case here: if the source was the owner and we didn't
-      // just send a message to add our reference then we can buffer up
-      // our reference to be removed when we are no longer valid
-      // Be very careful here! You can only do this if the expression
-      // was sent from the source or you risk reference count cycles!
-      if ((source == op->owner_space) &&
-          (!added.exists() || added.has_triggered()))
-        result->record_remote_owner_valid_reference();
-      else
-        op->send_remote_valid_decrement(source, NULL/*mutator*/, added);
+      result->add_base_expression_reference(LIVE_EXPR_REF);
+      op->unpack_global_ref();
       pending.done_ref_counting = true;
       ImplicitReferenceTracker::record_live_expression(result);
       return result;
@@ -7793,13 +7321,9 @@ namespace Legion {
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        DistributedCollectable(ctx->runtime, LEGION_DISTRIBUTED_HELP_ENCODE( 
-          ctx->runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC),
-          ctx->runtime->address_space),
+        DistributedCollectable(ctx->runtime,LEGION_DISTRIBUTED_HELP_ENCODE(
+          ctx->runtime->get_available_distributed_id(), INDEX_EXPR_NODE_DC)),
         context(ctx), origin_expr(this), op_kind(kind), invalidated(0)
-#ifdef DEBUG_LEGION
-        , tree_active(true)
-#endif
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -7810,23 +7334,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, RegionTreeForest *ctx,
-        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
-        IndexSpaceOperation *origin)
+        IndexSpaceExprID eid, DistributedID did, IndexSpaceOperation *origin)
       : IndexSpaceExpression(tag, eid, inter_lock),
-        DistributedCollectable(ctx->runtime, did, owner), 
-        context(ctx), origin_expr(origin),
-        op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
-#ifdef DEBUG_LEGION
-        , tree_active(true)
-#endif
+        DistributedCollectable(ctx->runtime, did), context(ctx),
+        origin_expr(origin), op_kind(REMOTE_EXPRESSION_KIND), invalidated(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
 #endif
-      // Keep a gc reference to ensure that this remain active until it 
-      // is made invalid on the owner node
-      add_base_gc_ref(REMOTE_DID_REF);
 #ifdef LEGION_GC
       log_garbage.info("GC Index Expr %lld %d %lld",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, expr_id);
@@ -7840,76 +7356,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceOperation::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tree_active); // should only happen once
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not the owner send a valid reference to the owner
-      if (!is_owner())
-        send_remote_valid_increment(owner_space, mutator);
-      IndexSpaceExpression *canon = canonical.load();
-      if ((canon != NULL) && (canon != this) &&
-          !canon->try_add_canonical_reference(did))
-      {
-        // We were unsuccessful at adding our canonical reference so 
-        // remove the resource reference to the canonical object and
-        // and mark that we no longer have a canonical expression
-        if (canon->remove_tree_expression_reference(did))
-          delete canon;
-        canonical.store(NULL);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::notify_invalid(ReferenceMutator *mutator)
+    void IndexSpaceOperation::notify_local(void)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_valid_decrement(owner_space, mutator,
-           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
-      // If we have a canonical reference that is not ourselves then 
-      // we need to remove the nested reference that we are holding on it too
-      IndexSpaceExpression *canon = canonical.load();
-      if ((canon != NULL) && (canon != this) &&
-          canon->remove_canonical_reference(did))
-        // should never actually delete it since we have a resource ref too
-        assert(false); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::InactiveFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      op->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Should only go through one cycle of active to not active
-      assert(tree_active);
-      tree_active = false;
-#endif
-      if (is_owner())
-      {
-        // Send the removal of the gc references on any remote nodes 
-        if (has_remote_instances())
-        {
-          InactiveFunctor functor(this, mutator); 
-          map_over_remote_instances(functor);
-        }
-      }
-      else
         context->unregister_remote_expression(expr_id);
       // Invalidate any derived operations
       invalidate_derived_operations(did, context);
@@ -7925,74 +7375,52 @@ namespace Legion {
 #endif
           context->remove_canonical_expression(this, volume);
         }
-        else if (canon->remove_tree_expression_reference(did))
+        else if (canon->remove_canonical_reference(did))
           delete canon;
       }
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::try_add_canonical_reference(DistributedID source)
+    void IndexSpaceOperation::add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_active_and_increment(source);
+      add_nested_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceOperation::remove_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_gc_ref(source);
+      return remove_nested_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::try_add_live_reference(ReferenceSource source)
+    bool IndexSpaceOperation::try_add_live_reference(void)
     //--------------------------------------------------------------------------
     {
-      return check_active_and_increment(source);
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceOperation::remove_live_reference(ReferenceSource source)
-    //--------------------------------------------------------------------------
-    {
-      return remove_base_gc_ref(source);
+      if (check_global_and_increment(LIVE_EXPR_REF))
+      {
+        ImplicitReferenceTracker::record_live_expression(this);
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::add_base_expression_reference(
-              ReferenceSource source, ReferenceMutator *mutator, unsigned count)
+                                         ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        add_base_valid_ref(source, &local_mutator, count);
-      }
-      else
-        add_base_valid_ref(source, mutator, count);
+      add_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::add_nested_expression_reference(
-        DistributedID source, std::set<RtEvent> &applied_events, unsigned count)
+                                           DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      WrapperReferenceMutator mutator(applied_events);
-      add_nested_expression_reference(source, &mutator, count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::add_nested_expression_reference(
-                DistributedID source, ReferenceMutator *mutator, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        add_nested_valid_ref(source, &local_mutator, count);
-      }
-      else
-        add_nested_valid_ref(source, mutator, count);
+      add_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8000,7 +7428,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_base_valid_ref(source, NULL/*mutator*/, count);
+      return remove_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8008,7 +7436,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_valid_ref(source, NULL/*mutator*/, count);
+      return remove_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -8245,15 +7673,15 @@ namespace Legion {
         // We're the node that should have the operation
         // Check to see if we've made the operation yet
         if ((local_operation != NULL) &&
-            local_operation->try_add_live_reference(REGION_TREE_REF))
+            local_operation->try_add_live_reference())
           return local_operation;
         // Operation doesn't exist yet, retake the lock and try to make it
         AutoLock t_lock(trie_lock);
         if ((local_operation != NULL) &&
-            local_operation->try_add_live_reference(REGION_TREE_REF))
+            local_operation->try_add_live_reference())
           return local_operation;
         local_operation = creator.consume();
-        if (!local_operation->try_add_live_reference(REGION_TREE_REF))
+        if (!local_operation->try_add_live_reference())
           assert(false); // should never hit this
         return local_operation;
       }
@@ -8269,7 +7697,7 @@ namespace Legion {
           std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
           if ((op_finder != operations.end()) &&
-              op_finder->second->try_add_live_reference(REGION_TREE_REF))
+              op_finder->second->try_add_live_reference())
             return op_finder->second;
           std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
             node_finder = nodes.find(target_expr);
@@ -8284,7 +7712,7 @@ namespace Legion {
           std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
           if ((op_finder != operations.end()) &&
-              op_finder->second->try_add_live_reference(REGION_TREE_REF))
+              op_finder->second->try_add_live_reference())
             return op_finder->second;
           // Still don't have the op
           std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator
@@ -8294,7 +7722,7 @@ namespace Legion {
             // Didn't find the sub-node, so make the operation here
             IndexSpaceExpression *result = creator.consume();
             operations[target_expr] = result;
-            if (!result->try_add_live_reference(REGION_TREE_REF))
+            if (!result->try_add_live_reference())
               assert(false); // should never hit this
             return result;
           }
@@ -8419,11 +7847,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
-        LegionColor c, DistributedID did, AddressSpaceID owner,
+        LegionColor c, DistributedID did,
         RtEvent init, CollectiveMapping *mapping, Provenance *prov)
-      : DistributedCollectable(ctx->runtime, did, owner, false/*register*/,
-          mapping), context(ctx), depth(d), color(c), provenance(prov),
-        initialized(init)
+      : ValidDistributedCollectable(ctx->runtime, did, false/*register*/,
+          mapping), context(ctx), depth(d), color(c),
+        provenance(prov), initialized(init)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8443,18 +7871,6 @@ namespace Legion {
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
     } 
-
-    //--------------------------------------------------------------------------
-    RtEvent IndexTreeNode::find_unregister_precondition(AddressSpaceID t) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<AddressSpaceID,RtEvent>::const_iterator finder =
-        send_effects.find(t);
-      if (finder == send_effects.end())
-        return RtEvent::NO_RT_EVENT;
-      else
-        return finder->second;
-    }
 
     //--------------------------------------------------------------------------
     void IndexTreeNode::attach_semantic_information(SemanticTag tag,
@@ -8648,22 +8064,17 @@ namespace Legion {
                                    DistributedID did, ApEvent ready,
                                    IndexSpaceExprID exp_id, RtEvent init,
                                    unsigned dep, Provenance *prov,
-                                   CollectiveMapping *map, bool r)
+                                   CollectiveMapping *map)
       : IndexTreeNode(ctx,
           (dep == UINT_MAX) ? ((par == NULL) ? 0 : par->depth + 1) : dep, c, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_SPACE_NODE_DC),
-          get_owner_space(h, ctx->runtime), init, map, prov),
+          init, map, prov),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
-        send_references((parent != NULL) ? 1 : 0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        index_space_set(false), tight_index_space(false), tree_valid(true),
-#ifdef DEBUG_LEGION
-        tree_active(true),
-#endif
-        root_valid(r)
+        index_space_set(false), tight_index_space(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8674,11 +8085,6 @@ namespace Legion {
       log_garbage.info("GC Index Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
-      // We keep a resource reference on the parent until the parent
-      // removes it saying that we no longer need to traverse it as
-      // part of sending this index space to remote nodes
-      if (send_references > 0)
-        parent->add_nested_resource_ref(did);
       if (is_owner() && ctx->runtime->legion_spy_enabled)
         LegionSpy::log_index_space_expr(handle.get_id(), this->expr_id);
     }
@@ -8698,122 +8104,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_active(ReferenceMutator *mutator)
+    void IndexSpaceNode::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(tree_active);
-#endif
+      // Nothing to do here currently
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_valid(ReferenceMutator *mutator)
+    void IndexSpaceNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      // If we're not the owner, we add a valid reference to the owner
-      // Note that we can skip this in the root_valid case because we 
-      // know the creation is collective and the create_node methods
-      // will add the appropriate references on each node without us
-      // needing to send any messages
-      if (!is_owner() && !root_valid)
-      {
-        if ((collective_mapping != NULL) && 
-            collective_mapping->contains(local_space))
-          send_remote_valid_increment(
-             collective_mapping->get_parent(owner_space, local_space), mutator);
-        else
-          send_remote_valid_increment(owner_space, mutator);
-      }
-      IndexSpaceExpression *canon = canonical.load();
-      if ((canon != NULL) && (canon != this) &&
-          !canon->try_add_canonical_reference(did))
-      {
-        canonical.store(NULL);
-        // We were unsuccessful at adding our canonical reference so 
-        // remove the resource reference to the canonical object and
-        // and mark that we no longer have a canonical expression
-        if (canon->remove_tree_expression_reference(did))
-          delete canon;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_owner())
-      {
-        if (parent == NULL)
-        {
-          // If we're a root index space node and this is the first time
-          // we have become invalid then the tree is no longer valid
-          AutoLock n_lock(node_lock);
-          tree_valid = false;
-        }
-      }
-      else
-      {
-        if ((collective_mapping != NULL) && 
-            collective_mapping->contains(local_space))
-          send_remote_valid_decrement(
-           collective_mapping->get_parent(owner_space, local_space), mutator,
-           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
-        else
-          send_remote_valid_decrement(owner_space, mutator,
-           RtEvent::NO_RT_EVENT, remote_owner_valid_references.exchange(0) + 1);
-      }
-      // If we have a canonical reference that is not ourselves then 
-      // we need to remove the nested reference that we are holding on it too
-      IndexSpaceExpression *canon = canonical.load();
-      if ((canon != NULL) && (canon != this) &&
-          canon->remove_canonical_reference(did))
-        // should never actually delete it since we have a resource ref too
-        assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::InactiveFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      std::map<AddressSpaceID,RtEvent>::iterator finder =
-        send_effects.find(target);
-      if (finder != send_effects.end())
-        finder->second =
-            node->send_remote_gc_decrement(target, mutator, finder->second);
-      else
-        send_effects[target] = node->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Should only become active one time
-      assert(tree_active);
-      tree_active = false;
-#endif
-      if (is_owner())
-      {
-        // Send the removal of the gc references on any remote nodes 
-        if (has_remote_instances())
-        {
-          InactiveFunctor functor(this, mutator, send_effects); 
-          map_over_remote_instances(functor);
-        }
-      }
-      else
+      if (!is_owner())
         context->unregister_remote_expression(expr_id);
-      // Broadcast out for any collective mappings
-      if ((collective_mapping != NULL) && 
-          collective_mapping->contains(local_space))
-      {
-        std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(owner_space, local_space, children);
-        for (std::vector<AddressSpaceID>::const_iterator it =
-              children.begin(); it != children.end(); it++)
-          send_remote_gc_decrement(*it, mutator);
-      }
       // Invalidate any derived operations
       invalidate_derived_operations(did, context);
       IndexSpaceExpression *canon = canonical.load();
@@ -8826,7 +8128,7 @@ namespace Legion {
 #endif
           context->remove_canonical_expression(this, volume);
         }
-        else if (canon->remove_tree_expression_reference(did))
+        else if (canon->remove_canonical_reference(did))
           delete canon;
       }
     }
@@ -9102,6 +8404,7 @@ namespace Legion {
       }
       else
       {
+        pack_valid_ref();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -9412,252 +8715,70 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::send_node(AddressSpaceID target, RtEvent done,
-                                   RtEvent &send_precondition,
-                                   std::set<IndexTreeNode*> &visited,
-                                   std::vector<SendNodeRecord> &nodes_to_send,
-                                   const bool above /* = false */)
+    void IndexSpaceNode::send_node(AddressSpaceID target, bool recurse)
     //--------------------------------------------------------------------------
     {
-      // Do a quick check to see if we already visited this node
-      if (!visited.insert(this).second)
-        return true;
-      // If we're not the owner continue up the tree to see if anyone is
-      // and check whether they are still valid
-      if (!is_owner())
-      {
-        if (parent != NULL)
-        {
-          // Try to get a reference on the parent
-          {
-            AutoLock n_lock(node_lock);
-            if (send_references == 0)
-              return false;
-            send_references++;
-          }
-          const bool result = parent->send_node(target, done,
-              send_precondition, visited, nodes_to_send, true/*above*/);
-          // Remove the reference
-          bool remove_reference = false;
-          {
-            AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-            assert(send_references > 0);
-#endif
-            remove_reference = (--send_references == 0);
-          }
-          if (remove_reference && parent->remove_nested_resource_ref(did))
-            delete parent;
-          return result;
-        }
-        else
-          return true;
-      }
-      // At this point we are the owner
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(tree_active);
-#endif
-      bool pack_space = false;
-      bool still_valid = false;
-      bool has_reference = false;
-      bool add_root_reference = false;
-      // Do our check to see if we're still valid
-      {
-        AutoLock n_lock(node_lock);
-        // Check to see if it is already in the remote set, if so we're done
-        if (has_remote_instance(target))
-        {
-          if (tree_valid)
-          {
-            // Still need to record the effects so this is not collected early
-            std::map<AddressSpaceID,RtEvent>::iterator finder =
-              send_effects.find(target);
-            // Because of control replication we could have made this index
-            // space on multiple nodes although there is no way to know for
-            // certain to confirm this is the case unfortunately so check
-            // to see if we actually have any send effects
-            if (finder != send_effects.end())
-            {
-              send_precondition = finder->second;
-              if (!send_precondition.has_triggered())
-                finder->second = Runtime::merge_events(send_precondition, done);
-              else
-                finder->second = done;
-            }
-            else
-            {
-              // This is the control replication case
-              // It should only happen for root index spaces
-#ifdef DEBUG_LEGION
-              assert(parent == NULL);
-#endif
-              send_effects[target] = done;
-            }
-            return true;
-          }
-          else
-            return false;
-        }
-        // First see if we are still valid
-        if (tree_valid && ((parent == NULL) || (send_references > 0)))
-        {
-          still_valid = true; 
-          // Grab a reference on the parent to keep it from being deleted
-          if (parent != NULL)
-          {
-            send_references++;
-            has_reference = true;
-          }
-          else if (root_valid)
-            add_root_reference = true;
-        }
-        else if (above)
-        {
-          std::map<AddressSpaceID,RtEvent>::iterator finder =
-            send_effects.find(target);
-#ifdef DEBUG_LEGION
-          assert(finder != send_effects.end());
-#endif
-          send_precondition = finder->second;
-          return false;
-        }
-        // Record this as an effect for when the node is no longer valid
-#ifdef DEBUG_LEGION
-        assert(send_effects.find(target) == send_effects.end());
-#endif
-        send_effects[target] = done;
-        update_remote_instances(target);
-        // Have to record this atomically with recording as a remote instance
-        pack_space = index_space_set;
-      }
-      // If we have a parent check to see if it is the owner
-      // If it is then we can continue traversing up
-      if (still_valid && (parent != NULL) &&
-          !parent->send_node(target, done, send_precondition,
-            visited, nodes_to_send, true/*above*/))
-      {
-        if (above)
-        {
-          // If this is above then we don't care about it if it
-          // is not still valid
-          bool remove_reference = false;
-          LocalReferenceMutator mutator;
-          if (has_reference)
-          {
-            AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-            assert(send_references > 0);
-#endif
-            remove_reference = (--send_references == 0);
-            // Remove this from the remote instances since we did
-            // not actually end up sending it
-            filter_remote_instances(target);
-          }
-          if (remove_reference && parent->remove_nested_resource_ref(did))
-            delete parent;
-          return false;
-        }
-        else
-          still_valid = false;
-      }
-      if (add_root_reference)
-        add_base_valid_ref(REMOTE_DID_REF);
-      // Record that we're going to send this node
-      nodes_to_send.emplace_back(SendNodeRecord(this, still_valid,
-            add_root_reference, pack_space, has_reference));
-      return still_valid;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::pack_node(Serializer &rez, AddressSpaceID target,
-                                   const SendNodeRecord &record)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(record.node == this);
-#endif
-      bool remove_reference = false;
-      LocalReferenceMutator mutator;
-      {
-        AutoLock n_lock(node_lock); 
-        {
-          // Do this before the rez check
-          rez.serialize<bool>(true); // is an index space node
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(did);
-          if (record.still_valid && (parent != NULL))
-            rez.serialize(parent->handle);
-          else
-            rez.serialize(IndexPartition::NO_PART);
-          rez.serialize(color);
-          rez.serialize(index_space_ready);
-          rez.serialize(expr_id);
-          rez.serialize(initialized);
-          rez.serialize(depth);
-          rez.serialize<bool>(record.add_root_reference);
-          if (provenance != NULL)
-            provenance->serialize(rez);
-          else
-            Provenance::serialize_null(rez);
-          if (record.pack_space)
-            pack_index_space(rez, true/*include size*/);
-          else
-            rez.serialize<size_t>(0);
-          if (collective_mapping != NULL)
-            collective_mapping->pack(rez);
-          else
-            rez.serialize<size_t>(0); // total spaces
-          rez.serialize<size_t>(semantic_info.size());
-          for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
-                semantic_info.begin(); it != semantic_info.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second.size);
-            rez.serialize(it->second.buffer, it->second.size);
-            rez.serialize(it->second.is_mutable);
-          } 
-        }
-        if (record.has_reference)
-        {
-#ifdef DEBUG_LEGION
-          assert(send_references > 0);
-#endif
-          remove_reference = (--send_references == 0);
-        }
-      }
-      if (remove_reference && parent->remove_nested_resource_ref(did))
-        delete parent;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::invalidate_tree(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      bool remove_reference;
-      {
-        AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-        assert(tree_valid);
-#endif
-        tree_valid = false;
-        remove_reference = (--send_references == 0);
-      }
-      if (remove_reference && parent->remove_nested_resource_ref(did))
-        delete parent;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::InvalidateRootFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (target == source)
+      // Quick out if we've already sent this
+      if (has_remote_instance(target))
         return;
-      runtime->send_index_space_destruction(node->handle, target, applied);
+      // Send our parent first if necessary
+      if (recurse && (parent != NULL))
+        parent->send_node(target, true/*recurse*/);
+      if (is_owner())
+      {
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(is_global());
+        assert(is_valid() || !recurse);
+#endif
+        if (!has_remote_instance(target))
+        {
+          Serializer rez;
+          pack_node(rez, target, recurse);
+          context->runtime->send_index_space_response(target, rez);
+          update_remote_instances(target);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexSpaceNode::pack_node(Serializer &rez,
+                                   AddressSpaceID target, bool recurse)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(handle);
+      rez.serialize(did);
+      if (recurse && (parent != NULL))
+        rez.serialize(parent->handle);
+      else
+        rez.serialize(IndexPartition::NO_PART);
+      rez.serialize(color);
+      rez.serialize(index_space_ready);
+      rez.serialize(expr_id);
+      rez.serialize(initialized);
+      rez.serialize(depth);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+      if (index_space_set)
+        pack_index_space(rez, true/*include size*/);
+      else
+        rez.serialize<size_t>(0);
+      if (collective_mapping != NULL)
+        collective_mapping->pack(rez);
+      else
+        rez.serialize<size_t>(0); // total spaces
+      rez.serialize<size_t>(semantic_info.size());
+      for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
+            semantic_info.begin(); it != semantic_info.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second.size);
+        rez.serialize(it->second.buffer, it->second.size);
+        rez.serialize(it->second.is_mutable);
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -9704,12 +8825,7 @@ namespace Legion {
           if (!is_owner())
           {
             runtime->send_index_space_destruction(handle, owner_space, applied);
-            // If we're part of the broadcast tree then we'll get sent back here
-            // later so we don't need to do anything now
-            if ((collective_mapping != NULL) && 
-                collective_mapping->contains(local_space))
-              return false;
-            need_broadcast = false;
+            return false;
           }
         }
       }
@@ -9728,20 +8844,7 @@ namespace Legion {
               children.begin(); it != children.end(); it++)
           runtime->send_index_space_destruction(handle, *it, applied);
       }
-      {
-        AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-        assert(root_valid);
-#endif
-        root_valid = false;
-        if (is_owner() && has_remote_instances())
-        {
-          InvalidateRootFunctor functor(source, this, applied, runtime);
-          map_over_remote_instances(functor);
-        }
-      }
-      WrapperReferenceMutator mutator(applied);
-      return remove_base_valid_ref(APPLICATION_REF, &mutator);
+      return remove_base_valid_ref(APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -9766,16 +8869,12 @@ namespace Legion {
       derez.deserialize(initialized);
       unsigned depth;
       derez.deserialize(depth);
-      bool add_root_reference;
-      derez.deserialize(add_root_reference);
       AutoProvenance provenance(Provenance::deserialize(derez));
       size_t index_space_size;
       derez.deserialize(index_space_size);
-      const void *index_space_ptr = 
-        (index_space_size > 0) ? derez.get_current_pointer() : NULL;
-      // Advance the pointer if necessary
-      if (index_space_size > 0)
-        derez.advance_pointer(index_space_size);
+      const void *index_space_ptr = (index_space_size > 0) ?
+        derez.get_current_pointer() : NULL;
+      derez.advance_pointer(index_space_size);
       size_t num_spaces;
       derez.deserialize(num_spaces);
       CollectiveMapping *mapping = NULL;
@@ -9788,7 +8887,7 @@ namespace Legion {
             true/*can fail*/, true/*first*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized, provenance,
-          ready_event,expr_id,mapping,NULL/*applied*/,add_root_reference,depth);
+          ready_event, expr_id, mapping, false/*add root reference*/, depth);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -9821,22 +8920,28 @@ namespace Legion {
       IndexSpaceNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       if (target != NULL)
       {
-        RtEvent send_precondition;
-        std::set<IndexTreeNode*> visited;
-        std::vector<SendNodeRecord> nodes_to_send;
-        target->send_node(source, to_trigger,
-                          send_precondition, visited, nodes_to_send);
+        // See if we're going to be sending the whole tree or not
+        bool recurse = true;
+        if (target->check_valid_and_increment(REGION_TREE_REF))
+        {
+          target->pack_valid_ref();
+          target->remove_base_valid_ref(REGION_TREE_REF);
+        }
+        else
+        {
+          target->pack_global_ref();
+          recurse = false;
+        }
+        target->send_node(source, recurse);
         // Now send back the results
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize<size_t>(nodes_to_send.size());
-          for (std::vector<SendNodeRecord>::const_iterator it =
-                nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-            it->node->pack_node(rez, source, *it);
           rez.serialize(to_trigger);
+          rez.serialize(handle);
+          rez.serialize(recurse);
         }
-        forest->runtime->send_index_space_return(source, rez,send_precondition);
+        forest->runtime->send_index_space_return(source, rez);
       }
       else
         Runtime::trigger_event(to_trigger);
@@ -9848,20 +8953,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      size_t node_count;
-      derez.deserialize(node_count);
-      for (unsigned idx = 0; idx < node_count; idx++)
-      {
-        bool is_index_space;
-        derez.deserialize<bool>(is_index_space);
-        if (is_index_space)
-          IndexSpaceNode::handle_node_creation(context, derez, source);
-        else
-          IndexPartNode::handle_node_creation(context, derez, source);
-      }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       Runtime::trigger_event(to_trigger);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *node = context->get_node(handle);
+      bool recurse;
+      derez.deserialize(recurse);
+      if (recurse)
+        node->unpack_valid_ref();
+      else
+        node->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -10077,6 +9180,7 @@ namespace Legion {
 
       IndexSpaceNode *node = forest->get_node(handle);
       node->release_color(color);
+      node->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -10088,7 +9192,7 @@ namespace Legion {
         rez.serialize<bool>(false/*local*/);
         rez.serialize<bool>(true/*index space*/);
         rez.serialize(handle);
-        add_base_expression_reference(REMOTE_DID_REF);
+        pack_global_ref();
       }
       else
       {
@@ -10105,77 +9209,49 @@ namespace Legion {
     {
       rez.serialize<bool>(true/*index space*/);
       rez.serialize(handle);
-      // Make sure this doesn't get collected until we're unpacked
-      // This could be a performance bug since it will block if we
-      // have to send a reference to a remote node, but that should
-      // never actually happen
-      LocalReferenceMutator mutator;
-      add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::try_add_canonical_reference(DistributedID source)
+    void IndexSpaceNode::add_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return check_active_and_increment(source);
+      add_nested_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::remove_canonical_reference(DistributedID source)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_gc_ref(source);
+      return remove_nested_resource_ref(source);
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::try_add_live_reference(ReferenceSource source)
+    bool IndexSpaceNode::try_add_live_reference(void)
     //--------------------------------------------------------------------------
     {
-      return check_active_and_increment(source);
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::remove_live_reference(ReferenceSource source)
-    //--------------------------------------------------------------------------
-    {
-      return remove_base_gc_ref(source);
+      if (check_global_and_increment(LIVE_EXPR_REF))
+      {
+        ImplicitReferenceTracker::record_live_expression(this);
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::add_base_expression_reference(
-              ReferenceSource source, ReferenceMutator *mutator, unsigned count)
+                                         ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        add_base_valid_ref(source, &local_mutator, count);
-      }
-      else
-        add_base_valid_ref(source, mutator, count);
+      add_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
     void IndexSpaceNode::add_nested_expression_reference(
-        DistributedID source, std::set<RtEvent> &applied_events, unsigned count)
+                                           DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      WrapperReferenceMutator mutator(applied_events);
-      add_nested_expression_reference(source, &mutator, count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::add_nested_expression_reference(
-                DistributedID source, ReferenceMutator *mutator, unsigned count)
-    //--------------------------------------------------------------------------
-    {
-      if (mutator == NULL)
-      {
-        LocalReferenceMutator local_mutator;
-        add_nested_valid_ref(source, &local_mutator, count);
-      }
-      else
-        add_nested_valid_ref(source, mutator, count);
+      add_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -10183,7 +9259,7 @@ namespace Legion {
                                          ReferenceSource source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_base_valid_ref(source, NULL/*mutator*/, count);
+      return remove_base_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -10191,7 +9267,7 @@ namespace Legion {
                                            DistributedID source, unsigned count)
     //--------------------------------------------------------------------------
     {
-      return remove_nested_valid_ref(source, NULL/*mutator*/, count);
+      return remove_nested_gc_ref(source, count);
     }
 
     //--------------------------------------------------------------------------
@@ -10396,13 +9472,13 @@ namespace Legion {
                                  Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      get_owner_space(p, ctx->runtime), init, mapping, prov), 
+                      init, mapping, prov), 
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial),
         shard_mapping(map), disjoint(dis), has_complete(comp >= 0),
-        complete(comp != 0), tree_valid(true), send_count(0), first_entry(NULL)
+        complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -10437,14 +9513,14 @@ namespace Legion {
                                  ShardMapping *shard_map, Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      get_owner_space(p, ctx->runtime), init, map, prov),
+                      init, map, prov),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part),
         shard_mapping(shard_map), disjoint_ready(dis_ready), disjoint(false), 
-        has_complete(comp >= 0), complete(comp != 0), tree_valid(true), 
-        send_count(0), first_entry(NULL)
+        has_complete(comp >= 0), complete(comp != 0),
+        first_entry(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
@@ -10478,7 +9554,7 @@ namespace Legion {
       {
         for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
-          if ((*it)->remove_partition_reference(NULL))
+          if ((*it)->remove_partition_reference())
             delete (*it);
         partition_trackers.clear();
       }
@@ -10498,161 +9574,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::InvalidFunctor::apply(AddressSpaceID target)
+    void IndexPartNode::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      std::map<AddressSpaceID,RtEvent>::iterator finder =
-        send_effects.find(target);
-      if (finder != send_effects.end())
-        finder->second =
-            node->send_remote_gc_decrement(target, mutator, finder->second);
+      // Remove the valid reference that we hold on the color space
+      if (color_space->parent != NULL)
+        color_space->parent->remove_nested_valid_ref(did);
       else
-        send_effects[target] = node->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // This should only happen once on each copy of the index part node
-      assert(tree_valid);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not the owner, we add a valid reference to the owner
-      if (is_owner())
+        color_space->remove_nested_valid_ref(did);
+      // Remove valid ref on partition of parent if it exists, otherwise
+      // our parent index space is a root so we remove the reference there
+      if (parent->parent != NULL)
       {
-#ifdef DEBUG_LEGION
-        // We should only become valid once on the owner node
-        assert(tree_valid);
-#endif
-        // Check to see if the color space has a parent partition, if so we
-        // add the valid reference there since valid references on index spaces
-        // that are not the root mean it is a valid expression
-        if (color_space->parent != NULL)
-          color_space->parent->add_nested_valid_ref(did, mutator);
-        else
-          color_space->add_nested_valid_ref(did, mutator);
-        // Add it to the partition of our parent if it exists, otherwise
-        // our parent index space is a root so we add the reference there
-        if (parent->parent != NULL)
-          parent->parent->add_nested_valid_ref(did, mutator);
-        else
-          parent->add_nested_valid_ref(did, mutator);
+        if (parent->parent->remove_nested_valid_ref(did))
+          delete parent->parent;
       }
       else
-      {
-        if ((collective_mapping != NULL) && 
-            collective_mapping->contains(local_space))
-          send_remote_valid_increment(
-            collective_mapping->get_parent(owner_space, local_space),
-            mutator, initialized);
-        else
-          send_remote_valid_increment(owner_space, mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (is_owner())
-      {
-        // Remove gc references from our remote nodes
-        if (has_remote_instances())
-        {
-          // Make sure invalidation are not handled before send effects
-          InvalidFunctor functor(this, mutator, send_effects);
-          map_over_remote_instances(functor);
-        }
-        if (collective_mapping != NULL)
-        {
-          std::vector<AddressSpaceID> children;
-          collective_mapping->get_children(owner_space, local_space, children);
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            send_remote_gc_decrement(*it, mutator);
-        }
-        // Remove the valid reference that we hold on the color space
-        if (color_space->parent != NULL)
-          color_space->parent->remove_nested_valid_ref(did, mutator);
-        else
-          color_space->remove_nested_valid_ref(did, mutator);
-        // Remove valid ref on partition of parent if it exists, otherwise
-        // our parent index space is a root so we remove the reference there
-        if (parent->parent != NULL)
-        {
-          if (parent->parent->remove_nested_valid_ref(did, mutator))
-            delete parent->parent;
-        }
-        else
-          parent->remove_nested_valid_ref(did, mutator);
-      }
-      else // Remove the valid reference that we have on the owner
-      {
-        if ((collective_mapping != NULL) &&
-            collective_mapping->contains(local_space))
-          send_remote_valid_decrement(
-             collective_mapping->get_parent(owner_space, local_space),
-             mutator, initialized);
-        else
-          send_remote_valid_decrement(owner_space, mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Continue propagating gc reference removals for collective mappings
-      if (!is_owner() && (collective_mapping != NULL) &&
-          collective_mapping->contains(local_space))
-      {
-        std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(owner_space, local_space, children);
-        for (std::vector<AddressSpaceID>::const_iterator it =
-              children.begin(); it != children.end(); it++)
-          send_remote_gc_decrement(*it, mutator);
-      }
-      // Finally remove valid references on all owner children and any trackers
+        parent->remove_nested_valid_ref(did);
+      // Remove valid references on all owner children and any trackers
       // We should not need a lock at this point since nobody else should
-      // be modifying these data structures at this point
-      // We still hold resource references to the node so we don't need to
-      // worry about the child nodes being deleted
-      parent->remove_child(color);
-      std::vector<IndexSpaceNode*> to_invalidate;
-      {
-        AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-        assert(tree_valid);
-#endif
-        tree_valid = false;
-        to_invalidate.reserve(color_map.size());
-        for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-              color_map.begin(); it != color_map.end(); it++)
-          to_invalidate.push_back(it->second);
-      }
-      for (std::vector<IndexSpaceNode*>::const_iterator it =
-            to_invalidate.begin(); it != to_invalidate.end(); it++)
-      {
-        (*it)->invalidate_tree();
+      // be modifying the color map
+      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+            color_map.begin(); it != color_map.end(); it++)
         // Remove the nested valid reference on this index space node
-        if ((*it)->remove_nested_valid_ref(did, mutator))
-          assert(false); // still holding resource ref so should never be hit 
-      }
+        if (it->second->remove_nested_valid_ref(did))
+          assert(false); // still holding resource ref so should never be hit
       if (!partition_trackers.empty())
       {
         for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
-          if ((*it)->remove_partition_reference(mutator))
+          if ((*it)->remove_partition_reference())
             delete (*it);
         partition_trackers.clear();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::notify_local(void)
+    //--------------------------------------------------------------------------
+    {
+      parent->remove_child(color);  
       // Remove the reference on our union expression if we have one
       IndexSpaceExpression *expr = union_expr.load();
       if ((expr != NULL) && expr->remove_nested_expression_reference(did))
@@ -10978,29 +9939,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::add_child(IndexSpaceNode *child) 
+    void IndexPartNode::add_child(IndexSpaceNode *child) 
     //--------------------------------------------------------------------------
     {
       // This child should live as long as we are alive
       child->add_nested_resource_ref(did);
+      child->add_nested_valid_ref(did);
       RtUserEvent to_trigger;
-      bool result;
       {
         AutoLock n_lock(node_lock);
-        result = tree_valid;
 #ifdef DEBUG_LEGION
+        assert(is_valid());
         assert(color_map.find(child->color) == color_map.end());
 #endif
         color_map[child->color] = child;
         std::map<LegionColor,RtUserEvent>::iterator finder = 
           pending_child_map.find(child->color);
         if (finder == pending_child_map.end())
-          return result;
+          return;
         to_trigger = finder->second;
         pending_child_map.erase(finder);
       }
       Runtime::trigger_event(to_trigger);
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -11843,190 +10803,88 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::send_node(AddressSpaceID target, RtEvent done,
-                                  RtEvent &send_precondition,
-                                  std::set<IndexTreeNode*> &visited,
-                                  std::vector<SendNodeRecord> &nodes_to_send,
-                                  const bool above /* = false */)
+    void IndexPartNode::send_node(AddressSpaceID target, bool recurse)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(recurse);
       assert(parent != NULL);
 #endif
-      // Do a quick check to see if we already visited this
-      if (!visited.insert(this).second)
-        return true;
-      if (!is_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(above);
-#endif
-        // See if anything above or the color space needs to be sent
-        if (!parent->send_node(target, done, send_precondition,
-                               visited, nodes_to_send, true/*above*/))
-          return false;
-        RtEvent temp_precondition;
-        color_space->send_node(target, done, temp_precondition,
-                               visited, nodes_to_send, false/*above*/);
-        if (temp_precondition.exists())
-        {
-          if (send_precondition.exists())
-            send_precondition =
-              Runtime::merge_events(send_precondition, temp_precondition);
-          else
-            send_precondition = temp_precondition;
-        }
-        return true;
-      }
-      // At this point we are the owner
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Do our check to see if we're still valid
-      {
-        AutoLock n_lock(node_lock);
-        if (!tree_valid)
-          return false;
-        if (has_remote_instance(target))
-        {
-          // Still need to record the effects so this is not collected early
-          std::map<AddressSpaceID,RtEvent>::iterator finder =
-            send_effects.find(target);
-          // Check to see if we could find it, we might not be able to because
-          // it already exists from a shard mapping from control repliction
-          if (finder != send_effects.end())
-          {
-            send_precondition = finder->second;
-            if (!send_precondition.has_triggered())
-              finder->second = Runtime::merge_events(send_precondition, done);
-            else
-              finder->second = done;
-          }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert(shard_mapping != NULL);
-            bool found = false;
-            for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
-            {
-              if ((*shard_mapping)[idx] != target)
-                continue;
-              found = true;
-              break;
-            }
-            assert(found);
-#endif
-            send_effects[target] = done;
-          }
-          return true;
-        }
-        // Record this as an effect for when the node is no longer valid
-#ifdef DEBUG_LEGION
-        assert(send_effects.find(target) == send_effects.end());
-#endif
-        send_effects[target] = done; 
-        send_count++;
-        update_remote_instances(target);
-      }
-      if (!parent->send_node(target, done, send_precondition,
-                             visited, nodes_to_send, true/*above*/))
+      // Quick out if we've already sent this
+      if (has_remote_instance(target))
+        return;
+      parent->send_node(target, true/*recurse*/);
+      color_space->send_node(target, true/*recurse*/);
+      if (is_owner())
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-        assert(send_count > 0);
+        assert(is_valid());
 #endif
-        if (((--send_count) == 0) && send_done.exists())
+        if (!has_remote_instance(target))
         {
-          Runtime::trigger_event(send_done);
-          send_done = RtUserEvent::NO_RT_USER_EVENT;
+          Serializer rez;
+          pack_node(rez, target);
+          context->runtime->send_index_partition_response(target, rez);
+          update_remote_instances(target);
         }
-        return false;
       }
-      RtEvent temp_precondition;
-      color_space->send_node(target, done, temp_precondition,
-                             visited, nodes_to_send, false/*above*/);
-      if (temp_precondition.exists())
-      {
-        if (send_precondition.exists())
-          send_precondition =
-            Runtime::merge_events(send_precondition, temp_precondition);
-        else
-          send_precondition = temp_precondition;
-      }
-      // Record that we will be sending this node
-      nodes_to_send.emplace_back(SendNodeRecord(this));
-      return true;
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::pack_node(Serializer &rez, AddressSpaceID target,
-                                  const SendNodeRecord &record)
+    void IndexPartNode::pack_node(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
-      // We're guaranteed to send at this point so we can remove the guard
-#ifdef DEBUG_LEGION
-      assert(send_count > 0);
-#endif
-      if (((--send_count) == 0) && send_done.exists())
-      {
-        Runtime::trigger_event(send_done);
-        send_done = RtUserEvent::NO_RT_USER_EVENT;
-      }
       // Check to see if we have computed the disjointness result
       // If not we'll record that we need to do it and then when it 
       // is computed we'll send out the result to all the remote copies
       const bool has_disjoint = 
         (!disjoint_ready.exists() || disjoint_ready.has_triggered());
       const bool disjoint_result = has_disjoint ? is_disjoint() : false;
+      RezCheck z(rez);
+      rez.serialize(handle);
+      rez.serialize(did);
+      rez.serialize(parent->handle); 
+      rez.serialize(color_space->handle);
+      rez.serialize(color);
+      rez.serialize<bool>(has_disjoint);
+      rez.serialize<bool>(disjoint_result);
+      if (has_complete)
       {
-        // Do this before the rez check
-        rez.serialize<bool>(false); // is not an index space node
-        RezCheck z(rez);
-        rez.serialize(handle);
-        rez.serialize(did);
-        rez.serialize(parent->handle); 
-        rez.serialize(color_space->handle);
-        rez.serialize(color);
-        rez.serialize<bool>(has_disjoint);
-        rez.serialize<bool>(disjoint_result);
-        if (has_complete)
-        {
-          if (complete)
-            rez.serialize<int>(1); // complete
-          else
-            rez.serialize<int>(0); // not complete
-        }
+        if (complete)
+          rez.serialize<int>(1); // complete
         else
-          rez.serialize<int>(-1); // we don't know yet
-        rez.serialize(partition_ready);
-        rez.serialize(partial_pending);
-        rez.serialize(initialized);
-        if (collective_mapping != NULL)
-          collective_mapping->pack(rez);
-        else
-          rez.serialize<size_t>(0); // total spaces
-        if (shard_mapping != NULL)
-        {
-          rez.serialize(shard_mapping->size());
-          for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
-            rez.serialize((*shard_mapping)[idx]);
-        }
-        else
-          rez.serialize<size_t>(0);
-        if (provenance != NULL)
-          provenance->serialize(rez);
-        else
-          Provenance::serialize_null(rez);
-        rez.serialize<size_t>(semantic_info.size());
-        for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
-              semantic_info.begin(); it != semantic_info.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second.size);
-          rez.serialize(it->second.buffer, it->second.size);
-          rez.serialize(it->second.is_mutable);
-        }
+          rez.serialize<int>(0); // not complete
+      }
+      else
+        rez.serialize<int>(-1); // we don't know yet
+      rez.serialize(partition_ready);
+      rez.serialize(partial_pending);
+      rez.serialize(initialized);
+      if (collective_mapping != NULL)
+        collective_mapping->pack(rez);
+      else
+        rez.serialize<size_t>(0); // total spaces
+      if (shard_mapping != NULL)
+      {
+        rez.serialize(shard_mapping->size());
+        for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
+          rez.serialize((*shard_mapping)[idx]);
+      }
+      else
+        rez.serialize<size_t>(0);
+      if (provenance != NULL)
+        provenance->serialize(rez);
+      else
+        Provenance::serialize_null(rez);
+      rez.serialize<size_t>(semantic_info.size());
+      for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
+            semantic_info.begin(); it != semantic_info.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second.size);
+        rez.serialize(it->second.buffer, it->second.size);
+        rez.serialize(it->second.is_mutable);
       }
     }
 
@@ -12121,33 +10979,21 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
-      RtEvent send_precondition;
-      std::set<IndexTreeNode*> visited;
-      std::vector<SendNodeRecord> nodes_to_send;
-      if ((target != NULL) &&
-          target->send_node(source, to_trigger, send_precondition,
-                            visited, nodes_to_send))
+      if (target != NULL)
       {
+        target->pack_valid_ref();
+        target->send_node(source, true/*recurse*/);
         // Now send back the results
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize<size_t>(nodes_to_send.size());
-          for (std::vector<SendNodeRecord>::const_iterator it =
-                nodes_to_send.begin(); it != nodes_to_send.end(); it++)
-            it->node->pack_node(rez, source, *it);
           rez.serialize(to_trigger);
+          rez.serialize(handle);
         }
-        forest->runtime->send_index_partition_return(source, rez,
-                                                     send_precondition);
+        forest->runtime->send_index_partition_return(source, rez);
       }
       else
-      {
-#ifdef DEBUG_LEGION
-        assert(nodes_to_send.empty());
-#endif
         Runtime::trigger_event(to_trigger);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -12156,20 +11002,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      size_t node_count;
-      derez.deserialize(node_count);
-      for (unsigned idx = 0; idx < node_count; idx++)
-      {
-        bool is_index_space;
-        derez.deserialize<bool>(is_index_space);
-        if (is_index_space)
-          IndexSpaceNode::handle_node_creation(context, derez, source);
-        else
-          IndexPartNode::handle_node_creation(context, derez, source);
-      }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       Runtime::trigger_event(to_trigger);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      IndexPartNode *node = context->get_node(handle);
+      node->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -12647,7 +11486,6 @@ namespace Legion {
                    ShardMapping *shard_mapping, Provenance *prov)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
-          get_owner_space(sp, ctx->runtime), 
           false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state((shard_mapping != NULL) ? FIELD_ALLOC_COLLECTIVE :
@@ -12689,7 +11527,7 @@ namespace Legion {
          DistributedID did, RtEvent init, Provenance *prov, Deserializer &derez)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
-          get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
+          false/*register with runtime*/),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
         allocation_state(FIELD_ALLOC_INVALID), outstanding_allocators(0),
         outstanding_invalidations(0)
@@ -12880,39 +11718,6 @@ namespace Legion {
       provenance = Provenance::deserialize(derez);
       if (provenance != NULL)
         provenance->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldSpaceNode::notify_valid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not the owner, we add a valid reference to the owner
-      if (!is_owner())
-      {
-        if ((collective_mapping != NULL) &&
-            collective_mapping->contains(local_space))
-          send_remote_valid_increment(
-             collective_mapping->get_parent(owner_space, local_space),
-             mutator, initialized);
-        else
-          send_remote_valid_increment(owner_space, mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldSpaceNode::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_owner())
-      {
-        if ((collective_mapping != NULL) &&
-            collective_mapping->contains(local_space))
-          send_remote_valid_decrement(
-             collective_mapping->get_parent(owner_space, local_space),
-             mutator, initialized);
-        else
-          send_remote_valid_decrement(owner_space, mutator);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -13600,7 +12405,7 @@ namespace Legion {
                 ready_event = Runtime::create_rt_user_event();
               outstanding_invalidations++;
               // Add a reference that will be remove when the flush returns
-              add_base_resource_ref(FIELD_ALLOCATOR_REF);
+              add_base_gc_ref(FIELD_ALLOCATOR_REF);
               // Send the invalidation and make ourselves the new 
               // pending exclusive allocator value
               Serializer rez;
@@ -13680,7 +12485,7 @@ namespace Legion {
                   const RtUserEvent done = Runtime::create_rt_user_event();
                   outstanding_invalidations++;
                   // Add a reference that will be remove when the flush returns
-                  add_base_resource_ref(FIELD_ALLOCATOR_REF);
+                  add_base_gc_ref(FIELD_ALLOCATOR_REF);
                   Serializer rez;
                   {
                     RezCheck z(rez);
@@ -13743,6 +12548,9 @@ namespace Legion {
                   available_indexes.clear();
                   rez.serialize(ready_event);
                 }
+                // Add a reference to this node to keep it alive until we 
+                // get the corresponding free operation from the remote node
+                add_base_gc_ref(FIELD_ALLOCATOR_REF);
                 runtime->send_field_space_allocator_response(source, rez); 
                 remote_field_infos.insert(source);
                 allocation_state = FIELD_ALLOC_INVALID; 
@@ -14344,6 +13152,7 @@ namespace Legion {
               rez.serialize(fid);
               rez.serialize(field_size);
             }
+            pack_global_ref();
             context->runtime->send_field_size_update(*it, rez);
             update_events.insert(done_event);
           }
@@ -14366,6 +13175,7 @@ namespace Legion {
             rez.serialize(fid);
             rez.serialize(field_size);
           }
+          pack_global_ref();
           context->runtime->send_field_size_update(owner_space, rez);
           update_events.insert(done_event);
         }
@@ -15411,6 +14221,7 @@ namespace Legion {
       FieldSpaceNode *node = forest->get_node(handle);
       std::set<RtEvent> applied;
       node->invalidate_layouts(index, applied, source);
+      node->unpack_global_ref();
       if (!applied.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(applied));
       else
@@ -15529,6 +14340,7 @@ namespace Legion {
       FieldSpaceNode *node = forest->get_node(handle);
       std::set<RtEvent> done_events;
       node->update_field_size(fid, field_size, done_events, source);
+      node->unpack_global_ref();
       if (!done_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(done_events));
       else
@@ -15995,12 +14807,10 @@ namespace Legion {
       derez.deserialize(ready_event);
 
       FieldSpaceNode *node = forest->get_node(handle);
-      // Add a reference to this node to keep it alive until we get the
-      // corresponding free operation from the remote node
+      
 #ifdef DEBUG_LEGION
       assert(node->is_owner());
 #endif
-      node->add_base_resource_ref(FIELD_ALLOCATOR_REF);
       node->create_allocator(source, ready_event);
     }
 
@@ -16058,7 +14868,7 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
-      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF,
+      if (node->remove_base_gc_ref(FIELD_ALLOCATOR_REF,
             (remove_free_reference ? 2 : 1)))
         delete node;
     }
@@ -16078,7 +14888,7 @@ namespace Legion {
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
       // Remove the reference that we added when we originally got the request
-      if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
+      if (node->remove_base_gc_ref(FIELD_ALLOCATOR_REF))
         delete node;
     }
 
@@ -16328,6 +15138,7 @@ namespace Legion {
               rez.serialize(index);
               rez.serialize(remote_done);
             }
+            pack_global_ref();
             runtime->send_field_space_layout_invalidation(*it, rez);
             applied.insert(remote_done);
           }
@@ -16904,13 +15715,9 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
             LEGION_DISTRIBUTED_HELP_ENCODE((id > 0) ? id :
               ctx->runtime->get_available_distributed_id(),
-              REGION_TREE_NODE_DC), (id > 0) ? ctx->runtime->determine_owner(id)
-            : ctx->runtime->address_space, false/*register with runtime*/, map),
+              REGION_TREE_NODE_DC), false/*register with runtime*/, map),
         context(ctx), column_source(column_src), provenance(prov),
         initialized(init), tree_initialized(tree), registered(false)
-#ifdef DEBUG_LEGION
-        , currently_active(true)
-#endif
     //--------------------------------------------------------------------------
     {
       if (provenance != NULL)
@@ -16928,15 +15735,6 @@ namespace Legion {
       }
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::notify_active(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(currently_active);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17137,7 +15935,6 @@ namespace Legion {
                                        FieldMask &first_touch_refinement,
                                        FieldMaskSet<RefinementOp> &refinements,
                                        RefinementTracker &refinement_tracker,
-                                       std::set<RtEvent> &applied_events,
                                        const bool track_disjoint_complete_below,
                                        const bool check_unversioned)
     //--------------------------------------------------------------------------
@@ -17174,14 +15971,14 @@ namespace Legion {
         if (arrived && proj_info.is_projecting())
         {
           siphon_logical_projection(closer, state, unopened_field_mask,
-                      proj_info, captures_closes, open_below, applied_events);
+                      proj_info, captures_closes, open_below);
         }
         else
         {
           const FieldMask *aliased_children = path.get_aliased_children(depth);
           siphon_logical_children(closer, state, unopened_field_mask, 
                                   aliased_children, captures_closes, next_child,
-                                  open_below, applied_events);
+                                  open_below);
         }
         // We always need to create and register close operations
         // regardless of whether we are tracing or not
@@ -17221,14 +16018,14 @@ namespace Legion {
           FieldMask open_only = user.field_mask - unopened_field_mask;
           if (!!open_only)
             add_open_field_state(state, arrived, proj_info, user, 
-                                 open_only, next_child, applied_events);
+                                 open_only, next_child);
         }
       }
       else if (!arrived || proj_info.is_projecting())
       {
         // Everything is open-only so make a state and merge it in
         add_open_field_state(state, arrived, proj_info, user, 
-                             user.field_mask, next_child, applied_events);
+                             user.field_mask, next_child);
       }
       // We also always do our dependence analysis even if we have
       // already traced because we need to pick up dependences on 
@@ -17317,7 +16114,7 @@ namespace Legion {
                     {
                       // Record that we have a projection from this node
                       RefProjectionSummary *summary = 
-                        new RefProjectionSummary(proj_info, applied_events);
+                        new RefProjectionSummary(proj_info);
                       summary->add_reference();
                       state.disjoint_complete_projections.insert(summary,
                                                                  remainder);
@@ -17382,7 +16179,7 @@ namespace Legion {
                   {
                     // Record that we have a projection from this node
                     RefProjectionSummary *summary =
-                      new RefProjectionSummary(proj_info, applied_events);
+                      new RefProjectionSummary(proj_info);
                     summary->add_reference();
                     state.disjoint_complete_projections.insert(summary,
                                                                remainder);
@@ -17462,14 +16259,14 @@ namespace Legion {
             next_child->register_logical_user(ctx, user, path, trace_info,
                      proj_info, unopened_field_mask, already_closed_mask, 
                      child_disjoint_complete, first_touch_refinement,
-                     refinements, refinement_tracker, applied_events,
+                     refinements, refinement_tracker,
                      true/*track disjoint complete below*/, 
                      false/*check unversioned*/);
           else
             next_child->register_logical_user(ctx, user, path, trace_info,
                      proj_info, unopened_field_mask, already_closed_mask, 
                      child_disjoint_complete, first_touch_refinement,
-                     refinements, refinement_tracker, applied_events,
+                     refinements, refinement_tracker,
                      false/*track disjoint complete below*/, 
                      false/*check unversioned*/);
         }
@@ -17477,7 +16274,7 @@ namespace Legion {
           next_child->register_logical_user(ctx, user, path, trace_info,
              proj_info, unopened_field_mask, already_closed_mask, 
              child_disjoint_complete, first_touch_refinement,
-             refinements, refinement_tracker, applied_events, 
+             refinements, refinement_tracker,
              track_disjoint_complete_below, false/*check unversioned*/);
         if (!refinements.empty() &&
             (!state.curr_epoch_users.empty() || 
@@ -18103,8 +16900,7 @@ namespace Legion {
                                               const ProjectionInfo &proj_info,
                                               const LogicalUser &user,
                                               const FieldMask &open_mask,
-                                              RegionTreeNode *next_child,
-                                              std::set<RtEvent> &applied_events)
+                                              RegionTreeNode *next_child)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18114,12 +16910,12 @@ namespace Legion {
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
            proj_info.projection_space, proj_info.sharding_function, 
-           proj_info.sharding_space, applied_events, this);
+           proj_info.sharding_space, this);
         merge_new_field_state(state, new_state);
       }
       else if (next_child != NULL)
       {
-        FieldState new_state(user, open_mask, next_child, applied_events);
+        FieldState new_state(user, open_mask, next_child);
         merge_new_field_state(state, new_state);
       }
 #ifdef DEBUG_LEGION
@@ -18203,8 +16999,7 @@ namespace Legion {
                                               const FieldMask *aliased_children,
                                               bool record_close_operations,
                                               RegionTreeNode *next_child,
-                                              FieldMask &open_below,
-                                              std::set<RtEvent> &applied_events)
+                                              FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -18318,8 +17113,7 @@ namespace Legion {
                 if (!!already_open)
                 {
                   open_below |= already_open;
-                  FieldState new_state(closer.user, already_open, 
-                                       next_child, applied_events);
+                  FieldState new_state(closer.user, already_open, next_child);
                   new_states.emplace_back(std::move(new_state));
                 }
                 // See if there are still any valid open fields
@@ -18390,10 +17184,9 @@ namespace Legion {
                       // FieldState in MULTI_REDUCE mode with two
                       // children open
                       FieldState new_state(closer.user, already_open,
-                                           cit->first, applied_events);
+                                           cit->first);
                       // Add the next child as well
-                      new_state.add_child(next_child, already_open, 
-                                          applied_events);
+                      new_state.add_child(next_child, already_open); 
                       new_state.open_state = OPEN_MULTI_REDUCE;
 #ifdef DEBUG_LEGION
                       assert(!!new_state.valid_fields());
@@ -18443,7 +17236,7 @@ namespace Legion {
                     // Create a new FieldState open in whatever mode is
                     // appropriate based on the usage
                     FieldState new_state(closer.user, already_open, 
-                                         next_child, applied_events);
+                                         next_child);
                     // We always have to go to read-write mode here
                     new_state.open_state = OPEN_READ_WRITE;
                     new_states.emplace_back(std::move(new_state));
@@ -18640,7 +17433,7 @@ namespace Legion {
       FieldMask open_mask = current_mask - open_below;
       if ((next_child != NULL) && !!open_mask)
       {
-        FieldState new_state(closer.user, open_mask, next_child,applied_events);
+        FieldState new_state(closer.user, open_mask, next_child);
         new_states.emplace_back(std::move(new_state));
       }
       merge_new_field_states(state, new_states);
@@ -18655,8 +17448,7 @@ namespace Legion {
                                               const FieldMask &current_mask,
                                               const ProjectionInfo &proj_info,
                                               bool record_close_operations,
-                                              FieldMask &open_below,
-                                              std::set<RtEvent> &applied_events)
+                                              FieldMask &open_below)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -18739,8 +17531,7 @@ namespace Legion {
                 // Keep track of the sharding projections
                 // in case we need to promote to read-write later
                 if (proj_info.is_sharding())
-                    it->record_projection_summary(proj_info, this, 
-                                                  applied_events);
+                    it->record_projection_summary(proj_info, this); 
                 // Keep going
                 it++;
               }
@@ -18748,11 +17539,10 @@ namespace Legion {
               // that we need to flush them so close them up
               else if (!IS_REDUCE(closer.user.usage) && 
                   it->can_elide_close_operation(state, closer.user.op, 
-                    closer.user.idx, proj_info, this, applied_events))
+                                    closer.user.idx, proj_info, this))
               {
                 if (proj_info.is_sharding())
-                  it->record_projection_summary(proj_info, this, 
-                                                applied_events);
+                  it->record_projection_summary(proj_info, this); 
                 // Promote this up to a read-write projection state
                 const FieldMask overlap = current_mask & it->valid_fields();
                 // Record that some fields are already open
@@ -18761,9 +17551,8 @@ namespace Legion {
                 {
                   // Make the new state to add
                   FieldState new_state(closer.user.usage, overlap, 
-                           proj_info.projection, proj_info.projection_space, 
-                           proj_info.sharding_function,proj_info.sharding_space,
-                           applied_events, this);
+                    proj_info.projection, proj_info.projection_space, 
+                    proj_info.sharding_function,proj_info.sharding_space, this);
                   // Copy over any projections from before
                   new_state.shard_projections.insert(
                     it->shard_projections.begin(), it->shard_projections.end());
@@ -18814,12 +17603,11 @@ namespace Legion {
               // size domain as the original index space launch
               if (!IS_REDUCE(closer.user.usage) &&
                   it->can_elide_close_operation(state, closer.user.op, 
-                    closer.user.idx, proj_info, this, applied_events))
+                                    closer.user.idx, proj_info, this))
               {
                 // If we're a write we need to update the projection space
                 if (proj_info.is_sharding())
-                  it->record_projection_summary(proj_info, this, 
-                                                applied_events);
+                  it->record_projection_summary(proj_info, this); 
                 open_below |= (it->valid_fields() & current_mask);
                 it++;
               }
@@ -18882,8 +17670,7 @@ namespace Legion {
       {
         FieldState new_state(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_space, 
-              proj_info.sharding_function, proj_info.sharding_space, 
-              applied_events, this);
+              proj_info.sharding_function, proj_info.sharding_space, this);
         new_states.emplace_back(std::move(new_state));
       }
       merge_new_field_states(state, new_states);
@@ -19015,7 +17802,7 @@ namespace Legion {
               removed_fields = true;
               if (!finder->second)
               {
-                if (next_child->remove_base_valid_ref(FIELD_STATE_REF))
+                if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
                   delete next_child;
                 state.open_children.erase(finder);
               }
@@ -19225,7 +18012,7 @@ namespace Legion {
                 removed_fields = true;
                 if (!finder->second)
                 {
-                  if (next_child->remove_base_valid_ref(FIELD_STATE_REF))
+                  if (next_child->remove_base_gc_ref(FIELD_STATE_REF))
                     delete next_child;
                   state.open_children.erase(finder);
                 }
@@ -19704,7 +18491,7 @@ namespace Legion {
             to_delete.begin(); it != to_delete.end(); it++)
       {
         state.disjoint_complete_children.erase(*it);
-        if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+        if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
           delete (*it);
       }
       state.disjoint_complete_children.tighten_valid_mask(); 
@@ -19717,7 +18504,6 @@ namespace Legion {
                                            const RegionTreePath &path,
                                            const LogicalTraceInfo &trace_info,
                                            FieldMask &already_closed_mask,
-                                           std::set<RtEvent> &applied_events,
                                            bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
@@ -19738,7 +18524,7 @@ namespace Legion {
           // Perform any close operations
           LogicalCloser closer(ctx, user, this, false/*validates*/);
           siphon_logical_deletion(closer, state, check_mask, next_child, 
-              open_below, ((depth+1) == path.get_max_depth()), applied_events);
+              open_below, ((depth+1) == path.get_max_depth()));
           if (closer.has_close_operations(already_closed_mask))
           {
             // Generate the close operations         
@@ -19780,7 +18566,7 @@ namespace Legion {
         // Continue the traversal
         // Only continue checking the fields that are open below
         next_child->register_logical_deletion(ctx, user, open_below, path,
-            trace_info, already_closed_mask, applied_events, invalidate_tree);
+            trace_info, already_closed_mask, invalidate_tree);
       }
       else
       {
@@ -19816,8 +18602,7 @@ namespace Legion {
                                               const FieldMask &current_mask,
                                               RegionTreeNode *next_child,
                                               FieldMask &open_below,
-                                              bool force_close_next,
-                                              std::set<RtEvent> &applied_events)
+                                              bool force_close_next)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -20052,7 +18837,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_logical_state(ContextID ctx, Serializer &rez,
-         const bool invalidate, std::vector<DistributedCollectable*> &to_remove)
+                                            const bool invalidate)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
@@ -20081,7 +18866,7 @@ namespace Legion {
           for (std::set<ProjectionSummary>::const_iterator it = 
                 fit->shard_projections.begin(); it != 
                 fit->shard_projections.end(); it++)
-            it->pack_summary(rez, to_remove);
+            it->pack_summary(rez);
         }
 #ifdef DEBUG_LEGION
         else
@@ -20095,13 +18880,7 @@ namespace Legion {
           const LegionColor child_color = it->first->get_color();
           rez.serialize(child_color);
           rez.serialize(it->second);
-          // Add a remote valid reference on these nodes to keep
-          // them live until we can add on remotely. No need for
-          // a mutator since we know that they are already valid
-          if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-            it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
-
-          to_traverse[child_color] = it->first;
+          to_traverse.insert(std::make_pair(child_color, it->first));
         }
       }
       rez.serialize(state.disjoint_complete_tree);
@@ -20113,8 +18892,7 @@ namespace Legion {
         const LegionColor child_color = it->first->get_color();
         rez.serialize(child_color);
         rez.serialize(it->second);
-        if (to_traverse.insert(std::make_pair(child_color, it->first)).second)
-          it->first->add_base_valid_ref(REMOTE_DID_REF, NULL/*mutator*/);
+        to_traverse.insert(std::make_pair(child_color, it->first));
       }
       rez.serialize<size_t>(state.disjoint_complete_accesses.size());
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
@@ -20143,16 +18921,13 @@ namespace Legion {
             state.disjoint_complete_projections.begin(); it !=
             state.disjoint_complete_projections.end(); it++)
       {
-        it->first->pack_summary(rez, to_remove);
+        it->first->pack_summary(rez);
         rez.serialize(it->second);
       }
       // Now recurse down the tree in a deterministic way
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
-      {
-        it->second->pack_logical_state(ctx, rez, invalidate, to_remove);
-        to_remove.push_back(it->second);
-      }
+        it->second->pack_logical_state(ctx, rez, invalidate);
       // If we were asked to invalidate then do that now
       if (invalidate)
         state.reset();
@@ -20180,7 +18955,6 @@ namespace Legion {
       size_t num_field_states;
       derez.deserialize(num_field_states);
       state.field_states.resize(num_field_states);
-      std::set<RtEvent> applied_events;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
       for (LegionList<FieldState>::iterator fit = state.field_states.begin();
             fit != state.field_states.end(); fit++)
@@ -20196,7 +18970,7 @@ namespace Legion {
           derez.deserialize(num_summaries);
           for (unsigned idx = 0; idx < num_summaries; idx++)
             fit->shard_projections.insert(
-             ProjectionSummary::unpack_summary(derez, context, applied_events));
+             ProjectionSummary::unpack_summary(derez, context));
         }
         size_t num_open_children;
         derez.deserialize(num_open_children);
@@ -20207,7 +18981,7 @@ namespace Legion {
           RegionTreeNode *child = get_tree_child(child_color);
           FieldMask mask;
           derez.deserialize(mask);
-          fit->add_child(child, mask, applied_events);
+          fit->add_child(child, mask);
           to_traverse.insert(std::make_pair(child_color, child));
         }
       }
@@ -20222,10 +18996,7 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);  
         if (state.disjoint_complete_children.insert(child, mask))
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-        }
+          child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         to_traverse.insert(std::make_pair(child_color, child));
       }
       size_t num_disjoint_complete_accesses;
@@ -20268,15 +19039,12 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_disjoint_complete_projections; idx++)
       {
         RefProjectionSummary *summary = new RefProjectionSummary(
-            ProjectionSummary::unpack_summary(derez, context, applied_events));
+            ProjectionSummary::unpack_summary(derez, context));
         FieldMask mask;
         derez.deserialize(mask);
         summary->add_reference();
         state.disjoint_complete_projections.insert(summary, mask);
       }
-      RtEvent applied;
-      if (!applied_events.empty())
-        applied = Runtime::merge_events(applied_events);
       // Traverse and remove remote references after we are done
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -20285,21 +19053,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
-                       const bool invalidate, std::set<RtEvent> &applied_events,
-                       std::vector<DistributedCollectable*> &to_remove) 
+                       const bool invalidate, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);  
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      manager.pack_manager(rez, invalidate, to_traverse, subscribers,to_remove);
+      manager.pack_manager(rez, invalidate, to_traverse, subscribers);
       EqSetTracker::finish_subscriptions(context->runtime, manager, 
                                          subscribers, applied_events);
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
       {
         it->second->pack_version_state(ctx, rez, invalidate, 
-                                       applied_events, to_remove);
+                                       applied_events);
         if (it->second->remove_base_resource_ref(VERSION_MANAGER_REF))
           delete it->second;
       }
@@ -20699,9 +19466,6 @@ namespace Legion {
                            CollectiveMapping *mapping, Provenance *prov)
       : RegionTreeNode(ctx, col_src, init, tree, prov, id, mapping), handle(r),
         parent(par), row_source(row_src)
-#ifdef DEBUG_LEGION
-        , currently_valid(true)
-#endif
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -20722,18 +19486,14 @@ namespace Legion {
       {
         for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
-          if ((*it)->remove_partition_reference(NULL))
+          if ((*it)->remove_partition_reference())
             delete (*it);
         partition_trackers.clear();
       }
       if (registered)
       {
-        // Only need to unregister ourselves with the column if we're the top
-        if (parent == NULL)
-        {
-          if (column_source->remove_nested_resource_ref(did))
-            delete column_source;
-        }
+        if (column_source->remove_nested_resource_ref(did))
+          delete column_source;
         // Unregister oursleves with the row source
         if (row_source->remove_nested_resource_ref(did))
           delete row_source;
@@ -20744,115 +19504,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::notify_valid(ReferenceMutator *mutator)
+    void RegionNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-      {
-        if (is_owner())
-        {
-#ifdef DEBUG_LEGION
-          assert(currently_valid);
-#endif
-          // Add valid references on our index space and our field space
-          column_source->add_nested_valid_ref(did, mutator);
-          row_source->add_nested_valid_ref(did, mutator);
-        }
-        else
-        {
-          if ((collective_mapping != NULL) &&
-              collective_mapping->contains(local_space))
-            send_remote_valid_increment(
-              collective_mapping->get_parent(owner_space,local_space),
-              mutator, initialized);
-          else
-            send_remote_valid_increment(owner_space, mutator);     
-        }
-      }
-      else
-      {
-        column_source->add_nested_valid_ref(did, mutator);
-        row_source->parent->add_nested_valid_ref(did, mutator);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::InvalidFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      node->send_remote_gc_decrement(target, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      if (parent == NULL)
-      {
-        if (is_owner())
-        {
-#ifdef DEBUG_LEGION
-          assert(currently_valid);
-          currently_valid = false;
-#endif
-          // Remove our valid references, no need to check for deletion
-          // since we know that we are holding resource references too
-          column_source->remove_nested_valid_ref(did, mutator);
-          row_source->remove_nested_valid_ref(did, mutator);
-          // Send deletion messages to each of our remote instances
-          if (has_remote_instances())
-          {
-            InvalidFunctor functor(this, mutator);
-            map_over_remote_instances(functor);
-          }
-          if (collective_mapping != NULL)
-          {
-            std::vector<AddressSpaceID> children;
-            collective_mapping->get_children(owner_space,local_space,children);
-            for (std::vector<AddressSpaceID>::const_iterator it =
-                  children.begin(); it != children.end(); it++)
-              send_remote_gc_decrement(*it, mutator);
-          }
-        }
-        else
-        {
-          if ((collective_mapping != NULL) &&
-              collective_mapping->contains(local_space))
-            send_remote_valid_decrement(
-              collective_mapping->get_parent(owner_space,local_space),
-              mutator, initialized);
-          else
-            send_remote_valid_decrement(owner_space, mutator);
-        }
-      }
-      else
-      {
-        column_source->remove_nested_valid_ref(did, mutator);
-        row_source->parent->remove_nested_valid_ref(did, mutator);
-      } 
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(currently_active);
-      currently_active = false;
-#endif
       if (parent == NULL)
       {
         context->runtime->release_tree_instances(handle.get_tree_id());
-        // Continue propagating gc reference removals
-        if (!is_owner() && (collective_mapping != NULL) &&
-            collective_mapping->contains(local_space))
-        {
-          std::vector<AddressSpaceID> children;
-          collective_mapping->get_children(owner_space, local_space, children);
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            send_remote_gc_decrement(*it, mutator);
-        }
+        if (row_source->parent == NULL)
+          row_source->remove_nested_valid_ref(did);
+        else
+          row_source->parent->remove_nested_valid_ref(did);
+        column_source->remove_nested_gc_ref(did);
       }
       if (!partition_trackers.empty())
       {
@@ -20861,10 +19523,10 @@ namespace Legion {
 #endif
         for (std::list<PartitionTracker*>::const_iterator it = 
               partition_trackers.begin(); it != partition_trackers.end(); it++)
-          if ((*it)->remove_partition_reference(mutator))
+          if ((*it)->remove_partition_reference())
             delete (*it);
         partition_trackers.clear();
-      } 
+      }
       for (unsigned idx = 0; idx < current_versions.max_entries(); idx++)
         if (current_versions.has_entry(idx))
           get_current_version_manager(idx).finalize_manager();
@@ -20877,12 +19539,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!registered);
 #endif
-      if (parent != NULL)
-        parent->add_child(this);
+      if (parent == NULL)
+      {
+        if (row_source->parent == NULL)
+          row_source->add_nested_valid_ref(did);
+        else
+          row_source->parent->add_nested_valid_ref(did);
+        column_source->add_nested_gc_ref(did);
+      }
       else
-        column_source->add_nested_resource_ref(did);
+        parent->add_child(this);
+      column_source->add_nested_resource_ref(did);
       row_source->add_nested_resource_ref(did);
       registered = true;
+      if (parent == NULL)
+        register_with_runtime();
     }
 
     //--------------------------------------------------------------------------
@@ -21004,10 +19675,7 @@ namespace Legion {
 #endif
       // Record the new disjoint complete tree
       if (state.disjoint_complete_children.insert(child, refinement_mask))
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-      }
+        child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
       // Update the refinement tree for the full subtree
       child->update_disjoint_complete_tree(ctx, refinement_op,
                                            refinement_mask, applied_events);
@@ -21207,6 +19875,40 @@ namespace Legion {
         }
       }
       return continue_traversal;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::pack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = this;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->pack_global_ref();
+      }
+      if (row_source->parent != NULL)
+        row_source->parent->pack_valid_ref();
+      else
+        row_source->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::unpack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = this;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->unpack_global_ref();
+      }
+      if (row_source->parent != NULL)
+        row_source->parent->unpack_valid_ref();
+      else
+        row_source->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -21413,10 +20115,7 @@ namespace Legion {
         refined_partition |= overlap;
         // Add it to the current set
         if (state.disjoint_complete_children.insert(it->first, overlap))
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          it->first->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-        }
+          it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         // Remove it from this set
         it.filter(overlap);
         if (!it->second)
@@ -21439,24 +20138,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::initialize_versioning_analysis(ContextID ctx,
                                               EquivalenceSet *set,
-                                              const FieldMask &mask,
-                                              std::set<RtEvent> &applied_events)
+                                              const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.initialize_versioning_analysis(set, mask, applied_events);
+      manager.initialize_versioning_analysis(set, mask);
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::initialize_nonexclusive_virtual_analysis(ContextID ctx,
                                     const FieldMask &mask,
-                                    const FieldMaskSet<EquivalenceSet> &eq_sets,
-                                              std::set<RtEvent> &applied_events)
+                                    const FieldMaskSet<EquivalenceSet> &eq_sets)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets,
-                                                       applied_events);
+      manager.initialize_nonexclusive_virtual_analysis(mask, eq_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -21594,33 +20290,33 @@ namespace Legion {
 #endif
         it->first->as_partition_node()->invalidate_refinement(ctx, it->second, 
                                   applied_events, to_release, source_context);
-        if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::record_refinement(ContextID ctx, EquivalenceSet *set,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                                       const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.record_refinement(set, mask, parent_mask, applied_events);
+      manager.record_refinement(set, mask, parent_mask);
       if (!!parent_mask && (parent != NULL))
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
     void RegionNode::propagate_refinement(ContextID ctx, PartitionNode *child,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                                          const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(child, mask, parent_mask, applied_events);
+      manager.propagate_refinement(child, mask, parent_mask);
       if (!!parent_mask && (parent != NULL))
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -22309,14 +21005,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionTracker::remove_partition_reference(ReferenceMutator *mutator)
+    bool PartitionTracker::remove_partition_reference()
     //--------------------------------------------------------------------------
     {
       // Pull a copy of this on to the stack in case we get deleted
       std::atomic<PartitionNode*> node(partition);
       const bool last = remove_reference();
       // If we weren't the last one that means we remove the reference
-      if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF, mutator))
+      if (!last && node.load()->remove_base_gc_ref(REGION_TREE_REF))
         delete node.load();
       return last;
     }
@@ -22383,38 +21079,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PartitionNode::notify_valid(ReferenceMutator *mutator)
+    void PartitionNode::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      column_source->add_nested_valid_ref(did, mutator);
-      row_source->add_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::notify_invalid(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // No need to check for deletion since we hold resource references 
-      column_source->remove_nested_valid_ref(did, mutator);
-      row_source->remove_nested_valid_ref(did, mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::notify_inactive(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(currently_active);
-      currently_active = false;
-#endif
       parent->remove_child(row_source->color);
+      row_source->remove_nested_gc_ref(did);
       // Remove gc references on all of our child nodes
       // We should not need a lock at this point since nobody else should
       // be modifying these data structures at this point
       // No need to check for deletion since we hold resource references
       for (std::map<LegionColor,RegionNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
-        it->second->remove_nested_gc_ref(did, mutator);
+        it->second->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -22425,6 +21101,7 @@ namespace Legion {
       assert(!registered);
 #endif
       row_source->add_nested_resource_ref(did);
+      row_source->add_nested_gc_ref(did);
       parent->add_nested_resource_ref(did);
       parent->add_child(this);
       // Create a partition deletion tracker for this node and add it to 
@@ -22476,8 +21153,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       child->add_nested_resource_ref(did);
+      child->add_nested_gc_ref(did);
       AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
+      assert(is_global());
       assert(color_map.find(child->row_source->color) == color_map.end());
 #endif
       color_map[child->row_source->color] = child;
@@ -22647,6 +21326,34 @@ namespace Legion {
         }
       }
       return continue_traversal;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::pack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = parent;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->pack_global_ref();
+      }
+      row_source->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::unpack_global_reference(bool need_root)
+    //--------------------------------------------------------------------------
+    {
+      if (need_root)
+      {
+        RegionNode *root = parent;
+        while (root->parent != NULL)
+          root = root->parent->parent;
+        root->unpack_global_ref();
+      }
+      row_source->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -22965,10 +21672,7 @@ namespace Legion {
             unrefined_children.insert(child, child_overlap);
           // Add it to the current set
           if (state.disjoint_complete_children.insert(child, child_overlap))
-          {
-            WrapperReferenceMutator mutator(applied_events);
-            child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-          }
+            child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         }
       }
       else
@@ -22999,10 +21703,7 @@ namespace Legion {
             unrefined_children.insert(child, child_overlap);
           // Add it to the current set
           if (state.disjoint_complete_children.insert(child, child_overlap))
-          {
-            WrapperReferenceMutator mutator(applied_events);
-            child->add_base_valid_ref(DISJOINT_COMPLETE_REF, &mutator);
-          }
+            child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
         }
         delete itr;
       } 
@@ -23185,34 +21886,33 @@ namespace Legion {
 #endif
         it->first->as_region_node()->invalidate_refinement(ctx, it->second, 
                   true/*self*/, source_context, applied_events, to_release);
-        if (it->first->remove_base_valid_ref(VERSION_MANAGER_REF))
+        if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
     }
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx, RegionNode *child, 
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                                             const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(child, mask, parent_mask, applied_events);
+      manager.propagate_refinement(child, mask, parent_mask);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx,
-                       const std::vector<RegionNode*> &children,
-                       const FieldMask &mask, std::set<RtEvent> &applied_events)
+                const std::vector<RegionNode*> &children, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_mask;
-      manager.propagate_refinement(children, mask, parent_mask, applied_events);
+      manager.propagate_refinement(children, mask, parent_mask);
       if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask, applied_events);
+        parent->propagate_refinement(ctx, this, parent_mask);
     }
 
     //--------------------------------------------------------------------------
