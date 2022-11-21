@@ -1984,7 +1984,7 @@ impl State {
             .or_insert_with(|| Chan::new(chan_id))
     }
 
-    fn create_inst<'a>(
+    fn find_or_create_inst<'a>(
         &'a mut self,
         inst_uid: InstUID,
         insts: &'a mut BTreeMap<InstUID, Inst>,
@@ -2855,7 +2855,7 @@ fn process_record(
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_uid, insts)
+                .find_or_create_inst(*inst_uid, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
@@ -2871,7 +2871,7 @@ fn process_record(
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_uid, insts)
+                .find_or_create_inst(*inst_uid, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
@@ -2886,7 +2886,7 @@ fn process_record(
                 Err(_) => unreachable!("bad dim kind"),
             };
             state
-                .create_inst(*inst_uid, insts)
+                .find_or_create_inst(*inst_uid, insts)
                 .add_dim_order(dim, dim_kind);
         }
         Record::PhysicalInstanceUsage {
@@ -3126,7 +3126,7 @@ fn process_record(
             state.create_op(*op_id);
             state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
             state
-                .create_inst(*inst_uid, insts)
+                .find_or_create_inst(*inst_uid, insts)
                 .set_inst_id(*inst_id)
                 .set_op_id(*op_id)
                 .set_start_stop(*create, *ready, *destroy)
