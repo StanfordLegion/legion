@@ -322,7 +322,6 @@ namespace Legion {
       LG_DEFERRED_EXECUTION_ID,
       LG_DEFERRED_COMPLETION_ID,
       LG_DEFERRED_COMMIT_ID,
-      LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
       LG_TRIGGER_COMPLETION_ID,
@@ -445,7 +444,6 @@ namespace Legion {
         "Deferred Execution",                                     \
         "Deferred Completion",                                    \
         "Deferred Commit",                                        \
-        "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
         "Trigger Completion",                                     \
@@ -796,6 +794,10 @@ namespace Legion {
       DISTRIBUTED_DOWNGRADE_RESPONSE,
       DISTRIBUTED_DOWNGRADE_SUCCESS,
       DISTRIBUTED_DOWNGRADE_UPDATE,
+      DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST,
+      DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE,
+      DISTRIBUTED_VALID_ACQUIRE_REQUEST,
+      DISTRIBUTED_VALID_ACQUIRE_RESPONSE,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
@@ -929,6 +931,7 @@ namespace Legion {
       SEND_GC_NOTIFY,
       SEND_GC_DEBUG_REQUEST,
       SEND_GC_DEBUG_RESPONSE,
+      SEND_GC_RECORD_EVENT,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_BROADCAST,
@@ -1050,6 +1053,10 @@ namespace Legion {
         "Distributed Downgrade Response",                             \
         "Distributed Downgrade Success",                              \
         "Distributed Downgrade Update",                               \
+        "Distributed Global Acquire Request",                         \
+        "Distributed Global Acquire Response",                        \
+        "Distributed Valid Acquire Request",                          \
+        "Distributed Valid Acquire Response",                         \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Created Region Contexts",                               \
@@ -1183,6 +1190,7 @@ namespace Legion {
         "Send GC Notify Collected",                                   \
         "Send GC Debug Request",                                      \
         "Send GC Debug Response",                                     \
+        "Send GC Record Event",                                       \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Task Variant Broadcast",                                \

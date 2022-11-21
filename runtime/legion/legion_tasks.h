@@ -549,7 +549,6 @@ namespace Legion {
     protected:
       TaskContext*                          execution_context;
       RemoteTraceRecorder*                  remote_trace_recorder;
-      RtEvent                               remote_collect_event;
       // For replication of this task
       ShardManager*                         shard_manager;
     protected:

@@ -331,30 +331,6 @@ namespace Legion {
         Serializer &rez;
       };
     public:
-      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
-      public:
-        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect)
-          : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
-            view(v), to_collect(collect) { }
-      public:
-        CollectableView *const view;
-        std::set<ApEvent> *const to_collect;
-      };
-    public:
-      struct CollectableInfo {
-      public:
-        CollectableInfo(void) : events_added(0) { }
-      public:
-        std::set<ApEvent> view_events;
-        // This event tracks when tracing is completed and it is safe
-        // to resume pruning of users from this view
-        RtEvent collect_event;
-        // Events added since the last collection of view events
-        unsigned events_added;
-      }; 
-    public:
       PhysicalManager(RegionTreeForest *ctx, DistributedID did,
                       MemoryManager *memory, PhysicalInstance inst, 
                       IndexSpaceExpression *instance_domain,
@@ -418,7 +394,8 @@ namespace Legion {
     public:
       virtual void notify_local(void);
     public:
-      bool can_collect(AddressSpaceID source, bool &already_collected);
+      bool can_collect(bool &already_collected) const;
+      bool acquire_collect(std::set<ApEvent> &gc_events);
       bool collect(RtEvent &collected);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
@@ -463,9 +440,7 @@ namespace Legion {
       void unregister_active_context(InnerContext *context); 
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
-      void defer_collect_user(CollectableView *view, ApEvent term_event,
-                              RtEvent collect, std::set<ApEvent> &to_collect, 
-                              bool &add_ref, bool &remove_ref);
+      void record_instance_user(ApEvent term_event, std::set<RtEvent> &applied);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -473,7 +448,6 @@ namespace Legion {
       bool meets_expression(IndexSpaceExpression *expr, 
                             bool tight_bounds = false) const;
     protected:
-      void prune_gc_events(void);
       void pack_garbage_collection_state(Serializer &rez,
                                          AddressSpaceID target, bool need_lock);
       void initialize_remote_gc_state(GarbageCollectionState state);
@@ -518,6 +492,7 @@ namespace Legion {
       static void handle_garbage_collection_debug_request(Runtime *runtime,
           Deserializer &derez, AddressSpaceID source);
       static void handle_garbage_collection_debug_response(Deserializer &derez); 
+      static void handle_record_event(Runtime *runtime, Deserializer &derez);
     public:
       MemoryManager *const memory_manager;
       // Unique identifier event that is common across nodes
@@ -556,21 +531,22 @@ namespace Legion {
       unsigned pending_changes;
       std::atomic<unsigned> failed_collection_count;
       RtEvent collection_ready;
-      RtUserEvent deferred_deletion;
       // Garbage collection priorities
       GCPriority min_gc_priority;
       RtEvent priority_update_done;
       std::map<std::pair<MapperID,Processor>,GCPriority> mapper_gc_priorities;
-    private:
-      // Events that have to trigger before we can remove our GC reference
-      std::map<CollectableView*,CollectableInfo> gc_events;
+    protected:
+      // Events for application users of this instance that must trigger
+      // before we could possibly do a deferred deletion
+      std::set<ApEvent> gc_events;
+      // The number of events added since the last time we pruned the list
+      unsigned added_gc_events;
     private:
 #ifdef DEBUG_LEGION_GC
       int valid_references;
 #else
       std::atomic<int> valid_references;
 #endif
-      bool inside_notify_invalid;
 #ifdef DEBUG_LEGION_GC
     private:
       std::map<ReferenceSource,int> detailed_base_valid_references;

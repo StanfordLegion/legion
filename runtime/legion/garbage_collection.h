@@ -50,7 +50,7 @@ namespace Legion {
       PHYSICAL_ANALYSIS_REF = 3,
       PENDING_UNBOUND_REF = 4,
       PHYSICAL_REGION_REF = 5,
-      PENDING_GC_REF = 6,
+      //PENDING_GC_REF = 6,
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
@@ -239,21 +239,25 @@ namespace Legion {
     public:
       bool is_global(bool need_lock = true) const;
       // Atomic check and increment operations 
-      bool check_active_and_increment(ReferenceSource source, int cnt = 1);
-      bool check_active_and_increment(DistributedID source, int cnt = 1);
+      inline bool check_global_and_increment(ReferenceSource src, int cnt = 1);
+      inline bool check_global_and_increment(DistributedID source, int cnt = 1);
 #ifndef DEBUG_LEGION_GC
     private:
       void add_gc_reference(int cnt);
       bool remove_gc_reference(int cnt);
+      bool acquire_global(int cnt);
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
 #else
     private:
+      void add_gc_reference(int cnt);
       void add_base_gc_ref_internal(ReferenceSource source, int cnt);
       void add_nested_gc_ref_internal(DistributedID source, int cnt);
       bool remove_base_gc_ref_internal(ReferenceSource source, int cnt);
       bool remove_nested_gc_ref_internal(DistributedID source, int cnt);
+      template<typename T>
+      bool acquire_global(int cnt, T source, std::map<T,int> &gc_references);
     public:
       void add_base_resource_ref_internal(ReferenceSource source, int cnt); 
       void add_nested_resource_ref_internal(DistributedID source, int cnt); 
@@ -292,6 +296,7 @@ namespace Legion {
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(void);
       virtual void initialize_downgrade_state(AddressSpaceID owner);
+      virtual void update_instances_internal(AddressSpaceID remote_inst);
       void check_for_downgrade(AddressSpaceID downgrade_owner, 
                                bool need_lock = true);
       bool process_downgrade_response(AddressSpaceID notready,
@@ -309,6 +314,9 @@ namespace Legion {
                                            Deserializer &derez);
       static void handle_downgrade_update(Runtime *runtime,
                                           Deserializer &derez);
+      static void handle_global_acquire_request(Runtime *runtime,
+                      Deserializer &derez, AddressSpaceID source);
+      static void handle_global_acquire_response(Deserializer &derez);
     public:
       Runtime *const runtime;
       const DistributedID did;
@@ -372,12 +380,16 @@ namespace Legion {
     private:
       void add_valid_reference(int cnt);
       bool remove_valid_reference( int cnt);
+      bool acquire_valid(int cnt);
 #else
     public:
+      void add_valid_reference(int cnt);
       void add_base_valid_ref_internal(ReferenceSource source, int cnt);
       void add_nested_valid_ref_internal(DistributedID source, int cnt);
       bool remove_base_valid_ref_internal(ReferenceSource source, int cnt);
       bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
+      template<typename T>
+      bool acquire_valid(int cnt, T source, std::map<T,int> &valid_references);
 #endif
     public:
       void pack_valid_ref(unsigned cnt = 1);
@@ -387,9 +399,14 @@ namespace Legion {
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(void);
       virtual void initialize_downgrade_state(AddressSpaceID owner);
+      virtual void update_instances_internal(AddressSpaceID remote_inst);
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;
+    public:
+      static void handle_valid_acquire_request(Runtime *runtime,
+                      Deserializer &derez, AddressSpaceID source);
+      static void handle_valid_acquire_response(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION_GC
       int valid_references;
@@ -607,6 +624,178 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_base_resource_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_base_resource_ref_internal(source, cnt);
+#else
+      int current = resource_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_resource_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline void DistributedCollectable::add_nested_resource_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      add_nested_resource_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = resource_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return;
+      }
+      add_resource_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_base_resource_ref(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_base_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_base_resource_ref_internal(source, cnt);
+#else
+      int current = resource_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_resource_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::remove_nested_resource_ref(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt >= 0);
+#endif
+#ifdef LEGION_GC
+      log_nested_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
+#endif
+#ifdef DEBUG_LEGION_GC
+      return remove_nested_resource_ref_internal(
+          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
+#else
+      int current = resource_references.load();
+#ifdef DEBUG_LEGION
+      assert(current >= cnt);
+#endif
+      while (current > cnt)
+      {
+        int next = current - cnt;
+        if (resource_references.compare_exchange_weak(current, next))
+          return false;
+      }
+      return remove_resource_reference(cnt);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::check_global_and_increment(
+                                         ReferenceSource source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt > 0);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int current = gc_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (gc_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
+          return true;
+        }
+      }
+      bool result = acquire_global(cnt);
+#else
+      bool result = acquire_global(cnt, source, detailed_base_gc_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_base_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool DistributedCollectable::check_global_and_increment(
+                                           DistributedID source, int cnt /*=1*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(cnt > 0);
+#endif
+#ifndef DEBUG_LEGION_GC
+      int current = gc_references.load();
+      while (current > 0)
+      {
+        int next = current + cnt;
+        if (gc_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
+          return true;
+        }
+      }
+      bool result = acquire_global(cnt);
+#else
+      bool result = acquire_global(cnt, source, detailed_nested_gc_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_nested_ref<true>(GC_REF_KIND, did, local_space, source, cnt);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     inline void ValidDistributedCollectable::add_base_valid_ref(
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
@@ -715,111 +904,67 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void DistributedCollectable::add_base_resource_ref(
+    inline bool ValidDistributedCollectable::check_valid_and_increment(
                                          ReferenceSource source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(cnt >= 0);
+      assert(cnt > 0);
 #endif
-#ifdef LEGION_GC
-      log_base_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifdef DEBUG_LEGION_GC
-      add_base_resource_ref_internal(source, cnt);
-#else
-      int current = resource_references.load();
+#ifndef DEBUG_LEGION_GC
+      int current = valid_references.load();
       while (current > 0)
       {
         int next = current + cnt;
-        if (resource_references.compare_exchange_weak(current, next))
-          return;
-      }
-      add_resource_reference(cnt);
+        if (valid_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
+          return true;
+        }
+      }
+      bool result = acquire_valid(cnt);
+#else
+      bool result = acquire_valid(cnt, source, detailed_base_valid_references);
+#endif
+#ifdef LEGION_GC
+      if (result)
+        log_base_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
+#endif
+      return result;
     }
 
     //--------------------------------------------------------------------------
-    inline void DistributedCollectable::add_nested_resource_ref(
+    inline bool ValidDistributedCollectable::check_valid_and_increment(
                                            DistributedID source, int cnt /*=1*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(cnt >= 0);
+      assert(cnt > 0);
 #endif
-#ifdef LEGION_GC
-      log_nested_ref<true>(RESOURCE_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifdef DEBUG_LEGION_GC
-      add_nested_resource_ref_internal(
-          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
-#else
-      int current = resource_references.load();
+#ifndef DEBUG_LEGION_GC
+      int current = valid_references.load();
       while (current > 0)
       {
         int next = current + cnt;
-        if (resource_references.compare_exchange_weak(current, next))
-          return;
-      }
-      add_resource_reference(cnt);
+        if (valid_references.compare_exchange_weak(current, next))
+        {
+#ifdef LEGION_GC
+          log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool DistributedCollectable::remove_base_resource_ref(
-                                         ReferenceSource source, int cnt /*=1*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
+          return true;
+        }
+      }
+      bool result = acquire_valid(cnt);
+#else
+      bool result = acquire_valid(cnt, source,detailed_nested_valid_references);
 #endif
 #ifdef LEGION_GC
-      log_base_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
+      if (result)
+        log_nested_ref<true>(VALID_REF_KIND, did, local_space, source, cnt);
 #endif
-#ifdef DEBUG_LEGION_GC
-      return remove_base_resource_ref_internal(source, cnt);
-#else
-      int current = resource_references.load();
-#ifdef DEBUG_LEGION
-      assert(current >= cnt);
-#endif
-      while (current > cnt)
-      {
-        int next = current - cnt;
-        if (resource_references.compare_exchange_weak(current, next))
-          return false;
-      }
-      return remove_resource_reference(cnt);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool DistributedCollectable::remove_nested_resource_ref(
-                                           DistributedID source, int cnt /*=1*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(cnt >= 0);
-#endif
-#ifdef LEGION_GC
-      log_nested_ref<false>(RESOURCE_REF_KIND, did, local_space, source, cnt);
-#endif
-#ifdef DEBUG_LEGION_GC
-      return remove_nested_resource_ref_internal(
-          LEGION_DISTRIBUTED_ID_FILTER(source), cnt);
-#else
-      int current = resource_references.load();
-#ifdef DEBUG_LEGION
-      assert(current >= cnt);
-#endif
-      while (current > cnt)
-      {
-        int next = current - cnt;
-        if (resource_references.compare_exchange_weak(current, next))
-          return false;
-      }
-      return remove_resource_reference(cnt);
-#endif
+      return result;
     }
 
   }; // namespace Internal 

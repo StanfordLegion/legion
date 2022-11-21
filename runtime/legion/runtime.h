@@ -3163,6 +3163,14 @@ namespace Legion {
       void send_did_downgrade_response(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_success(AddressSpaceID target, Serializer &rez);
       void send_did_downgrade_update(AddressSpaceID target, Serializer &rez);
+      void send_did_acquire_global_request(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_did_acquire_global_response(AddressSpaceID target,
+                                            Serializer &rez);
+      void send_did_acquire_valid_request(AddressSpaceID target,
+                                          Serializer &rez);
+      void send_did_acquire_valid_response(AddressSpaceID target,
+                                           Serializer &rez);
       void send_created_region_contexts(AddressSpaceID target, Serializer &rez);
       void send_back_atomic(AddressSpaceID target, Serializer &rez);
       void send_atomic_reservation_request(AddressSpaceID target, 
@@ -3388,6 +3396,7 @@ namespace Legion {
       void send_gc_notify(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
+      void send_gc_record_event(AddressSpaceID target, Serializer &rez);
       void send_acquire_request(AddressSpaceID target, Serializer &rez);
       void send_acquire_response(AddressSpaceID target, Serializer &rez);
       void send_variant_broadcast(AddressSpaceID target, Serializer &rez);
@@ -3541,6 +3550,12 @@ namespace Legion {
       void handle_did_downgrade_response(Deserializer &derez);
       void handle_did_downgrade_success(Deserializer &derez);
       void handle_did_downgrade_update(Deserializer &derez);
+      void handle_did_global_acquire_request(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_did_global_acquire_response(Deserializer &derez);
+      void handle_did_valid_acquire_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_did_valid_acquire_response(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
       void handle_send_atomic_reservation_request(Deserializer &derez);
@@ -3725,6 +3740,7 @@ namespace Legion {
       void handle_gc_notify(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_debug_response(Deserializer &derez);
+      void handle_gc_record_event(Deserializer &derez);
       void handle_acquire_request(Deserializer &derez, AddressSpaceID source);
       void handle_acquire_response(Deserializer &derez, AddressSpaceID source);
       void handle_variant_request(Deserializer &derez, AddressSpaceID source);
@@ -5776,6 +5792,14 @@ namespace Legion {
           break;
         case DISTRIBUTED_DOWNGRADE_UPDATE:
           break;
+        case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
+          break;
+        case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
+          break;
+        case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
+          break;
+        case DISTRIBUTED_VALID_ACQUIRE_RESPONSE:
+          break;
         case SEND_ATOMIC_RESERVATION_REQUEST:
           break;
         case SEND_ATOMIC_RESERVATION_RESPONSE:
@@ -6053,6 +6077,8 @@ namespace Legion {
         case SEND_GC_DEBUG_REQUEST:
           break;
         case SEND_GC_DEBUG_RESPONSE:
+          break;
+        case SEND_GC_RECORD_EVENT:
           break;
         case SEND_ACQUIRE_REQUEST:
           break;

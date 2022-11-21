@@ -2476,16 +2476,6 @@ namespace Legion {
           // Clear it once we've packed it up
           deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         }
-        if (memo_state == MEMO_RECORD)
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl != NULL);
-#endif
-          if (is_remote())
-            rez.serialize(remote_collect_event);
-          else
-            rez.serialize(tpl->get_collect_event());
-        }
       }
     }
 
@@ -2567,13 +2557,6 @@ namespace Legion {
       {
         derez.deserialize(deferred_complete_mapping);
         version_infos.resize(logical_regions.size());
-        if (memo_state == MEMO_RECORD)
-        {
-#ifdef DEBUG_LEGION
-          assert(tpl != NULL);
-#endif
-          derez.deserialize(remote_collect_event);
-        }
       }
       update_no_access_regions();
     } 
@@ -4186,7 +4169,7 @@ namespace Legion {
         const RtUserEvent remote_applied = Runtime::create_rt_user_event();
         remote_trace_recorder = new RemoteTraceRecorder(runtime,
             orig_proc.address_space(), runtime->address_space, 
-            get_trace_local_id(), tpl, remote_applied, remote_collect_event);
+            get_trace_local_id(), tpl, remote_applied);
         remote_trace_recorder->add_recorder_reference();
         map_applied_conditions.insert(remote_applied);
 #ifdef DEBUG_LEGION

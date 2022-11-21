@@ -205,7 +205,6 @@ namespace Legion {
                                     const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
-                                    RtEvent collect_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
                                     size_t local_collective_arrivals,
@@ -295,7 +294,7 @@ namespace Legion {
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info) = 0;
       virtual void add_copy_user(bool reading, ReductionOpID redop,
-                                 ApEvent done_event, RtEvent collect_event,
+                                 ApEvent done_event,
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
@@ -339,7 +338,6 @@ namespace Legion {
                                        const size_t op_ctx_index,
                                        const unsigned index,
                                        ApEvent term_event,
-                                       RtEvent collect_event,
                                        PhysicalManager *target,
                                        CollectiveMapping *analysis_mapping,
                                        size_t local_collective_arrivals,
@@ -423,7 +421,6 @@ namespace Legion {
         FieldMask *mask;
         IndexSpaceNode *expr;
         UniqueID op_id;
-        RtEvent collect_event;
         bool symbolic;
         bool local_initialized;
       };
@@ -504,7 +501,6 @@ namespace Legion {
                                     const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
-                                    RtEvent collect_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
                                     size_t local_collective_arrivals,
@@ -650,7 +646,6 @@ namespace Legion {
                                        const size_t op_ctx_index,
                                        const unsigned index,
                                        ApEvent term_event,
-                                       RtEvent collect_event,
                                        PhysicalManager *target,
                                        size_t local_collective_arrivals,
                                        std::vector<RtEvent> &regsitered_events,
@@ -670,7 +665,6 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const size_t op_ctx_index,
                                     const unsigned index,
-                                    RtEvent collect_event,
                                     RtUserEvent local_registered,
                                     RtEvent global_registered,
                                     RtUserEvent local_applied,
@@ -750,7 +744,6 @@ namespace Legion {
         FieldMask *mask;
         IndexSpaceNode *expr;
         UniqueID op_id;
-        RtEvent collect_event;
         bool symbolic;
         bool local_initialized;
       };
@@ -758,24 +751,6 @@ namespace Legion {
     private:
       // Use this flag to deduplicate deletion notifications from our instances
       std::atomic<bool> deletion_notified;
-    };
-
-    /**
-     * \class CollectableView
-     * An interface class for handling garbage collection of users
-     */
-    class CollectableView {
-    public:
-      virtual ~CollectableView(void) { }
-    public:
-      virtual void add_collectable_reference(void) = 0;
-      virtual bool remove_collectable_reference(void) = 0;
-      virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
-    public:
-      void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
-                              RtEvent collect);
-      static void handle_deferred_collect(CollectableView *view,
-                                          const std::set<ApEvent> &to_collect);
     };
 
     /**
@@ -788,8 +763,7 @@ namespace Legion {
      * Finding the interfering users then just requires traversing the top
      * node and any overlapping sub nodes and then doing this recursively.
      */
-    class ExprView : public LegionHeapify<ExprView>, 
-                     public CollectableView, public Collectable {
+    class ExprView : public LegionHeapify<ExprView>, public Collectable {
     public:
       typedef LegionMap<ApEvent,FieldMask> EventFieldMap;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
@@ -804,10 +778,6 @@ namespace Legion {
     public:
       inline bool deterministic_pointer_less(const ExprView *rhs) const
         { return view_expr->deterministic_pointer_less(rhs->view_expr); }
-    public:
-      virtual void add_collectable_reference(void);
-      virtual bool remove_collectable_reference(void);
-      virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
       void find_user_preconditions(const RegionUsage &usage,
                                    IndexSpaceExpression *user_expr,
@@ -842,13 +812,10 @@ namespace Legion {
                             UniqueID op_id, unsigned index,
                             FieldMask user_mask,
                             const ApEvent term_event,
-                            const RtEvent collect_event,
                             IndexSpaceExpression *user_expr,
-                            const size_t user_volume,
-                            const bool trace_recording);
+                            const size_t user_volume);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
-                            RtEvent collect_event, const FieldMask &user_mask,
-                            const bool trace_recording);
+                            const FieldMask &user_mask);
       // TODO: Optimize this so that we prune out intermediate nodes in 
       // the tree that are empty and re-balance the tree. The hard part of
       // this is that it will require stopping any precondition searches
@@ -1007,8 +974,7 @@ namespace Legion {
     public:
       PendingTaskUser(const RegionUsage &usage, const FieldMask &user_mask,
                       IndexSpaceNode *user_expr, const UniqueID op_id,
-                      const unsigned index, const ApEvent term_event,
-                      const RtEvent collect_event);
+                      const unsigned index, const ApEvent term_event);
       virtual ~PendingTaskUser(void);
     public:
       virtual bool apply(MaterializedView *view, const FieldMask &mask);
@@ -1019,7 +985,6 @@ namespace Legion {
       const UniqueID op_id;
       const unsigned index;
       const ApEvent term_event;
-      const RtEvent collect_event;
     };
 
     class PendingCopyUser : public RemotePendingUser, 
@@ -1027,8 +992,7 @@ namespace Legion {
     public:
       PendingCopyUser(const bool reading, const FieldMask &copy_mask,
                       IndexSpaceExpression *copy_expr, const UniqueID op_id,
-                      const unsigned index, const ApEvent term_event,
-                      const RtEvent collect_event);
+                      const unsigned index, const ApEvent term_event);
       virtual ~PendingCopyUser(void);
     public:
       virtual bool apply(MaterializedView *view, const FieldMask &mask);
@@ -1039,7 +1003,6 @@ namespace Legion {
       const UniqueID op_id;
       const unsigned index;
       const ApEvent term_event;
-      const RtEvent collect_event;
     };
 
     /**
@@ -1099,7 +1062,6 @@ namespace Legion {
                                     const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
-                                    RtEvent collect_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
                                     size_t local_collective_arrivals,
@@ -1123,7 +1085,7 @@ namespace Legion {
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info);
       virtual void add_copy_user(bool reading, ReductionOpID redop,
-                                 ApEvent done_event, RtEvent collect_event,
+                                 ApEvent term_event,
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
@@ -1153,16 +1115,14 @@ namespace Legion {
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
                                   ApEvent term_event, 
-                                  RtEvent collect_event, UniqueID op_id,
-                                  const unsigned index,
-                                  const bool trace_recording);
+                                  UniqueID op_id,
+                                  const unsigned index);
       void add_internal_copy_user(const RegionUsage &usage,
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
                                   ApEvent term_event, 
-                                  RtEvent collect_event, UniqueID op_id,
-                                  const unsigned index,
-                                  const bool trace_recording);
+                                  UniqueID op_id,
+                                  const unsigned index);
       template<bool NEED_EXPR_LOCK>
       void clean_cache(void);
 #ifdef ENABLE_VIEW_REPLICATION
@@ -1252,7 +1212,7 @@ namespace Legion {
      * This class represents a single reduction physical instance
      * in a specific memory.
      */
-    class ReductionView : public IndividualView, public CollectableView,
+    class ReductionView : public IndividualView,
                           public LegionHeapify<ReductionView> {
     public:
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
@@ -1281,10 +1241,6 @@ namespace Legion {
       virtual ~ReductionView(void);
     public:
       ReductionView& operator=(const ReductionView&rhs) = delete;
-    public: // From CollectableView
-      virtual void add_collectable_reference(void);
-      virtual bool remove_collectable_reference(void);
-      virtual void collect_users(const std::set<ApEvent> &term_events);
     public: // From InstanceView
       virtual void send_view(AddressSpaceID target);
       virtual ReductionOpID get_redop(void) const; 
@@ -1297,7 +1253,6 @@ namespace Legion {
                                     const size_t op_ctx_index,
                                     const unsigned index,
                                     ApEvent term_event,
-                                    RtEvent collect_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
                                     size_t local_collective_arrivals,
@@ -1321,7 +1276,7 @@ namespace Legion {
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info);
       virtual void add_copy_user(bool reading, ReductionOpID redop,
-                                 ApEvent done_event, RtEvent collect_event,
+                                 ApEvent term_event,
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
@@ -1341,24 +1296,21 @@ namespace Legion {
                                        std::set<ApEvent> &wait_on) const;
       void find_writing_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
-                                      std::set<ApEvent> &preconditions);
+                                      std::set<ApEvent> &preconditions,
+                                      const bool trace_recording);
       void find_reading_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
                                       std::set<ApEvent> &preconditions) const;
       void find_initializing_last_users(const FieldMask &user_mask,
                                         IndexSpaceExpression *user_expr,
                                         std::set<ApEvent> &preconditions) const;
-      bool add_user(const RegionUsage &usage,
+      void add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
-                    const FieldMask &user_mask,
-                    ApEvent term_event, RtEvent collect_event,
-                    UniqueID op_id, unsigned index,
-                    bool copy_user, std::set<RtEvent> &applied_events,
-                    const bool trace_recording);
+                    const FieldMask &user_mask, ApEvent term_event,
+                    UniqueID op_id, unsigned index, bool copy_user);
     protected:
       void add_physical_user(PhysicalUser *user, bool reading,
                              ApEvent term_event, const FieldMask &user_mask);
-      void filter_local_users(ApEvent term_event);
       void find_dependences(const EventFieldUsers &users,
                             IndexSpaceExpression *user_expr,
                             const FieldMask &user_mask,
@@ -1366,7 +1318,8 @@ namespace Legion {
       void find_dependences_and_filter(EventFieldUsers &users,
                             IndexSpaceExpression *user_expr,
                             const FieldMask &user_mask,
-                            std::set<ApEvent> &wait_on);
+                            std::set<ApEvent> &wait_on,
+                            const bool trace_recording);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
                                              Deserializer &derez);
@@ -1381,9 +1334,6 @@ namespace Legion {
       EventFieldUsers writing_users;
       EventFieldUsers reduction_users;
       EventFieldUsers reading_users;
-      std::set<ApEvent> outstanding_gc_events;
-    protected:
-      std::set<ApEvent> initial_user_events;
     };
 
     /**

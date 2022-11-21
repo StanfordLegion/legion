@@ -20087,6 +20087,8 @@ namespace Legion {
         delete thunk;
         thunk = NULL;
       }
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
       privilege_path = RegionTreePath();
       version_info.clear();
       map_applied_conditions.clear();
