@@ -7881,36 +7881,7 @@ namespace Legion {
       collective_instances = collective_inst;
       deduplicate_across_shards = dedup_across_shards;
       is_first_local_shard = first_local_shard;
-      // Setup the distributed ID broadcast and send out the value
-      if (collective_instances)
-      {
-        // Check to make sure that everything is local here
-        if (resource == LEGION_EXTERNAL_INSTANCE)
-        {
-          const PointerConstraint &pointer =
-                                  layout_constraint_set.pointer_constraint;
-          const AddressSpaceID owner_space = pointer.memory.address_space();
-          if (owner_space != runtime->address_space)
-          {
-            const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-              REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-            };
-            REPORT_LEGION_ERROR(ERROR_NONLOCAL_COLLECTIVE_ATTACH,
-                "Illegal collective attach operation performed by shard %d of "
-                "control-replicated task %s (UID %lld). External instance in "
-                "%s memory " IDFMT " of address space %d, but shard %d is "
-                "executing on address space %d. All collective attach ops must "
-                "attach to instances in the local address space.",
-                ctx->owner_shard->shard_id, ctx->get_task_name(),
-                ctx->get_unique_id(), mem_names[pointer.memory.kind()],
-                pointer.memory.id, pointer.memory.address_space(), 
-                ctx->owner_shard->shard_id, runtime->address_space)
-          }
-        }
-      }
-      else
+      if (!collective_instances)
       {
         // Figure out which shard should be the one to make the
         // owner manager and therefore the distributed ID
@@ -7941,6 +7912,7 @@ namespace Legion {
           default:
             break;
         }
+      // Setup the distributed ID broadcast and send out the value
         did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_78);
         // Can only do the broadcast if we know we can make the ID safely
@@ -8119,6 +8091,12 @@ namespace Legion {
       ApEvent ready_event;
       LayoutConstraintSet constraints;
       PhysicalInstance instance = PhysicalInstance::NO_INST;
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
       if (is_first_local_shard || 
           (collective_instances && !deduplicate_across_shards))
       {
@@ -8238,12 +8216,6 @@ namespace Legion {
                                         get_completion_event());
 #endif
       }
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
       ShardManager *shard_manager = repl_ctx->shard_manager;
       // Now we need to make the instance to span the shards
       if (collective_instances)
