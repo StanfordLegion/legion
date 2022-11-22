@@ -4376,6 +4376,7 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
       virtual void check_point_requirements(

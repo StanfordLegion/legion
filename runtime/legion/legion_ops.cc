@@ -2092,7 +2092,7 @@ namespace Legion {
       if ((op_kind != TASK_OP_KIND) && (op_kind != MAP_OP_KIND) &&
           (op_kind != ACQUIRE_OP_KIND) && (op_kind != RELEASE_OP_KIND) &&
           (op_kind != DEPENDENT_PARTITION_OP_KIND) &&
-          (op_kind != DETACH_OP_KIND))
+          (op_kind != ATTACH_OP_KIND) && (op_kind != DETACH_OP_KIND))
       {
         ApEvent effects_done;
         if (!completion_effects.empty())
@@ -22946,13 +22946,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     { 
       const PhysicalTraceInfo trace_info(this, 0/*idx*/);
-      runtime->forest->attach_external(this, 0/*idx*/,
-                                       requirement,
-                                       external_instances,
-                                       version_info,
-                                       trace_info,
-                                       map_applied_conditions,
-                                       restricted);
+      ApUserEvent attach_post = Runtime::create_ap_user_event(&trace_info);
+      ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
+                                                         requirement,
+                                                         external_instances,
+                                                         version_info,
+                                                         attach_post,
+                                                         trace_info,
+                                                         map_applied_conditions,
+                                                         restricted);
+      Runtime::trigger_event(&trace_info, attach_post, attach_event);
+      record_completion_effect(attach_post);
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, attach_event,attach_post);
+#endif
       // This operation is ready once the instance is attached
       region.impl->set_reference(external_instances[0]);
       // Once we have created the instance, then we are done
@@ -23634,6 +23642,25 @@ namespace Legion {
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(map_applied_conditions));
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAttachOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+      {
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        ApEvent effects_done;
+        if (!effects.empty())
+          effects_done = Runtime::merge_events(NULL, effects);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        get_completion_event());
+      }
+#endif
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -24406,13 +24433,14 @@ namespace Legion {
                                          filter_precondition, flush);
       Runtime::trigger_event(&trace_info, detach_post, detach_event);
       record_completion_effect(detach_post);
-#ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, detach_event,detach_post);
-#endif
-      if (runtime->legion_spy_enabled)
+      {
         runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
                                               requirement, references);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, detach_event,detach_post);
+#endif
+      }
       if (!map_applied_conditions.empty())
         complete_mapping(finalize_complete_mapping(
               Runtime::merge_events(map_applied_conditions)));

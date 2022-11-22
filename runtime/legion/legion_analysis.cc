@@ -6311,12 +6311,9 @@ namespace Legion {
       const UniqueID op_id = op->get_unique_op_id();
       const size_t op_ctx_index = op->get_ctx_index();
       const AddressSpaceID local_space = runtime->address_space;
-      // We know this cast is safe from type argument in non-remote constructor
+      IndexSpaceNode *expr_node = region->row_source;
 #ifdef DEBUG_LEGION
-      IndexSpaceNode *expr_node = dynamic_cast<IndexSpaceNode*>(analysis_expr);
-      assert(expr_node != NULL);
-#else
-      IndexSpaceNode *expr_node = static_cast<IndexSpaceNode*>(analysis_expr);
+      assert(expr_node == analysis_expr);
 #endif
       std::vector<RtEvent> registered_events;
       std::vector<ApEvent> inst_ready_events;
@@ -8640,7 +8637,7 @@ namespace Legion {
                          true/*exclusive*/, mapping, first_local),
         usage(use), trace_info(t_info), precondition(pre), true_guard(true_g),
         false_guard(false_g), add_restriction(restriction),
-        output_aggregator(NULL), dummy_arrivals(NULL)
+        output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
       if (view != NULL)
@@ -8661,7 +8658,7 @@ namespace Legion {
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
                          true/*exclusive*/), usage(use), trace_info(t_info),
         precondition(pre), add_restriction(restriction),
-        output_aggregator(NULL), dummy_arrivals(NULL)
+        output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8675,8 +8672,7 @@ namespace Legion {
                         const ApEvent pre, const bool restriction)
       : PhysicalAnalysis(rt, o, idx, expr, true/*on heap*/, false/*immutable*/,
           true/*exclusive*/), usage(use), trace_info(t_info), precondition(pre),
-        add_restriction(restriction), output_aggregator(NULL),
-        dummy_arrivals(NULL)
+        add_restriction(restriction), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
       for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -8704,8 +8700,7 @@ namespace Legion {
         usage(use), trace_info(t_info), views(vws, true/*copy*/),
         reduction_views(reductions, true/*copy*/),
         precondition(pre), true_guard(true_g), false_guard(false_g),
-        add_restriction(restriction), output_aggregator(NULL),
-        dummy_arrivals(NULL)
+        add_restriction(restriction), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -8724,6 +8719,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(targets.size() == 1);
 #endif
+      target_instances.resize(targets.size());
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+        target_instances[idx] = targets[idx].get_physical_manager();
       InnerContext *context = op->find_physical_context(index);
       if (op->perform_collective_analysis(collective_mapping,
                                           collective_first_local))
@@ -8738,12 +8736,9 @@ namespace Legion {
                 targets[idx].get_valid_fields());
         }
         else
-        {
-          dummy_arrivals = new std::map<InstanceView*,size_t>();
           return op->convert_collective_views(index, analysis_index,
-                      region, targets, context, collective_mapping,
-                      collective_first_local, target_views, *dummy_arrivals);
-        }
+                    region, targets, context, collective_mapping,
+                    collective_first_local, target_views, collective_arrivals);
       }
       else
         context->convert_analysis_views(targets, target_views);
@@ -8767,12 +8762,6 @@ namespace Legion {
           else
             views.insert(it->first, it->second);
         }
-        target_views.clear();
-      }
-      if (dummy_arrivals != NULL)
-      {
-        delete dummy_arrivals;
-        dummy_arrivals = NULL;
       }
       return PhysicalAnalysis::perform_traversal(precondition,
                                 version_info, applied_events);
@@ -8870,6 +8859,78 @@ namespace Legion {
         runtime->send_equivalence_set_remote_overwrites(target, rez);
         applied_events.insert(applied);
       }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent OverwriteAnalysis::perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &applied_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination,
+                                           ApEvent &instances_ready,
+                                           bool symbolic)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(termination.exists());
+      assert(!trace_info.recording);
+#endif
+      if (precondition.exists() && !precondition.has_triggered())
+        return defer_registration(precondition, usage, applied_events,
+         trace_info, init_precondition, termination, instances_ready, symbolic);
+      const UniqueID op_id = op->get_unique_op_id();
+      const size_t op_ctx_index = op->get_ctx_index();
+      const AddressSpaceID local_space = runtime->address_space;
+#ifdef DEBUG_LEGION
+      // In this case we know the expression should be a region
+      IndexSpaceNode *expr_node = dynamic_cast<IndexSpaceNode*>(analysis_expr);
+      assert(expr_node != NULL);
+#else
+      IndexSpaceNode *expr_node = static_cast<IndexSpaceNode*>(analysis_expr);
+#endif
+      std::vector<RtEvent> registered_events;
+      std::vector<ApEvent> inst_ready_events;
+      for (unsigned idx = 0; idx < target_views.size(); idx++)
+      {
+        for (FieldMaskSet<InstanceView>::const_iterator it =
+              target_views[idx].begin(); it != target_views[idx].end(); it++)
+        {
+          size_t view_collective_arrivals = 0;
+          if (!collective_arrivals.empty())
+          {
+            std::map<InstanceView*,size_t>::const_iterator finder =
+              collective_arrivals.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(finder != collective_arrivals.end()); 
+#endif
+            view_collective_arrivals = finder->second;
+          }
+          const ApEvent ready = it->first->register_user(usage, it->second,
+              expr_node, op_id, op_ctx_index, index, termination,
+              target_instances[idx], collective_mapping,
+              view_collective_arrivals, registered_events, applied_events,
+              trace_info, local_space, symbolic);
+          if (ready.exists())
+            inst_ready_events.push_back(ready);
+        }
+      }
+      if (!inst_ready_events.empty())
+      {
+        if ((inst_ready_events.size() > 1) || init_precondition.exists())
+        {
+          if (init_precondition.exists())
+            inst_ready_events.push_back(init_precondition);
+          instances_ready = 
+            Runtime::merge_events(&trace_info, inst_ready_events);
+        }
+        else
+          instances_ready = inst_ready_events.back();
+      }
+      else
+        instances_ready = init_precondition;
+      if (!registered_events.empty())
+        return Runtime::merge_events(registered_events);
       return RtEvent::NO_RT_EVENT;
     }
 

@@ -3075,11 +3075,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::attach_external(AttachOp *attach_op, 
+    ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
                                unsigned index,
                                const RegionRequirement &req,
                                const InstanceSet &external_instances,
                                const VersionInfo &version_info,
+                               const ApEvent termination_event,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &map_applied_events,
                                const bool restricted)
@@ -3101,8 +3102,17 @@ namespace Legion {
       // Send out any remote updates
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_events);
+      // We can perform the registration in parallel with everything else
+      ApEvent instances_ready;
+      const RegionUsage usage(req);
+      RtEvent registration_done = 
+        analysis->perform_registration(views_ready, usage, map_applied_events,
+          ApEvent::NO_AP_EVENT, termination_event, instances_ready);
+      if (registration_done.exists())
+        map_applied_events.insert(registration_done);
       if (analysis->remove_reference())
         delete analysis;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
