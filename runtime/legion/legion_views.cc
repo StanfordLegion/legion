@@ -6212,6 +6212,16 @@ namespace Legion {
     void CollectiveView::notify_local(void)
     //--------------------------------------------------------------------------
     {
+      if (!deletion_notified.exchange(true))
+      {
+        // Unregister ourselves with all our local instances
+        for (std::vector<IndividualView*>::const_iterator it =
+              local_views.begin(); it != local_views.end(); it++)
+        {
+          PhysicalManager *manager = (*it)->get_manager();
+          manager->unregister_deletion_subscriber(this);
+        }
+      }
       for (std::vector<IndividualView*>::const_iterator it =
             local_views.begin(); it != local_views.end(); it++)
         if ((*it)->remove_nested_gc_ref(did))
