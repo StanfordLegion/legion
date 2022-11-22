@@ -2774,8 +2774,13 @@ namespace Legion {
         AutoLock v_lock(view_lock);
         std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
           collective_analyses.find(key);
+        // Not all collective user registrations record an analysis with
+        // the instance for performing copies. Specifically this is the
+        // case with OverwriteAnalysis for attach operations, and 
+        // FilterAnalysis in the case where there is no flush
+        if (finder == collective_analyses.end())
+          return;
 #ifdef DEBUG_LEGION
-        assert(finder != collective_analyses.end());
         assert(finder->second.analysis != NULL);
         assert(!finder->second.ready.exists());
 #endif
