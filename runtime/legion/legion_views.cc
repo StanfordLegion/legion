@@ -6323,6 +6323,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(tid);
+            rez.serialize(owner_context);
           }
           runtime->send_collective_view_deletion(ctx_space, rez);
         }
