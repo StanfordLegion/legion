@@ -71,6 +71,7 @@ legion_cxx_tests = [
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
     ['examples/future_map_transforms/future_map_transforms', []],
+    ['examples/concurrent_tasks/concurrent', ['-ll:cpu', '4']],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 
@@ -776,6 +777,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
         cmdline.append('-DLegion_HIP_ARCH=%s' % env['GPU_ARCH'])
     if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
         cmdline.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
+    cmdline.append('-DLegion_USE_NVTX=%s' % ('ON' if env['USE_NVTX'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_OpenMP=%s' % ('ON' if env['USE_OPENMP'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Kokkos=%s' % ('ON' if env['USE_KOKKOS'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
@@ -896,7 +898,7 @@ def report_mode(debug, max_dim, launcher,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir):
+                use_gcov, use_cmake, use_rdir, use_nvtx):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -938,6 +940,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
+    print('###   * NVTX:       %s' % use_nvtx)
     print('###   * Max DIM:    %s' % max_dim)
     print('#'*60)
     print()
@@ -1007,6 +1010,7 @@ def run_tests(test_modules=None,
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
+    use_nvtx = feature_enabled('nvtx', False)
     use_shared_objects = feature_enabled('shared', False,
                                          envname='SHARED_OBJECTS')
 
@@ -1050,7 +1054,7 @@ def run_tests(test_modules=None,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir)
+                use_gcov, use_cmake, use_rdir, use_nvtx)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
@@ -1087,6 +1091,7 @@ def run_tests(test_modules=None,
         ('SHARED_OBJECTS', '1' if use_shared_objects else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
+        ('USE_NVTX', '1' if use_nvtx else '0'),
         ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
         ('DEFINE_HEADERS_DIR', os.path.join(root_dir, 'runtime')),
@@ -1244,7 +1249,7 @@ def driver():
         choices=MultipleChoiceList('gasnet', 'cuda', 'hip', 'openmp', 'kokkos',
                                    'python', 'llvm', 'hdf', 'fortran', 'spy', 'prof',
                                    'bounds', 'privilege', 'complex',
-                                   'gcov', 'cmake', 'rdir'),
+                                   'gcov', 'cmake', 'rdir', 'nvtx'),
         type=lambda s: s.split(','),
         default=None,
         help='Build Legion with features (also via USE_*).')

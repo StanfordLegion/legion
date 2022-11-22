@@ -1631,9 +1631,10 @@ namespace Legion {
         launch_space(IndexSpace::NO_SPACE), 
         sharding_space(IndexSpace::NO_SPACE), global_arg(UntypedBuffer()), 
         argument_map(ArgumentMap()), predicate(Predicate::TRUE_PRED), 
-        must_parallelism(false), map_id(0), tag(0), static_dependences(NULL), 
-        enable_inlining(false), independent_requirements(false), 
-        elide_future_return(false), silence_warnings(false)
+        concurrent(false), must_parallelism(false), map_id(0), tag(0),
+        static_dependences(NULL), enable_inlining(false),
+        independent_requirements(false), elide_future_return(false), 
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1648,10 +1649,11 @@ namespace Legion {
                                      const char *prov)
       : task_id(tid), launch_domain(dom), launch_space(IndexSpace::NO_SPACE),
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
-        argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
-        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false),
-        elide_future_return(false), silence_warnings(false)
+        argument_map(map), predicate(pred), concurrent(false), 
+        must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
+        provenance(prov), static_dependences(NULL), enable_inlining(false),
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1667,10 +1669,11 @@ namespace Legion {
                                      const char *prov)
       : task_id(tid), launch_domain(Domain::NO_DOMAIN), launch_space(space),
         sharding_space(IndexSpace::NO_SPACE), global_arg(global), 
-        argument_map(map), predicate(pred), must_parallelism(must), map_id(mid),
-        tag(t), map_arg(marg), provenance(prov), static_dependences(NULL),
-        enable_inlining(false), independent_requirements(false),
-        elide_future_return(false), silence_warnings(false)
+        argument_map(map), predicate(pred), concurrent(false),
+        must_parallelism(must), map_id(mid), tag(t), map_arg(marg),
+        provenance(prov), static_dependences(NULL), enable_inlining(false),
+        independent_requirements(false), elide_future_return(false),
+        silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2099,7 +2102,7 @@ namespace Legion {
       : task_id(0), global_registration(true), 
         task_variant_name(NULL), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false)
+        replicable_variant(false), concurrent_variant(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2110,7 +2113,7 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false)
+        replicable_variant(false), concurrent_variant(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2122,7 +2125,7 @@ namespace Legion {
       : task_id(task_id), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
         inner_variant(false), idempotent_variant(false),
-        replicable_variant(false)
+        replicable_variant(false), concurrent_variant(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2317,7 +2320,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2332,35 +2335,28 @@ namespace Legion {
     Future::~Future(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-        impl = NULL;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Internal::FutureImpl *i, bool need_reference)
+    Future::Future(Internal::FutureImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && need_reference)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
     Future& Future::operator=(const Future &rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
       return *this;
     }
 
@@ -2368,8 +2364,7 @@ namespace Legion {
     Future& Future::operator=(Future &&rhs)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && 
-          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
         delete impl;
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -2534,7 +2529,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2546,38 +2541,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(Internal::FutureMapImpl *i, bool need_reference)
+    FutureMap::FutureMap(Internal::FutureMapImpl *i)
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && need_reference)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
     }
 
     //--------------------------------------------------------------------------
     FutureMap::~FutureMap(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-        impl = NULL;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
     }
 
     //--------------------------------------------------------------------------
     FutureMap& FutureMap::operator=(const FutureMap &rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          delete impl;
-      }
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
+        delete impl;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+        impl->add_base_gc_ref(Internal::APPLICATION_REF);
       return *this;
     }
 
@@ -2585,8 +2573,7 @@ namespace Legion {
     FutureMap& FutureMap::operator=(FutureMap &&rhs)
     //--------------------------------------------------------------------------
     {
-      if ((impl != NULL) && 
-          impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+      if ((impl != NULL) && impl->remove_base_gc_ref(Internal::APPLICATION_REF))
         delete impl;
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -2837,6 +2824,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       impl->report_incompatible_multi_accessor(index, fid, inst1, inst2);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::report_colocation_violation(const char *accessor_kind,
+                 FieldID fid, Realm::RegionInstance inst1, 
+                 Realm::RegionInstance inst2, 
+                 const PhysicalRegion &other, bool reduction) const
+    //--------------------------------------------------------------------------
+    {
+      impl->report_colocation_violation(accessor_kind, fid, inst1, inst2,
+                                        other, reduction);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::empty_colocation_regions(
+                         const char *accessor_kind, FieldID fid, bool reduction)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::empty_colocation_regions(accessor_kind,
+                                                             fid, reduction);
     }
 
     //--------------------------------------------------------------------------

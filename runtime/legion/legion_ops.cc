@@ -34,22 +34,89 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     /*static*/ const std::string Provenance::no_provenance;
+    /*static*/ constexpr char Provenance::delimeter;
+
+    //--------------------------------------------------------------------------
+    Provenance::Provenance(const char *prov)
+    //--------------------------------------------------------------------------
+    {
+      initialize(prov, strlen(prov));
+    }
+
+    //--------------------------------------------------------------------------
+    Provenance::Provenance(const void *buffer, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      initialize((const char*)buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    Provenance::Provenance(const std::string &prov)
+    //--------------------------------------------------------------------------
+    {
+      initialize(prov.c_str(), prov.length());
+    }
+
+    //--------------------------------------------------------------------------
+    void Provenance::initialize(const char *prov, size_t size)
+    //--------------------------------------------------------------------------
+    {
+      unsigned split = 0;
+      while (split < size)
+      {
+        if (prov[split] == delimeter)
+          break;
+        split++;
+      }
+      if (split > 0)
+        human.assign(prov, split);
+      if ((split+1) < size)
+        machine.assign(prov+split+1, size-(split+1));
+    }
+
+    //--------------------------------------------------------------------------
+    char* Provenance::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      char *result = (char*)malloc(
+          human.length() + (!machine.empty() ? machine.length() + 1 : 0) + 1);
+      unsigned offset = 0;
+      for (unsigned idx = 0; idx < human.length(); idx++)
+        result[offset++] = human[idx];
+      if (!machine.empty())
+      {
+        result[offset++] = delimeter; 
+        for (unsigned idx = 0; idx < machine.length(); idx++)
+          result[offset++] = machine[idx];
+      }
+      result[offset] = '\0';
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     void Provenance::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      const size_t strlen = provenance.length();
-      rez.serialize(strlen);
+      size_t strlen = human.length() + machine.length();
       if (strlen > 0)
-        rez.serialize(provenance.c_str(), strlen);
+      {
+        strlen++; // handle the delimeter
+        rez.serialize(strlen);
+        if (human.length() > 0)
+          rez.serialize(human.c_str(), human.length());
+        rez.serialize(delimeter);
+        if (machine.length() > 0)
+          rez.serialize(machine.c_str(), machine.length());
+      }
+      else
+        rez.serialize(strlen);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Provenance::serialize_null(Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<size_t>(0);
+      rez.serialize<size_t>(SIZE_MAX);
     }
 
     //--------------------------------------------------------------------------
@@ -58,7 +125,7 @@ namespace Legion {
     {
       size_t length;
       derez.deserialize(length);
-      if (length > 0)
+      if (length < SIZE_MAX)
       {
         Provenance *result = new Provenance(derez.get_current_pointer(),length);
         derez.advance_pointer(length);
@@ -1375,8 +1442,7 @@ namespace Legion {
         size_t instance_size = it->first->get_instance_size();
         if (instance_size > 0)
         {
-          if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                                NULL/*mutator*/, it->second))
+          if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, it->second))
             delete it->first;
           std::map<PhysicalManager*,unsigned>::iterator to_delete = it++;
           acquired_instances.erase(to_delete);
@@ -1394,8 +1460,7 @@ namespace Legion {
     {
       for (std::map<PhysicalManager*,unsigned>::iterator it = 
             acquired_instances.begin(); it != acquired_instances.end(); it++)
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                              NULL/*mutator*/, it->second))
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, it->second))
           delete it->first;
       acquired_instances.clear();
     }
@@ -1409,8 +1474,7 @@ namespace Legion {
       for (std::vector<std::pair<PhysicalManager*,unsigned> >::const_iterator 
             it = dargs->instances->begin(); it != dargs->instances->end(); it++)
       {
-        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, 
-                                    NULL/*mutator*/, it->second))
+        if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, it->second))
           delete it->first;
       }
       delete dargs->instances;
@@ -1440,7 +1504,7 @@ namespace Legion {
         provenance->add_reference();
         if (runtime->legion_spy_enabled)
           LegionSpy::log_operation_provenance(unique_op_id,
-                                  prov->provenance.c_str());
+                                              prov->human_str());
       }
       if (runtime->profiler != NULL)
         runtime->profiler->register_operation(this);
@@ -1456,14 +1520,6 @@ namespace Legion {
       provenance = prov;
       if (provenance != NULL)
         provenance->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      // should be overwridden by inheriting classes
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -3010,8 +3066,7 @@ namespace Legion {
         const size_t future_size = sizeof(bool);
         Future temp = Future(
               new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(),
-                runtime->address_space, get_completion_event(), 
+                runtime->get_available_distributed_id(), get_completion_event(),
                 get_provenance(), &future_size, this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
@@ -3725,8 +3780,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -4009,13 +4063,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent MapOp::get_program_order_event(void) const
     //--------------------------------------------------------------------------
     {
@@ -4060,12 +4107,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MapOp::get_provenance_string(void) const
+    const std::string& MapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -5468,10 +5515,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
-    {
-      if (runtime->check_privileges)
-        check_copy_privileges(false/*permit projection*/);
-      perform_base_dependence_analysis();
+    { 
+      perform_base_dependence_analysis(false/*permit projection*/);
       ProjectionInfo projection_info;
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -5479,8 +5524,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
@@ -5493,8 +5537,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -5508,8 +5551,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  projection_info,
                                                  gather_privilege_paths[idx],
-                                                 refinement_tracker,
-                                                 map_applied_conditions);
+                                                 refinement_tracker);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -5521,15 +5563,16 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
                                                  scatter_privilege_paths[idx],
-                                                 refinement_tracker,
-                                                 map_applied_conditions);
+                                                 refinement_tracker);
       }
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::perform_base_dependence_analysis(void)
+    void CopyOp::perform_base_dependence_analysis(bool permit_projection)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_copy_privileges(permit_projection);
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
@@ -6479,13 +6522,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     UniqueID CopyOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -6523,12 +6559,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CopyOp::get_provenance_string(void) const
+    const std::string& CopyOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -7699,10 +7735,7 @@ namespace Legion {
     void IndexCopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_copy_privileges(true/*permit projection*/);
-      // Register a dependence on our predicate
-      perform_base_dependence_analysis();
+      perform_base_dependence_analysis(true/*permit projection*/);
       RefinementTracker refinement_tracker(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -7711,8 +7744,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_info,
                                                      src_privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -7727,8 +7759,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_info,
                                                      dst_privilege_paths[idx],
-                                                     refinement_tracker,
-                                                     map_applied_conditions);
+                                                     refinement_tracker);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -7744,8 +7775,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
-                                                 refinement_tracker,
-                                                 map_applied_conditions);
+                                                 refinement_tracker);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -7759,8 +7789,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
-                                                 refinement_tracker,
-                                                 map_applied_conditions);
+                                                 refinement_tracker);
         }
       }
     }
@@ -8826,9 +8855,8 @@ namespace Legion {
       {
         const size_t future_size = 0;
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              runtime->address_space, completion_event, get_provenance(),
-              &future_size, track ? this : NULL));
+              runtime->get_available_distributed_id(), completion_event,
+              get_provenance(), &future_size, track ? this : NULL));
         // We can set the future result right now because we know that it
         // will not be complete until we are complete ourselves
         result.impl->set_result(NULL);
@@ -9465,7 +9493,7 @@ namespace Legion {
               if (runtime->legion_spy_enabled && owner)
                 LegionSpy::log_field_creation(field_space_node->handle.id,
                     fields[idx], *field_size, (get_provenance() == NULL) ? 
-                    NULL : get_provenance()->c_str());
+                    NULL : get_provenance()->human_str());
             }
             break;
           }
@@ -9811,7 +9839,7 @@ namespace Legion {
         // Check to see if we can remove these requirements because
         // they were never actually initialized in the first place
         if (runtime->forest->perform_deletion_analysis(this, index, *it,
-            privilege_path, map_applied_conditions,
+            privilege_path,
             (kind == LOGICAL_REGION_DELETION)) && it->privilege_fields.empty())
           it = deletion_requirements.erase(it);
         else
@@ -10019,7 +10047,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -10250,12 +10278,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& CloseOp::get_provenance_string(void) const
+    const std::string& CloseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -10554,7 +10582,7 @@ namespace Legion {
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(),
-            local_space, local_space, region_node, true/*register now*/);
+            local_space, region_node, true/*register now*/);
         // Merge the state from the old equivalence sets if not overwriting
         if (!refinement_overwrite)
         {
@@ -10572,8 +10600,7 @@ namespace Legion {
         }
         region_node->invalidate_refinement(ctx, refinement_mask, 
             false/*self*/, *parent_ctx, map_applied_conditions, to_release);
-        region_node->record_refinement(ctx, set, refinement_mask,
-                                       map_applied_conditions);
+        region_node->record_refinement(ctx, set, refinement_mask);
         if (!map_applied_conditions.empty())
           complete_mapping(Runtime::merge_events(map_applied_conditions));
         else
@@ -10592,7 +10619,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -10721,8 +10748,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -10895,13 +10921,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
-    }
-
-    //--------------------------------------------------------------------------
-    void PostCloseOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -11108,8 +11127,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -11442,25 +11460,25 @@ namespace Legion {
             for (std::vector<RegionNode*>::const_iterator rit =
                   regions.begin(); rit != regions.end(); rit++)
               initialize_region(*rit, sit->second, refinement_regions,
-                                refinement_partitions, map_applied_conditions);
+                                refinement_partitions);
           }
           const FieldMask remaining = it->second - summaries.get_valid_mask();
           if (!!remaining)
           {
             if (it->first->is_region())
               initialize_region(it->first->as_region_node(), remaining, 
-               refinement_regions,refinement_partitions,map_applied_conditions);
+               refinement_regions, refinement_partitions);
             else
               initialize_partition(it->first->as_partition_node(), remaining, 
-               refinement_regions,refinement_partitions,map_applied_conditions);
+               refinement_regions, refinement_partitions);
           }
         }
         else if (it->first->is_region())
           initialize_region(it->first->as_region_node(), it->second,
-             refinement_regions, refinement_partitions, map_applied_conditions);
+             refinement_regions, refinement_partitions);
         else
           initialize_partition(it->first->as_partition_node(), it->second,
-             refinement_regions, refinement_partitions, map_applied_conditions);
+             refinement_regions, refinement_partitions);
       }
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
@@ -11484,7 +11502,7 @@ namespace Legion {
         assert(refinement_regions.find(it->first) != refinement_regions.end());
 #endif
         it->first->propagate_refinement(ctx, refinement_regions[it->first],
-                                        it->second, map_applied_conditions);
+                                        it->second);
       }
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -11496,15 +11514,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_region(RegionNode *node,const FieldMask &mask, 
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-         FieldMaskSet<PartitionNode> &refinement_partitions,
-         std::set<RtEvent> &map_applied_conditions)
+         FieldMaskSet<PartitionNode> &refinement_partitions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(node->parent != NULL); // should always have a parent
 #endif
       PendingEquivalenceSet *pending = new PendingEquivalenceSet(node);
-      initialize_pending(pending, mask, map_applied_conditions);
+      initialize_pending(pending, mask);
       // Parent context takes ownership here
       parent_ctx->record_pending_disjoint_complete_set(pending, mask);
       std::vector<RegionNode*> &children = refinement_regions[node->parent];
@@ -11530,8 +11547,7 @@ namespace Legion {
     void RefinementOp::initialize_partition(PartitionNode *node,
          const FieldMask &mask, 
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
-         FieldMaskSet<PartitionNode> &refinement_partitions,
-         std::set<RtEvent> &map_applied_conditions)
+         FieldMaskSet<PartitionNode> &refinement_partitions)
     //--------------------------------------------------------------------------
     {
       // Make pending refinements for each of the child regions and
@@ -11550,7 +11566,7 @@ namespace Legion {
         {
           RegionNode *child = node->get_child(color);
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
-          initialize_pending(pending, mask, map_applied_conditions);
+          initialize_pending(pending, mask);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
           if (add_children)
@@ -11577,7 +11593,7 @@ namespace Legion {
           const LegionColor color = itr->yield_color();
           RegionNode *child = node->get_child(color);
           PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
-          initialize_pending(pending, mask, map_applied_conditions);
+          initialize_pending(pending, mask);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
           if (add_children)
@@ -11601,7 +11617,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_pending(PendingEquivalenceSet *pending,
-                   const FieldMask &set_mask, std::set<RtEvent> &applied_events)
+                                          const FieldMask &set_mask)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_expr = pending->region_node->row_source;
@@ -11625,7 +11641,7 @@ namespace Legion {
             if (overlap_expr->is_empty())
               continue;
           }
-          pending->record_previous(it->first, overlap, applied_events);
+          pending->record_previous(it->first, overlap);
         }
       }
     }
@@ -11638,7 +11654,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it =
               to_release.begin(); it != to_release.end(); it++)
-          if ((*it)->remove_base_valid_ref(DISJOINT_COMPLETE_REF))
+          if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete (*it);
         to_release.clear();
       }
@@ -11975,8 +11991,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, req,
                                                        projection_info,
                                                        privilege_paths[idx],
-                                                       refinement_tracker,
-                                                       map_applied_conditions);
+                                                       refinement_tracker);
           if (runtime->legion_spy_enabled)
           {
             LegionSpy::log_logical_requirement(unique_op_id, idx, 
@@ -12001,8 +12016,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, 0/*idx*/, req,
                                                        projection_info,
                                                        privilege_paths[idx],
-                                                       refinement_tracker,
-                                                       map_applied_conditions);
+                                                       refinement_tracker);
           if (runtime->legion_spy_enabled)
           {
             LegionSpy::log_logical_requirement(unique_op_id, idx, 
@@ -12337,8 +12351,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -12547,13 +12560,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     UniqueID AcquireOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -12591,12 +12597,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& AcquireOp::get_provenance_string(void) const
+    const std::string& AcquireOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -13263,8 +13269,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -13500,13 +13505,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
     UniqueID ReleaseOp::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -13544,12 +13542,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& ReleaseOp::get_provenance_string(void) const
+    const std::string& ReleaseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -13965,8 +13963,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), 
-            runtime->address_space, get_completion_event(), 
+            runtime->get_available_distributed_id(), get_completion_event(), 
             get_provenance(), NULL/*no known future size*/, this));
       collective = dc;
       if (runtime->legion_spy_enabled)
@@ -14784,12 +14781,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& MustEpochOp::get_provenance_string(void) const
+    const std::string& MustEpochOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -14827,6 +14824,12 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
       parent_task = ctx->get_task();
+      if (ctx->is_concurrent_context())
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_CONCURRENT_EXECUTION,
+            "Illegal nested must epoch launch inside task %s (UID %lld) "
+            "which has a concurrent ancesstor (must epoch or index task). "
+            "Nested concurrency is not supported.", 
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
@@ -14839,8 +14842,14 @@ namespace Legion {
     {
       IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
       return new FutureMapImpl(ctx, this, launch_node,
-            runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, get_provenance());
+            runtime, runtime->get_available_distributed_id(), get_provenance());
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MustEpochOp::get_concurrent_analysis_precondition(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->acquire_concurrent_reservation(mapped_event);
     }
 
     //--------------------------------------------------------------------------
@@ -15130,7 +15139,11 @@ namespace Legion {
       // Now we can invoke the mapper
       MapperManager *mapper = invoke_mapper(); 
       // Check that all the tasks have been assigned to different processors
+      // and perform the concurrent analysis on each of them so that they 
+      // all know what their starting preconditions are
       {
+        const RtEvent concurrent_precondition =
+          get_concurrent_analysis_precondition();
         std::map<Processor,SingleTask*> target_procs;
         for (unsigned idx = 0; idx < single_tasks.size(); idx++)
         {
@@ -15161,6 +15174,7 @@ namespace Legion {
           }
           target_procs[proc] = task;
           task->target_proc = proc;
+          task->perform_concurrent_analysis(proc, concurrent_precondition);
         }
       }
       std::set<RtEvent> tasks_all_mapped;
@@ -16347,14 +16361,14 @@ namespace Legion {
               std::set<RtEvent> &mapped_events, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      for (std::map<DomainPoint,Future>::const_iterator it =
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent mapped =
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
+          it->second->request_internal_buffer(this, false/*eager*/);
         if (mapped.exists())
           mapped_events.insert(mapped);
-        const RtEvent ready = it->second.impl->subscribe();
+        const RtEvent ready = it->second->subscribe();
         if (ready.exists())
           ready_events.insert(ready);
       }
@@ -17136,8 +17150,7 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
-                                                   refinement_tracker,
-                                                   map_applied_conditions);
+                                                   refinement_tracker);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit(this);
@@ -17805,12 +17818,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& DependentPartitionOp::get_provenance_string(void) const
+    const std::string& DependentPartitionOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -17855,9 +17869,7 @@ namespace Legion {
     void DependentPartitionOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_dependent_op(); 
-      if (remove_launch_space_reference(launch_space))
-        delete launch_space;
+      deactivate_dependent_op();  
       runtime->free_dependent_partition_op(this);
     }
 
@@ -17871,6 +17883,8 @@ namespace Legion {
         delete thunk;
         thunk = NULL;
       }
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
       privilege_path = RegionTreePath();
       version_info.clear();
       map_applied_conditions.clear();
@@ -17949,13 +17963,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return &acquired_instances;
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -18766,12 +18773,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& FillOp::get_provenance_string(void) const
+    const std::string& FillOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -18827,23 +18834,29 @@ namespace Legion {
     void FillOp::trigger_dependence_analysis(void) 
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_fill_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
-      if (!wait_barriers.empty() || !arrive_barriers.empty())
-        parent_ctx->perform_barrier_dependence_analysis(this, 
-                              wait_barriers, arrive_barriers);
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
+      perform_base_dependence_analysis();
       ProjectionInfo projection_info;
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->check_privileges)
+        check_fill_privilege();
+      if (!wait_barriers.empty() || !arrive_barriers.empty())
+        parent_ctx->perform_barrier_dependence_analysis(this, 
+                              wait_barriers, arrive_barriers);
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      // If we are waiting on a future register a dependence
+      if (future.impl != NULL)
+        future.impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -19513,30 +19526,13 @@ namespace Legion {
     void IndexFillOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->check_privileges)
-        check_fill_privilege();
       perform_base_dependence_analysis();
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       RefinementTracker tracker(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::perform_base_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!wait_barriers.empty() || !arrive_barriers.empty())
-        parent_ctx->perform_barrier_dependence_analysis(this, 
-                              wait_barriers, arrive_barriers);
-      // Register a dependence on our predicate
-      register_predicate_dependence();
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -20424,8 +20420,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions); 
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -20523,13 +20518,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       commit_operation(true/*deactivate*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::record_reference_mutation_effect(RtEvent event)
-    //--------------------------------------------------------------------------
-    {
-      map_applied_conditions.insert(event);
     }
 
     //--------------------------------------------------------------------------
@@ -21134,8 +21122,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -21749,9 +21736,8 @@ namespace Legion {
       // Create the future result that we will complete when we're done
       const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(),
-                  get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(), get_completion_event(),
+                get_provenance(), &future_size, this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, unordered);
@@ -21851,8 +21837,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -21890,7 +21875,6 @@ namespace Legion {
       // Add a valid reference to the instances to act as an acquire to keep
       // them valid through the end of mapping them, we'll release the valid
       // references when we are done mapping
-      WrapperReferenceMutator mutator(map_applied_conditions);
       PhysicalManager *manager = reference.get_physical_manager();
       if (!manager->is_external_instance())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
@@ -21902,7 +21886,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
-      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
+      manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
       // If we need to flush then register this operation to bring the
       // data that it has up to date, use READ-ONLY privileges since we're
@@ -22196,9 +22180,8 @@ namespace Legion {
       // Create the future result that we will complete when we're done
       const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(),
-                  get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(), get_completion_event(),
+                get_provenance(), &future_size, this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
@@ -22236,8 +22219,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker,
-                                                   map_applied_conditions);
+                                                   privilege_path, tracker);
     }
 
     //--------------------------------------------------------------------------
@@ -22555,9 +22537,8 @@ namespace Legion {
       const size_t future_size = (measurement == LEGION_MEASURE_SECONDS) ?
         sizeof(double) : sizeof(long long);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                  runtime->get_available_distributed_id(),
-                  runtime->address_space, get_completion_event(), 
-                  get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(), get_completion_event(),
+                get_provenance(), &future_size, this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(),
@@ -22770,9 +22751,8 @@ namespace Legion {
       }
       return_type_size = launcher.return_type_size;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(),
-            runtime->address_space, get_completion_event(), get_provenance(),
-            (launcher.return_type_size < SIZE_MAX) ?
+            runtime->get_available_distributed_id(), get_completion_event(),
+            get_provenance(), (launcher.return_type_size < SIZE_MAX) ?
               &launcher.return_type_size : NULL/*no size*/, this));
       if (runtime->legion_spy_enabled)
       {
@@ -22964,8 +22944,8 @@ namespace Legion {
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              runtime->address_space, get_completion_event(), get_provenance(),
+              runtime->get_available_distributed_id(), get_completion_event(), 
+              get_provenance(),
               (serdez_redop_fns == NULL) ? &redop->sizeof_rhs : NULL, this));
       mapper_id = map_id;
       tag = t;
@@ -23047,11 +23027,11 @@ namespace Legion {
     {
       populate_sources();
       std::vector<RtEvent> preconditions;
-      for (std::map<DomainPoint,Future>::const_iterator it =
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
         const RtEvent ready =
-          it->second.impl->request_internal_buffer(this, false/*eager*/);
+          it->second->request_internal_buffer(this, false/*eager*/);
         if (ready.exists() && !ready.has_triggered())
           preconditions.push_back(ready);
       }
@@ -23078,10 +23058,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(serdez_redop_fns != NULL);
 #endif
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second.impl;
+        FutureImpl *impl = it->second;
         size_t src_size = 0;
         const void *source = impl->find_internal_buffer(parent_ctx, src_size);
         (*(serdez_redop_fns->fold_fn))(redop, serdez_redop_buffer, 
@@ -23162,11 +23142,10 @@ namespace Legion {
       {
         // Need to do our subscriptions now
         std::vector<RtEvent> ready_events;
-        for (std::map<DomainPoint,Future>::const_iterator it = 
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
         {
-          FutureImpl *impl = it->second.impl;
-          const RtEvent ready = impl->subscribe();
+          const RtEvent ready = it->second->subscribe();
           if (ready.exists())
             ready_events.push_back(ready);
         }
@@ -23195,10 +23174,10 @@ namespace Legion {
       // We're done with our mapping at the point we've made all the instances
       complete_mapping();
       std::vector<RtEvent> ready_events;
-      for (std::map<DomainPoint,Future>::const_iterator it =
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
             sources.begin(); it != sources.end(); it++)
       {
-        const RtEvent ready = it->second.impl->subscribe();
+        const RtEvent ready = it->second->subscribe();
         if (ready.exists() && !ready.has_triggered())
           ready_events.push_back(ready);
       }
@@ -23331,10 +23310,10 @@ namespace Legion {
       RtEvent completion_precondition;
       std::vector<FutureInstance*> instances;
       instances.reserve(sources.size());
-      for (std::map<DomainPoint,Future>::const_iterator it = 
+      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
             sources.begin(); it != sources.end(); it++)
       {
-        FutureImpl *impl = it->second.impl;
+        FutureImpl *impl = it->second;
         FutureInstance *instance = impl->get_canonical_instance();
         if (instance->size != redop->sizeof_rhs)
           REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
@@ -23718,8 +23697,7 @@ namespace Legion {
       }
       // Do the rest of the unpack
       result->unpack_remote_base(derez, runtime, ready_events);
-      WrapperReferenceMutator mutator(ready_events);
-      result->unpack(derez, mutator);
+      result->unpack(derez);
       return result;
     }
 
@@ -23837,12 +23815,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteMapOp::get_provenance_string(void) const
+    const std::string& RemoteMapOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -23898,7 +23876,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteMapOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteMapOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_mapping(derez, runtime);
@@ -23978,12 +23956,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCopyOp::get_provenance_string(void) const
+    const std::string& RemoteCopyOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24072,7 +24050,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCopyOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteCopyOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_copy(derez, runtime);
@@ -24152,12 +24130,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteCloseOp::get_provenance_string(void) const
+    const std::string& RemoteCloseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24213,7 +24191,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteCloseOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteCloseOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_close(derez, runtime);
@@ -24294,12 +24272,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteAcquireOp::get_provenance_string(void) const
+    const std::string& RemoteAcquireOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24340,7 +24318,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAcquireOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteAcquireOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_acquire(derez, runtime);
@@ -24421,12 +24399,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteReleaseOp::get_provenance_string(void) const
+    const std::string& RemoteReleaseOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24482,7 +24460,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReleaseOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteReleaseOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_release(derez, runtime);
@@ -24562,12 +24540,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteFillOp::get_provenance_string(void) const
+    const std::string& RemoteFillOp::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24607,7 +24585,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteFillOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteFillOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_fill(derez, runtime);
@@ -24688,12 +24666,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemotePartitionOp::get_provenance_string(void) const
+    const std::string& RemotePartitionOp::get_provenance_string(
+                                                               bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }
@@ -24757,8 +24736,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemotePartitionOp::unpack(Deserializer &derez,
-                                   ReferenceMutator &mutator)
+    void RemotePartitionOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       unpack_external_partition(derez, runtime);
@@ -24864,7 +24842,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAttachOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteAttachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
@@ -24967,7 +24945,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDetachOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteDetachOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
@@ -25071,7 +25049,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeletionOp::unpack(Deserializer &derez,ReferenceMutator &mutator)
+    void RemoteDeletionOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
@@ -25175,7 +25153,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteReplayOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteReplayOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment
@@ -25279,7 +25257,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteSummaryOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    void RemoteSummaryOp::unpack(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment

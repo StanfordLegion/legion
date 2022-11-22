@@ -4164,9 +4164,21 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       end
     end)
 
-  -- We don't need to register tasks that are only inlined
+  -- Filter out inline tasks: don't need to register them since they
+  -- won't be called
   local variants = data.filter(function(variant)
     return not variant.task.is_inline
+  end, variants)
+
+  -- IMPORTANT: save all the CUDA variants first, because we DO need
+  -- to register CUDA kernels for local variants
+  local cuda_variants = data.filter(function(variant)
+    return variant:is_cuda()
+  end, variants)
+
+  -- Now filter local variants
+  local variants = data.filter(function(variant)
+    return not variant.task.is_local
   end, variants)
 
   local task_registrations = variants:map(
@@ -4291,11 +4303,8 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local cuda_setup = quote end
   if gpuhelper.check_gpu_available() then
     gpuhelper.link_driver_library()
-    local all_kernels = terralib.newlist()
-    variants:map(function(variant)
-      if variant:is_cuda() then
-        all_kernels:insertall(variant:get_cuda_kernels())
-      end
+    local all_kernels = cuda_variants:flatmap(function(variant)
+      return variant:get_cuda_kernels()
     end)
     all_kernels:insertall(gpuhelper.get_internal_kernels())
     cuda_setup = gpuhelper.jit_compile_kernels_and_register(all_kernels)

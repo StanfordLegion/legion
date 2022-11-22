@@ -159,8 +159,10 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+#ifdef LEGION_MULTI_REGION_ACCESSOR
   template<typename, int,typename,typename,bool,bool,int>
     class MultiRegionAccessor;
+#endif
   template<typename,int,typename,typename>
     class UnsafeFieldAccessor;
   namespace ArraySyntax {
@@ -280,7 +282,6 @@ namespace Legion {
       OPEN_READ_ONLY_PROJ     = 5, // read-only projection
       OPEN_READ_WRITE_PROJ    = 6, // read-write projection
       OPEN_REDUCE_PROJ        = 7, // reduction-only projection
-      OPEN_REDUCE_PROJ_DIRTY  = 8, // same as above but already open dirty 
     }; 
 
     // Internal reduction operators
@@ -320,7 +321,6 @@ namespace Legion {
       LG_DEFERRED_EXECUTION_ID,
       LG_DEFERRED_COMPLETION_ID,
       LG_DEFERRED_COMMIT_ID,
-      LG_DEFERRED_COLLECT_ID,
       LG_PRE_PIPELINE_ID,
       LG_TRIGGER_DEPENDENCE_ID,
       LG_TRIGGER_COMPLETION_ID,
@@ -380,9 +380,6 @@ namespace Legion {
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_PENDING_REPLICATION_TASK_ID,
       LG_DEFER_APPLY_STATE_TASK_ID,
-      LG_DEFER_RELEASE_REF_TASK_ID,
-      LG_DEFER_REMOTE_REF_UPDATE_TASK_ID,
-      LG_DEFER_REMOTE_UNREGISTER_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
       LG_FINALIZE_EQ_SETS_TASK_ID,
@@ -404,7 +401,6 @@ namespace Legion {
       LG_DEFER_DELETE_INDIVIDUAL_MANAGER_TASK_ID,
       LG_DEFER_COLLECTIVE_MANAGER_TASK_ID,
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
-      LG_DEFER_REMOVE_REMOTE_REFS_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
       LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
@@ -418,6 +414,7 @@ namespace Legion {
       LG_DEFER_TRACE_UPDATE_TASK_ID,
       LG_FINALIZE_OUTPUT_ID,
       LG_FREE_EXTERNAL_TASK_ID,
+      LG_DEFER_CONCURRENT_ANALYSIS_TASK_ID,
       LG_DEFER_CONSENSUS_MATCH_TASK_ID,
       LG_DEFER_COLLECTIVE_TASK_ID,
       LG_YIELD_TASK_ID,
@@ -443,7 +440,6 @@ namespace Legion {
         "Deferred Execution",                                     \
         "Deferred Completion",                                    \
         "Deferred Commit",                                        \
-        "Garbage Collection",                                     \
         "Prepipeline Stage",                                      \
         "Logical Dependence Analysis",                            \
         "Trigger Completion",                                     \
@@ -503,9 +499,6 @@ namespace Legion {
         "Defer Equivalence Set Make Owner",                       \
         "Defer Pending Equivalence Set Replication",              \
         "Defer Equivalence Set Apply State",                      \
-        "Defer Equivalence Set Remove References",                \
-        "Defer Remote Reference Update",                          \
-        "Defer Remote Unregister",                                \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \
         "Finalize Equivalence Sets",                              \
@@ -527,7 +520,6 @@ namespace Legion {
         "Defer Instance Manager Deletion",                        \
         "Defer Reduction Manager Registration",                   \
         "Defer Verify Partition",                                 \
-        "Defer Remove Remote Region Tree Flow Back References",   \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
         "Defer Disjoint Complete Response",                       \
@@ -541,6 +533,7 @@ namespace Legion {
         "Defer Trace Update",                                     \
         "Finalize Output Region Instance",                        \
         "Free External Allocation",                               \
+        "Defer Concurrent Analysis",                              \
         "Defer Consensus Match",                                  \
         "Defer Collective Async",                                 \
         "Yield",                                                  \
@@ -709,6 +702,7 @@ namespace Legion {
       // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1, 
       TASK_VIRTUAL_CHANNEL = 2,
+      INDEX_SPACE_VIRTUAL_CHANNEL = 3,
       FIELD_SPACE_VIRTUAL_CHANNEL = 4,
       REFERENCE_VIRTUAL_CHANNEL = 6,
       UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority
@@ -730,6 +724,7 @@ namespace Legion {
       SEND_REMOTE_TASK_PROFILING_RESPONSE,
       SEND_SHARED_OWNERSHIP,
       SEND_INDEX_SPACE_REQUEST,
+      SEND_INDEX_SPACE_RESPONSE,
       SEND_INDEX_SPACE_RETURN,
       SEND_INDEX_SPACE_SET,
       SEND_INDEX_SPACE_CHILD_REQUEST,
@@ -743,6 +738,7 @@ namespace Legion {
       SEND_INDEX_SPACE_RELEASE_COLOR,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_REQUEST,
+      SEND_INDEX_PARTITION_RESPONSE,
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
@@ -782,17 +778,20 @@ namespace Legion {
       SLICE_REMOTE_MAPPED,
       SLICE_REMOTE_COMPLETE,
       SLICE_REMOTE_COMMIT,
+      SLICE_VERIFY_CONCURRENT_EXECUTION,
       SLICE_FIND_INTRA_DEP,
       SLICE_RECORD_INTRA_DEP,
       SLICE_COLLECTIVE_REQUEST,
       SLICE_COLLECTIVE_RESPONSE,
       DISTRIBUTED_REMOTE_REGISTRATION,
-      DISTRIBUTED_VALID_UPDATE,
-      DISTRIBUTED_GC_UPDATE,
-      DISTRIBUTED_RESOURCE_UPDATE,
-      DISTRIBUTED_CREATE_ADD,
-      DISTRIBUTED_CREATE_REMOVE,
-      DISTRIBUTED_UNREGISTER,
+      DISTRIBUTED_DOWNGRADE_REQUEST,
+      DISTRIBUTED_DOWNGRADE_RESPONSE,
+      DISTRIBUTED_DOWNGRADE_SUCCESS,
+      DISTRIBUTED_DOWNGRADE_UPDATE,
+      DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST,
+      DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE,
+      DISTRIBUTED_VALID_ACQUIRE_REQUEST,
+      DISTRIBUTED_VALID_ACQUIRE_RESPONSE,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
@@ -900,6 +899,7 @@ namespace Legion {
       SEND_GC_ACQUIRED,
       SEND_GC_DEBUG_REQUEST,
       SEND_GC_DEBUG_RESPONSE,
+      SEND_GC_RECORD_EVENT,
       SEND_ACQUIRE_REQUEST,
       SEND_ACQUIRE_RESPONSE,
       SEND_VARIANT_BROADCAST,
@@ -938,6 +938,8 @@ namespace Legion {
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
+      SEND_CONCURRENT_RESERVATION_CREATION,
+      SEND_CONCURRENT_EXECUTION_ANALYSIS,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -953,6 +955,7 @@ namespace Legion {
         "Send Remote Task Profiling Response",                        \
         "Send Shared Ownership",                                      \
         "Send Index Space Request",                                   \
+        "Send Index Space Response",                                  \
         "Send Index Space Return",                                    \
         "Send Index Space Set",                                       \
         "Send Index Space Child Request",                             \
@@ -966,6 +969,7 @@ namespace Legion {
         "Send Index Space Release Color",                             \
         "Send Index Partition Notification",                          \
         "Send Index Partition Request",                               \
+        "Send Index Partition Response",                              \
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
@@ -1005,17 +1009,20 @@ namespace Legion {
         "Slice Remote Mapped",                                        \
         "Slice Remote Complete",                                      \
         "Slice Remote Commit",                                        \
+        "Slice Verify Concurrent Execution",                          \
         "Slice Find Intra-Space Dependence",                          \
         "Slice Record Intra-Space Dependence",                        \
         "Slice Collective Instance Request",                          \
         "Slice Collective Instance Response",                         \
         "Distributed Remote Registration",                            \
-        "Distributed Valid Update",                                   \
-        "Distributed GC Update",                                      \
-        "Distributed Resource Update",                                \
-        "Distributed Create Add",                                     \
-        "Distributed Create Remove",                                  \
-        "Distributed Unregister",                                     \
+        "Distributed Downgrade Request",                              \
+        "Distributed Downgrade Response",                             \
+        "Distributed Downgrade Success",                              \
+        "Distributed Downgrade Update",                               \
+        "Distributed Global Acquire Request",                         \
+        "Distributed Global Acquire Response",                        \
+        "Distributed Valid Acquire Request",                          \
+        "Distributed Valid Acquire Response",                         \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
         "Send Created Region Contexts",                               \
@@ -1123,6 +1130,7 @@ namespace Legion {
         "Send GC Acquire Response",                                   \
         "Send GC Debug Request",                                      \
         "Send GC Debug Response",                                     \
+        "Send GC Record Event",                                       \
         "Send Acquire Request",                                       \
         "Send Acquire Response",                                      \
         "Send Task Variant Broadcast",                                \
@@ -1161,6 +1169,8 @@ namespace Legion {
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \
+        "Send Concurrent Reservation Creation",                       \
+        "Send Concurrent Execution Analysis",                         \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1494,9 +1504,9 @@ namespace Legion {
     // with at most one logical static collective kind
     // Ones that have been commented out are free to be reused
     enum CollectiveIndexLocation {
-      COLLECTIVE_LOC_0 = 0, 
+      //COLLECTIVE_LOC_0 = 0, 
       COLLECTIVE_LOC_1 = 1,
-      COLLECTIVE_LOC_2 = 2,
+      //COLLECTIVE_LOC_2 = 2,
       COLLECTIVE_LOC_3 = 3,
       COLLECTIVE_LOC_4 = 4, 
       COLLECTIVE_LOC_5 = 5,
@@ -1513,11 +1523,11 @@ namespace Legion {
       COLLECTIVE_LOC_16 = 16,
       COLLECTIVE_LOC_17 = 17, 
       COLLECTIVE_LOC_18 = 18, 
-      COLLECTIVE_LOC_19 = 19,
+      //COLLECTIVE_LOC_19 = 19,
       COLLECTIVE_LOC_20 = 20,
       COLLECTIVE_LOC_21 = 21, 
       COLLECTIVE_LOC_22 = 22, 
-      COLLECTIVE_LOC_23 = 23,
+      //COLLECTIVE_LOC_23 = 23,
       COLLECTIVE_LOC_24 = 24,
       COLLECTIVE_LOC_25 = 25,
       COLLECTIVE_LOC_26 = 26,
@@ -1544,7 +1554,7 @@ namespace Legion {
       COLLECTIVE_LOC_47 = 47,
       COLLECTIVE_LOC_48 = 48,
       COLLECTIVE_LOC_49 = 49,
-      COLLECTIVE_LOC_50 = 50,
+      //COLLECTIVE_LOC_50 = 50,
       COLLECTIVE_LOC_51 = 51,
       COLLECTIVE_LOC_52 = 52,
       COLLECTIVE_LOC_53 = 53,
@@ -1573,7 +1583,7 @@ namespace Legion {
       COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
-      COLLECTIVE_LOC_79 = 79,
+      //COLLECTIVE_LOC_79 = 79,
       COLLECTIVE_LOC_80 = 80,
       COLLECTIVE_LOC_81 = 81,
       COLLECTIVE_LOC_82 = 82,
@@ -1587,7 +1597,7 @@ namespace Legion {
       COLLECTIVE_LOC_90 = 90,
       COLLECTIVE_LOC_91 = 91,
       COLLECTIVE_LOC_92 = 92,
-      //COLLECTIVE_LOC_93 = 93,
+      COLLECTIVE_LOC_93 = 93,
       COLLECTIVE_LOC_94 = 94,
       COLLECTIVE_LOC_95 = 95,
       COLLECTIVE_LOC_96 = 96,
@@ -1598,6 +1608,7 @@ namespace Legion {
       COLLECTIVE_LOC_101 = 101,
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
+      COLLECTIVE_LOC_104 = 104,
     };
 
     // legion_types.h
@@ -1810,8 +1821,6 @@ namespace Legion {
 
     class Collectable;
     class Notifiable;
-    class ReferenceMutator;
-    class LocalReferenceMutator;
     class ImplicitReferenceTracker;
     class DistributedCollectable;
     class LayoutDescription;
@@ -1974,6 +1983,8 @@ namespace Legion {
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
     friend class Internal::Runtime;                         \
+    friend class Internal::FutureImpl;                      \
+    friend class Internal::FutureMapImpl;                   \
     friend class Internal::PhysicalRegionImpl;              \
     friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \

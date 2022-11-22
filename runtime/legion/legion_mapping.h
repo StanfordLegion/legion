@@ -44,9 +44,11 @@ namespace Legion {
     public:
       PhysicalInstance(void);
       PhysicalInstance(const PhysicalInstance &rhs);
+      PhysicalInstance(PhysicalInstance &&rhs);
       ~PhysicalInstance(void);
     public:
       PhysicalInstance& operator=(const PhysicalInstance &rhs); 
+      PhysicalInstance& operator=(PhysicalInstance &&rhs);
     public:
       bool operator<(const PhysicalInstance &rhs) const;
       bool operator==(const PhysicalInstance &rhs) const;

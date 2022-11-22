@@ -372,6 +372,10 @@ function context:add_codegen_context(name, context)
   self.codegen_contexts[name] = context
 end
 
+function context:remove_codegen_context(name)
+  self.codegen_contexts[name] = nil
+end
+
 function context:get_codegen_context(name)
   assert(self.codegen_contexts[name] ~= nil)
   return self.codegen_contexts[name]
@@ -7364,6 +7368,14 @@ function codegen.expr_attach_hdf5(cx, node)
        end)]
   end
 
+  if cx.variant:get_config_options().inner then
+    actions = quote
+      [actions]
+
+      c.legion_runtime_unmap_region([cx.runtime], [cx.context], [new_pr])
+    end
+  end
+
   return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
@@ -8682,7 +8694,11 @@ function codegen.stat_for_list(cx, node)
   -- Check if the loop needs the CUDA or OpenMP code generation
   local cuda = cx.variant:is_cuda() and
                (node.metadata and node.metadata.parallelizable) and
-               not node.annotations.cuda:is(ast.annotation.Forbid)
+               (not node.annotations.cuda:is(ast.annotation.Forbid) and
+                -- if there's a cuda codegen context, this is a part of the kernel
+                -- that is being generated, so we shouldn't enable the cuda codegen
+                -- on this loop
+                not cx:has_codegen_context("cuda"))
   local openmp = not cx.variant:is_cuda() and
                  openmphelper.check_openmp_available() and
                  node.annotations.openmp:is(ast.annotation.Demand)
@@ -8959,6 +8975,7 @@ function codegen.stat_for_list(cx, node)
 
       preamble = host_preamble
       postamble = quote [host_postamble]; [buffer_cleanups]; end
+      cx:remove_codegen_context("cuda")
     end  -- if openmp then
   end
 

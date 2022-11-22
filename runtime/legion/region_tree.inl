@@ -882,23 +882,17 @@ namespace Legion {
         expressions.insert(this);
         return this;
       }
+      else if (expressions.find(this) != expressions.end())
+        return this;
       Realm::IndexSpace<DIM,T> local_space;
       // No need to wait for the event, we know it is already triggered
       // because we called get_volume on this before we got here
       get_expr_index_space(&local_space, type_tag, true/*need tight result*/);
-      const DistributedID local_did = get_distributed_id();
       size_t local_rect_count = 0;
       KDNode<DIM,T,void> *local_tree = NULL;
       for (std::set<IndexSpaceExpression*>::const_iterator it =
             expressions.begin(); it != expressions.end(); it++)
       {
-        // We can get duplicates here
-        if ((*it) == this)
-        {
-          if (local_tree != NULL)
-            delete local_tree;
-          return this;
-        }
         Realm::IndexSpace<DIM,T> other_space;
         // No need to wait for the event here either, we know that if it is
         // in the 'expressions' data structure then wait has already been
@@ -911,16 +905,14 @@ namespace Legion {
         if (local_space.sparsity == other_space.sparsity)
         {
           // We know that things are the same here
-          // Try to add the expression reference, we can race with deletions
-          // here though so handle the case we're we can't add a reference
-          if ((*it)->try_add_canonical_reference(local_did))
+          // Check to see if they have the expression is still alive and
+          // can be used as a canonical expression
+          if ((*it)->try_add_live_reference())
           {
             if (local_tree != NULL)
               delete local_tree;
             return (*it);
           }
-          else
-            continue;
         }
         if (!local_space.sparsity.exists() || !other_space.sparsity.exists())
         {
@@ -1001,7 +993,7 @@ namespace Legion {
         // If we get here that means we are congruent
         // Try to add the expression reference, we can race with deletions
         // here though so handle the case we're we can't add a reference
-        if ((*it)->try_add_canonical_reference(local_did))
+        if ((*it)->try_add_live_reference())
         {
           if (local_tree != NULL)
             delete local_tree;
@@ -1060,9 +1052,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceOperationT<DIM,T>::IndexSpaceOperationT(RegionTreeForest *ctx, 
-        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceExprID eid, DistributedID did,
         IndexSpaceOperation *origin, TypeTag tag, Deserializer &derez)
-      : IndexSpaceOperation(tag, ctx, eid, did, owner, origin),
+      : IndexSpaceOperation(tag, ctx, eid, did, origin),
         is_index_space_tight(false)
     //--------------------------------------------------------------------------
     {
@@ -1206,7 +1198,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->add_base_expression_reference(REMOTE_DID_REF);
+        this->pack_global_ref();
       }
       else
       {
@@ -1216,7 +1208,7 @@ namespace Legion {
         rez.serialize(origin_expr);
         // Add a reference here that we'll remove after we've added a reference
         // on the target space expression
-        this->add_base_expression_reference(REMOTE_DID_REF);
+        this->pack_global_ref();
       }
     }
 
@@ -1224,7 +1216,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::create_node(IndexSpace handle,
                          DistributedID did, RtEvent initialized, 
-                         Provenance *provenance, std::set<RtEvent> *applied,
+                         Provenance *provenance,
                          CollectiveMapping *collective_mapping,
                          IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
@@ -1236,12 +1228,12 @@ namespace Legion {
         return context->create_node(handle, &tight_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
-                          collective_mapping, applied, true/*add root ref*/);
+                          collective_mapping, true/*add root ref*/);
       else
         return context->create_node(handle, &realm_index_space, false/*domain*/,
                           NULL/*parent*/, 0/*color*/, did, initialized,
                           provenance, realm_index_space_ready, new_expr_id,
-                          collective_mapping, applied, true/*add root ref*/);
+                          collective_mapping, true/*add root ref*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1567,7 +1559,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -1719,7 +1710,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -1879,7 +1869,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -2027,7 +2016,6 @@ namespace Legion {
       rez.serialize(this->type_tag); // unpacked by creator
       rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
       rez.serialize(this->did); // unpacked by IndexSpaceOperation
-      rez.serialize(this->owner_space); // unpacked by IndexSpaceOperation
       rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
       // unpacked by IndexSpaceOperationT
       Realm::IndexSpace<DIM,T> temp;
@@ -2061,9 +2049,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     RemoteExpression<DIM,T>::RemoteExpression(RegionTreeForest *forest,
-        IndexSpaceExprID eid, DistributedID did, AddressSpaceID owner,
+        IndexSpaceExprID eid, DistributedID did,
         IndexSpaceOperation *origin, TypeTag tag, Deserializer &derez)
-      : IndexSpaceOperationT<DIM,T>(forest, eid, did, owner, origin, tag, derez)
+      : IndexSpaceOperationT<DIM,T>(forest, eid, did, origin, tag, derez)
     //--------------------------------------------------------------------------
     {
     }
@@ -2135,9 +2123,9 @@ namespace Legion {
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
-        Provenance *prov, CollectiveMapping *mapping, bool is_root)
+        Provenance *prov, CollectiveMapping *mapping)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
-          dep, prov, mapping, is_root), linearization_ready(false)
+          dep, prov, mapping), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -2467,7 +2455,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceNodeT<DIM,T>::create_node(IndexSpace new_handle,
                          DistributedID did, RtEvent initialized, 
-                         Provenance *provenance, std::set<RtEvent> *applied,
+                         Provenance *provenance,
                          CollectiveMapping *collective_mapping,
                          IndexSpaceExprID new_expr_id)
     //--------------------------------------------------------------------------
@@ -2481,8 +2469,8 @@ namespace Legion {
       const ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       return context->create_node(new_handle, &local_space, false/*domain*/,
                               NULL/*parent*/, 0/*color*/, did, initialized,
-                              provenance, ready, new_expr_id,collective_mapping,
-                              applied, true/*add root reference*/);
+                              provenance, ready, new_expr_id,
+                              collective_mapping, true/*add root reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -4576,9 +4564,9 @@ namespace Legion {
         // Fast case for when we know that the bounds of future map
         // is the same as the color space of the new partition
         // Get the shard-local futures for this future map            
-        std::map<DomainPoint,Future> shard_local_futures;
+        std::map<DomainPoint,FutureImpl*> shard_local_futures;
         future_map->get_shard_local_futures(shard_local_futures);
-        for (std::map<DomainPoint,Future>::const_iterator it = 
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
              shard_local_futures.begin(); it != shard_local_futures.end(); it++)
         {
           const Point<COLOR_DIM,COLOR_T> point = it->first;
@@ -4587,7 +4575,7 @@ namespace Legion {
           IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
                                             partition->get_child(child_color));
           size_t future_size = 0;
-          const Domain *domain = static_cast<const Domain*>(it->second.impl->
+          const Domain *domain = static_cast<const Domain*>(it->second->
                         find_internal_buffer(op->get_context(), future_size));
           if (future_size != sizeof(Domain))
             REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
@@ -4709,7 +4697,7 @@ namespace Legion {
       std::vector<size_t> long_weights;
       std::vector<LegionColor> child_colors(count);
       unsigned color_index = 0;
-      std::map<DomainPoint,Future> futures;
+      std::map<DomainPoint,FutureImpl*> futures;
       future_map->get_all_futures(futures);
       // Make all the entries for the color space
       for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
@@ -4719,13 +4707,13 @@ namespace Legion {
               itr(rect_iter.rect); itr.valid; itr.step())
         {
           const DomainPoint key(Point<COLOR_DIM,COLOR_T>(itr.p));
-          std::map<DomainPoint,Future>::const_iterator finder = 
+          std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
             futures.find(key);
           if (finder == futures.end())
             REPORT_LEGION_ERROR(ERROR_MISSING_PARTITION_BY_WEIGHT_COLOR,
                 "A partition by weight call is missing an entry for a "
                 "color in the color space. All colors must be present.")
-          FutureImpl *future = future_map->unpack_future(finder->second);
+          FutureImpl *future = finder->second;
           size_t future_size = 0;
           const void *data =
             future->find_internal_buffer(op->get_context(), future_size);
