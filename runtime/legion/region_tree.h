@@ -650,13 +650,14 @@ namespace Legion {
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);
-      void attach_external(AttachOp *attach_op, unsigned index,
-                           const RegionRequirement &req,
-                           const InstanceSet &external_instances,
-                           const VersionInfo &version_info,
-                           const PhysicalTraceInfo &trace_info,
-                           std::set<RtEvent> &map_applied_events,
-                           const bool restricted);
+      ApEvent attach_external(AttachOp *attach_op, unsigned index,
+                              const RegionRequirement &req,
+                              const InstanceSet &external_instances,
+                              const VersionInfo &version_info,
+                              const ApEvent termination_event,
+                              const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &map_applied_events,
+                              const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, const VersionInfo &version_info,
                               const InstanceSet &target_instances,

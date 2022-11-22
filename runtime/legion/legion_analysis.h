@@ -2522,6 +2522,13 @@ namespace Legion {
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
+      virtual RtEvent perform_registration(RtEvent precondition,
+                                           const RegionUsage &usage,
+                                           std::set<RtEvent> &applied_events,
+                                           ApEvent init_precondition,
+                                           ApEvent termination_event,
+                                           ApEvent &instances_ready,
+                                           bool symbolic = false);
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -2543,8 +2550,9 @@ namespace Legion {
       // Can only safely be accessed when analysis is locked
       CopyFillAggregator *output_aggregator;
     protected:
+      std::vector<PhysicalManager*> target_instances;
       LegionVector<FieldMaskSet<InstanceView> > target_views;
-      std::map<InstanceView*,size_t> *dummy_arrivals;
+      std::map<InstanceView*,size_t> collective_arrivals;
     };
 
     /**

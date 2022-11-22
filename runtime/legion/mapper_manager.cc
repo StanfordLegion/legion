@@ -2061,14 +2061,6 @@ namespace Legion {
           0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
-      if (success && (priority != 0))
-      {
-        PhysicalManager *manager = result.impl->as_physical_manager();
-        const RtEvent ready = manager->set_garbage_collection_priority(
-                mapper_id, processor, runtime->address_space, priority);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -2107,14 +2099,6 @@ namespace Legion {
                         ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
-      if (success && (priority != 0))
-      {
-        PhysicalManager *manager = result.impl->as_physical_manager();
-        const RtEvent ready = manager->set_garbage_collection_priority(
-                mapper_id, processor, runtime->address_space, priority);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -2153,14 +2137,6 @@ namespace Legion {
                  ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
-      if (success && created && (priority != 0))
-      {
-        PhysicalManager *manager = result.impl->as_physical_manager();
-        const RtEvent ready = manager->set_garbage_collection_priority(
-                mapper_id, processor, runtime->address_space, priority);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
       resume_mapper_call(ctx);
       return success;
     }
@@ -2200,14 +2176,6 @@ namespace Legion {
                   ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, created);
-      if (success && created && (priority != 0))
-      {
-        PhysicalManager *manager = result.impl->as_physical_manager();
-        const RtEvent ready = manager->set_garbage_collection_priority(
-                mapper_id, processor, runtime->address_space, priority);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
       resume_mapper_call(ctx);
       return success;
     }
