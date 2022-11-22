@@ -7974,9 +7974,6 @@ namespace Legion {
     void ReplAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!collective_map_barrier.exists());
-#endif
       ReplCollectiveViewCreator<
         CollectiveViewCreator<AttachOp> >::deactivate(false/*free*/);
       if (did_broadcast != NULL)
@@ -8092,7 +8089,6 @@ namespace Legion {
         ReplicateContext *repl_ctx = 
           dynamic_cast<ReplicateContext*>(parent_ctx);
         assert(repl_ctx != NULL);
-        assert(!collective_map_barrier.exists());
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -8431,9 +8427,6 @@ namespace Legion {
     void ReplDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!collective_map_barrier.exists());
-#endif
       ReplCollectiveViewCreator<
         CollectiveViewCreator<DetachOp> >::deactivate(false/*free*/);
       if (freeop)
@@ -8513,7 +8506,6 @@ namespace Legion {
         ReplicateContext *repl_ctx = 
           dynamic_cast<ReplicateContext*>(parent_ctx);
         assert(repl_ctx != NULL);
-        assert(!collective_map_barrier.exists());
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
