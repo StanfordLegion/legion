@@ -301,6 +301,10 @@ namespace Legion {
       RtEvent request_internal_buffer(Operation *op, bool eager);
       const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
       FutureInstance* get_canonical_instance(void);
+      ApEvent reduce_from_canonical(FutureInstance *target, AllReduceOp *op,
+                          const ReductionOpID redop_id,
+                          const ReductionOp *redop, bool exclusive,
+                          ApEvent precondition = ApEvent::NO_AP_EVENT);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);

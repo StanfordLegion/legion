@@ -5981,21 +5981,36 @@ namespace Legion {
       ApEvent local_precondition = local_target->initialize(redop, this);
       if (deterministic)
       {
-        for (std::vector<FutureInstance*>::const_iterator it =
-              instances.begin(); it != instances.end(); it++)
-          local_precondition = local_target->reduce_from(*it, this, redop_id,
-                                redop, true/*exclusive*/, local_precondition);
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
+        {
+          local_precondition = it->second->reduce_from_canonical(local_target,
+              this, redop_id, redop, true/*exclusive*/, local_precondition);
+          if (runtime->legion_spy_enabled)
+          {
+            const ApEvent ready_event = it->second->get_ready_event();
+            if (ready_event.exists())
+              LegionSpy::log_future_use(unique_op_id, ready_event);
+          }
+        }
       }
       else
       {
         std::set<ApEvent> postconditions;
-        for (std::vector<FutureInstance*>::const_iterator it =
-              instances.begin(); it != instances.end(); it++)
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
         {
-          const ApEvent postcondition = local_target->reduce_from(*it, this,
-                    redop_id, redop, false/*exclusive*/, local_precondition);
+          const ApEvent postcondition = it->second->reduce_from_canonical(
+              local_target, this, redop_id, redop, 
+              false/*exclusive*/, local_precondition);
           if (postcondition.exists())
             postconditions.insert(postcondition);
+          if (runtime->legion_spy_enabled)
+          {
+            const ApEvent ready_event = it->second->get_ready_event();
+            if (ready_event.exists())
+              LegionSpy::log_future_use(unique_op_id, ready_event);
+          }
         }
         if (!postconditions.empty())
           local_precondition = Runtime::merge_events(NULL, postconditions);

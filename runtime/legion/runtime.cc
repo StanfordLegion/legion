@@ -1372,6 +1372,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent FutureImpl::reduce_from_canonical(FutureInstance *target,
+                                  AllReduceOp *op, const ReductionOpID redop_id,
+                                  const ReductionOp *redop, bool exclusive,
+                                  ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      FutureInstance *canonical = get_canonical_instance();
+      if (canonical->size != redop->sizeof_rhs)
+        REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
+            "Future in future map reduction in task %s (UID %lld) does not "
+            "have the right input size for the given reduction operator. "
+            "Future has size %zd bytes but reduction operator expects "
+            "RHS inputs of %zd bytes.", op->get_context()->get_task_name(),
+            op->get_context()->get_unique_id(), 
+            canonical->size, redop->sizeof_rhs)
+      // Need the lock here to serialize access to the canonical
+      // instance data structures when performing the copy
+      AutoLock f_lock(future_lock);
+      return target->reduce_from(canonical, op, redop_id, redop, 
+                                 exclusive, precondition);
+    }
+
+    //--------------------------------------------------------------------------
     bool FutureImpl::is_empty(bool block, bool silence_warnings,
                               const char *warning_string, bool internal)
     //--------------------------------------------------------------------------
