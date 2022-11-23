@@ -11366,7 +11366,7 @@ tunable_pat             = re.compile(
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 reservation_pat         = re.compile(
-    prefix+"Reservation (?P<reservation>[0-9a-f]+) (?P<pre>[0-9a-f]+) (?P<post>[0-09a-f]+)")
+    prefix+"Reservation (?P<reservation>[0-9a-f]+) (?P<pre>[0-9a-f]+) (?P<post>[0-9a-f]+)")
 ap_user_event_pat       = re.compile(
     prefix+"Ap User Event (?P<id>[0-9a-f]+)")
 rt_user_event_pat       = re.compile(
