@@ -12350,7 +12350,7 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_replayed()
         return True
-    m = reservation_path.match(line)
+    m = reservation_pat.match(line)
     if m is not None:
         # Just ignoring reservations right now and treating them 
         # as chained event dependences
