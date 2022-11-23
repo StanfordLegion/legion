@@ -727,7 +727,8 @@ namespace Legion {
           remote_instances.map(downgrade_functor);
         }
       }
-      else if ((downgrade_owner == local_space) && (collective_mapping == NULL))
+      else if ((downgrade_owner == local_space) && ((collective_mapping == NULL) 
+                                 || !collective_mapping->contains(local_space)))
       {
         // If we're the owner then we have to send it to the owner_space
         // to get all the remote instances
@@ -850,7 +851,8 @@ namespace Legion {
               (remote_instances.size() - downgrade_functor.skipped);
           }
         }
-        else if ((owner == local_space) && (collective_mapping == NULL))
+        else if ((owner == local_space) && ((collective_mapping == NULL) || 
+                                !collective_mapping->contains(local_space)))
         {
           // If we're the owner then we have to send it to the owner_space
           // to get all the remote instances
@@ -959,7 +961,12 @@ namespace Legion {
         return owner_space;
       }
       if (!collective_mapping->contains(owner))
-        return collective_mapping->get_parent(owner_space, local_space);
+      {
+        if (is_owner())
+          return owner;
+        else
+          return collective_mapping->get_parent(owner_space, local_space);
+      }
       return collective_mapping->get_parent(owner, local_space);
     }
 
