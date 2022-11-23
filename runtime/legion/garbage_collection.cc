@@ -961,7 +961,12 @@ namespace Legion {
         return owner_space;
       }
       if (!collective_mapping->contains(owner))
-        return collective_mapping->get_parent(owner_space, local_space);
+      {
+        if (is_owner())
+          return owner;
+        else
+          return collective_mapping->get_parent(owner_space, local_space);
+      }
       return collective_mapping->get_parent(owner, local_space);
     }
 
