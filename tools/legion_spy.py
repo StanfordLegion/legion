@@ -8655,7 +8655,7 @@ class Task(object):
                                         (str(shard.shard),str(op)))
                                 if op.state.assert_on_warning:
                                     assert False
-                            continue
+                                continue
                             if op.points is not None:
                                 if op.kind == INDEX_TASK_KIND:
                                     for point in itervalues(op.points):
@@ -11393,6 +11393,8 @@ tunable_pat             = re.compile(
 # Physical event and operation patterns
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
+reservation_pat         = re.compile(
+    prefix+"Reservation (?P<reservation>[0-9a-f]+) (?P<pre>[0-9a-f]+) (?P<post>[0-9a-f]+)")
 ap_user_event_pat       = re.compile(
     prefix+"Ap User Event (?P<id>[0-9a-f]+)")
 rt_user_event_pat       = re.compile(
@@ -12375,6 +12377,17 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_replayed()
+        return True
+    m = reservation_pat.match(line)
+    if m is not None:
+        # Just ignoring reservations right now and treating them 
+        # as chained event dependences
+        e1 = state.get_event(int(m.group('pre'),16))
+        e2 = state.get_event(int(m.group('post'),16))
+        assert e2.exists()
+        if e1.exists():
+            e2.add_incoming(e1)
+            e1.add_outgoing(e2)
         return True
     return False
 

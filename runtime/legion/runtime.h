@@ -5619,8 +5619,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      if (precondition.exists())
-        LegionSpy::log_event_dependence(precondition, result);
+      LegionSpy::log_reservation_acquire(r, precondition, result);
 #endif
       return result;
     }
