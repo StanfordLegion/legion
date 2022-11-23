@@ -8648,7 +8648,7 @@ class Task(object):
                                         (str(shard.shard),str(op)))
                                 if op.state.assert_on_warning:
                                     assert False
-                            continue
+                                continue
                             if op.points is not None:
                                 if op.kind == INDEX_TASK_KIND:
                                     for point in itervalues(op.points):
