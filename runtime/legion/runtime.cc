@@ -4206,7 +4206,7 @@ namespace Legion {
           rez.serialize<bool>(internal);
           rez.serialize<bool>(true/*replicated*/);
         }
-        runtime->send_future_map_request_future(owner_space, rez);
+        runtime->send_future_map_request_future(space, rez);
         if (wait_on != NULL)
         {
           *wait_on = future_ready_event;
