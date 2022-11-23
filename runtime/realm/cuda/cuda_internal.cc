@@ -86,7 +86,7 @@ namespace Realm {
       assert(ms);
       array = ms->array;
       dim = ndims;
-      pos[0] = (ndims >= 1) ? lo[0] : 0;
+      pos[0] = (ndims >= 1) ? lo[0] * field_size : 0; // x is measured in bytes
       pos[1] = (ndims >= 2) ? lo[1] : 0;
       pos[2] = (ndims >= 3) ? lo[2] : 0;
       width_in_bytes = field_size;
@@ -550,6 +550,7 @@ namespace Realm {
                     //  as we have in the output cursor
                     bytes = in_port->iter->step_custom(bytes_left, in_ainfo,
                                                        false /*!tentative*/);
+		    if(bytes == 0) break;  // flow control or end of array
 
                     if(in_ainfo.dim <= 2) {
                       CUDA_MEMCPY2D copy_info;
@@ -670,6 +671,7 @@ namespace Realm {
                   // only out is an array
                   bytes = out_port->iter->step_custom(bytes_left, out_ainfo,
                                                       false /*!tentative*/);
+		  if(bytes == 0) break;  // flow control or end of array
 
                   if(out_ainfo.dim <= 2) {
                     CUDA_MEMCPY2D copy_info;
