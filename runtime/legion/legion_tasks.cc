@@ -11247,7 +11247,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(future_map.impl != NULL);
 #endif
-          future_map.impl->pack_future_map(rez);
+          future_map.impl->pack_future_map(rez, target);
         }
         if (predicate_false_future.impl != NULL)
           predicate_false_future.impl->pack_future(rez);
@@ -11269,14 +11269,14 @@ namespace Legion {
       if (points.empty())
       {
         if (point_arguments.impl != NULL)
-          point_arguments.impl->pack_future_map(rez);
+          point_arguments.impl->pack_future_map(rez, target);
         else
           rez.serialize<DistributedID>(0);
         rez.serialize<size_t>(point_futures.size());
         for (unsigned idx = 0; idx < point_futures.size(); idx++)
         {
           FutureMapImpl *impl = point_futures[idx].impl;
-          impl->pack_future_map(rez);
+          impl->pack_future_map(rez, target);
         }
         rez.serialize(concurrent_precondition);
       }

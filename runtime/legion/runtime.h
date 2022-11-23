@@ -568,11 +568,13 @@ namespace Legion {
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
       FutureMapImpl(TaskContext *ctx, Operation *op, IndexSpaceNode *domain,
-                    Runtime *rt, DistributedID did, Provenance *provenance);
+                    Runtime *rt, DistributedID did, Provenance *provenance,
+                    CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index,
                     ApEvent completion, Provenance *provenance,
-                    bool register_now = true); // remote
+                    bool register_now = true, 
+                    CollectiveMapping *mapping = NULL); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
                     GenerationID gen, int depth, 
 #ifdef LEGION_SPY
@@ -601,7 +603,7 @@ namespace Legion {
                                     const char *warning_string = NULL);
       bool reset_all_futures(void);
     public:
-      void pack_future_map(Serializer &rez);
+      void pack_future_map(Serializer &rez, AddressSpaceID target);
       static FutureMap unpack_future_map(Runtime *runtime,
           Deserializer &derez, TaskContext *ctx);
     public:
@@ -692,11 +694,13 @@ namespace Legion {
     public:
       ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Operation *op,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
-                        Runtime *rt, DistributedID did, Provenance *provenance);
+                        Runtime *rt, DistributedID did, Provenance *provenance,
+                        CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, size_t index,
-                        ApEvent completion, Provenance *provenance);
+                        ApEvent completion, Provenance *provenance,
+                        CollectiveMapping *collective_mapping);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs) = delete;
       virtual ~ReplFutureMapImpl(void);
     public:

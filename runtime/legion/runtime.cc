@@ -3339,9 +3339,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, Provenance *prov)
+                                 DistributedID did, Provenance *prov,
+                                 CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), true, mapping),
         context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
         op_gen(o->get_generation()), op_depth(o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -3366,10 +3367,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, size_t index,
-                                 ApEvent completion,
-                                 Provenance *prov, bool register_now)
+                                 ApEvent completion, Provenance *prov,
+                                 bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), register_now), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
+          register_now, mapping),
         context(ctx), op(NULL), op_ctx_index(index), op_gen(0), op_depth(0),
 #ifdef LEGION_SPY
         op_uid(0),
@@ -3625,17 +3627,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::pack_future_map(Serializer &rez)
+    void FutureMapImpl::pack_future_map(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       rez.serialize(did);
-      rez.serialize(future_map_domain->handle);
-      rez.serialize(completion_event);
-      rez.serialize(op_ctx_index);
-      if (provenance != NULL)
-        provenance->serialize(rez);
+      if ((collective_mapping == NULL) || !collective_mapping->contains(target))
+      {
+        rez.serialize<bool>(true); // can create
+        rez.serialize(future_map_domain->handle);
+        rez.serialize(completion_event);
+        rez.serialize(op_ctx_index);
+        if (provenance != NULL)
+          provenance->serialize(rez);
+        else
+          Provenance::serialize_null(rez);
+      }
       else
-        Provenance::serialize_null(rez);
+        rez.serialize<bool>(false); // cannot make it, need to wait
       pack_global_ref();
     }
 
@@ -3648,6 +3656,16 @@ namespace Legion {
       derez.deserialize(future_map_did);
       if (future_map_did == 0)
         return FutureMap();
+      bool can_create;
+      derez.deserialize<bool>(can_create);
+      if (!can_create)
+      {
+        // Have to wait to find this one since it is created collectively
+        FutureMap result(static_cast<FutureMapImpl*>(
+          runtime->find_distributed_collectable(future_map_did, true/*wait*/)));
+        result.impl->unpack_global_ref();
+        return result;
+      }
       IndexSpace future_map_domain;
       derez.deserialize(future_map_domain);
       ApEvent completion;
@@ -4119,8 +4137,9 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
                                          Operation *op, IndexSpaceNode *domain,
                                          IndexSpaceNode *shard_dom, Runtime *rt, 
-                                         DistributedID did, Provenance *prov)
-      : FutureMapImpl(ctx, op, domain, rt, did, prov),
+                                         DistributedID did, Provenance *prov,
+                                         CollectiveMapping *mapping)
+      : FutureMapImpl(ctx, op, domain, rt, did, prov, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), op_uid(op->get_unique_op_id()),
         sharding_function(NULL), own_sharding_function(false),
@@ -4138,8 +4157,10 @@ namespace Legion {
     ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
                             Runtime *rt, IndexSpaceNode *domain,
                             IndexSpaceNode *shard_dom, DistributedID did, 
-                            size_t index, ApEvent completion, Provenance *prov)
-      : FutureMapImpl(ctx, rt, domain, did, index, completion, prov),
+                            size_t index, ApEvent completion, Provenance *prov,
+                            CollectiveMapping *mapping)
+      : FutureMapImpl(ctx, rt, domain, did, index, completion, prov, 
+                      true/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), op_uid(ctx->get_unique_id()),
         sharding_function(NULL), own_sharding_function(false),
@@ -4223,7 +4244,30 @@ namespace Legion {
         return Future(finder->second);
       }
       else // If we're the owner shard we can just do the normal thing
-        return FutureMapImpl::get_future(point, internal, wait_on);
+      {
+        AutoLock fm_lock(future_map_lock);
+        // Check to see if we already have a future for the point
+        std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
+                                              futures.find(point);
+        if (finder != futures.end())
+          return Future(finder->second);
+        // Otherwise we need a future from the context to use for
+        // the point that we will fill in later
+        FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
+              runtime->get_available_distributed_id(),
+              completion_event, op, op_gen, op_ctx_index, point,
+#ifdef LEGION_SPY
+            op_uid,
+#endif
+            op_depth, provenance);
+        result->add_nested_gc_ref(did);
+        result->add_nested_resource_ref(did);
+        futures[point] = result;
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(),
+                                   ApEvent::NO_AP_EVENT, point);
+        return Future(result);
+      }
     }
 
     //--------------------------------------------------------------------------

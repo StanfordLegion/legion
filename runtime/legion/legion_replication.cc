@@ -9470,7 +9470,7 @@ namespace Legion {
     {
       if (local_shards.size() == 1)
         return new ReplFutureMapImpl(ctx, this, op, domain, shard_domain,
-                                     runtime, did, provenance);
+                            runtime, did, provenance, collective_mapping);
       AutoLock m_lock(manager_lock);
       // See if we already have this here or not
       std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >::iterator
@@ -9487,7 +9487,7 @@ namespace Legion {
       }
       // Didn't find it so make it
       ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, op,
-          domain, shard_domain, runtime, did, provenance);
+          domain, shard_domain, runtime, did, provenance, collective_mapping);
       // Record it for the shards that come later
       std::pair<ReplFutureMapImpl*,size_t> &pending = 
         created_future_maps[did];
@@ -9505,7 +9505,7 @@ namespace Legion {
     {
       if (local_shards.size() == 1)
         return new ReplFutureMapImpl(ctx, this, runtime, domain, shard_domain,
-                                     did, index, completion, provenance);
+                      did, index, completion, provenance, collective_mapping);
       AutoLock m_lock(manager_lock);
       // See if we already have this here or not
       std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >::iterator
@@ -9522,7 +9522,8 @@ namespace Legion {
       }
       // Didn't find it so make it
       ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, runtime,
-          domain, shard_domain, did, index, completion, provenance);
+                              domain, shard_domain, did, index, completion,
+                              provenance, collective_mapping);
       // Record it for the shards that come later
       std::pair<ReplFutureMapImpl*,size_t> &pending = 
         created_future_maps[did];
