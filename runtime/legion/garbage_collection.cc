@@ -639,7 +639,8 @@ namespace Legion {
             // We're the downgrade owner, so start the process to check to
             // see if all the nodes are ready to perform the deletion
             if (!is_owner() || !remote_instances.empty() || 
-                (collective_mapping != NULL) || 
+                ((collective_mapping != NULL) && 
+                 (collective_mapping->size() > 1)) || 
                 (sent_global_references != received_global_references))
             {
               // If we're already checking for a downgrade but are awaiting

@@ -714,8 +714,7 @@ namespace Legion {
      */
     class FutureNameExchange : public AllGatherCollective<false> {
     public:
-      FutureNameExchange(ReplicateContext *ctx, CollectiveID id, 
-                         ReplFutureMapImpl *future_map);
+      FutureNameExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
       FutureNameExchange(const FutureNameExchange &rhs);
       virtual ~FutureNameExchange(void);
     public:
@@ -725,8 +724,6 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_future_names(std::map<DomainPoint,FutureImpl*> &futures);
-    public:
-      ReplFutureMapImpl *const future_map;
     protected:
       std::map<DomainPoint,Future> results;
     };
@@ -2539,6 +2536,12 @@ namespace Legion {
                       const FieldMask &mask, DistributedID did, bool &first);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
+      ReplFutureMapImpl* deduplicate_future_map_creation(ReplicateContext *ctx,
+          Operation *op, IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
+          DistributedID did, Provenance *provenance); 
+      ReplFutureMapImpl* deduplicate_future_map_creation(ReplicateContext *ctx,
+          IndexSpaceNode *domain, IndexSpaceNode *shard_domain, size_t index,
+          DistributedID did, ApEvent completion, Provenance *provenance);
       // Return true if we have a shard on every address space
       bool is_total_sharding(void);
     public:
@@ -2550,9 +2553,6 @@ namespace Legion {
     public:
       void send_collective_message(ShardID target, Serializer &rez);
       void handle_collective_message(Deserializer &derez);
-    public:
-      void send_future_map_request(ShardID target, Serializer &rez);
-      void handle_future_map_request(Deserializer &derez);
     public:
       void send_disjoint_complete_request(ShardID target, Serializer &rez);
       void handle_disjoint_complete_request(Deserializer &derez);
@@ -2599,7 +2599,6 @@ namespace Legion {
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
-      static void handle_future_map_request(Deserializer &derez, Runtime *rt);
       static void handle_disjoint_complete_request(Deserializer &derez, 
                                                    Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
@@ -2672,6 +2671,8 @@ namespace Legion {
     protected:
       std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
                                         created_equivalence_sets;
+      std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >
+                                        created_future_maps;
       // ApEvents describing the completion of each shard
       std::set<ApEvent> shard_effects;
     protected:

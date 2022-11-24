@@ -3339,9 +3339,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o,
                                  IndexSpaceNode *domain, Runtime *rt,
-                                 DistributedID did, Provenance *prov)
+                                 DistributedID did, Provenance *prov,
+                                 CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC)), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), true, mapping),
         context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
         op_gen(o->get_generation()), op_depth(o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -3366,10 +3367,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx,Runtime *rt,IndexSpaceNode *d,
                                  DistributedID did, size_t index,
-                                 ApEvent completion,
-                                 Provenance *prov, bool register_now)
+                                 ApEvent completion, Provenance *prov,
+                                 bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), register_now), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
+          register_now, mapping),
         context(ctx), op(NULL), op_ctx_index(index), op_gen(0), op_depth(0),
 #ifdef LEGION_SPY
         op_uid(0),
@@ -3510,6 +3512,7 @@ namespace Legion {
           rez.serialize(point);
           rez.serialize(future_ready_event);
           rez.serialize<bool>(internal);
+          rez.serialize<bool>(false/*replicated*/);
         }
         runtime->send_future_map_request_future(owner_space, rez);
         if (wait_on != NULL)
@@ -3624,17 +3627,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::pack_future_map(Serializer &rez)
+    void FutureMapImpl::pack_future_map(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       rez.serialize(did);
-      rez.serialize(future_map_domain->handle);
-      rez.serialize(completion_event);
-      rez.serialize(op_ctx_index);
-      if (provenance != NULL)
-        provenance->serialize(rez);
+      if ((collective_mapping == NULL) || !collective_mapping->contains(target))
+      {
+        rez.serialize<bool>(true); // can create
+        rez.serialize(future_map_domain->handle);
+        rez.serialize(completion_event);
+        rez.serialize(op_ctx_index);
+        if (provenance != NULL)
+          provenance->serialize(rez);
+        else
+          Provenance::serialize_null(rez);
+      }
       else
-        Provenance::serialize_null(rez);
+        rez.serialize<bool>(false); // cannot make it, need to wait
       pack_global_ref();
     }
 
@@ -3647,6 +3656,16 @@ namespace Legion {
       derez.deserialize(future_map_did);
       if (future_map_did == 0)
         return FutureMap();
+      bool can_create;
+      derez.deserialize<bool>(can_create);
+      if (!can_create)
+      {
+        // Have to wait to find this one since it is created collectively
+        FutureMap result(static_cast<FutureMapImpl*>(
+          runtime->find_distributed_collectable(future_map_did, true/*wait*/)));
+        result.impl->unpack_global_ref();
+        return result;
+      }
       IndexSpace future_map_domain;
       derez.deserialize(future_map_domain);
       ApEvent completion;
@@ -3722,7 +3741,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* FutureMapImpl::find_shard_local_future(const DomainPoint &point)
+    FutureImpl* FutureMapImpl::find_shard_local_future(ShardID shard,
+                                                       const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3733,7 +3753,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::get_shard_local_futures(
+    void FutureMapImpl::get_shard_local_futures(ShardID shard,
                                       std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
@@ -3802,9 +3822,14 @@ namespace Legion {
       derez.deserialize(done);
       bool internal;
       derez.deserialize(internal);
+      bool replicated;
+      derez.deserialize(replicated);
       
-      // Should always find it since this is the owner node
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      // Should always find it since this is the owner node except in the 
+      // replicated case in which case a shard on this node might not have
+      // actually made it yet, so wait in that case
+      DistributedCollectable *dc = 
+        runtime->find_distributed_collectable(did, replicated);
 #ifdef DEBUG_LEGION
       FutureMapImpl *impl = dynamic_cast<FutureMapImpl*>(dc);
       assert(impl != NULL);
@@ -4013,14 +4038,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TransformFutureMapImpl::argument_map_wrap(void)
-    //--------------------------------------------------------------------------
-    {
-      previous->argument_map_wrap();
-    }
-
-    //--------------------------------------------------------------------------
-    FutureImpl* TransformFutureMapImpl::find_shard_local_future(
+    FutureImpl* TransformFutureMapImpl::find_shard_local_future(ShardID shard,
                                                        const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
@@ -4037,7 +4055,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(previous->future_map_domain->contains_point(transformed));
 #endif
-        return previous->find_shard_local_future(transformed);
+        return previous->find_shard_local_future(shard, transformed);
       }
       else
       {
@@ -4045,17 +4063,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(previous->future_map_domain->contains_point(transformed));
 #endif
-        return previous->find_shard_local_future(transformed);
+        return previous->find_shard_local_future(shard, transformed);
       } 
     }
 
     //--------------------------------------------------------------------------
-    void TransformFutureMapImpl::get_shard_local_futures(
+    void TransformFutureMapImpl::get_shard_local_futures(ShardID shard,
                                      std::map<DomainPoint,FutureImpl*> &futures)
     //--------------------------------------------------------------------------
     {
       std::map<DomainPoint,FutureImpl*> previous_futures;
-      previous->get_shard_local_futures(previous_futures);
+      previous->get_shard_local_futures(shard, previous_futures);
       Domain domain, range;
       future_map_domain->get_launch_space_domain(domain);
       previous->future_map_domain->get_launch_space_domain(range);
@@ -4116,128 +4134,56 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
-                                         IndexSpaceNode *domain,
+    ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
+                                         Operation *op, IndexSpaceNode *domain,
                                          IndexSpaceNode *shard_dom, Runtime *rt, 
-                                         DistributedID did, Provenance *prov)
-      : FutureMapImpl(ctx, op, domain, rt, did, prov),
-        repl_ctx(ctx), shard_domain(shard_dom),
-        future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
-        future_map_barrier(ctx->get_next_future_map_barrier()),
-        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
-        op_depth(repl_ctx->get_depth()), op_uid(op->get_unique_op_id()),
-        sharding_function_ready(Runtime::create_rt_user_event()), 
+                                         DistributedID did, Provenance *prov,
+                                         CollectiveMapping *mapping)
+      : FutureMapImpl(ctx, op, domain, rt, did, prov, mapping),
+        shard_manager(man), shard_domain(shard_dom),
+        op_depth(ctx->get_depth()), op_uid(op->get_unique_op_id()),
         sharding_function(NULL), own_sharding_function(false),
-        collective_performed(false), has_non_trivial_call(false)
+        collective_performed(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(shard_domain != NULL);
 #endif
       shard_domain->add_nested_valid_ref(did);
-      repl_ctx->add_reference();
-      // Now register ourselves with the context
-      repl_ctx->register_future_map(this);
+      shard_manager->add_reference();
     }
 
     //--------------------------------------------------------------------------
-    ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
-                            IndexSpaceNode *domain, IndexSpaceNode *shard_dom,
-                            DistributedID did, size_t index, 
-                            ApEvent completion, Provenance *prov, bool reg)
-      : FutureMapImpl(ctx, rt, domain, did, index, completion, prov,reg),
-        repl_ctx(ctx), shard_domain(shard_dom),
-        future_map_barrier_index(ctx->peek_next_future_map_barrier_index()),
-        future_map_barrier(ctx->get_next_future_map_barrier()),
-        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
-        op_depth(repl_ctx->get_depth()), op_uid(repl_ctx->get_unique_id()),
-        sharding_function_ready(Runtime::create_rt_user_event()), 
+    ReplFutureMapImpl::ReplFutureMapImpl(TaskContext *ctx, ShardManager *man,
+                            Runtime *rt, IndexSpaceNode *domain,
+                            IndexSpaceNode *shard_dom, DistributedID did, 
+                            size_t index, ApEvent completion, Provenance *prov,
+                            CollectiveMapping *mapping)
+      : FutureMapImpl(ctx, rt, domain, did, index, completion, prov, 
+                      true/*register now*/, mapping),
+        shard_manager(man), shard_domain(shard_dom),
+        op_depth(ctx->get_depth()), op_uid(ctx->get_unique_id()),
         sharding_function(NULL), own_sharding_function(false),
-        collective_performed(false), has_non_trivial_call(false)
+        collective_performed(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(shard_domain != NULL);
 #endif
       shard_domain->add_nested_valid_ref(did);
-      repl_ctx->add_reference();
-      // Now register ourselves with the context
-      repl_ctx->register_future_map(this);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
-      : FutureMapImpl(rhs), repl_ctx(NULL), shard_domain(NULL), 
-        future_map_barrier_index(0), collective_index(0), op_depth(0), op_uid(0)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
+      shard_manager->add_reference();
     }
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::~ReplFutureMapImpl(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       if (shard_domain->remove_nested_valid_ref(did))
         delete shard_domain;
-      if (repl_ctx->remove_reference())
-        delete repl_ctx;
+      if (shard_manager->remove_reference())
+        delete shard_manager;
       if (own_sharding_function)
-        delete sharding_function;
-    }
-
-    //--------------------------------------------------------------------------
-    ReplFutureMapImpl& ReplFutureMapImpl::operator=(
-                                                   const ReplFutureMapImpl &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::notify_local(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Do the base version, then arrive on our barrier
-      FutureMapImpl::notify_local();
-      // Decide what to do here about our future map barrier depending
-      // on whether we saw any non-trivial calls on this shard. If we 
-      // did not see any non-trivial calls then neither should any of
-      // the other shards and we don't have to use the barrier to guide
-      // reclamation of this future map
-      if (has_non_trivial_call)
-      {
-        Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
-        if (!future_map_barrier.has_triggered())
-        {
-          // Add a reference to this to prevent it being collected
-          add_base_resource_ref(DEFERRED_TASK_REF);
-          // Launch a task to do the reclaim once everyone is done
-          ReclaimFutureMapArgs args(repl_ctx, this, op_uid);
-          runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_WORK_PRIORITY, future_map_barrier);
-        }
-        else
-          repl_ctx->unregister_future_map(this);
-      }
-      else
-      {
-        // No non-trivial call so we can unregister ourselves now
-        repl_ctx->unregister_future_map(this);
-        // If we're the owner shard of the barrier then do the arrival
-        // for all the shards so that the barrier generation triggers
-        // without needing to do any communication
-        const size_t total_shards = repl_ctx->total_shards;
-        if ((future_map_barrier_index % total_shards) ==  
-            repl_ctx->owner_shard->shard_id)
-          Runtime::phase_barrier_arrive(future_map_barrier, total_shards);
-      }
+        delete sharding_function.load();
     }
 
     //--------------------------------------------------------------------------
@@ -4245,8 +4191,6 @@ namespace Legion {
                                          bool internal, RtEvent *wait_on)
     //--------------------------------------------------------------------------
     {
-      if (!internal)
-        has_non_trivial_call = true;
       // Do a quick check to see if we've already got it
       {
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
@@ -4257,32 +4201,39 @@ namespace Legion {
       }
       // Now we need to figure out which shard we're on, see if we know
       // the sharding function yet, if not we have to wait
-      if (!sharding_function_ready.has_triggered())
-        sharding_function_ready.wait();
+      if (sharding_function == NULL)
+      {
+        RtEvent wait_on = get_sharding_function_ready();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       Domain domain;
       shard_domain->get_launch_space_domain(domain);
-      const ShardID owner_shard = sharding_function->find_owner(point, domain);
-      // If we're the owner shard we can just do the normal thing
-      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      const ShardID owner_shard = 
+        sharding_function.load()->find_owner(point, domain);
+      // Figure out which node has this future
+      const AddressSpaceID space = shard_manager->get_shard_space(owner_shard); 
+      if (space != runtime->address_space)
       {
-        // We have to figure out the name of the future from the owner shard
-        RtUserEvent done_event = Runtime::create_rt_user_event();
+        // Make an event for when we have the answer
+        RtUserEvent future_ready_event = Runtime::create_rt_user_event();
+        // If not send a message to get it
         Serializer rez;
-        rez.serialize(repl_ctx->shard_manager->repl_id);
-        rez.serialize(owner_shard);
-        rez.serialize<RtEvent>(future_map_barrier);
-        rez.serialize(point);
-        rez.serialize(did);
-        rez.serialize(done_event);
-        rez.serialize<bool>(internal);
-        repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(point);
+          rez.serialize(future_ready_event);
+          rez.serialize<bool>(internal);
+          rez.serialize<bool>(true/*replicated*/);
+        }
+        runtime->send_future_map_request_future(space, rez);
         if (wait_on != NULL)
         {
-          *wait_on = done_event;
+          *wait_on = future_ready_event;
           return Future();
         }
-        // Wait for the event
-        done_event.wait();
+        future_ready_event.wait();
         // Now we can wake up see if we found it
         AutoLock f_lock(future_map_lock,1,false/*exclusive*/);
         std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
@@ -4293,7 +4244,30 @@ namespace Legion {
         return Future(finder->second);
       }
       else // If we're the owner shard we can just do the normal thing
-        return FutureMapImpl::get_future(point, internal, wait_on);
+      {
+        AutoLock fm_lock(future_map_lock);
+        // Check to see if we already have a future for the point
+        std::map<DomainPoint,FutureImpl*>::const_iterator finder = 
+                                              futures.find(point);
+        if (finder != futures.end())
+          return Future(finder->second);
+        // Otherwise we need a future from the context to use for
+        // the point that we will fill in later
+        FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
+              runtime->get_available_distributed_id(),
+              completion_event, op, op_gen, op_ctx_index, point,
+#ifdef LEGION_SPY
+            op_uid,
+#endif
+            op_depth, provenance);
+        result->add_nested_gc_ref(did);
+        result->add_nested_resource_ref(did);
+        futures[point] = result;
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(),
+                                   ApEvent::NO_AP_EVENT, point);
+        return Future(result);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4301,20 +4275,18 @@ namespace Legion {
                                       std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
-      has_non_trivial_call = true;
       // We know this call only comes from the application so we don't
       // need to worry about thread safety
-      if (collective_performed.load())
+      if (!collective_performed)
       {
-        // No need for the lock, we know we have all the futures
-        others = futures;
-        return;
-      }
-      // Now we've got all our local futures so we can do the exchange
-      // Have to hold the lock when doing this as there might be
-      // other requests for the future map
-      if (!collective_performed.load())
-      { 
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =
+          dynamic_cast<ReplicateContext*>(implicit_context);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = 
+          static_cast<ReplicateContext*>(implicit_context);
+#endif
         for (int i = 0; runtime->safe_control_replication && (i < 2); i++)
         {
           Murmur3Hasher hasher(repl_ctx, 
@@ -4326,27 +4298,22 @@ namespace Legion {
             break;
         }
         std::map<DomainPoint,FutureImpl*> local_futures;
-        get_shard_local_futures(local_futures);
-        FutureNameExchange collective(repl_ctx, collective_index, this);
+        get_shard_local_futures(repl_ctx->owner_shard->shard_id, local_futures);
+        FutureNameExchange collective(repl_ctx, COLLECTIVE_LOC_32);
         collective.exchange_future_names(local_futures);
         AutoLock f_lock(future_map_lock);
-        if (!collective_performed.load())
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+              local_futures.begin(); it != local_futures.end(); it++)
         {
-          // When the collective is done we can mark that we've done it
-          // and then copy the results
-          for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
-                local_futures.begin(); it != local_futures.end(); it++)
+          if (futures.insert(*it).second)
           {
-            if (futures.insert(*it).second)
-            {
-              it->second->add_nested_resource_ref(did);
-              it->second->add_nested_gc_ref(did);
-            }
+            it->second->add_nested_resource_ref(did);
+            it->second->add_nested_gc_ref(did);
           }
-          collective_performed.store(true);
         }
+        collective_performed = true; 
       }
-      // No need for the lock, we know the futures are unchanging now
+      // No need for the lock now that we know that we have all of them
       others = futures;
     }
 
@@ -4355,6 +4322,14 @@ namespace Legion {
                                              const char *warning_string)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx =
+        dynamic_cast<ReplicateContext*>(implicit_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(implicit_context);
+#endif
       if (runtime->runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())
         REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, 
@@ -4389,32 +4364,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* ReplFutureMapImpl::find_shard_local_future(
+    FutureImpl* ReplFutureMapImpl::find_shard_local_future(ShardID local_shard,
                                                        const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       Domain domain;
       shard_domain->get_launch_space_domain(domain);
-      if (!sharding_function_ready.has_triggered())
-        sharding_function_ready.wait();
+      if (sharding_function == NULL)
+      {
+        RtEvent wait_on = get_sharding_function_ready();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
       // Check to see if we own this point or not
-      const ShardID shard = sharding_function->find_owner(point, domain);
-      if (shard != repl_ctx->owner_shard->shard_id)
+      const ShardID shard = sharding_function.load()->find_owner(point, domain);
+      if (shard != local_shard)
         return NULL;
-      return FutureMapImpl::find_shard_local_future(point);
+      return FutureMapImpl::find_shard_local_future(local_shard, point);
     }
     
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::get_shard_local_futures(
+    void ReplFutureMapImpl::get_shard_local_futures(ShardID local_shard,
                                       std::map<DomainPoint,FutureImpl*> &others)
     //--------------------------------------------------------------------------
     {
       Domain sharding_domain;
       shard_domain->get_launch_space_domain(sharding_domain);
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      if (!sharding_function_ready.has_triggered())
-        sharding_function_ready.wait();
-      IndexSpace local_space = sharding_function->find_shard_space(
+      if (sharding_function == NULL)
+      {
+        RtEvent wait_on = get_sharding_function_ready();
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      ShardingFunction *function = sharding_function.load();
+      IndexSpace local_space = function->find_shard_space(
           local_shard, future_map_domain, shard_domain->handle, provenance);
       // Handle the case where there are no points for the local shard
       if (!local_space.exists())
@@ -4425,8 +4408,7 @@ namespace Legion {
       std::vector<RtEvent> ready_events;
       for (Domain::DomainPointIterator itr(domain); itr; itr++)
       {
-        const ShardID shard = 
-          sharding_function->find_owner(itr.p, sharding_domain);
+        const ShardID shard = function->find_owner(itr.p, sharding_domain);
         if (shard == local_shard)
         {
           RtEvent ready;
@@ -4444,143 +4426,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function,
+    bool ReplFutureMapImpl::set_sharding_function(ShardingFunction *function,
                                                   bool own_function)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(sharding_function == NULL);
-#endif
-      std::vector<PendingRequest> to_perform;
+      // Deduplicate sharding function sets across multiple shards
+      RtUserEvent to_trigger;
       {
-        AutoLock fm_lock(future_map_lock);
-        sharding_function = function;
-        own_sharding_function = own_function;
-        if (!pending_future_map_requests.empty())
-          to_perform.swap(pending_future_map_requests);
-      }
-      Runtime::trigger_event(sharding_function_ready);
-      if (!to_perform.empty())
-      {
-        for (std::vector<PendingRequest>::const_iterator it = 
-              to_perform.begin(); it != to_perform.end(); it++)
-          process_future_map_request(it->point, it->src_did, 
-                                     it->internal, it->done_event);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::handle_future_map_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DomainPoint point;
-      derez.deserialize(point);
-      DistributedID src_did;
-      derez.deserialize(src_did);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      bool internal;
-      derez.deserialize(internal);
-      // We can't actually process this until we get our sharding function
-      if (sharding_function == NULL)
-      {
-        // Take the lock and see if we lost the race
         AutoLock fm_lock(future_map_lock);
         if (sharding_function == NULL)
         {
-          pending_future_map_requests.push_back(
-              PendingRequest(point, src_did, done_event, internal));
-          return;
+          sharding_function = function;
+          own_sharding_function = own_function;
+          to_trigger = sharding_function_ready;
         }
-        // If we have a sharding function now we can fall through and continue
+        else 
+          return false;
       }
-      process_future_map_request(point, src_did, internal, done_event);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
+      return true;
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::process_future_map_request(const DomainPoint &point,
-                                                       DistributedID src_did,
-                                                       const bool internal,
-                                                       RtUserEvent done_event)
+    RtEvent ReplFutureMapImpl::get_sharding_function_ready(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-#endif
-      const AddressSpaceID source = runtime->determine_owner(src_did);
-      Future result = get_future(point, internal);
-      if (source != runtime->address_space)
+      AutoLock f_lock(future_map_lock);
+      if (sharding_function == NULL)
       {
-        // Remote future map so send the answer back
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(src_did);
-          rez.serialize(point);
-          if (result.impl != NULL)
-            result.impl->pack_future(rez);
-          else
-            rez.serialize<DistributedID>(0);
-          rez.serialize(done_event);
-        }
-        runtime->send_control_replicate_future_map_response(source, rez);
+        if (!sharding_function_ready.exists())
+          sharding_function_ready = Runtime::create_rt_user_event();
+        return sharding_function_ready;
       }
       else
-      {
-        // Local future map so we should be able to find it and set it
-        DistributedCollectable *dc = 
-          runtime->find_distributed_collectable(src_did);
-#ifdef DEBUG_LEGION
-        ReplFutureMapImpl *target = dynamic_cast<ReplFutureMapImpl*>(dc);
-        assert(target != NULL);
-#else
-        ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(dc);
-#endif
-        target->set_future(point, result.impl);
-        Runtime::trigger_event(done_event);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ReplFutureMapImpl::handle_future_map_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID map_did;
-      derez.deserialize(map_did);
-      DomainPoint point;
-      derez.deserialize(point);
-
-      // It should already exist so we're just finding it
-      DistributedCollectable *dc = 
-          runtime->find_distributed_collectable(map_did);
-#ifdef DEBUG_LEGION
-      ReplFutureMapImpl *target = dynamic_cast<ReplFutureMapImpl*>(dc);
-      assert(target != NULL);
-#else
-      ReplFutureMapImpl *target = static_cast<ReplFutureMapImpl*>(dc);
-#endif
-      Future f = FutureImpl::unpack_future(runtime, derez,
-                                                   target->op, target->op_gen,
-#ifdef LEGION_SPY
-                                                   target->op_uid,
-#endif
-                                                   target->op_depth);
-      target->set_future(point, f.impl);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/void ReplFutureMapImpl::handle_future_map_reclaim(const void *arg)
-    //--------------------------------------------------------------------------
-    {
-      const ReclaimFutureMapArgs *recl_args = (const ReclaimFutureMapArgs*)arg;
-      recl_args->ctx->unregister_future_map(recl_args->impl);
-      if (recl_args->impl->remove_base_resource_ref(DEFERRED_TASK_REF))
-        delete recl_args->impl;
+        return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -12351,16 +12231,6 @@ namespace Legion {
               runtime->handle_future_map_future_response(derez);
               break;
             }
-          case SEND_REPL_FUTURE_MAP_REQUEST:
-            {
-              runtime->handle_control_replicate_future_map_request(derez); 
-              break;
-            }
-          case SEND_REPL_FUTURE_MAP_RESPONSE:
-            {
-              runtime->handle_control_replicate_future_map_response(derez);
-              break;
-            }
           case SEND_REPL_DISJOINT_COMPLETE_REQUEST:
             {
               runtime->handle_control_replicate_disjoint_complete_request(
@@ -16114,9 +15984,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(ShardingFunctor *func, 
-              RegionTreeForest *f, ShardManager *m, ShardingID id, bool skip)
+       RegionTreeForest *f, ShardManager *m, ShardingID id, bool skip, bool own)
       : functor(func), forest(f), manager(m), sharding_id(id),
-        use_points(func->use_points()), skip_checks(skip)
+        use_points(func->use_points()), skip_checks(skip), own_functor(own)
     //--------------------------------------------------------------------------
     {
     }
@@ -16125,6 +15995,8 @@ namespace Legion {
     ShardingFunction::~ShardingFunction(void)
     //--------------------------------------------------------------------------
     {
+      if (own_functor)
+        delete functor;
     }
 
     //--------------------------------------------------------------------------
@@ -22262,24 +22134,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_future_map_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REPL_FUTURE_MAP_REQUEST>(
-                                                      rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_future_map_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REPL_FUTURE_MAP_RESPONSE>(
-                                      rez, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_disjoint_complete_request(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24273,22 +24127,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureMapImpl::handle_future_map_future_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_future_map_request(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_future_map_request(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_future_map_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ReplFutureMapImpl::handle_future_map_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -31871,11 +31709,6 @@ namespace Legion {
         case LG_CONTROL_REP_DELETE_TASK_ID:
           {
             ShardManager::handle_delete(args);
-            break;
-          }
-        case LG_RECLAIM_FUTURE_MAP_TASK_ID:
-          {
-            ReplFutureMapImpl::handle_future_map_reclaim(args);
             break;
           }
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
