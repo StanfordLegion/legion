@@ -80,6 +80,9 @@ pub struct FutureID(HexU64);
 pub struct EventID(pub HexU64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct ReservationID(pub HexU64);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 pub struct IndirectID(HexU64);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -184,6 +187,8 @@ pub enum Record {
     // Physical event and operation patterns
     #[serde(rename = "Event Event")]
     EventDependence { id1: EventID, id2: EventID },
+    #[serde(rename = "Reservation")]
+    ReservationAcquire { r: ReservationID, pre: EventID, post: EventID }, 
     #[serde(rename = "Ap User Event Trigger")]
     ApUserEventTrigger { id: EventID },
     #[serde(rename = "Ap User Event")]
