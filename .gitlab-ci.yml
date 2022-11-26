@@ -913,11 +913,11 @@ gcc9_cxx11_debug_hdf5_mpi_regent:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *regent]
 # Multi-node Legion Spy
 gcc49_cxx11_debug_spy_gasnet1_mpi_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *cxx11_normal, *spy, *gasnet1_mpi, *regent, *short]
 gcc49_cxx11_debug_spy_mpi_regent:
-  <<: [*linux_compute, *image, *tests]
+  <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *cxx11_normal, *spy, *mpi, *regent]
 # * Different architectures
