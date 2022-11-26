@@ -912,14 +912,14 @@ gcc9_cxx11_debug_hdf5_mpi_regent:
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *regent]
 # Multi-node Legion Spy
-#gcc49_cxx11_debug_spy_gasnet1_mpi_regent:
-#  <<: [*linux_compute, *image, *tests]
-#  variables:
-#    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *gasnet1_mpi, *regent, *short]
-#gcc49_cxx11_debug_spy_mpi_regent:
-#  <<: [*linux_compute, *image, *tests]
-#  variables:
-#    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *mpi, *regent]
+gcc49_cxx11_debug_spy_gasnet1_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *gasnet1_mpi, *regent, *short]
+gcc49_cxx11_debug_spy_mpi_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc9, *terra12, *cxx11_normal, *spy, *mpi, *regent]
 # * Different architectures
 gcc9_cxx11_32bit_debug_legion:
   <<: [*linux, *image_2004, *tests]
@@ -1067,10 +1067,10 @@ clang12_cxx11_debug_hdf5_mpi_regent:
   variables:
     <<: [*clang12, *terra12, *debug, *cxx11_normal, *hdf5, *mpi, *regent, *incremental]
 # * Integration: HDF5 + GASNet
-# clang12_cxx11_debug_spy_gasnet_regent:
-#   <<: [*linux_compute, *image_2004, *tests]
-#   variables:
-#     <<: [*clang12, *terra12, *debug, *cxx11_normal, *spy, *gasnet, *regent]
+ clang12_cxx11_debug_spy_gasnet_regent:
+   <<: [*linux_compute, *image_2004, *tests]
+   variables:
+     <<: [*clang12, *terra12, *debug, *cxx11_normal, *spy, *gasnet, *regent]
 # * Different architectures
 clang12_cxx11_32bit_debug_legion:
   <<: [*linux, *image_2004, *tests]
