@@ -11896,6 +11896,25 @@ namespace Legion {
         delete collective.first;
         pending_region_trees.pop_front();
       }
+      while (!pending_distributed_ids.empty())
+      {
+        std::pair<ValueBroadcast<DIDBroadcast>*,bool> &collective = 
+          pending_distributed_ids.front();
+        if (collective.second)
+        {
+          const DIDBroadcast value = collective.first->get_value(false);
+          runtime->revoke_pending_distributed_collectable(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_distributed_ids.pop_front();
+      }
       if (returned_resource_ready_barrier.exists())
         returned_resource_ready_barrier.destroy_barrier();
       if (returned_resource_mapped_barrier.exists())
