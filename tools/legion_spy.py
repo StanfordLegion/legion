@@ -3916,7 +3916,7 @@ class LogicalVerificationState(object):
                 need_fence = False
             # Now determine whether we need to have a close operation along the
             # path between these two operations due to them being in different shards
-            elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_log:
+            elif prev_op.owner_shard != op.owner_shard and prev_op is not prev_logical:
                 # Operations from two different shards with control
                 # replication always need a close operation between them
                 # to ensure cross-shard mapping dependences are obeyed
