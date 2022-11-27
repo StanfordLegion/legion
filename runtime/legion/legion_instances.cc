@@ -1148,11 +1148,11 @@ namespace Legion {
           // node from an unrelated meta-task execution
           void *location = runtime->find_or_create_pending_collectable_location(
               view_did, sizeof(ReductionView));
-          return new (location) ReductionView(own_ctx, view_did,
+          return new (location) ReductionView(runtime, view_did,
               logical_owner, this, true/*register now*/, mapping);
         }
         else
-          return new ReductionView(own_ctx, view_did,
+          return new ReductionView(runtime, view_did,
               logical_owner, this, true/*register now*/, mapping);
       }
       else
@@ -1163,11 +1163,11 @@ namespace Legion {
           // node from an unrelated meta-task execution
           void *location = runtime->find_or_create_pending_collectable_location(
               view_did, sizeof(MaterializedView));
-          return new (location) MaterializedView(own_ctx, view_did,
+          return new (location) MaterializedView(runtime, view_did,
                 logical_owner, this, true/*register now*/, mapping);
         }
         else
-          return new MaterializedView(own_ctx, view_did,
+          return new MaterializedView(runtime, view_did,
                 logical_owner, this, true/*register now*/, mapping);
       }
     }
@@ -1381,10 +1381,10 @@ namespace Legion {
         std::map<ContextKey,ViewEntry>::iterator view_finder =
           context_views.find(key);
 #ifdef DEBUG_LEGION
-        assert(view_finder != context_views.end());
-        assert(view_finder->second.second > 0);
+        assert((view_finder != context_views.end()) || (key.first > 0));
 #endif
-        if (--view_finder->second.second == 0)
+        if ((view_finder != context_views.end()) && 
+            (--view_finder->second.second == 0))
           context_views.erase(view_finder);
       }
       if (own_ctx->remove_subscriber_reference(this))

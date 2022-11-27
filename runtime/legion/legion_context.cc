@@ -3040,14 +3040,6 @@ namespace Legion {
         if (next->remove_nested_valid_ref(did))
           delete next;
       }
-      while (!redop_fill_views.empty())
-      {
-        std::map<ReductionOpID,FillView*>::iterator next = 
-          redop_fill_views.begin();
-        if (next->second->remove_nested_valid_ref(did))
-          delete next->second;
-        redop_fill_views.erase(next);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -10848,7 +10840,7 @@ namespace Legion {
         runtime->get_remote_distributed_id(
             mapping->find_nearest(runtime->address_space));
       const RtEvent ready =
-        create_collective_view( collective_did, mapping, instances);
+        create_collective_view(did, collective_did, mapping, instances);
       // This is a bit subtle, we need to encode the right kind of the 
       // distributed ID (e.g. whether it is just replicated or allreduce)
       // The way we determine that is by looking at the distributed IDs of
@@ -10869,7 +10861,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::create_collective_view(
+    RtEvent InnerContext::create_collective_view(DistributedID creator_did,
                       DistributedID collective_did, CollectiveMapping *mapping,
                       const std::vector<DistributedID> &individual_dids)
     //--------------------------------------------------------------------------
@@ -10890,6 +10882,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(get_replication_id());
             rez.serialize(did);
+            rez.serialize(creator_did);
             rez.serialize(collective_did);
             mapping->pack(rez);
             rez.serialize<size_t>(individual_dids.size());
@@ -10919,11 +10912,11 @@ namespace Legion {
         ReductionOpID redop = local_views.back()->get_redop();
         CollectiveView *view = NULL;
         if (redop > 0)
-          view = new AllreduceView(this, collective_did, local_views,
-              individual_dids, false/*register now*/, mapping, redop);
+          view = new AllreduceView(runtime, collective_did, creator_did,
+           local_views, individual_dids, false/*register now*/, mapping, redop);
         else
-          view = new ReplicatedView(this, collective_did, local_views,
-              individual_dids, false/*register now*/, mapping);
+          view = new ReplicatedView(runtime, collective_did, creator_did,
+              local_views, individual_dids, false/*register now*/, mapping);
         if (view->is_owner())
           view->add_nested_gc_ref(did);
         view->register_with_runtime();
@@ -10975,7 +10968,8 @@ namespace Legion {
       RtEvent ctx_ready;
       if (context == NULL)
         context = runtime->find_or_request_inner_context(context_did,ctx_ready);
-      DistributedID collective_did;
+      DistributedID creator_did, collective_did;
+      derez.deserialize(creator_did);
       derez.deserialize(collective_did);
       size_t num_spaces;
       derez.deserialize(num_spaces);
@@ -10991,7 +10985,7 @@ namespace Legion {
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
         ctx_ready.wait();
       Runtime::trigger_event(done, context->create_collective_view(
-            collective_did, mapping, individual_dids));
+            creator_did, collective_did, mapping, individual_dids));
       if (mapping->remove_reference())
         delete mapping;
     }
@@ -11220,9 +11214,8 @@ namespace Legion {
       }
 #endif
       // At this point we have to make it since we couldn't find it
-      DistributedID did = runtime->get_available_distributed_id();
       FillView *fill_view = 
-        new FillView(this, did,
+        new FillView(runtime, runtime->get_available_distributed_id(),
 #ifdef LEGION_SPY
                      op->get_unique_op_id(),
 #endif
@@ -11276,9 +11269,8 @@ namespace Legion {
 #endif
       // We're going to need to set the value for this view
       set_view = true;
-      DistributedID did = runtime->get_available_distributed_id();
       FillView *fill_view = 
-        new FillView(this, did,
+        new FillView(runtime, runtime->get_available_distributed_id(),
 #ifdef LEGION_SPY
                      op->get_unique_op_id(),
 #endif
@@ -11359,41 +11351,6 @@ namespace Legion {
       }
 #endif
       return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    FillView* InnerContext::find_or_create_reduction_fill_view(
-                                                            ReductionOpID redop)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock f_lock(fill_view_lock,1,false/*exclusive*/);
-        std::map<ReductionOpID,FillView*>::const_iterator finder = 
-          redop_fill_views.find(redop);
-        if (finder != redop_fill_views.end())
-          return finder->second;
-      }
-      const ReductionOp *reduction_op = runtime->get_reduction_op(redop);
-      AutoLock f_lock(fill_view_lock);
-      // Check to see if we lost the race
-      std::map<ReductionOpID,FillView*>::const_iterator finder = 
-        redop_fill_views.find(redop);
-      if (finder != redop_fill_views.end())
-        return finder->second;
-#ifdef DEBUG_LEGION
-      assert(reduction_op->identity != NULL);
-#endif
-      FillView *fill_view = new FillView(this, 
-                                       runtime->get_available_distributed_id(),
-#ifdef LEGION_SPY
-                                       0/*no creator*/,
-#endif
-                                       reduction_op->identity,
-                                       reduction_op->sizeof_rhs,
-                                       true/*register now*/);
-      fill_view->add_nested_valid_ref(did);
-      redop_fill_views[redop] = fill_view;
-      return fill_view;
     }
 
     //--------------------------------------------------------------------------
@@ -13310,8 +13267,6 @@ namespace Legion {
       if (!created_requirements.empty())
         invalidate_created_requirement_contexts(is_top_level_task, 
                                                 applied, total_shards); 
-      // Cannot clear our instance top view references until we are deleted 
-      // as we might still need to help out our other sibling shards
     }
 
     //--------------------------------------------------------------------------

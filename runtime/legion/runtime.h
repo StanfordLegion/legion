@@ -2919,7 +2919,8 @@ namespace Legion {
                            SerdezOp *serdez_op,
                            bool permit_duplicates,
                            bool preregistered);
-      const ReductionOp* get_reduction(ReductionOpID redop_id); 
+      const ReductionOp* get_reduction(ReductionOpID redop_id);
+      FillView* find_or_create_reduction_fill_view(ReductionOpID redop_id);
       const SerdezOp* get_serdez(CustomSerdezID serdez_id);
       const SerdezRedopFns* get_serdez_redop(ReductionOpID redop_id);
     public:
@@ -4374,6 +4375,7 @@ namespace Legion {
       std::map<RegistrationKey,std::set<RtUserEvent> > pending_remote_callbacks;
     protected:
       mutable LocalLock redop_lock;
+      std::map<ReductionOpID,FillView*> redop_fill_views;
       mutable LocalLock serdez_lock;
     protected:
       mutable LocalLock projection_lock;

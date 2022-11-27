@@ -1688,7 +1688,6 @@ namespace Legion {
                              const Future &future, bool &set_value);
       FillView* find_fill_view(const void *value, size_t value_size);
       FillView* find_fill_view(const Future &future);
-      FillView* find_or_create_reduction_fill_view(ReductionOpID redop_id);
     public:
       virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void add_subscriber_reference(PhysicalManager *manager) 
@@ -1781,9 +1780,8 @@ namespace Legion {
       IndividualView* create_instance_top_view(PhysicalManager *manager,
                                 AddressSpaceID source,
                                 CollectiveMapping *mapping = NULL);
-      virtual CollectiveResult* find_or_create_collective_view(
-          RegionTreeID tid, const std::vector<DistributedID> &instances, 
-          RtEvent &ready);
+      virtual CollectiveResult* find_or_create_collective_view(RegionTreeID tid,
+          const std::vector<DistributedID> &instances, RtEvent &ready);
       void notify_collective_deletion(RegionTreeID tid, DistributedID did);
     protected:
       RtEvent dispatch_collective_invalidation(
@@ -1791,7 +1789,7 @@ namespace Legion {
           const FieldMaskSet<CollectiveResult> &replacements);
       CollectiveResult* find_or_create_collective_view(RegionTreeID tid,
           const std::vector<DistributedID> &instances);
-      RtEvent create_collective_view(
+      RtEvent create_collective_view(DistributedID creator_did,
           DistributedID collective_did, CollectiveMapping *mapping,
           const std::vector<DistributedID> &individual_dids);
       static void release_collective_view(Runtime *runtime, 
@@ -2003,7 +2001,6 @@ namespace Legion {
       std::list<FillView*>  value_fill_view_cache;
       std::list<std::pair<FillView*,DistributedID> > future_fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
-      std::map<ReductionOpID,FillView*> redop_fill_views;
     protected:
       // Equivalence sets that were invalidated by 
       // invalidate_region_tree_contexts and need to be released

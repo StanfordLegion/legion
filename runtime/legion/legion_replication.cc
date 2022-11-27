@@ -10834,7 +10834,7 @@ namespace Legion {
           }
           return result;
         }
-        result = new FillView(op->get_context(), did,
+        result = new FillView(runtime, did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
@@ -10847,7 +10847,7 @@ namespace Legion {
       }
       else
       {
-        FillView *fill_view = new FillView(op->get_context(), did,
+        FillView *fill_view = new FillView(runtime, did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
