@@ -3053,11 +3053,13 @@ namespace Legion {
           *target_arrivals[idx] = collective_arrivals;
         }
       }
+      // Remove this before we wake up the analyses
+      const bool delete_now = owner->remove_pending_rendezvous(this);
       if (!ready_events.empty())
         Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
       else
         Runtime::trigger_event(ready);
-      return owner->remove_pending_rendezvous(this);
+      return delete_now;
     }
 
     //--------------------------------------------------------------------------
