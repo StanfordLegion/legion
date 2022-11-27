@@ -3378,7 +3378,8 @@ namespace Legion {
       inline Provenance* get_provenance(void) { return provenance; }
     public:
       void unpack_local_field_update(Deserializer &derez);
-      static void handle_local_field_update(Deserializer &derez);
+      static void handle_local_field_update(Deserializer &derez, 
+                                            Runtime *runtime);
     public:
       static void handle_context_request(Deserializer &derez, Runtime *runtime,
                                          AddressSpaceID source);

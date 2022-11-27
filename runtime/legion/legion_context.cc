@@ -22304,16 +22304,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteContext::handle_local_field_update(
-                                                            Deserializer &derez)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      RemoteContext *context;
-      derez.deserialize(context);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      RemoteContext *context = static_cast<RemoteContext*>(
+          runtime->find_or_request_inner_context(did, ready));
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       context->unpack_local_field_update(derez);
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
+      context->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

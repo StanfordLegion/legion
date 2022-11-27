@@ -23602,7 +23602,7 @@ namespace Legion {
     void Runtime::handle_local_field_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RemoteContext::handle_local_field_update(derez);
+      RemoteContext::handle_local_field_update(derez, this);
     }
 
     //--------------------------------------------------------------------------

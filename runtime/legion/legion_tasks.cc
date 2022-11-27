@@ -6746,6 +6746,10 @@ namespace Legion {
         deactivate();
         return false;
       }
+      // Figure out what our parent context is
+      RtEvent ctx_ready;
+      parent_ctx = 
+        runtime->find_or_request_inner_context(context_did, ctx_ready);
       if (!elide_future_return)
       {
         result = FutureImpl::unpack_future(runtime, derez);
@@ -6762,18 +6766,9 @@ namespace Legion {
         }
       }
       set_provenance(Provenance::deserialize(derez));
-      // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = 
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
+      // Make sure the parent ctx is ready
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
-      {
-        // Wait if the profiler is going to ask for the context
-        if (runtime->profiler != NULL)
-          ctx_ready.wait();
-        else
-          ready_events.insert(ctx_ready);
-      }
+        ctx_ready.wait();
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Remote individual tasks are always resolved
@@ -11490,13 +11485,7 @@ namespace Legion {
         parent_ctx =
           runtime->find_or_request_inner_context(context_did, ctx_ready);
         if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        {
-          // Need to wait if the profiler is going to want to check this
-          if (runtime->profiler != NULL)
-            ctx_ready.wait();
-          else
-            ready_events.insert(ctx_ready);
-        }
+          ctx_ready.wait();
       }
       else
         parent_ctx = index_owner->parent_ctx;
