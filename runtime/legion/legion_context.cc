@@ -8686,7 +8686,7 @@ namespace Legion {
             !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_child_operation_index(get_context_id(), result,
+        LegionSpy::log_child_operation_index(get_unique_id(), result,
                                              op->get_unique_op_id());
       return result;
     }
@@ -8736,7 +8736,7 @@ namespace Legion {
       // For now we just bump our counter
       size_t result = total_close_count++;
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_close_operation_index(get_context_id(), result, 
+        LegionSpy::log_close_operation_index(get_unique_id(), result, 
                                              op->get_unique_op_id());
       return result;
     }
@@ -8756,7 +8756,7 @@ namespace Legion {
             !is_replaying_physical_trace())
         perform_window_wait();
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_child_operation_index(get_context_id(), result, 
+        LegionSpy::log_child_operation_index(get_unique_id(), result, 
                                              op->get_unique_op_id()); 
       return result;
     }

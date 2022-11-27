@@ -8215,8 +8215,6 @@ namespace Legion {
         runtime->find_or_request_inner_context(context_did, ctx_ready);
       if (ctx_ready.exists())
         ready_events.insert(ctx_ready);
-      // Set our parent task for the user
-      parent_task = parent_ctx->get_task();
       return false;
     }
 
@@ -11744,8 +11742,7 @@ namespace Legion {
         assert(finder != future_handles->handles.end());
 #endif
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->get_context_id(), context_index, point,
-            get_provenance());
+            parent_ctx->did, context_index, point, get_provenance());
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -12087,7 +12084,7 @@ namespace Legion {
       assert(finder != handles.end());
 #endif
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->get_context_id(), context_index, point, get_provenance());
+        parent_ctx->did, context_index, point, get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 
