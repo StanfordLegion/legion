@@ -26813,14 +26813,6 @@ namespace Legion {
               delete (*it);
         }
       }
-      if (!redop_fill_views.empty())
-      {
-        for (std::map<ReductionOpID,FillView*>::const_iterator it = 
-              redop_fill_views.begin(); it != redop_fill_views.end(); it++)
-          if (it->second->remove_base_valid_ref(RUNTIME_REF))
-            delete it->second;
-        redop_fill_views.clear();
-      }
       if (virtual_manager->remove_base_gc_ref(NEVER_GC_REF))
         delete virtual_manager;
       virtual_manager = NULL;
@@ -30603,40 +30595,6 @@ namespace Legion {
     {
       AutoLock r_lock(redop_lock);
       return get_reduction_op(redop_id, true/*has lock*/); 
-    }
-
-    //--------------------------------------------------------------------------
-    FillView* Runtime::find_or_create_reduction_fill_view(ReductionOpID redop)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock r_lock(redop_lock,1,false/*exclusive*/);
-        std::map<ReductionOpID,FillView*>::const_iterator finder = 
-          redop_fill_views.find(redop);
-        if (finder != redop_fill_views.end())
-          return finder->second;
-      }
-      AutoLock r_lock(redop_lock);
-      // Check to see if we lost the race
-      std::map<ReductionOpID,FillView*>::const_iterator finder = 
-        redop_fill_views.find(redop);
-      if (finder != redop_fill_views.end())
-        return finder->second;
-      const ReductionOp *reduction_op = 
-        get_reduction_op(redop, true/*has lock*/);
-#ifdef DEBUG_LEGION
-      assert(reduction_op->identity != NULL);
-#endif
-      FillView *fill_view = new FillView(NULL, get_available_distributed_id(),
-#ifdef LEGION_SPY
-                                         0/*no creator*/,
-#endif
-                                         reduction_op->identity,
-                                         reduction_op->sizeof_rhs,
-                                         true/*register now*/);
-      fill_view->add_base_valid_ref(RUNTIME_REF);
-      redop_fill_views[redop] = fill_view;
-      return fill_view;
     }
 
     //--------------------------------------------------------------------------

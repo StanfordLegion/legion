@@ -31,7 +31,7 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ResourceTracker, public DistributedCollectable {
+    class TaskContext : public DistributedCollectable, public ResourceTracker {
     public:
       class AutoRuntimeCall {
       public:
@@ -1688,6 +1688,7 @@ namespace Legion {
                              const Future &future, bool &set_value);
       FillView* find_fill_view(const void *value, size_t value_size);
       FillView* find_fill_view(const Future &future);
+      FillView* find_or_create_reduction_fill_view(ReductionOpID redop_id);
     public:
       virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void add_subscriber_reference(PhysicalManager *manager) 
@@ -2002,6 +2003,7 @@ namespace Legion {
       std::list<FillView*>  value_fill_view_cache;
       std::list<std::pair<FillView*,DistributedID> > future_fill_view_cache;
       static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
+      std::map<ReductionOpID,FillView*> redop_fill_views;
     protected:
       // Equivalence sets that were invalidated by 
       // invalidate_region_tree_contexts and need to be released
@@ -2048,6 +2050,7 @@ namespace Legion {
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
       virtual InnerContext* find_parent_context(void);
+      virtual UniqueID get_unique_id(void) const { return root_uid; }
     public:
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
@@ -2060,6 +2063,8 @@ namespace Legion {
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
+    public:
+      const UniqueID root_uid;
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<OutputRequirement>       dummy_output_requirements;

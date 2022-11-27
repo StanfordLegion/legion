@@ -43,9 +43,7 @@ namespace Legion {
         context(ctx), valid_references(0)
     //--------------------------------------------------------------------------
     {
-      // Context can be null for reduction fill views only
-      if (context != NULL)
-        context->add_nested_resource_ref(did);
+      context->add_nested_resource_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -55,7 +53,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(valid_references == 0);
 #endif
-      if ((context != NULL) && context->remove_nested_resource_ref(did))
+      if (context->remove_nested_resource_ref(did))
         delete context;
     }
 
@@ -5475,7 +5473,7 @@ namespace Legion {
                                  bool register_now, CollectiveMapping *mapping)
       : IndividualView(ctx, encode_reduction_did(did), man, log_own, 
                        register_now, mapping),
-        fill_view(runtime->find_or_create_reduction_fill_view(man->redop))
+        fill_view(ctx->find_or_create_reduction_fill_view(man->redop))
     //--------------------------------------------------------------------------
     {
       fill_view->add_nested_resource_ref(did);
@@ -10125,7 +10123,7 @@ namespace Legion {
       : CollectiveView(ctx, encode_allreduce_did(id),
                        views, insts, register_now, mapping), redop(redop_id),
         reduction_op(runtime->get_reduction_op(redop)),
-        fill_view(runtime->find_or_create_reduction_fill_view(redop)),
+        fill_view(ctx->find_or_create_reduction_fill_view(redop)),
         unique_allreduce_tag(mapping->contains(local_space) ? 
             mapping->find_index(local_space) : 0), multi_instance(false),
         evaluated_multi_instance(false)

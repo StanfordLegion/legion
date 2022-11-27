@@ -2951,21 +2951,7 @@ namespace Legion {
       }
       // No need for the lock here since we're being cleaned up
       if (!local_field_infos.empty())
-        local_field_infos.clear();
-      while (!value_fill_view_cache.empty())
-      {
-        FillView* next = value_fill_view_cache.front();
-        value_fill_view_cache.pop_front();
-        if (next->remove_nested_valid_ref(did))
-          delete next;
-      }
-      while (!future_fill_view_cache.empty())
-      {
-        FillView *next = future_fill_view_cache.front().first;
-        future_fill_view_cache.pop_front();
-        if (next->remove_nested_valid_ref(did))
-          delete next;
-      }
+        local_field_infos.clear(); 
       while (!pending_equivalence_sets.empty())
       {
         LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::iterator
@@ -3037,6 +3023,30 @@ namespace Legion {
           release_collective_view(runtime, did, (*it)->collective_did);
           delete (*it);
         }
+      }
+      // Shouldn't need any lock for these as the context is not longer
+      // valid and there shouldn't be any races
+      while (!value_fill_view_cache.empty())
+      {
+        FillView* next = value_fill_view_cache.front();
+        value_fill_view_cache.pop_front();
+        if (next->remove_nested_valid_ref(did))
+          delete next;
+      }
+      while (!future_fill_view_cache.empty())
+      {
+        FillView *next = future_fill_view_cache.front().first;
+        future_fill_view_cache.pop_front();
+        if (next->remove_nested_valid_ref(did))
+          delete next;
+      }
+      while (!redop_fill_views.empty())
+      {
+        std::map<ReductionOpID,FillView*>::iterator next = 
+          redop_fill_views.begin();
+        if (next->second->remove_nested_valid_ref(did))
+          delete next->second;
+        redop_fill_views.erase(next);
       }
     }
 
@@ -11352,6 +11362,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FillView* InnerContext::find_or_create_reduction_fill_view(
+                                                            ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock f_lock(fill_view_lock,1,false/*exclusive*/);
+        std::map<ReductionOpID,FillView*>::const_iterator finder = 
+          redop_fill_views.find(redop);
+        if (finder != redop_fill_views.end())
+          return finder->second;
+      }
+      const ReductionOp *reduction_op = runtime->get_reduction_op(redop);
+      AutoLock f_lock(fill_view_lock);
+      // Check to see if we lost the race
+      std::map<ReductionOpID,FillView*>::const_iterator finder = 
+        redop_fill_views.find(redop);
+      if (finder != redop_fill_views.end())
+        return finder->second;
+#ifdef DEBUG_LEGION
+      assert(reduction_op->identity != NULL);
+#endif
+      FillView *fill_view = new FillView(this, 
+                                       runtime->get_available_distributed_id(),
+#ifdef LEGION_SPY
+                                       0/*no creator*/,
+#endif
+                                       reduction_op->identity,
+                                       reduction_op->sizeof_rhs,
+                                       true/*register now*/);
+      fill_view->add_nested_valid_ref(did);
+      redop_fill_views[redop] = fill_view;
+      return fill_view;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::notify_instance_deletion(PhysicalManager *deleted)
     //--------------------------------------------------------------------------
     {
@@ -12105,7 +12150,8 @@ namespace Legion {
     TopLevelContext::TopLevelContext(Runtime *rt)
       : InnerContext(rt, NULL, -1, false/*full inner*/,
                      dummy_requirements, dummy_output_requirements,
-                     dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT)
+                     dummy_indexes, dummy_mapped, ApEvent::NO_AP_EVENT),
+        root_uid(rt->get_unique_operation_id())
     //--------------------------------------------------------------------------
     {
     }
@@ -22462,7 +22508,12 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RemoteContext *context = new RemoteContext(did, runtime);
+      void *location;
+      RemoteContext *context = NULL;
+      if (runtime->find_pending_collectable_location(did, location))
+        context = new(location) RemoteContext(did, runtime);
+      else
+        context = new RemoteContext(did, runtime);
       context->unpack_remote_context(derez);
       context->register_with_runtime();
     }
