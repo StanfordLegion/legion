@@ -2819,7 +2819,7 @@ namespace Legion {
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize(parent_ctx->did);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
