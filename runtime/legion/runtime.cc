@@ -504,7 +504,7 @@ namespace Legion {
       assert(node != NULL);
       assert(context != NULL);
 #endif
-      context->add_reference();
+      context->add_base_resource_ref(FIELD_ALLOCATOR_REF);
       node->add_base_resource_ref(FIELD_ALLOCATOR_REF);
     }
 
@@ -523,7 +523,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       context->destroy_field_allocator(node, free_from_application);
-      if (context->remove_reference())
+      if (context->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
         delete context;
       if (node->remove_base_resource_ref(FIELD_ALLOCATOR_REF))
         delete node;
@@ -2090,7 +2090,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<DistributedID>(did);
-      rez.serialize(context->get_unique_id());
+      rez.serialize(context->did);
       rez.serialize(producer_context_index);
       rez.serialize(producer_point);
       if (provenance != NULL)
@@ -2110,18 +2110,17 @@ namespace Legion {
                                 int op_depth)
     //--------------------------------------------------------------------------
     {
-      DistributedID future_did;
+      DistributedID future_did, ctx_did;
       derez.deserialize(future_did);
       if (future_did == 0)
         return Future();
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
+      derez.deserialize(ctx_did);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       DomainPoint point;
       derez.deserialize(point);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      Future result(runtime->find_or_create_future(future_did, context_uid,
+      Future result(runtime->find_or_create_future(future_did, ctx_did,
                                             op_ctx_index, point, provenance,
                                             op, op_gen,
 #ifdef LEGION_SPY
@@ -6857,7 +6856,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(it->second);
-            rez.serialize(top_context->get_context_uid());
+            rez.serialize(top_context->did);
             rez.serialize(repl_context);
           }
           runtime->send_control_replicate_implicit_response(it->first, rez);
@@ -6968,14 +6967,14 @@ namespace Legion {
       DerezCheck z(derez);
       ImplicitShardManager *manager;
       derez.deserialize(manager);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
+      DistributedID context_did;
+      derez.deserialize(context_did);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *shard_manager = runtime->find_shard_manager(repl_id);
       RtEvent context_ready;
       InnerContext *context = 
-        runtime->find_context(context_uid, false, &context_ready);
+        runtime->find_or_request_inner_context(context_did, context_ready);
       RtUserEvent to_trigger = 
         manager->process_implicit_response(shard_manager, context);
       Runtime::trigger_event(to_trigger, context_ready);
@@ -12418,11 +12417,6 @@ namespace Legion {
               runtime->handle_remote_context_response(derez);
               break;
             }
-          case SEND_REMOTE_CONTEXT_FREE:
-            {
-              runtime->handle_remote_context_free(derez);
-              break;
-            }
           case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
             {
               runtime->handle_remote_context_physical_request(derez,
@@ -17446,11 +17440,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *map_context = 
-        new TopLevelContext(this, get_unique_operation_id());
-      map_context->add_reference();
+      TopLevelContext *map_context = new TopLevelContext(this);
+      map_context->add_base_gc_ref(RUNTIME_REF);
       map_context->set_executing_processor(proc);
-      register_local_context(map_context);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       // Get an individual task to be the top-level task
       IndividualTask *mapper_task = get_available_individual_task();
@@ -22278,30 +22270,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_context_request(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REMOTE_CONTEXT_REQUEST>(rez, 
-                                                              true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_remote_context_response(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_REMOTE_CONTEXT_RESPONSE>(rez, 
                                             true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_remote_context_free(AddressSpaceID target, 
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REMOTE_CONTEXT_FREE>(rez,
-                                                          true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -24557,38 +24531,14 @@ namespace Legion {
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      RemoteContext *target;
-      derez.deserialize(target);
-      InnerContext *context = find_context(context_uid);
-      context->send_remote_context(source, target);
+      RemoteContext::handle_context_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_remote_context_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      RemoteContext *context;
-      derez.deserialize(context);
-      // Unpack the result
-      std::set<RtEvent> preconditions;
-      context->unpack_remote_context(derez, preconditions);
-      // Then register it
-      UniqueID context_uid = context->get_context_uid();
-      register_remote_context(context_uid, context, preconditions);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_remote_context_free(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      UniqueID remote_owner_uid;
-      derez.deserialize(remote_owner_uid);
-      unregister_remote_context(remote_owner_uid);
+      RemoteContext::handle_context_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -26471,6 +26421,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext* Runtime::find_or_request_inner_context(DistributedID did,
+                                                         RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == INNER_CONTEXT_DC);
+#endif
+      DistributedCollectable *dc = find_or_request_distributed_collectable<
+        RemoteContext, SEND_REMOTE_CONTEXT_REQUEST>(did, ready);
+      // Have to static cast since the memory might not have been initialized
+      return static_cast<InnerContext*>(dc);
+    }
+
+    //--------------------------------------------------------------------------
     template<typename T, MessageKind MK>
     DistributedCollectable* Runtime::find_or_request_distributed_collectable(
                                           DistributedID to_find, RtEvent &ready)
@@ -26520,7 +26484,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     FutureImpl* Runtime::find_or_create_future(DistributedID did,
-                                               UniqueID context_uid,
+                                               DistributedID ctx_did,
                                                size_t op_ctx_index,
                                                const DomainPoint &op_point,
                                                Provenance *provenance,
@@ -26547,7 +26511,10 @@ namespace Legion {
           return result;
         }
       }
-      InnerContext *context = find_context(context_uid);
+      RtEvent ctx_ready;
+      InnerContext *context = find_or_request_inner_context(ctx_did, ctx_ready);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
              ApEvent::NO_AP_EVENT, op, gen, op_ctx_index, op_point,
 #ifdef LEGION_SPY
@@ -28174,260 +28141,6 @@ namespace Legion {
 #endif
       AutoLock ctx_lock(context_lock);
       available_contexts.push_back(context);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::register_local_context(InnerContext *ctx)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID context_uid = ctx->get_context_uid();
-#ifdef DEBUG_LEGION
-      // sanity check
-      assert((context_uid % total_address_spaces) == address_space); 
-#endif
-      AutoLock ctx_lock(context_lock);
-#ifdef DEBUG_LEGION
-      assert(local_contexts.find(context_uid) == local_contexts.end());
-#endif
-      local_contexts[context_uid] = ctx;
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::unregister_local_context(UniqueID context_uid)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // sanity check
-      assert((context_uid % total_address_spaces) == address_space); 
-#endif
-      AutoLock ctx_lock(context_lock);
-      std::map<UniqueID,InnerContext*>::iterator finder = 
-        local_contexts.find(context_uid);
-#ifdef DEBUG_LEGION
-      assert(finder != local_contexts.end());
-#endif
-      local_contexts.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::register_remote_context(UniqueID context_uid, 
-                       RemoteContext *context, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_trigger;
-      {
-        AutoLock ctx_lock(context_lock);
-        std::map<UniqueID,std::pair<RtUserEvent,RemoteContext*> >::iterator 
-          finder = pending_remote_contexts.find(context_uid);
-#ifdef DEBUG_LEGION
-        assert(remote_contexts.find(context_uid) == remote_contexts.end());
-        assert(finder != pending_remote_contexts.end());
-#endif
-        to_trigger = finder->second.first;
-        pending_remote_contexts.erase(finder);
-        remote_contexts[context_uid] = context; 
-      }
-#ifdef DEBUG_LEGION
-      assert(to_trigger.exists());
-#endif
-      if (!preconditions.empty())
-        Runtime::trigger_event(to_trigger,Runtime::merge_events(preconditions));
-      else
-        Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::unregister_remote_context(UniqueID context_uid)
-    //--------------------------------------------------------------------------
-    {
-      RemoteContext *context = NULL;
-      {
-        AutoLock ctx_lock(context_lock);
-        std::map<UniqueID,RemoteContext*>::iterator finder = 
-          remote_contexts.find(context_uid);
-#ifdef DEBUG_LEGION
-        assert(finder != remote_contexts.end());
-#endif
-        context = finder->second;
-        remote_contexts.erase(finder);
-      }
-      // Remove our reference and delete it if we're done with it
-      if (context->remove_reference())
-        delete context;
-    }
-
-    //--------------------------------------------------------------------------
-    InnerContext* Runtime::find_context(UniqueID context_uid,
-                                      bool return_null_if_not_found /*=false*/,
-                                      RtEvent *wait_for /*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Cannot support both of these concurrently
-      assert(!return_null_if_not_found || (wait_for == NULL));
-#endif
-      RtEvent wait_on;
-      RtUserEvent ready_event;
-      RemoteContext *result = NULL;
-      {
-        // Need exclusive permission since we might mutate stuff
-        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        // See if it is local first
-        std::map<UniqueID,InnerContext*>::const_iterator
-          local_finder = local_contexts.find(context_uid);
-        if (local_finder != local_contexts.end())
-        {
-          if (return_null_if_not_found &&
-              !local_finder->second->check_add_reference())
-            return NULL;
-          return local_finder->second;
-        }
-        // Now see if it is remote
-        std::map<UniqueID,RemoteContext*>::const_iterator
-          remote_finder = remote_contexts.find(context_uid);
-        if (remote_finder != remote_contexts.end())
-        {
-          if (return_null_if_not_found &&
-              !remote_finder->second->check_add_reference())
-            return NULL;
-          return remote_finder->second;
-        }
-        // If we don't have it, see if we should send the response or not
-        std::map<UniqueID,
-                 std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
-          pending_finder = pending_remote_contexts.find(context_uid);
-        if (pending_finder != pending_remote_contexts.end())
-        {
-          if (wait_for != NULL)
-          {
-            *wait_for = pending_finder->second.first;
-            return pending_finder->second.second;
-          }
-          else
-          {
-            wait_on = pending_finder->second.first;
-            result = pending_finder->second.second;
-          }
-        } else if (return_null_if_not_found)
-          // If its not here and we are supposed to return null do that
-          return NULL;
-      }
-      if (result == NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(!return_null_if_not_found);
-#endif
-        // Make a remote context here in case we need to request it, 
-        // we can't make it while holding the lock
-        RemoteContext *temp = new RemoteContext(this, context_uid);
-        // Add a reference to the newly created context
-        temp->add_reference();
-        InnerContext *local_result = NULL;
-        // Use a do while (false) loop here for easy breaks
-        do 
-        { 
-          // Retake the lock in exclusive mode and see if we lost the race
-          AutoLock ctx_lock(context_lock);
-          // See if it is local first
-          std::map<UniqueID,InnerContext*>::const_iterator
-            local_finder = local_contexts.find(context_uid);
-          if (local_finder != local_contexts.end())
-          {
-            // Need to jump to end to avoid leaking memory with temp
-            local_result = local_finder->second;
-            break;
-          }
-          // Now see if it is remote
-          std::map<UniqueID,RemoteContext*>::const_iterator
-            remote_finder = remote_contexts.find(context_uid);
-          if (remote_finder != remote_contexts.end())
-          {
-            // Need to jump to end to avoid leaking memory with temp
-            local_result = remote_finder->second;
-            break;
-          }
-          // If we don't have it, see if we should send the response or not
-          std::map<UniqueID,
-                   std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
-            pending_finder = pending_remote_contexts.find(context_uid);
-          if (pending_finder == pending_remote_contexts.end())
-          {
-            // Make an event to trigger for when we are done
-            ready_event = Runtime::create_rt_user_event();
-            pending_remote_contexts[context_uid] = 
-              std::pair<RtUserEvent,RemoteContext*>(ready_event, temp); 
-            result = temp;
-            // Add a result that will be removed when the response
-            // message comes back from the owner, this also prevents
-            // temp from being deleted at the end of this block
-            result->add_reference();
-          }
-          else // if we're going to have it we might as well wait
-          {
-            if (wait_for != NULL)
-            {
-              *wait_for = pending_finder->second.first;
-              local_result = pending_finder->second.second;
-              // Need to continue to end to avoid leaking memory with temp
-            }
-            else
-            {
-              wait_on = pending_finder->second.first;
-              result = pending_finder->second.second;
-            }
-          }
-        } while (false); // only go through this block once
-        if (temp->remove_reference())
-          delete temp;
-        if (local_result != NULL)
-          return local_result;
-      }
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      // If there is no wait event, we have to send the message
-      if (!wait_on.exists())
-      {
-#ifdef DEBUG_LEGION
-        assert(ready_event.exists());
-        assert(!return_null_if_not_found);
-#endif
-        // We have to send the message
-        // Figure out the target
-        const AddressSpaceID target = get_runtime_owner(context_uid);
-#ifdef DEBUG_LEGION
-        assert(target != address_space);
-#endif
-        // Send the message
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(context_uid);
-          rez.serialize(result);
-        }
-        send_remote_context_request(target, rez); 
-        if (wait_for != NULL)
-        {
-          *wait_for = ready_event;
-          return result;
-        }
-        else
-        {
-          // Wait for it to be ready
-          ready_event.wait();
-          // We already know the answer cause we sent the message
-          return result;
-        }
-      }
-      else
-      {
-        if (!wait_on.has_triggered())
-          wait_on.wait();
-        if (return_null_if_not_found &&
-            !result->check_add_reference())
-          return NULL;
-        return result;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -30086,13 +29799,11 @@ namespace Legion {
       assert(target.exists());
 #endif
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = 
-        new TopLevelContext(this, get_unique_operation_id());
+      TopLevelContext *top_context = new TopLevelContext(this);
       // Add a reference to the top level context
-      top_context->add_reference();
+      top_context->add_base_gc_ref(RUNTIME_REF);
       // Set the executing processor
       top_context->set_executing_processor(target);
-      register_local_context(top_context);
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       AutoProvenance provenance(launcher.provenance);
@@ -30127,13 +29838,11 @@ namespace Legion {
       // Get an individual task to be the top-level task
       IndividualTask *top_task = get_available_individual_task();
       // Get a remote task to serve as the top of the top-level task
-      TopLevelContext *top_context = 
-        new TopLevelContext(this, get_unique_operation_id());
+      TopLevelContext *top_context = new TopLevelContext(this);
       // Add a reference to the top level context
-      top_context->add_reference();
+      top_context->add_base_gc_ref(RUNTIME_REF);
       // Set the executing processor
       top_context->set_executing_processor(proxy);
-      register_local_context(top_context);
       TaskLauncher launcher(top_task_id, UntypedBuffer(),
                             Predicate::TRUE_PRED, top_mapper_id);
       // Mark that this task is the top-level task
@@ -30918,7 +30627,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(reduction_op->identity != NULL);
 #endif
-      FillView *fill_view = new FillView(forest, get_available_distributed_id(),
+      FillView *fill_view = new FillView(NULL, get_available_distributed_id(),
 #ifdef LEGION_SPY
                                          0/*no creator*/,
 #endif
@@ -31814,8 +31523,7 @@ namespace Legion {
         case LG_TOP_FINISH_TASK_ID:
           {
             TopFinishArgs *fargs = (TopFinishArgs*)args; 
-            fargs->ctx->free_remote_contexts();
-            if (fargs->ctx->remove_reference())
+            if (fargs->ctx->remove_base_gc_ref(RUNTIME_REF))
               delete fargs->ctx;
             // Finally tell the runtime that we have one less top level task
             runtime->decrement_outstanding_top_level_tasks();
@@ -31829,7 +31537,7 @@ namespace Legion {
             if (margs->future->remove_base_gc_ref(META_TASK_REF))
               delete margs->future;
             // We can also deactivate the enclosing context 
-            if (margs->ctx->remove_reference())
+            if (margs->ctx->remove_nested_gc_ref(RUNTIME_REF))
               delete margs->ctx;
             // Finally tell the runtime we have one less top level task
             runtime->decrement_outstanding_top_level_tasks();

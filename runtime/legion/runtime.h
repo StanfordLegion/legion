@@ -3268,7 +3268,6 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_request(AddressSpaceID target, Serializer &rez);
       void send_remote_context_response(AddressSpaceID target, Serializer &rez);
-      void send_remote_context_free(AddressSpaceID target, Serializer &rez);
       void send_remote_context_physical_request(AddressSpaceID target, 
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
@@ -3619,7 +3618,6 @@ namespace Legion {
       void handle_remote_context_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_remote_context_response(Deserializer &derez);
-      void handle_remote_context_free(Deserializer &derez);
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
@@ -3882,12 +3880,15 @@ namespace Legion {
                                                         RtEvent &ready);
       EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
                                                       RtEvent &ready);
+      InnerContext* find_or_request_inner_context(DistributedID did,
+                                                  RtEvent &ready);
     protected:
       template<typename T, MessageKind MK>
       DistributedCollectable* find_or_request_distributed_collectable(
                                             DistributedID did, RtEvent &ready);
     public:
-      FutureImpl* find_or_create_future(DistributedID did, UniqueID ctx_uid,
+      FutureImpl* find_or_create_future(DistributedID did,
+                                        DistributedID ctx_did,
                                         size_t op_ctx_index,
                                         const DomainPoint &point,
                                         Provenance *provenance,
@@ -4087,14 +4088,6 @@ namespace Legion {
     public:
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
-      void register_local_context(InnerContext *ctx);
-      void unregister_local_context(UniqueID context_uid);
-      void register_remote_context(UniqueID context_uid, RemoteContext *ctx,
-                                   std::set<RtEvent> &preconditions);
-      void unregister_remote_context(UniqueID context_uid);
-      InnerContext* find_context(UniqueID context_uid, 
-                                 bool return_null_if_not_found = false,
-                                 RtEvent *wait_for = NULL);
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % total_address_spaces); }
     public:
@@ -4412,11 +4405,6 @@ namespace Legion {
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
       mutable LocalLock context_lock;
-      std::map<UniqueID,InnerContext*> local_contexts;
-      LegionMap<UniqueID,RemoteContext*,
-                RUNTIME_REMOTE_ALLOC> remote_contexts;
-      std::map<UniqueID,
-        std::pair<RtUserEvent,RemoteContext*> > pending_remote_contexts;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
     protected:
@@ -5926,8 +5914,6 @@ namespace Legion {
         case SEND_REMOTE_CONTEXT_REQUEST:
           break;
         case SEND_REMOTE_CONTEXT_RESPONSE:
-          break;
-        case SEND_REMOTE_CONTEXT_FREE:
           break;
         case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
           break;

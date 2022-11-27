@@ -31,7 +31,7 @@ namespace Legion {
      * provide all the methods for handling the 
      * execution of a task at runtime.
      */
-    class TaskContext : public ResourceTracker, public Collectable {
+    class TaskContext : public ResourceTracker, public DistributedCollectable {
     public:
       class AutoRuntimeCall {
       public:
@@ -51,11 +51,9 @@ namespace Legion {
       TaskContext(Runtime *runtime, SingleTask *owner, int depth,
                   const std::vector<RegionRequirement> &reqs,
                   const std::vector<OutputRequirement> &output_reqs,
+                  DistributedID did, bool perform_registration,
                   bool inline_task, bool implicit_ctx = false);
-      TaskContext(const TaskContext &rhs);
       virtual ~TaskContext(void);
-    public:
-      TaskContext& operator=(const TaskContext &rhs);
     public:
       // This is used enough that we want it inlined
       inline Processor get_executing_processor(void) const
@@ -64,8 +62,6 @@ namespace Legion {
         { executing_processor = p; }
       inline size_t get_tunable_index(void)
         { return total_tunable_count++; }
-      inline UniqueID get_unique_id(void) const 
-        { return get_context_uid(); }
       inline const char* get_task_name(void)
         { return get_task()->get_task_name(); }
       inline const std::vector<PhysicalRegion>& get_physical_regions(void) const
@@ -77,12 +73,9 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const = 0;
       virtual ContextID get_context_id(void) const = 0;
-      virtual UniqueID get_context_uid(void) const;
       virtual Task* get_task(void); 
+      virtual UniqueID get_unique_id(void) const;
       virtual InnerContext* find_parent_context(void);
-      virtual void pack_remote_context(Serializer &rez, 
-                                       AddressSpaceID target,
-                                       bool replicate = false) = 0;
       virtual void compute_task_tree_coordinates(
                 TaskTreeCoordinates &coords) const = 0;
       virtual bool attempt_children_complete(void) = 0;
@@ -749,7 +742,6 @@ namespace Legion {
       IndexSpace find_index_launch_space(const Domain &domain,
                                          Provenance *provenance);
     public:
-      Runtime *const runtime;
       SingleTask *const owner_task;
       const std::vector<RegionRequirement> &regions;
       const std::vector<OutputRequirement> &output_reqs;
@@ -1069,14 +1061,14 @@ namespace Legion {
                    bool full_inner, const std::vector<RegionRequirement> &reqs,
                    const std::vector<OutputRequirement> &output_reqs,
                    const std::vector<unsigned> &parent_indexes,
-                   const std::vector<bool> &virt_mapped, UniqueID context_uid, 
-                   ApEvent execution_fence, bool remote = false, 
+                   const std::vector<bool> &virt_mapped,
+                   ApEvent execution_fence, DistributedID did = 0,
                    bool inline_task = false, bool implicit_task = false,
                    bool concurrent_task = false);
-      InnerContext(const InnerContext &rhs);
+      InnerContext(const InnerContext &rhs) = delete;
       virtual ~InnerContext(void);
     public:
-      InnerContext& operator=(const InnerContext &rhs);
+      InnerContext& operator=(const InnerContext &rhs) = delete;
     public:
       inline unsigned get_max_trace_templates(void) const
         { return context_configuration.max_templates_per_trace; }
@@ -1085,6 +1077,8 @@ namespace Legion {
       virtual ReplicationID get_replication_id(void) const { return 0; }
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
+    public: // Garbage collection methods
+      virtual void notify_local(void);
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -1168,12 +1162,9 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
-      virtual UniqueID get_context_uid(void) const;
       virtual bool is_inner_context(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
-      virtual void unpack_remote_context(Deserializer &derez,
-                                         std::set<RtEvent> &preconditions);
       virtual void compute_task_tree_coordinates(
                             TaskTreeCoordinates &coordinates) const;
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
@@ -1700,9 +1691,9 @@ namespace Legion {
     public:
       virtual void notify_instance_deletion(PhysicalManager *deleted); 
       virtual void add_subscriber_reference(PhysicalManager *manager) 
-        { add_reference(); }
+        { add_nested_resource_ref(manager->did); }
       virtual bool remove_subscriber_reference(PhysicalManager *manager)
-        { return remove_reference(); }
+        { return remove_nested_resource_ref(manager->did); }
     public:
       virtual const std::vector<PhysicalRegion>& begin_task(
                                                     Legion::Runtime *&runtime);
@@ -1768,11 +1759,7 @@ namespace Legion {
       static void handle_deferred_commit_queue(const void *args);
       static void handle_post_end_task(const void *args);
     public:
-      void clear_instance_top_views(void); 
-    public:
-      void free_remote_contexts(void);
-      void send_remote_context(AddressSpaceID remote_instance, 
-                               RemoteContext *target);
+      void send_context(AddressSpaceID source);
     public:
       // These three methods guard all access to the creation of views onto
       // physical instances within a parent task context. This is important
@@ -1803,10 +1790,11 @@ namespace Legion {
           const FieldMaskSet<CollectiveResult> &replacements);
       CollectiveResult* find_or_create_collective_view(RegionTreeID tid,
           const std::vector<DistributedID> &instances);
-      RtEvent create_collective_view(UniqueID ctx_uid,
+      RtEvent create_collective_view(
           DistributedID collective_did, CollectiveMapping *mapping,
           const std::vector<DistributedID> &individual_dids);
-      static void release_collective_view(Runtime *runtime, DistributedID did);
+      static void release_collective_view(Runtime *runtime, 
+          DistributedID context_did, DistributedID collective_did);
     public:
       static void handle_create_collective_view(Deserializer &derez,
                                                 Runtime *runtime);
@@ -1833,8 +1821,6 @@ namespace Legion {
 #endif
     public:
       const RegionTreeContext tree_context; 
-      const UniqueID context_uid;
-      const bool remote_context;
       const bool full_inner_context;
     protected:
       // This is immutable except for remote contexts which unpack it 
@@ -1990,9 +1976,6 @@ namespace Legion {
       LegionMap<RegionNode*,
         FieldMaskSet<PendingEquivalenceSet> >   pending_equivalence_sets;
     protected:
-      mutable LocalLock                       remote_lock;
-      std::map<AddressSpaceID,RemoteContext*> remote_instances;
-    protected:
       // Dependence tracking information for phase barriers
       mutable LocalLock                                   phase_barrier_lock;
       struct BarrierContribution {
@@ -2036,8 +2019,8 @@ namespace Legion {
       // Collective instance rendezvous data structures
       mutable LocalLock                                 collective_lock;
       // Only valid on the onwer context node
-      LegionMap<RegionTreeID,
-                std::vector<CollectiveResult*> >        collective_results;
+      std::map<RegionTreeID,
+               std::vector<CollectiveResult*> >         collective_results;
     public:
       // TODO: delete this once we properly replay mapping dependences
       RtEvent inorder_concurrent_replay_analysis;
@@ -2056,11 +2039,11 @@ namespace Legion {
      */
     class TopLevelContext : public InnerContext {
     public:
-      TopLevelContext(Runtime *runtime, UniqueID ctx_uid);
-      TopLevelContext(const TopLevelContext &rhs);
+      TopLevelContext(Runtime *runtime);
+      TopLevelContext(const TopLevelContext &rhs) = delete;
       virtual ~TopLevelContext(void);
     public:
-      TopLevelContext& operator=(const TopLevelContext &rhs);
+      TopLevelContext& operator=(const TopLevelContext &rhs) = delete;
     public:
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
@@ -2345,13 +2328,13 @@ namespace Legion {
                        const std::vector<OutputRequirement> &output_reqs,
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
-                       UniqueID context_uid, ApEvent execution_fence_event,
+                       ApEvent execution_fence_event,
                        ShardManager *manager, bool inline_task, 
                        bool implicit_task = false, bool concurrent = false);
-      ReplicateContext(const ReplicateContext &rhs);
+      ReplicateContext(const ReplicateContext &rhs) = delete;
       virtual ~ReplicateContext(void);
     public:
-      ReplicateContext& operator=(const ReplicateContext &rhs);
+      ReplicateContext& operator=(const ReplicateContext &rhs) = delete;
     public:
       inline int get_shard_collective_radix(void) const
         { return shard_collective_radix; }
@@ -2483,7 +2466,6 @@ namespace Legion {
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state,
                           std::set<RtEvent> &applied_events, size_t num_shards);
-      virtual void free_region_tree_context(void);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
                           std::set<RtEvent> &applied_events, size_t num_shards);
@@ -3328,14 +3310,13 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_REQUEST_TASK_ID;
       public:
-        RemotePhysicalRequestArgs(UniqueID uid, RemoteContext *ctx,
+        RemotePhysicalRequestArgs(RemoteContext *ctx,
                                   InnerContext *loc, unsigned idx, 
                                   AddressSpaceID src, RtUserEvent trig)
           : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
-            context_uid(uid), target(ctx), local(loc), index(idx), 
+            target(ctx), local(loc), index(idx), 
             source(src), to_trigger(trig) { }
       public:
-        const UniqueID context_uid;
         RemoteContext *const target;
         InnerContext *const local;
         const unsigned index;
@@ -3357,16 +3338,16 @@ namespace Legion {
         const unsigned index;
       };
     public:
-      RemoteContext(Runtime *runtime, UniqueID context_uid);
-      RemoteContext(const RemoteContext &rhs);
+      RemoteContext(DistributedID did, Runtime *runtime);
+      RemoteContext(const RemoteContext &rhs) = delete;
       virtual ~RemoteContext(void);
     public:
-      RemoteContext& operator=(const RemoteContext &rhs);
+      RemoteContext& operator=(const RemoteContext &rhs) = delete;
     public:
       virtual Task* get_task(void);
+      virtual UniqueID get_unique_id(void) const;
       virtual ReplicationID get_replication_id(void) const { return repl_id; }
-      virtual void unpack_remote_context(Deserializer &derez,
-                                         std::set<RtEvent> &preconditions);
+      void unpack_remote_context(Deserializer &derez);
       virtual InnerContext* find_parent_context(void);
     public:
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
@@ -3394,6 +3375,9 @@ namespace Legion {
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
     public:
+      static void handle_context_request(Deserializer &derez, Runtime *runtime,
+                                         AddressSpaceID source);
+      static void handle_context_response(Deserializer &derez,Runtime *runtime);
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
       static void defer_physical_request(const void *args, Runtime *runtime);
@@ -3407,18 +3391,20 @@ namespace Legion {
       static void handle_find_collective_view_response(Deserializer &derez,
                                                        Runtime *runtime);
     protected:
-      UniqueID parent_context_uid;
-      InnerContext *parent_ctx;
+      DistributedID parent_context_did;
+      std::atomic<InnerContext*> parent_ctx;
       ShardManager *shard_manager; // if we're lucky and one is already here
       Provenance *provenance;
     protected:
       bool top_level_context;
       RemoteTask remote_task;
+      UniqueID remote_uid;
     protected:
       std::vector<unsigned> local_parent_req_indexes;
       std::vector<bool> local_virtual_mapped;
     protected:
       // Cached physical contexts recorded from the owner
+      mutable LocalLock remote_lock;
       std::map<unsigned/*index*/,InnerContext*> physical_contexts;
       std::map<unsigned,RtEvent> pending_physical_contexts;
     protected:
@@ -3440,10 +3426,12 @@ namespace Legion {
                         public LegionHeapify<LeafContext> {
     public:
       LeafContext(Runtime *runtime, SingleTask *owner,bool inline_task = false);
-      LeafContext(const LeafContext &rhs);
+      LeafContext(const LeafContext &rhs) = delete;
       virtual ~LeafContext(void);
     public:
-      LeafContext& operator=(const LeafContext &rhs);
+      LeafContext& operator=(const LeafContext &rhs) = delete;
+    public: // Garbage collection methods
+      virtual void notify_local(void) { /* nothing to do */ }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -3462,8 +3450,6 @@ namespace Legion {
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
-      virtual void pack_remote_context(Serializer &rez, 
-          AddressSpaceID target, bool replicate = false);
       virtual void compute_task_tree_coordinates(
                 TaskTreeCoordinates &coordinatess) const;
       virtual bool attempt_children_complete(void);

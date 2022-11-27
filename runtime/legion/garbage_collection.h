@@ -39,8 +39,10 @@ namespace Legion {
       REGION_TREE_NODE_DC = 0xD,
       EQUIVALENCE_SET_DC = 0xE,
       PHI_VIEW_DC = 0xF,
-      // be careful making this last one bigger than 0x10! see instance encoding
-      DIST_TYPE_LAST_DC = 0x10,  // must be last
+      LEAF_CONTEXT_DC = 0x10,
+      INNER_CONTEXT_DC = 0x11,
+      // be careful making this last one bigger than 0x20! see instance encoding
+      DIST_TYPE_LAST_DC = 0x20,  // must be last
     };
 
     enum ReferenceSource {
@@ -50,7 +52,7 @@ namespace Legion {
       PHYSICAL_ANALYSIS_REF = 3,
       PENDING_UNBOUND_REF = 4,
       PHYSICAL_REGION_REF = 5,
-      //PENDING_GC_REF = 6,
+      SINGLE_TASK_REF = 6,
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
@@ -77,7 +79,8 @@ namespace Legion {
       CANONICAL_REF = 30,
       DISJOINT_COMPLETE_REF = 31,
       REPLICATION_REF = 32,
-      LAST_SOURCE_REF = 33,
+      COLLECTIVE_REF = 33,
+      LAST_SOURCE_REF = 34,
     };
 
     enum ReferenceKind {
@@ -94,7 +97,7 @@ namespace Legion {
       "Physical Analysis Reference",                \
       "Pending Unbound Reference",                  \
       "Physical Region Reference",                  \
-      "Pending GC Reference",                       \
+      "Single Task Reference",                      \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
       "Memory Manager Reference",                   \
@@ -121,6 +124,7 @@ namespace Legion {
       "Canonical Index Space Expression Reference", \
       "Disjoint Complete Reference",                \
       "Replication Reference",                      \
+      "Collective Reference",                       \
     }
 
     extern Realm::Logger log_garbage;

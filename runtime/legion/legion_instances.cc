@@ -1135,7 +1135,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndividualView* PhysicalManager::construct_top_view(
                                            AddressSpaceID logical_owner,
-                                           DistributedID view_did, UniqueID uid,
+                                           DistributedID view_did,
+                                           InnerContext *own_ctx,
                                            CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
@@ -1147,12 +1148,12 @@ namespace Legion {
           // node from an unrelated meta-task execution
           void *location = runtime->find_or_create_pending_collectable_location(
               view_did, sizeof(ReductionView));
-          return new (location) ReductionView(context, view_did,
-              logical_owner, this, uid, true/*register now*/, mapping);
+          return new (location) ReductionView(own_ctx, view_did,
+              logical_owner, this, true/*register now*/, mapping);
         }
         else
-          return new ReductionView(context, view_did,
-              logical_owner, this, uid, true/*register now*/, mapping);
+          return new ReductionView(own_ctx, view_did,
+              logical_owner, this, true/*register now*/, mapping);
       }
       else
       {
@@ -1162,12 +1163,12 @@ namespace Legion {
           // node from an unrelated meta-task execution
           void *location = runtime->find_or_create_pending_collectable_location(
               view_did, sizeof(MaterializedView));
-          return new (location) MaterializedView(context, view_did,
-                logical_owner, this, uid, true/*register now*/, mapping);
+          return new (location) MaterializedView(own_ctx, view_did,
+                logical_owner, this, true/*register now*/, mapping);
         }
         else
-          return new MaterializedView(context, view_did,
-                logical_owner, this, uid, true/*register now*/, mapping);
+          return new MaterializedView(own_ctx, view_did,
+                logical_owner, this, true/*register now*/, mapping);
       }
     }
 
@@ -1178,7 +1179,7 @@ namespace Legion {
                                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
+      ContextKey key(own_ctx->get_replication_id(), own_ctx->did);
       // If we're a replicate context then we want to ignore the specific
       // context UID since there might be several shards on this node
       if (key.first > 0)
@@ -1249,7 +1250,7 @@ namespace Legion {
         // node is going to be the logical owner
         DistributedID view_did = runtime->get_available_distributed_id(); 
         result = construct_top_view((mapping == NULL) ? logical_owner :
-            owner_space, view_did, own_ctx->get_context_uid(), mapping);
+            owner_space, view_did, own_ctx, mapping);
       }
       else if ((mapping != NULL) && mapping->contains(local_space))
       {
@@ -1276,7 +1277,7 @@ namespace Legion {
         // For collective instances each node of the instance serves as its
         // own logical owner view
         result = construct_top_view(runtime->address_space, view_did.load(),
-                                    own_ctx->get_context_uid(), mapping);
+                                    own_ctx, mapping);
       }
       else
       {
@@ -1361,7 +1362,7 @@ namespace Legion {
     void PhysicalManager::unregister_active_context(InnerContext *own_ctx)
     //--------------------------------------------------------------------------
     {
-      ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
+      ContextKey key(own_ctx->get_replication_id(), own_ctx->did);
       // If we're a replicate context then we want to ignore the specific
       // context UID since there might be several shards on this node
       if (key.first > 0)
@@ -2703,8 +2704,8 @@ namespace Legion {
         runtime->find_or_request_instance_manager(did, man_ready);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
-      UniqueID ctx_uid;
-      derez.deserialize(ctx_uid);
+      DistributedID ctx_did;
+      derez.deserialize(ctx_did);
       RtEvent ctx_ready;
       InnerContext *context = NULL;
       if (repl_id > 0)
@@ -2717,7 +2718,7 @@ namespace Legion {
           context = shard_manager->find_local_context();
       }
       if (context == NULL)
-        context = runtime->find_context(ctx_uid,false/*can't fail*/,&ctx_ready);
+        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       CollectiveMapping *mapping = NULL;

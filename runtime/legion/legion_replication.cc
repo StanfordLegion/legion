@@ -10834,7 +10834,7 @@ namespace Legion {
           }
           return result;
         }
-        result = new FillView(runtime->forest, did,
+        result = new FillView(op->get_context(), did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
@@ -10847,8 +10847,7 @@ namespace Legion {
       }
       else
       {
-        FillView *fill_view = 
-          new FillView(runtime->forest, did,
+        FillView *fill_view = new FillView(op->get_context(), did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
@@ -12528,7 +12527,7 @@ namespace Legion {
         collective_index(ctx->get_next_collective_index(loc))
     //--------------------------------------------------------------------------
     {
-      context->add_reference();
+      context->add_base_resource_ref(COLLECTIVE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -12537,7 +12536,7 @@ namespace Legion {
         local_shard(ctx->owner_shard->shard_id), collective_index(id)
     //--------------------------------------------------------------------------
     { 
-      context->add_reference();
+      context->add_base_resource_ref(COLLECTIVE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -12546,7 +12545,7 @@ namespace Legion {
     {
       // Unregister this with the context 
       context->unregister_collective(this);
-      if (context->remove_reference())
+      if (context->remove_base_resource_ref(COLLECTIVE_REF))
         delete context;
     }
 

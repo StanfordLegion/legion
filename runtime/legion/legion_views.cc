@@ -37,12 +37,15 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
+    LogicalView::LogicalView(InnerContext *ctx, DistributedID did,
                              bool register_now, CollectiveMapping *map)
       : DistributedCollectable(ctx->runtime, did, register_now, map),
         context(ctx), valid_references(0)
     //--------------------------------------------------------------------------
     {
+      // Context can be null for reduction fill views only
+      if (context != NULL)
+        context->add_nested_resource_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -52,6 +55,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(valid_references == 0);
 #endif
+      if ((context != NULL) && context->remove_nested_resource_ref(did))
+        delete context;
     }
 
     //--------------------------------------------------------------------------
@@ -182,10 +187,9 @@ namespace Legion {
     ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
-    InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
-                               UniqueID own_ctx, bool register_now,
-                               CollectiveMapping *mapping)
-      : LogicalView(ctx, did, register_now, mapping), owner_context(own_ctx)
+    InstanceView::InstanceView(InnerContext *ctx, DistributedID did,
+                               bool register_now, CollectiveMapping *mapping)
+      : LogicalView(ctx, did, register_now, mapping)
     //--------------------------------------------------------------------------
     {
     }
@@ -383,7 +387,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ExprView::ExprView(RegionTreeForest *ctx, PhysicalManager *man, 
                        MaterializedView *view, IndexSpaceExpression *exp) 
-      : context(ctx), manager(man), inst_view(view),
+      : forest(ctx), manager(man), inst_view(view),
         view_expr(exp), view_volume(SIZE_MAX),
 #if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
         view_did(view->did),
@@ -622,7 +626,7 @@ namespace Legion {
             continue;
           }
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(it->first->view_expr, user_expr);
+            forest->intersect_index_spaces(it->first->view_expr, user_expr);
           if (!expr_overlap->is_empty())
           {
             to_traverse.insert(it->first, overlap);
@@ -772,7 +776,7 @@ namespace Legion {
             continue;
           }
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(it->first->view_expr, copy_expr);
+            forest->intersect_index_spaces(it->first->view_expr, copy_expr);
           if (!expr_overlap->is_empty())
           {
             const bool copy_dominates = 
@@ -818,7 +822,7 @@ namespace Legion {
             continue;
           }
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(it->first->view_expr, expr);
+            forest->intersect_index_spaces(it->first->view_expr, expr);
           if (!expr_overlap->is_empty())
           {
             const bool dominates = 
@@ -864,7 +868,7 @@ namespace Legion {
         if (it->first->view_expr == expr)
           return it->first;
         IndexSpaceExpression *overlap =
-          context->intersect_index_spaces(expr, it->first->view_expr);
+          forest->intersect_index_spaces(expr, it->first->view_expr);
         const size_t overlap_volume = overlap->get_volume();
         if (overlap_volume == 0)
           continue;
@@ -907,7 +911,7 @@ namespace Legion {
           if (!overlap_mask)
             continue;
           IndexSpaceExpression *overlap =
-            context->intersect_index_spaces(subview->view_expr,
+            forest->intersect_index_spaces(subview->view_expr,
                                             it->first->view_expr);
           const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == 0)
@@ -1021,7 +1025,7 @@ namespace Legion {
           if (!overlap_mask)
             continue;
           IndexSpaceExpression *overlap =
-            context->intersect_index_spaces(expr, it->first->view_expr);
+            forest->intersect_index_spaces(expr, it->first->view_expr);
           const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == 0)
             continue;
@@ -1074,7 +1078,7 @@ namespace Legion {
           if (!overlap_mask)
             continue;
           IndexSpaceExpression *overlap =
-            context->intersect_index_spaces(user_expr, it->first->view_expr);
+            forest->intersect_index_spaces(user_expr, it->first->view_expr);
           const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == user_volume)
           {
@@ -1358,7 +1362,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(user_index == users.size());
 #endif
-              users.push_back(PhysicalUser::unpack_user(derez, context,source));
+              users.push_back(PhysicalUser::unpack_user(derez, forest, source));
               // Add a reference to prevent this being deleted
               // before we're done unpacking
               users.back()->add_reference();
@@ -1392,7 +1396,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(user_index == users.size());
 #endif
-              users.push_back(PhysicalUser::unpack_user(derez, context,source));
+              users.push_back(PhysicalUser::unpack_user(derez, forest, source));
               // Add a reference to prevent this being deleted
               // before we're done unpacking
               users.back()->add_reference();
@@ -1411,7 +1415,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_subviews; idx++)
         {
           IndexSpaceExpression *subview_expr = 
-            IndexSpaceExpression::unpack_expression(derez, context, source);
+            IndexSpaceExpression::unpack_expression(derez, forest, source);
           FieldMask subview_mask;
           derez.deserialize(subview_mask);
           // See if we already have it in the cache
@@ -1424,7 +1428,7 @@ namespace Legion {
             subview = root->find_congruent_view(subview_expr);
             // If it's still NULL then we can make it
             if (subview == NULL)
-              subview = new ExprView(context, manager, inst_view, subview_expr);
+              subview = new ExprView(forest, manager, inst_view, subview_expr);
             expr_cache[subview_expr->expr_id] = subview;
           }
           else
@@ -1579,7 +1583,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      DETAILED_PROFILER(context->runtime, 
+      DETAILED_PROFILER(forest->runtime, 
                         MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
       // Don't do this if we are in Legion Spy since we want to see
       // all of the dependences on an instance
@@ -2156,11 +2160,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IndividualView::IndividualView(RegionTreeForest *ctx, DistributedID did,
-                     PhysicalManager *man,
-                     AddressSpaceID log_owner, UniqueID owner_context,
-                     bool register_now, CollectiveMapping *mapping)
-      : InstanceView(ctx, did, owner_context, register_now,mapping),
+    IndividualView::IndividualView(InnerContext *ctx, DistributedID did,
+                                 PhysicalManager *man, AddressSpaceID log_owner,
+                                 bool register_now, CollectiveMapping *mapping)
+      : InstanceView(ctx, did, register_now, mapping),
         manager(man), logical_owner(log_owner)
     //--------------------------------------------------------------------------
     {
@@ -3521,12 +3524,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(
-                               RegionTreeForest *ctx, DistributedID did,
+                               InnerContext *ctx, DistributedID did,
                                AddressSpaceID log_own, PhysicalManager *man,
-                               UniqueID own_ctx, bool register_now,
-                               CollectiveMapping *mapping)
+                               bool register_now, CollectiveMapping *mapping)
       : IndividualView(ctx, encode_materialized_did(did), man,
-                       log_own, own_ctx, register_now, mapping), 
+                       log_own, register_now, mapping), 
         expr_cache_uses(0), outstanding_additions(0)
 #ifdef ENABLE_VIEW_REPLICATION
         , remote_added_users(0), remote_pending_users(NULL)
@@ -3538,7 +3540,8 @@ namespace Legion {
 #endif
       if (is_logical_owner())
       {
-        current_users = new ExprView(ctx,manager,this,manager->instance_domain);
+        current_users = new ExprView(runtime->forest, manager, this,
+                                     manager->instance_domain);
         current_users->add_reference();
       }
       else
@@ -3625,7 +3628,7 @@ namespace Legion {
           ExprView *target_view = current_users->find_congruent_view(user_expr);
           // Couldn't find a congruent view so we need to make one
           if (target_view == NULL)
-            target_view = new ExprView(context, manager, this, user_expr);
+            target_view = new ExprView(runtime->forest, manager,this,user_expr);
           expr_cache[user_expr->expr_id] = target_view;
           finder = expr_cache.find(user_expr->expr_id);
         }
@@ -3729,8 +3732,8 @@ namespace Legion {
             // See if we lost the race
             if (current_users == NULL)
             {
-              current_users = 
-               new ExprView(context, manager, this, manager->instance_domain);
+              current_users = new ExprView(runtime->forest, manager, this, 
+                                           manager->instance_domain);
               current_users->add_reference();
             }
           }
@@ -4088,8 +4091,8 @@ namespace Legion {
             // See if we lost the race
             if (current_users == NULL)
             {
-              current_users = 
-               new ExprView(context, manager, this, manager->instance_domain);
+              current_users = new ExprView(runtime->forest, manager, this,
+                                           manager->instance_domain);
               current_users->add_reference();
             }
           }
@@ -4294,8 +4297,8 @@ namespace Legion {
         AutoLock v_lock(view_lock);
         if (current_users == NULL)
         {
-          current_users = 
-            new ExprView(context, manager, this, manager->instance_domain);
+          current_users = new ExprView(runtime->forest, manager, this,
+                                       manager->instance_domain);
           current_users->add_reference();
         }
         // We need to hold the expr lock here since we might have to 
@@ -4452,7 +4455,7 @@ namespace Legion {
         {
           target_view = current_users->find_congruent_view(user_expr);
           if (target_view == NULL)
-            target_view = new ExprView(context, manager, this, user_expr);
+            target_view = new ExprView(runtime->forest, manager,this,user_expr);
         }
         if (target_view != current_users)
         {
@@ -4783,10 +4786,10 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(context->did);
         rez.serialize(manager->did);
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
-        rez.serialize(owner_context);
       }
       runtime->send_materialized_view(target, rez);
       update_remote_instances(target);
@@ -4798,28 +4801,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez); 
-      DistributedID did;
+      DistributedID did, ctx_did;
       derez.deserialize(did);
+      derez.deserialize(ctx_did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      RtEvent man_ready;
+      RtEvent man_ready, ctx_ready;
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(manager_did, man_ready);
+      InnerContext *context =
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+      {
+        if (man_ready.exists() && !man_ready.has_triggered())
+          man_ready = Runtime::merge_events(man_ready, ctx_ready);
+        else
+          man_ready = ctx_ready;
+      }
       if (man_ready.exists() && !man_ready.has_triggered())
       {
         // Defer this until the manager is ready
-        DeferMaterializedViewArgs args(did, manager, logical_owner,context_uid);
+        DeferMaterializedViewArgs args(did, manager, logical_owner, context);
         runtime->issue_runtime_meta_task(args, 
             LG_LATENCY_RESPONSE_PRIORITY, man_ready);
       }
       else
-        create_remote_view(runtime, did, manager, logical_owner, context_uid); 
+        create_remote_view(runtime, did, manager, logical_owner, context); 
     }
 
     //--------------------------------------------------------------------------
@@ -4830,13 +4841,13 @@ namespace Legion {
       const DeferMaterializedViewArgs *dargs = 
         (const DeferMaterializedViewArgs*)args; 
       create_remote_view(runtime, dargs->did, dargs->manager, 
-          dargs->logical_owner, dargs->context_uid);
+          dargs->logical_owner, dargs->context);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void MaterializedView::create_remote_view(Runtime *runtime,
                             DistributedID did, PhysicalManager *manager,
-                            AddressSpaceID logical_owner, UniqueID context_uid)
+                            AddressSpaceID logical_owner, InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4846,14 +4857,11 @@ namespace Legion {
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) MaterializedView(runtime->forest,
-                                              did, logical_owner,
-                                              inst_manager, context_uid,
-                                              false/*register now*/);
+        view = new(location) MaterializedView(context, did, logical_owner,
+                                      inst_manager, false/*register now*/);
       else
-        view = new MaterializedView(runtime->forest, did,
-                                    logical_owner, inst_manager, 
-                                    context_uid, false/*register now*/);
+        view = new MaterializedView(context, did, logical_owner,
+                                    inst_manager, false/*register now*/);
       // Register only after construction
       view->register_with_runtime();
     }
@@ -4863,7 +4871,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
+    DeferredView::DeferredView(InnerContext *ctx, DistributedID did,
                                bool register_now, CollectiveMapping *mapping)
       : LogicalView(ctx, did, register_now, mapping)
     //--------------------------------------------------------------------------
@@ -4895,7 +4903,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FillView::FillView(RegionTreeForest *ctx, DistributedID did,
+    FillView::FillView(InnerContext *ctx, DistributedID did,
 #ifdef LEGION_SPY
                        UniqueID op_uid,
 #endif
@@ -4918,7 +4926,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FillView::FillView(RegionTreeForest *ctx, DistributedID did,
+    FillView::FillView(InnerContext *ctx, DistributedID did,
 #ifdef LEGION_SPY
                        UniqueID op_uid,
 #endif
@@ -4962,6 +4970,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(context->did);
 #ifdef LEGION_SPY
         rez.serialize(fill_op_uid);
 #endif
@@ -4994,8 +5003,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
+      DistributedID did, ctx_did;
       derez.deserialize(did);
+      derez.deserialize(ctx_did);
+      RtEvent ctx_ready;
+      InnerContext *context =
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
 #ifdef LEGION_SPY
       UniqueID op_uid;
       derez.deserialize(op_uid);
@@ -5003,6 +5016,8 @@ namespace Legion {
       size_t value_size;
       derez.deserialize(value_size);
       
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       void *location;
       FillView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -5010,7 +5025,7 @@ namespace Legion {
         if (value_size > 0)
         {
           const void *value = derez.get_current_pointer();
-          view = new(location) FillView(runtime->forest, did,
+          view = new(location) FillView(context, did,
 #ifdef LEGION_SPY
                                         op_uid,
 #endif
@@ -5018,7 +5033,7 @@ namespace Legion {
           derez.advance_pointer(value_size);
         }
         else
-          view = new(location) FillView(runtime->forest, did,
+          view = new(location) FillView(context, did,
 #ifdef LEGION_SPY
                                         op_uid,
 #endif
@@ -5029,7 +5044,7 @@ namespace Legion {
         if (value_size > 0)
         {
           const void *value = derez.get_current_pointer();
-          view = new FillView(runtime->forest, did,
+          view = new FillView(context, did,
 #ifdef LEGION_SPY
                               op_uid,
 #endif
@@ -5037,7 +5052,7 @@ namespace Legion {
           derez.advance_pointer(value_size);
         }
         else
-          view = new FillView(runtime->forest, did,
+          view = new FillView(context, did,
 #ifdef LEGION_SPY
                               op_uid,
 #endif
@@ -5220,7 +5235,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
+    PhiView::PhiView(InnerContext *ctx, DistributedID did, 
                      PredEvent tguard, PredEvent fguard,
                      FieldMaskSet<DeferredView> &&true_vws,
                      FieldMaskSet<DeferredView> &&false_vws,
@@ -5303,6 +5318,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(context->did);
         rez.serialize(true_guard);
         rez.serialize(false_guard);
         rez.serialize<size_t>(true_views.size());
@@ -5368,8 +5384,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
+      DistributedID did, ctx_did;
       derez.deserialize(did);
+      derez.deserialize(ctx_did);
+      RtEvent ctx_ready;
+      InnerContext *context =
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
       PredEvent true_guard, false_guard;
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -5405,17 +5425,19 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
           ready_events.insert(ready);
       }
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       // Make the phi view but don't register it yet
       void *location;
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) PhiView(runtime->forest, did,
+        view = new(location) PhiView(context, did,
                                      true_guard, false_guard,
                                      std::move(true_views),
                                      std::move(false_views),
                                      false/*register_now*/);
       else
-        view = new PhiView(runtime->forest, did, true_guard, 
+        view = new PhiView(context, did, true_guard, 
                            false_guard, std::move(true_views),
                            std::move(false_views), false/*register now*/);
       if (!ready_events.empty())
@@ -5448,12 +5470,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
-                                 AddressSpaceID log_own,
-                                 PhysicalManager *man, UniqueID own_ctx, 
+    ReductionView::ReductionView(InnerContext *ctx, DistributedID did,
+                                 AddressSpaceID log_own, PhysicalManager *man,
                                  bool register_now, CollectiveMapping *mapping)
       : IndividualView(ctx, encode_reduction_did(did), man, log_own, 
-                       own_ctx, register_now, mapping),
+                       register_now, mapping),
         fill_view(runtime->find_or_create_reduction_fill_view(man->redop))
     //--------------------------------------------------------------------------
     {
@@ -5825,7 +5846,7 @@ namespace Legion {
             continue;
           // Otherwise we need to check for dependences
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
+            runtime->forest->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
           wait_on.insert(uit->first);
@@ -5853,7 +5874,7 @@ namespace Legion {
           if (!overlap)
             continue;
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
+            runtime->forest->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
           wait_on.insert(uit->first);
@@ -5916,7 +5937,7 @@ namespace Legion {
           if (!overlap)
             continue;
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
+            runtime->forest->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
           // Have a precondition so we need to record it
@@ -5994,7 +6015,7 @@ namespace Legion {
           if (!overlap)
             continue;
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
+            runtime->forest->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
           // Have a precondition so we need to record it
@@ -6019,7 +6040,7 @@ namespace Legion {
           if (!overlap)
             continue;
           IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(user_expr, it->first->expr);
+            runtime->forest->intersect_index_spaces(user_expr, it->first->expr);
           if (expr_overlap->is_empty())
             continue;
           // Have a precondition so we need to record it
@@ -6086,9 +6107,9 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(context->did);
         rez.serialize(manager->did);
         rez.serialize(logical_owner);
-        rez.serialize(owner_context);
       }
       runtime->send_reduction_view(target, rez);
       update_remote_instances(target);
@@ -6107,27 +6128,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez); 
-      DistributedID did;
+      DistributedID did, ctx_did;
       derez.deserialize(did);
+      derez.deserialize(ctx_did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-
-      RtEvent man_ready;
+      RtEvent man_ready, ctx_ready;
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(manager_did, man_ready);
+      InnerContext *context =
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+      {
+        if (man_ready.exists() && !man_ready.has_triggered())
+          man_ready = Runtime::merge_events(man_ready, ctx_ready);
+        else
+          man_ready = ctx_ready;
+      }
       if (man_ready.exists() && !man_ready.has_triggered())
       {
         // Defer this until the manager is ready
-        DeferReductionViewArgs args(did, manager, logical_owner, context_uid);
+        DeferReductionViewArgs args(did, manager, logical_owner, context);
         runtime->issue_runtime_meta_task(args,
             LG_LATENCY_RESPONSE_PRIORITY, man_ready);
       }
       else
-        create_remote_view(runtime, did, manager, logical_owner, context_uid);
+        create_remote_view(runtime, did, manager, logical_owner, context);
     }
 
     //--------------------------------------------------------------------------
@@ -6138,13 +6166,13 @@ namespace Legion {
       const DeferReductionViewArgs *dargs = 
         (const DeferReductionViewArgs*)args; 
       create_remote_view(runtime, dargs->did, dargs->manager, 
-                         dargs->logical_owner, dargs->context_uid);
+                         dargs->logical_owner, dargs->context);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void ReductionView::create_remote_view(Runtime *runtime,
                             DistributedID did, PhysicalManager *manager,
-                            AddressSpaceID logical_owner, UniqueID context_uid)
+                            AddressSpaceID logical_owner, InnerContext *context)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6153,12 +6181,11 @@ namespace Legion {
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReductionView(runtime->forest, did, logical_owner,
-                                           manager, context_uid, 
-                                           false/*register now*/);
+        view = new(location) ReductionView(context, did, logical_owner,
+                                           manager, false/*register now*/);
       else
-        view = new ReductionView(runtime->forest, did, logical_owner, manager,
-                                 context_uid, false/*register now*/);
+        view = new ReductionView(context, did, logical_owner, manager,
+                                 false/*register now*/);
       // Only register after construction
       view->register_with_runtime();
     }
@@ -6168,12 +6195,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CollectiveView::CollectiveView(RegionTreeForest *ctx, DistributedID id,
-                                   UniqueID owner_context, 
+    CollectiveView::CollectiveView(InnerContext *ctx, DistributedID id,
                                    const std::vector<IndividualView*> &views,
                                    const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
-      : InstanceView(ctx, id, owner_context, register_now, mapping),
+      : InstanceView(ctx, id, register_now, mapping),
         instances(insts), local_views(views), deletion_notified(false) 
     //--------------------------------------------------------------------------
     {
@@ -6200,12 +6226,6 @@ namespace Legion {
     CollectiveView::~CollectiveView(void)
     //--------------------------------------------------------------------------
     {
-#if 0
-      for (std::vector<IndividualView*>::const_iterator it =
-            local_views.begin(); it != local_views.end(); it++)
-        if ((*it)->remove_nested_gc_ref(did))
-          delete (*it);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6329,30 +6349,19 @@ namespace Legion {
       {
         // Notify the context that this can be deleted
         // See if the context is local or not
-        const AddressSpaceID ctx_space = 
-          runtime->get_runtime_owner(owner_context);
-        if (ctx_space != local_space)
+        if (!context->is_owner())
         {
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(tid);
-            rez.serialize(owner_context);
+            rez.serialize(context->did);
           }
-          runtime->send_collective_view_deletion(ctx_space, rez);
+          runtime->send_collective_view_deletion(context->owner_space, rez);
         }
         else
-        {
-          InnerContext *context = 
-            runtime->find_context(owner_context, true/*can fail*/);
-          if (context != NULL)
-          {
-            context->notify_collective_deletion(tid, did);
-            if (context->remove_reference())
-              delete context;
-          }
-        }
+          context->notify_collective_deletion(tid, did);
       }
       else
       {
@@ -10013,13 +10022,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplicatedView::ReplicatedView(RegionTreeForest *ctx, DistributedID id,
-                                   UniqueID owner_context, 
+    ReplicatedView::ReplicatedView(InnerContext *ctx, DistributedID id,
                                    const std::vector<IndividualView*> &views,
                                    const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
       : CollectiveView(ctx, encode_replicated_did(id),
-                       owner_context, views, insts, register_now, mapping)
+                       views, insts, register_now, mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -10050,7 +10058,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(owner_context);
+        rez.serialize(context->did);
         rez.serialize<size_t>(instances.size());
         rez.serialize(&instances.front(), 
             instances.size() * sizeof(DistributedID));
@@ -10069,10 +10077,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
+      DistributedID did, ctx_did;
       derez.deserialize(did);
-      UniqueID owner_context;
-      derez.deserialize(owner_context);
+      derez.deserialize(ctx_did);
+      RtEvent ctx_ready;
+      InnerContext *context = 
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
       size_t num_insts;
       derez.deserialize(num_insts);
       std::vector<DistributedID> instances(num_insts);
@@ -10085,16 +10095,16 @@ namespace Legion {
         mapping = new CollectiveMapping(derez, num_spaces);
         mapping->add_reference();
       }
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       void *location;
       ReplicatedView *view = NULL;
       std::vector<IndividualView*> no_views;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReplicatedView(runtime->forest, did,
-                                            owner_context, no_views, instances,
+        view = new(location) ReplicatedView(context, did, no_views, instances,
                                             false/*register now*/, mapping);
       else
-        view = new ReplicatedView(runtime->forest, did,
-                                  owner_context, no_views, instances,
+        view = new ReplicatedView(context, did, no_views, instances,
                                   false/*register now*/, mapping);
       // Register only after construction
       view->register_with_runtime();
@@ -10107,13 +10117,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AllreduceView::AllreduceView(RegionTreeForest *ctx, DistributedID id,
-                                 UniqueID owner_context, 
+    AllreduceView::AllreduceView(InnerContext *ctx, DistributedID id,
                                  const std::vector<IndividualView*> &views,
                                  const std::vector<DistributedID> &insts,
                                  bool register_now, CollectiveMapping *mapping,
                                  ReductionOpID redop_id)
-      : CollectiveView(ctx, encode_allreduce_did(id), owner_context,
+      : CollectiveView(ctx, encode_allreduce_did(id),
                        views, insts, register_now, mapping), redop(redop_id),
         reduction_op(runtime->get_reduction_op(redop)),
         fill_view(runtime->find_or_create_reduction_fill_view(redop)),
@@ -10160,7 +10169,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(owner_context);
+        rez.serialize(context->did);
         rez.serialize<size_t>(instances.size());
         rez.serialize(&instances.front(), 
             instances.size() * sizeof(DistributedID));
@@ -10180,10 +10189,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      DistributedID did;
+      DistributedID did, ctx_did;
       derez.deserialize(did);
-      UniqueID owner_context;
-      derez.deserialize(owner_context);
+      derez.deserialize(ctx_did);
+      RtEvent ctx_ready;
+      InnerContext *context =
+        runtime->find_or_request_inner_context(ctx_did, ctx_ready);
       size_t num_insts;
       derez.deserialize(num_insts);
       std::vector<DistributedID> instances(num_insts);
@@ -10198,17 +10209,17 @@ namespace Legion {
       }
       ReductionOpID redop;
       derez.deserialize(redop);
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       void *location;
       AllreduceView *view = NULL;
       std::vector<IndividualView*> no_views;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) AllreduceView(runtime->forest, did,
-                                           owner_context, no_views, instances,
+        view = new(location) AllreduceView(context, did, no_views, instances,
                                            false/*register now*/, 
                                            mapping, redop);
       else
-        view = new AllreduceView(runtime->forest, did,
-                                 owner_context, no_views, instances,
+        view = new AllreduceView(context, did, no_views, instances,
                                  false/*register now*/, mapping, redop);
       // Register only after construction
       view->register_with_runtime();

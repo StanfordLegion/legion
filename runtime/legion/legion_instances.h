@@ -162,8 +162,8 @@ namespace Legion {
     class InstanceManager : public DistributedCollectable {
     public:
       enum {
-        EXTERNAL_CODE = 0x10,
-        REDUCTION_CODE = 0x20,
+        EXTERNAL_CODE = 0x20,
+        REDUCTION_CODE = 0x40,
       };
     public:
       InstanceManager(RegionTreeForest *forest,
@@ -433,7 +433,7 @@ namespace Legion {
       IndividualView* find_or_create_instance_top_view(InnerContext *context,
           AddressSpaceID logical_owner, CollectiveMapping *mapping);
       IndividualView* construct_top_view(AddressSpaceID logical_owner,
-                                         DistributedID did, UniqueID uid,
+                                         DistributedID did, InnerContext *ctx,
                                          CollectiveMapping *mapping);
       void register_deletion_subscriber(InstanceDeletionSubscriber *subscriber);
       void unregister_deletion_subscriber(InstanceDeletionSubscriber *subscrib);
@@ -521,7 +521,7 @@ namespace Legion {
     protected:
       mutable LocalLock inst_lock;
       std::set<InstanceDeletionSubscriber*> subscribers;
-      typedef std::pair<ReplicationID,UniqueID> ContextKey;
+      typedef std::pair<ReplicationID,DistributedID> ContextKey;
       typedef std::pair<IndividualView*,unsigned> ViewEntry;
       std::map<ContextKey,ViewEntry> context_views;
       std::map<ReplicationID,RtUserEvent> pending_views;
@@ -1469,7 +1469,7 @@ namespace Legion {
     /*static*/ inline bool InstanceManager::is_physical_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xF) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                                         PHYSICAL_MANAGER_DC);
     }
 
@@ -1478,7 +1478,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
+      if ((decode & (DIST_TYPE_LAST_DC-1)) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & REDUCTION_CODE) != 0);
     }
@@ -1488,7 +1488,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const unsigned decode = LEGION_DISTRIBUTED_HELP_DECODE(did);
-      if ((decode & 0xF) != PHYSICAL_MANAGER_DC)
+      if ((decode & (DIST_TYPE_LAST_DC-1)) != PHYSICAL_MANAGER_DC)
         return false;
       return ((decode & EXTERNAL_CODE) != 0);
     }

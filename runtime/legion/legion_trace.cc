@@ -7065,7 +7065,7 @@ namespace Legion {
         recurrent_replays(0), updated_frontiers(0)
     //--------------------------------------------------------------------------
     {
-      repl_ctx->add_reference();
+      repl_ctx->add_base_resource_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -7077,7 +7077,7 @@ namespace Legion {
         it->second.destroy_barrier();
       // Unregister ourselves from the context and then remove our reference
       repl_ctx->unregister_trace_template(template_index);
-      if (repl_ctx->remove_reference())
+      if (repl_ctx->remove_base_resource_ref(TRACE_REF))
         delete repl_ctx;
     } 
 

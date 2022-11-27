@@ -10172,7 +10172,7 @@ namespace Legion {
         migration_index(0), sample_count(0)
     //--------------------------------------------------------------------------
     {
-      context->add_reference();
+      context->add_nested_resource_ref(did);
       set_expr->add_nested_expression_reference(did);
       region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
@@ -10211,7 +10211,7 @@ namespace Legion {
 #endif
       if (replicated_owner_state != NULL)
         delete replicated_owner_state;
-      if (context->remove_reference())
+      if (context->remove_nested_resource_ref(did))
         delete context;
       if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
@@ -16389,7 +16389,7 @@ namespace Legion {
           const FieldMask phi_mask = it->second.get_valid_mask();
           FieldMaskSet<DeferredView> true_view;
           true_view.insert(fill_view, phi_mask);
-          PhiView *phi_view = new PhiView(runtime->forest,
+          PhiView *phi_view = new PhiView(context,
               runtime->get_available_distributed_id(),
               true_guard, false_guard, std::move(true_view), 
               std::move(it->second));
@@ -17174,7 +17174,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(region_node->handle);
         rez.serialize(context->get_replication_id());
-        rez.serialize(context->get_context_uid());
+        rez.serialize(context->did);
         // There be dragons here!
         // In the case where we first make a new equivalence set on a
         // remote node that is about to be the owner, we can't mark it
@@ -17239,8 +17239,8 @@ namespace Legion {
       derez.deserialize(handle);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
-      UniqueID ctx_uid;
-      derez.deserialize(ctx_uid);
+      DistributedID ctx_did;
+      derez.deserialize(ctx_did);
       RegionNode *node = runtime->forest->get_node(handle);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
@@ -17255,7 +17255,12 @@ namespace Legion {
           context = manager->find_local_context();
       }
       if (context == NULL)
-        context = runtime->find_context(ctx_uid);
+      {
+        RtEvent ctx_ready;
+        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+        if (ctx_ready.exists() && !ctx_ready.has_triggered())
+          ctx_ready.wait();
+      }
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
