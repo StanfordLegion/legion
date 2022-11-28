@@ -2117,6 +2117,7 @@ namespace Legion {
     friend class Internal::ReplDetachOp;                    \
     friend class Internal::ReplAcquireOp;                   \
     friend class Internal::ReplReleaseOp;                   \
+    friend class Internal::ShardManager;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     template<int, typename>                                 \

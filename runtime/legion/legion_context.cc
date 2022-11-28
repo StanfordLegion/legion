@@ -18119,10 +18119,10 @@ namespace Legion {
       if (collective)
       {
         const DistributedID map_did = get_next_distributed_id();
-        ReplFutureMapImpl *map = shard_manager->deduplicate_future_map_creation(
+        result = shard_manager->deduplicate_future_map_creation(
               this, domain_node, domain_node, total_children_count++,
               map_did, ApEvent::NO_AP_EVENT, provenance);
-        result = FutureMap(map);
+        ReplFutureMapImpl *map = static_cast<ReplFutureMapImpl*>(result.impl);
         ShardingFunction *function;
         if (implicit)
         {
@@ -18226,9 +18226,9 @@ namespace Legion {
       if (collective)
       {
         const DistributedID map_did = get_next_distributed_id();
-        ReplFutureMapImpl *map = shard_manager->deduplicate_future_map_creation(
+        result = shard_manager->deduplicate_future_map_creation(
             this, creation_op, domain_node, domain_node, map_did, provenance);
-        result = FutureMap(map);
+        ReplFutureMapImpl *map = static_cast<ReplFutureMapImpl*>(result.impl);
         ShardingFunction *function;
         if (implicit)
         {

@@ -1216,7 +1216,7 @@ namespace Legion {
     public:
       // Make this a virtual method so for control replication we can 
       // create a different type of future map for the task
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+      virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       // Also virtual for control replication override
       virtual void initialize_concurrent_analysis(bool replay);

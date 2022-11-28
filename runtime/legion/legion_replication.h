@@ -1642,7 +1642,7 @@ namespace Legion {
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+      virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       virtual void initialize_concurrent_analysis(bool replay);
       virtual RtEvent verify_concurrent_execution(const DomainPoint &point,
@@ -2196,7 +2196,7 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+      virtual FutureMap create_future_map(TaskContext *ctx,
                       IndexSpace domain, IndexSpace shard_space);
       virtual RtEvent get_concurrent_analysis_precondition(void);
       virtual void instantiate_tasks(InnerContext *ctx,
@@ -2900,10 +2900,10 @@ namespace Legion {
                                                bool &set_view);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
-      ReplFutureMapImpl* deduplicate_future_map_creation(ReplicateContext *ctx,
+      FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
           Operation *op, IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
           DistributedID did, Provenance *provenance); 
-      ReplFutureMapImpl* deduplicate_future_map_creation(ReplicateContext *ctx,
+      FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
           IndexSpaceNode *domain, IndexSpaceNode *shard_domain, size_t index,
           DistributedID did, ApEvent completion, Provenance *provenance);
       // Return true if we have a shard on every address space

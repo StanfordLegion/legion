@@ -16983,8 +16983,7 @@ namespace Legion {
       // Make a new future map for storing our results
       // We'll fill it in later
       sharding_space = launcher.sharding_space;
-      result_map = FutureMap(create_future_map(ctx, launch_space, 
-                                               sharding_space));
+      result_map = create_future_map(ctx, launch_space, sharding_space);
       instantiate_tasks(ctx, launcher); 
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
@@ -17001,13 +17000,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* MustEpochOp::create_future_map(TaskContext *ctx,
+    FutureMap MustEpochOp::create_future_map(TaskContext *ctx,
               IndexSpace domain, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
-      return new FutureMapImpl(ctx, this, launch_node,
-            runtime, runtime->get_available_distributed_id(), get_provenance());
+      return FutureMap(new FutureMapImpl(ctx, this, launch_node, runtime,
+              runtime->get_available_distributed_id(), get_provenance()));
     }
 
     //--------------------------------------------------------------------------
