@@ -3565,6 +3565,9 @@ namespace Legion {
       impl->add_nested_gc_ref(did);
       impl->add_nested_resource_ref(did);
       AutoLock fm_lock(future_map_lock);
+#ifdef DEBUG_LEGION
+      assert(futures.find(point) == futures.end());
+#endif
       futures[point] = impl;
     }
 
@@ -3842,10 +3845,30 @@ namespace Legion {
         RezCheck z2(rez);
         rez.serialize(did);
         rez.serialize(point);
-        f.impl->pack_future(rez);
+        rez.serialize(f.impl->did);
+        f.impl->pack_global_ref();
         rez.serialize(done);
       }
       runtime->send_future_map_response_future(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureMapImpl::process_future_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DomainPoint point;
+      derez.deserialize(point);
+      DistributedID future_did;
+      derez.deserialize(future_did);
+      FutureImpl *impl = runtime->find_or_create_future(future_did, 
+                                    context->get_context_uid(),
+                                    op_ctx_index, point, provenance, op, op_gen,
+#ifdef LEGION_SPY
+                                    op_uid,
+#endif
+                                    op_depth);
+      set_future(point, impl);
+      impl->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -3856,9 +3879,6 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      DomainPoint point;
-      derez.deserialize(point);
-      
       // Should always find it since this is the source node
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
@@ -3867,9 +3887,8 @@ namespace Legion {
 #else
       FutureMapImpl *impl = static_cast<FutureMapImpl*>(dc);
 #endif
-      Future future = FutureImpl::unpack_future(runtime, derez);
       // Add it to the map
-      impl->set_future(point, future.impl);
+      impl->process_future_response(derez);
       // Trigger the done event
       RtUserEvent done;
       derez.deserialize(done);
