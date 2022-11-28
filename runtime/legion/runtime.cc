@@ -3860,9 +3860,9 @@ namespace Legion {
       derez.deserialize(point);
       DistributedID future_did;
       derez.deserialize(future_did);
-      FutureImpl *impl = runtime->find_or_create_future(future_did, 
-                                    context->get_context_uid(),
-                                    op_ctx_index, point, provenance, op, op_gen,
+      FutureImpl *impl = runtime->find_or_create_future(future_did,
+                                    context->did, op_ctx_index, point,
+                                    provenance, op, op_gen,
 #ifdef LEGION_SPY
                                     op_uid,
 #endif
