@@ -2819,7 +2819,7 @@ namespace Legion {
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize(parent_ctx->did);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
@@ -25946,7 +25946,7 @@ namespace Legion {
       rez.serialize(remote_ptr);
       rez.serialize(source);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize(parent_ctx->did);
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
         provenance->serialize(rez);
@@ -25961,10 +25961,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
-      UniqueID parent_uid;
-      derez.deserialize(parent_uid);
+      DistributedID did;
+      derez.deserialize(did);
       RtEvent ready;
-      parent_ctx = runtime->find_context(parent_uid, false, &ready);
+      parent_ctx = runtime->find_or_request_inner_context(did, ready);
       if (ready.exists())
         ready_events.insert(ready);
       set_provenance(Provenance::deserialize(derez));

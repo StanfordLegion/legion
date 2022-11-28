@@ -73,6 +73,10 @@ index_expr_pat  = re.compile(prefix + r'GC Index Expr (?P<did>[0-9]+) (?P<node>[
 field_space_pat = re.compile(prefix + r'GC Field Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 region_pat      = re.compile(prefix + r'GC Region (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<is>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
 partition_pat   = re.compile(prefix + r'GC Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<ip>[0-9]+) (?P<fs>[0-9]+) (?P<tid>[0-9]+)')
+# Contexts
+inner_context_pat = re.compile(prefix + r'GC Inner Context (?P<did>[0-9]+) (?P<node>[0-9]+)')
+leaf_context_pat = re.compile(prefix + r'GC Leaf Context (?P<did>[0-9]+) (?P<node>[0-9]+)')
+shard_manager_pat = re.compile(prefix + r'GC Shard Manager (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Source Kinds
 source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_ ]+)')
 # Deletion Pattern
@@ -667,6 +671,27 @@ class Partition(Base):
     def __repr__(self):
         return 'Partition '+str(self.did)+' (Node='+str(self.node)+') ('+str(self.index_partition)+','+str(self.field_space)+','+str(self.tree_id)+')'
 
+class InnerContext(Base):
+    def __init__(self, did, node):
+        super(InnerContext,self).__init__(did, node)
+
+    def __repr__(self):
+        return 'Inner Context '+str(self.did)+' (Node='+str(self.node)+')'
+
+class LeafContext(Base):
+    def __init__(self, did, node):
+        super(LeafContext,self).__init__(did, node)
+
+    def __repr__(self):
+        return 'Leaf Context '+str(self.did)+' (Node='+str(self.node)+')'
+
+class ShardManager(Base):
+    def __init__(self, did, node):
+        super(ShardManager,self).__init__(did, node)
+
+    def __repr__(self):
+        return 'Shard Manager '+str(self.did)+' (Node='+str(self.node)+')'
+
 class Instance(object):
     def __init__(self, iid, mem, kind):
         self.iid = iid
@@ -693,6 +718,9 @@ class State(object):
         self.field_spaces = {}
         self.regions = {}
         self.partitions = {}
+        self.inner_contexts = {}
+        self.leaf_contexts = {}
+        self.shard_managers = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:
@@ -837,6 +865,21 @@ class State(object):
                                        long_type(m.group('fs')),
                                        long_type(m.group('tid')))
                     continue
+                m = inner_context_pat.match(line)
+                if m is not None:
+                    self.log_inner_context(long_type(m.group('did')),
+                                           long_type(m.group('node')))
+                    continue
+                m = leaf_context_pat.match(line)
+                if m is not None:
+                    self.log_leaf_context(long_type(m.group('did')),
+                                          long_type(m.group('node')))
+                    continue
+                m = shard_manager_pat.match(line)
+                if m is not None:
+                    self.log_shard_manager(long_type(m.group('did')),
+                                           long_type(m.group('node')))
+                    continue
                 m = source_kind_pat.match(line)
                 if m is not None:
                     self.log_source_kind(int(m.group('kind')),
@@ -888,6 +931,12 @@ class State(object):
             region.update_nested_references(self)
         for partition in itervalues(self.partitions):
             partition.update_nested_references(self)
+        for context in itervalues(self.inner_contexts):
+            context.update_nested_references(self)
+        for context in itervalues(self.leaf_contexts):
+            context.update_nested_references(self)
+        for manager in itervalues(self.shard_managers):
+            manager.update_nested_references(self)
         # Run the garbage collector
         gc.collect()
 
@@ -970,6 +1019,15 @@ class State(object):
 
     def log_partition(self, did, node, index_partition, field_space, tid):
         self.get_partition(did, node, index_partition, field_space, tid)
+
+    def log_inner_context(self, did, node):
+        self.get_inner_context(did, node)
+
+    def log_leaf_context(self, did, node):
+        self.get_leaf_context(did, node)
+
+    def log_shard_manager(self, did, node):
+        self.get_shard_manager(did, node)
 
     def log_source_kind(self, kind, name):
         if kind not in self.src_names:
@@ -1092,6 +1150,33 @@ class State(object):
                 del self.unknowns[key]
         return self.partitions[key]
 
+    def get_inner_context(self, did, node):
+        key = (did,node)
+        if key not in self.inner_contexts:
+            self.inner_contexts[key] = InnerContext(did, node)
+            if key in self.unknowns:
+                self.inner_contexts[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.inner_contexts[key]
+
+    def get_leaf_context(self, did, node):
+        key = (did,node)
+        if key not in self.leaf_contexts:
+            self.leaf_contexts[key] = LeafContext(did, node)
+            if key in self.unknowns:
+                self.leaf_contexts[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.leaf_contexts[key]
+
+    def get_shard_manager(self, did, node):
+        key = (did,node)
+        if key not in self.shard_managers:
+            self.shard_managers[key] = ShardManager(did, node)
+            if key in self.unknowns:
+                self.shard_managers[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.shard_managers[key]
+
     def get_obj(self, did, node):
         key = (did,node)
         if key in self.views:
@@ -1118,47 +1203,63 @@ class State(object):
             return self.regions[key]
         if key in self.partitions:
             return self.partitions[key]
+        if key in self.inner_contexts:
+            return self.inner_contexts[key]
+        if key in self.leaf_contexts:
+            return self.leaf_contexts[key]
+        if key in self.shard_managers:
+            return self.shard_managers[key]
         if key in self.unknowns:
             return self.unknowns[key]
         self.unknowns[key] = Base(did, node)
         return self.unknowns[key]
 
     def check_for_cycles(self, assert_on_error):
-        for did,manager in iteritems(self.managers):
+        for manager in itervalues(self.managers):
             print("Checking for cycles in "+repr(manager))
             manager.check_for_cycles(assert_on_error)
-        for did,view in iteritems(self.views):
+        for view in itervalues(self.views):
             print("Checking for cycles in "+repr(view))
             view.check_for_cycles(assert_on_error)
-        for did,future in iteritems(self.futures):
+        for future in itervalues(self.futures):
             print("Checking for cycles in "+repr(future))
             future.check_for_cycles(assert_on_error)
-        for did,future_map in iteritems(self.future_maps):
+        for future_map in itervalues(self.future_maps):
             print("Checking for cycles in "+repr(future_map))
             future_map.check_for_cycles(assert_on_error)
-        for did,eq in iteritems(self.equivalence_sets):
+        for eq in itervalues(self.equivalence_sets):
             print("Checking for cycles in "+repr(eq))
             eq.check_for_cycles(assert_on_error)
-        for did,constraint in iteritems(self.constraints):
+        for constraint in itervalues(self.constraints):
             print("Checking for cycles in "+repr(constraint))
             constraint.check_for_cycles(assert_on_error)
-        for did,index_space in iteritems(self.index_spaces):
+        for index_space in itervalues(self.index_spaces):
             print("Checking for cycles in "+repr(index_space))
             index_space.check_for_cycles(assert_on_error)
-        for did,index_part in iteritems(self.index_partitions):
+        for index_part in itervalues(self.index_partitions):
             print("Checking for cycles in "+repr(index_part))
             index_part.check_for_cycles(assert_on_error)
-        for did,index_expr in iteritems(self.index_expressions):
+        for index_expr in itervalues(self.index_expressions):
             print("Checking for cycles in "+repr(index_expr))
             index_expr.check_for_cycles(assert_on_error)
-        for did,field_space in iteritems(self.field_spaces):
+        for field_space in itervalues(self.field_spaces):
             print("Checking for cycles in "+repr(field_space))
             field_space.check_for_cycles(assert_on_error)
-        for did,region in iteritems(self.regions):
+        for region in itervalues(self.regions):
             print("Checking for cycles in "+repr(region))
             region.check_for_cycles(assert_on_error)
-        for did,partition in iteritems(self.partitions):
+        for partition in itervalues(self.partitions):
             print("Checking for cycles in "+repr(partition))
+            partition.check_for_cycles(assert_on_error)
+        for context in itervalues(self.inner_contexts):
+            print("Checking for cycles in "+repr(context))
+            context.check_for_cycles(assert_on_error)
+        for context in itervalues(self.leaf_contexts):
+            print("Checking for cycles in "+repr(context))
+            context.check_for_cycles(assert_on_error)
+        for manager in itervalues(self.shard_managers):
+            print("Checking for cycles in "+repr(manager))
+            manager.check_for_cycles(assert_on_error)
         print("NO CYCLES")
 
     def check_for_leaks(self, assert_on_error, verbose): 
@@ -1175,6 +1276,9 @@ class State(object):
         leaked_field_spaces = 0
         leaked_regions = 0
         leaked_partitions = 0
+        leaked_inner = 0
+        leaked_leaves = 0
+        leaked_shards = 0
         for future in itervalues(self.futures):
             if not future.check_for_leaks(assert_on_error, verbose):
                 leaked_futures += 1
@@ -1215,6 +1319,15 @@ class State(object):
         for partition in itervalues(self.partitions):
             if not partition.check_for_leaks(assert_on_error, verbose):
                 leaked_partitions += 1
+        for context in itervalues(self.inner_contexts):
+            if not context.check_for_leaks(assert_on_error, verbose):
+                leaked_inner += 1
+        for context in itervalues(self.leaf_contexts):
+            if not context.check_for_leaks(assert_on_error, verbose):
+                leaked_leaves += 1
+        for manager in itervalues(self.shard_managers):
+            if not manager.check_for_leaks(assert_on_error, verbose):
+                leaked_shards += 1
         print("LEAK SUMMARY")
         if leaked_futures > 0:
             print("  LEAKED FUTURES: "+str(leaked_futures))
@@ -1281,6 +1394,22 @@ class State(object):
             if assert_on_error: assert False
         else:
             print("  Leaked Partitions: "+str(leaked_partitions))
+        if leaked_inner > 0:
+            print("  LEAKED INNER CONTEXTES: "+str(leaked_inner))
+            if assert_on_error: assert False
+        else:
+            print("  Leaked Inner Contexts: "+str(leaked_inner))
+        if leaked_leaves > 0:
+            print("  LEAKED LEAF CONTEXTES: "+str(leaked_leaves))
+            if assert_on_error: assert False
+        else:
+            print("  Leaked Leaf Contexts: "+str(leaked_leaves))
+        if leaked_shards > 0:
+            print("  LEAKED SHARD MANAGERS: "+str(leaked_shards))
+            if assert_on_error: assert False
+        else:
+            print("  Leaked Shard Managers: "+str(leaked_shards))
+
 
 def main():
     parser = argparse.ArgumentParser(

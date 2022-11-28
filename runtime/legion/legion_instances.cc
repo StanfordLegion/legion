@@ -1135,7 +1135,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndividualView* PhysicalManager::construct_top_view(
                                            AddressSpaceID logical_owner,
-                                           DistributedID view_did, UniqueID uid,
+                                           DistributedID view_did,
+                                           InnerContext *own_ctx,
                                            CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
@@ -1147,12 +1148,12 @@ namespace Legion {
           // node from an unrelated meta-task execution
           void *location = runtime->find_or_create_pending_collectable_location(
               view_did, sizeof(ReductionView));
-          return new (location) ReductionView(context, view_did,
-              logical_owner, this, uid, true/*register now*/, mapping);
+          return new (location) ReductionView(runtime, view_did,
+              logical_owner, this, true/*register now*/, mapping);
         }
         else
-          return new ReductionView(context, view_did,
-              logical_owner, this, uid, true/*register now*/, mapping);
+          return new ReductionView(runtime, view_did,
+              logical_owner, this, true/*register now*/, mapping);
       }
       else
       {
@@ -1162,12 +1163,12 @@ namespace Legion {
           // node from an unrelated meta-task execution
           void *location = runtime->find_or_create_pending_collectable_location(
               view_did, sizeof(MaterializedView));
-          return new (location) MaterializedView(context, view_did,
-                logical_owner, this, uid, true/*register now*/, mapping);
+          return new (location) MaterializedView(runtime, view_did,
+                logical_owner, this, true/*register now*/, mapping);
         }
         else
-          return new MaterializedView(context, view_did,
-                logical_owner, this, uid, true/*register now*/, mapping);
+          return new MaterializedView(runtime, view_did,
+                logical_owner, this, true/*register now*/, mapping);
       }
     }
 
@@ -1178,11 +1179,14 @@ namespace Legion {
                                                    CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
-      ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
       // If we're a replicate context then we want to ignore the specific
-      // context UID since there might be several shards on this node
-      if (key.first > 0)
-        key.second = 0;
+      // context DID since there might be several shards on this node
+      bool replicated = false;
+      DistributedID key = own_ctx->get_replication_id();
+      if (key == 0)
+        key = own_ctx->did;
+      else
+        replicated = true;
       RtEvent wait_for;
       {
         AutoLock i_lock(inst_lock);
@@ -1191,14 +1195,14 @@ namespace Legion {
         // on their side before calling this method
         assert(subscribers.find(own_ctx) == subscribers.end());
 #endif
-        std::map<ContextKey,ViewEntry>::iterator finder =
+        std::map<DistributedID,ViewEntry>::iterator finder =
           context_views.find(key);
         if (finder != context_views.end())
         {
 #ifdef DEBUG_LEGION
           // This should only happen with control replication because normal
           // contexts should be deduplicating on their side
-          assert(key.first > 0);
+          assert(replicated);
 #endif
           // This better be a new context so bump the reference count
           if (subscribers.insert(own_ctx).second)
@@ -1207,12 +1211,12 @@ namespace Legion {
           return finder->second.first;
         }
         // Check to see if someone else from this context is making the view 
-        if (key.first > 0)
+        if (replicated)
         {
           // Only need to do this for control replication, otherwise the
           // context will have deduplicated for us
-          std::map<ReplicationID,RtUserEvent>::iterator pending_finder =
-            pending_views.find(key.first);
+          std::map<DistributedID,RtUserEvent>::iterator pending_finder =
+            pending_views.find(key);
           if (pending_finder != pending_views.end())
           {
             if (!pending_finder->second.exists())
@@ -1220,7 +1224,7 @@ namespace Legion {
             wait_for = pending_finder->second;
           }
           else
-            pending_views[key.first] = RtUserEvent::NO_RT_USER_EVENT;
+            pending_views[key] = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
       if (wait_for.exists())
@@ -1228,11 +1232,11 @@ namespace Legion {
         if (!wait_for.has_triggered())
           wait_for.wait();
         AutoLock i_lock(inst_lock);
-        std::map<ContextKey,ViewEntry>::iterator finder =
+        std::map<DistributedID,ViewEntry>::iterator finder =
           context_views.find(key);
 #ifdef DEBUG_LEGION
+        assert(replicated);
         assert(finder != context_views.end());
-        assert(key.first > 0);
 #endif
         // This better be a new context so bump the reference count
         if (subscribers.insert(own_ctx).second)
@@ -1249,7 +1253,7 @@ namespace Legion {
         // node is going to be the logical owner
         DistributedID view_did = runtime->get_available_distributed_id(); 
         result = construct_top_view((mapping == NULL) ? logical_owner :
-            owner_space, view_did, own_ctx->get_context_uid(), mapping);
+            owner_space, view_did, own_ctx, mapping);
       }
       else if ((mapping != NULL) && mapping->contains(local_space))
       {
@@ -1263,8 +1267,8 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(key.first);
-          rez.serialize(key.second);
+          rez.serialize(key);
+          rez.serialize(own_ctx->did);
           rez.serialize(owner_space);
           mapping->pack(rez);
           rez.serialize(&view_did);
@@ -1276,7 +1280,7 @@ namespace Legion {
         // For collective instances each node of the instance serves as its
         // own logical owner view
         result = construct_top_view(runtime->address_space, view_did.load(),
-                                    own_ctx->get_context_uid(), mapping);
+                                    own_ctx, mapping);
       }
       else
       {
@@ -1288,8 +1292,8 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(key.first);
-          rez.serialize(key.second);
+          rez.serialize(key);
+          rez.serialize(own_ctx->did);
           rez.serialize(logical_owner);
           rez.serialize<size_t>(0); // no mapping
           rez.serialize(&view_did);
@@ -1313,10 +1317,10 @@ namespace Legion {
       entry.second = 1/*only a single initial reference*/;
       if (subscribers.insert(own_ctx).second)
         own_ctx->add_subscriber_reference(this);
-      if (key.first > 0)
+      if (replicated)
       {
-        std::map<ReplicationID,RtUserEvent>::iterator finder =
-          pending_views.find(key.first);
+        std::map<DistributedID,RtUserEvent>::iterator finder =
+          pending_views.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != pending_views.end());
 #endif
@@ -1361,11 +1365,11 @@ namespace Legion {
     void PhysicalManager::unregister_active_context(InnerContext *own_ctx)
     //--------------------------------------------------------------------------
     {
-      ContextKey key(own_ctx->get_replication_id(), own_ctx->get_context_uid());
       // If we're a replicate context then we want to ignore the specific
       // context UID since there might be several shards on this node
-      if (key.first > 0)
-        key.second = 0;
+      DistributedID key = own_ctx->get_replication_id();
+      if (key == 0)
+        key = own_ctx->did;
       {
         AutoLock inst(inst_lock);
         std::set<InstanceDeletionSubscriber*>::iterator finder = 
@@ -1377,7 +1381,7 @@ namespace Legion {
         subscribers.erase(finder);
         // Remove the reference on the view entry and remove it from our
         // manager if it no longer has anymore active contexts
-        std::map<ContextKey,ViewEntry>::iterator view_finder =
+        std::map<DistributedID,ViewEntry>::iterator view_finder =
           context_views.find(key);
 #ifdef DEBUG_LEGION
         assert(view_finder != context_views.end());
@@ -2701,13 +2705,12 @@ namespace Legion {
       RtEvent man_ready;
       PhysicalManager *manager =
         runtime->find_or_request_instance_manager(did, man_ready);
-      ReplicationID repl_id;
+      DistributedID repl_id, ctx_did;
       derez.deserialize(repl_id);
-      UniqueID ctx_uid;
-      derez.deserialize(ctx_uid);
+      derez.deserialize(ctx_did);
       RtEvent ctx_ready;
       InnerContext *context = NULL;
-      if (repl_id > 0)
+      if (repl_id != ctx_did)
       {
         // See if we're on a node where there is a shard manager for
         // this replicated context
@@ -2717,7 +2720,7 @@ namespace Legion {
           context = shard_manager->find_local_context();
       }
       if (context == NULL)
-        context = runtime->find_context(ctx_uid,false/*can't fail*/,&ctx_ready);
+        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       CollectiveMapping *mapping = NULL;

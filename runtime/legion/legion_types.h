@@ -368,7 +368,6 @@ namespace Legion {
       LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
-      LG_CONTROL_REP_DELETE_TASK_ID,
       LG_DEFER_COMPOSITE_COPY_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
@@ -489,7 +488,6 @@ namespace Legion {
         "Defer Reduction View Registration",                      \
         "Defer Phi View Registration",                            \
         "Control Replication Launch",                             \
-        "Control Replciation Delete",                             \
         "Defer Composite Copy",                                   \
         "Tighten Index Space",                                    \
         "Remote Physical Context Request",                        \
@@ -881,7 +879,6 @@ namespace Legion {
       SEND_LOGICAL_PARTITION_SEMANTIC_INFO,
       SEND_REMOTE_CONTEXT_REQUEST,
       SEND_REMOTE_CONTEXT_RESPONSE,
-      SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_REMOTE_CONTEXT_FIND_COLLECTIVE_VIEW_REQUEST,
@@ -938,7 +935,6 @@ namespace Legion {
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
       SEND_REPLICATE_LAUNCH,
-      SEND_REPLICATE_DELETE,
       SEND_REPLICATE_POST_MAPPED,
       SEND_REPLICATE_POST_EXECUTION,
       SEND_REPLICATE_TRIGGER_COMPLETE,
@@ -1138,7 +1134,6 @@ namespace Legion {
         "Send Logical Partition Semantic Info",                       \
         "Send Remote Context Request",                                \
         "Send Remote Context Response",                               \
-        "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
         "Send Remote Context Find Collective View Request",           \
@@ -1195,7 +1190,6 @@ namespace Legion {
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
         "Send Replication Launch",                                    \
-        "Send Replication Delete",                                    \
         "Send Replication Post Mapped",                               \
         "Send Replication Post Execution",                            \
         "Send Replication Trigger Complete",                          \
@@ -2238,7 +2232,6 @@ namespace Legion {
   typedef ::legion_projection_epoch_id_t ProjectionEpochID;
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
-  typedef ::legion_replication_id_t ReplicationID;
   typedef ::legion_shard_id_t ShardID;
   typedef ::legion_internal_color_t LegionColor;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 

@@ -433,7 +433,6 @@ namespace Legion {
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez,
                               std::set<RtEvent> &ready_events);
-      void send_remote_context(AddressSpaceID target, RemoteTask *dst);
     public:
       virtual void pack_profiling_requests(Serializer &rez,
                                            std::set<RtEvent> &applied) const;
@@ -551,8 +550,6 @@ namespace Legion {
       RemoteTraceRecorder*                  remote_trace_recorder;
       // For replication of this task
       ShardManager*                         shard_manager;
-    protected:
-      std::map<AddressSpaceID,RemoteTask*>  remote_instances;
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
@@ -823,7 +820,6 @@ namespace Legion {
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
       UniqueID remote_unique_id;
-      UniqueID remote_owner_uid;
     protected:
       Future predicate_false_future;
       void *predicate_false_result;
@@ -1084,7 +1080,7 @@ namespace Legion {
     public:
       const ShardID shard_id;
     protected:
-      UniqueID remote_owner_uid;
+      DistributedID context_did;
       RtBarrier shard_barrier;
       bool all_shards_complete;
     };
@@ -1344,9 +1340,6 @@ namespace Legion {
     public:
       SliceTask& operator=(const SliceTask &rhs);
     public:
-      inline UniqueID get_remote_owner_uid(void) const 
-        { return remote_owner_uid; }
-    public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
       virtual Operation* get_origin_operation(void) { return index_owner; }
@@ -1524,7 +1517,6 @@ namespace Legion {
       IndexTask *index_owner;
       UniqueID remote_unique_id;
       bool origin_mapped;
-      UniqueID remote_owner_uid;
       DomainPoint reduction_instance_point;
       // An event for tracking when origin-mapped slices on the owner
       // node have committed so we can trigger things appropriately

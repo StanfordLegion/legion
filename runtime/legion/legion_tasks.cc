@@ -2334,9 +2334,11 @@ namespace Legion {
         profiling_info.clear();
       }
       untracked_valid_regions.clear();
-      if ((execution_context != NULL) && execution_context->remove_reference())
+      if ((execution_context != NULL) && 
+          execution_context->remove_base_gc_ref(SINGLE_TASK_REF))
         delete execution_context; 
-      if ((shard_manager != NULL) && shard_manager->remove_reference())
+      if ((shard_manager != NULL) && 
+          shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
         delete shard_manager;
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
@@ -2560,28 +2562,6 @@ namespace Legion {
       }
       update_no_access_regions();
     } 
-
-    //--------------------------------------------------------------------------
-    void SingleTask::send_remote_context(AddressSpaceID remote_instance,
-                                         RemoteTask *remote_ctx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_instance != runtime->address_space);
-#endif
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_ctx);
-        execution_context->pack_remote_context(rez, remote_instance);
-      }
-      runtime->send_remote_context_response(remote_instance, rez);
-      AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-      assert(remote_instances.find(remote_instance) == remote_instances.end());
-#endif
-      remote_instances[remote_instance] = remote_ctx;
-    }
 
     //--------------------------------------------------------------------------
     void SingleTask::shard_off(RtEvent mapped_precondition)
@@ -3743,14 +3723,13 @@ namespace Legion {
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, unique_op_id,ApEvent::NO_AP_EVENT,
-          false/*remote*/, false/*inline*/, true/*implicit*/);
+          parent_req_indexes, virtual_mapped, ApEvent::NO_AP_EVENT,
+          0/*did*/, false/*inline*/, true/*implicit*/);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
       execution_context = inner_ctx;
-      execution_context->add_reference();
-      runtime->register_local_context(inner_ctx);
+      execution_context->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;
     }
 
@@ -3762,7 +3741,7 @@ namespace Legion {
       assert(shard_manager == NULL);
 #endif
       shard_manager = manager;
-      shard_manager->add_reference();
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3904,7 +3883,8 @@ namespace Legion {
 #endif
         // First make a shard manager to handle the all the shard tasks
         const size_t total_shards = output.task_mappings.size();
-        const ReplicationID repl_context = runtime->get_unique_replication_id();
+        const DistributedID repl_context = 
+          runtime->get_available_distributed_id();
         if (runtime->legion_spy_enabled)
           LegionSpy::log_replication(get_unique_id(), repl_context,
                                      !output.control_replication_map.empty());
@@ -3979,13 +3959,27 @@ namespace Legion {
             shard_lookup.push_back(idx);
           }
         }
+        // Construct the collective mapping
+        std::vector<AddressSpaceID> spaces(output.task_mappings.size());
+        for (unsigned idx = 0; idx < spaces.size(); idx++)
+          spaces[idx] = runtime->find_address_space(
+              output.task_mappings[idx].target_procs.front());
+        std::sort(spaces.begin(), spaces.end());
+        // Uniquify them
+        std::vector<AddressSpaceID>::iterator last = 
+          std::unique(spaces.begin(), spaces.end());
+        spaces.erase(last, spaces.end());
+        // The shard manager will take ownership of this
+        CollectiveMapping *mapping =
+          new CollectiveMapping(spaces, runtime->legion_collective_radix);
         if (!output.control_replication_map.empty())
         {
-          shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
-              is_top_level_task(), isomorphic_points, output.shard_domain,
-              std::move(output.shard_points), std::move(sorted_points),
-              std::move(shard_lookup), runtime->address_space, this);
-          shard_manager->add_reference();
+          shard_manager = new ShardManager(runtime, repl_context, mapping,
+              true/*cr*/, is_top_level_task(), isomorphic_points, 
+              output.shard_domain, std::move(output.shard_points), 
+              std::move(sorted_points), std::move(shard_lookup), 
+              runtime->address_space, this);
+          shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
           if (output.control_replication_map.size() != total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Mapper %s specified a non-empty control replication "
@@ -4035,11 +4029,12 @@ namespace Legion {
         }
         else
         {
-          shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
-              is_top_level_task(), isomorphic_points, output.shard_domain,
-              std::move(output.shard_points), std::move(sorted_points),
-              std::move(shard_lookup), runtime->address_space, this);
-          shard_manager->add_reference();
+          shard_manager = new ShardManager(runtime, repl_context, mapping,
+              false/*cr*/, is_top_level_task(), isomorphic_points, 
+              output.shard_domain, std::move(output.shard_points),
+              std::move(sorted_points), std::move(shard_lookup), 
+              runtime->address_space, this);
+          shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
           if (!runtime->unsafe_mapper)
           {
             // Currently we only support non-control replication of 
@@ -4724,7 +4719,7 @@ namespace Legion {
         {
           execution_context = new LeafContext(runtime, this, inline_task);
           // Add a reference to our execution context
-          execution_context->add_reference();
+          execution_context->add_base_gc_ref(SINGLE_TASK_REF);
         }
         else // This method adds a reference to the context for us
           execution_context = 
@@ -5214,14 +5209,12 @@ namespace Legion {
     {
       InnerContext *inner_ctx = new InnerContext(runtime, this, 
           get_depth(), v->is_inner(), regions, output_regions,
-          parent_req_indexes, virtual_mapped, unique_op_id,
-          execution_fence_event, false/*remote*/, inline_task,
-          concurrent_task || parent_ctx->is_concurrent_context());
+          parent_req_indexes, virtual_mapped, execution_fence_event, 0/*did*/, 
+          inline_task, concurrent_task || parent_ctx->is_concurrent_context());
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       inner_ctx->configure_context(mapper, task_priority);
-      inner_ctx->add_reference();
-      runtime->register_local_context(inner_ctx);
+      inner_ctx->add_base_gc_ref(SINGLE_TASK_REF);
       return inner_ctx;
     }
 
@@ -5752,7 +5745,7 @@ namespace Legion {
       assert(launch_space == NULL);
 #endif
       launch_space = runtime->forest->get_node(launch_handle);
-      launch_space->add_base_valid_ref(CONTEXT_REF);
+      add_launch_space_reference(launch_space);
       derez.deserialize(sliced);
       derez.deserialize(redop);
       if (redop > 0)
@@ -5929,7 +5922,6 @@ namespace Legion {
       predicate_false_result = NULL;
       predicate_false_size = 0;
       orig_task = this;
-      remote_owner_uid = 0;
       remote_unique_id = get_unique_id();
       sent_remotely = false;
       top_level_task = false;
@@ -6020,7 +6012,6 @@ namespace Legion {
               get_unique_id(), parent_ctx->get_task_name(),
               parent_ctx->get_unique_id(), get_trace()->get_trace_id())
       }
-      remote_owner_uid = ctx->get_unique_id();
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED &&
           !launcher.elide_future_return)
@@ -6702,7 +6693,7 @@ namespace Legion {
         rez.serialize<bool>(valid_output_regions[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
-      rez.serialize(remote_owner_uid);
+      rez.serialize(parent_ctx->did);
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
@@ -6748,7 +6739,8 @@ namespace Legion {
       derez.deserialize(orig_task);
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
-      derez.deserialize(remote_owner_uid);
+      DistributedID context_did;
+      derez.deserialize(context_did);
       derez.deserialize(top_level_task);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -6771,6 +6763,10 @@ namespace Legion {
         deactivate();
         return false;
       }
+      // Figure out what our parent context is
+      RtEvent ctx_ready;
+      parent_ctx = 
+        runtime->find_or_request_inner_context(context_did, ctx_ready);
       if (!elide_future_return)
       {
         result = FutureImpl::unpack_future(runtime, derez);
@@ -6787,17 +6783,9 @@ namespace Legion {
         }
       }
       set_provenance(Provenance::deserialize(derez));
-      // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+      // Make sure the parent ctx is ready
       if (ctx_ready.exists() && !ctx_ready.has_triggered())
-      {
-        // Wait if the profiler is going to ask for the context
-        if (runtime->profiler != NULL)
-          ctx_ready.wait();
-        else
-          ready_events.insert(ctx_ready);
-      }
+        ctx_ready.wait();
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Remote individual tasks are always resolved
@@ -7102,21 +7090,6 @@ namespace Legion {
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       SingleTask::deactivate(false/*free*/);
-      if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
       if (freeop)
         runtime->free_point_task(this);
     } 
@@ -7963,8 +7936,7 @@ namespace Legion {
       shard_manager = manager;
       shard_barrier = shard_manager->get_shard_task_barrier();
       if (manager->original_task != NULL)
-        remote_owner_uid = 
-          manager->original_task->get_context()->get_unique_id();
+        context_did = manager->original_task->get_context()->did;
       // Only make our termination event on the node where the shard will run
       if (runtime->find_address_space(proc) == runtime->address_space)
         single_task_termination = Runtime::create_ap_user_event(NULL);
@@ -7983,25 +7955,6 @@ namespace Legion {
     ShardTask::~ShardTask(void)
     //--------------------------------------------------------------------------
     {
-      // Set our shard manager to NULL since we are not supposed to delete it
-      shard_manager = NULL;
-      // We clear out instance top view here since we know that all
-      // our sibling shards are done at this point too, this allows
-      // us to remove any references to the context and hopefully to
-      // delete it
-      if ((execution_context != NULL) && execution_context->is_inner_context())
-      {
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(execution_context);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = 
-          static_cast<ReplicateContext*>(execution_context);
-#endif
-        repl_ctx->clear_instance_top_views();
-      }
-      SingleTask::deactivate(false/*free*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8024,7 +7977,9 @@ namespace Legion {
     void ShardTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Set our shard manager to NULL since we are not supposed to delete it
+      shard_manager = NULL;
+      SingleTask::deactivate(false/*free*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8243,7 +8198,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       pack_single_task(rez, target);
-      rez.serialize(remote_owner_uid);
+      rez.serialize(context_did);
       return false;
     }
 
@@ -8264,14 +8219,13 @@ namespace Legion {
       assert(!single_task_termination.exists());
 #endif
       single_task_termination = temp_single_task_termination;
-      derez.deserialize(remote_owner_uid);
+      derez.deserialize(context_did);
       // Figure out what our parent context is
       RtEvent ctx_ready;
-      parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+      parent_ctx = 
+        runtime->find_or_request_inner_context(context_did, ctx_ready);
       if (ctx_ready.exists())
         ready_events.insert(ctx_ready);
-      // Set our parent task for the user
-      parent_task = parent_ctx->get_task();
       return false;
     }
 
@@ -8318,21 +8272,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_shard(shard_manager->repl_id, shard_id, get_unique_id());
+        LegionSpy::log_shard(LEGION_DISTRIBUTED_ID_FILTER(shard_manager->did),
+                             shard_id, get_unique_id());
       // Check to see if we are control replicated or not
       if (shard_manager->control_replicated)
       {
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             get_depth(), v->is_inner(), regions, output_regions,
-            parent_req_indexes, virtual_mapped, unique_op_id,
-            execution_fence_event, shard_manager, inline_task,
-            parent_ctx->is_concurrent_context());
-        repl_ctx->add_reference();
+            parent_req_indexes, virtual_mapped, execution_fence_event,
+            shard_manager, inline_task, parent_ctx->is_concurrent_context());
+        repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         repl_ctx->configure_context(mapper, task_priority);
-        runtime->register_local_context(repl_ctx);
         // Save the execution context early since we'll need it
         execution_context = repl_ctx;
         // Wait until all the other shards are ready too
@@ -8349,14 +8302,12 @@ namespace Legion {
     {
       ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
           get_depth(), false/*is inner*/, regions, output_regions,
-          parent_req_indexes, virtual_mapped, unique_op_id,
-          execution_fence_event, shard_manager,
-          false/*inline task*/, true/*implicit*/);
-      repl_ctx->add_reference();
+          parent_req_indexes, virtual_mapped, execution_fence_event,
+          shard_manager, false/*inline task*/, true/*implicit*/);
+      repl_ctx->add_base_gc_ref(SINGLE_TASK_REF);
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       repl_ctx->configure_context(mapper, task_priority);
-      runtime->register_local_context(repl_ctx);
       // Save the execution context early since we'll need it
       execution_context = repl_ctx;
       // Wait until all the other shards are ready too
@@ -10187,7 +10138,6 @@ namespace Legion {
           Predicate::TRUE_PRED, this->task_id, get_provenance());
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this;
-      result->remote_owner_uid = parent_ctx->get_unique_id();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -11192,7 +11142,6 @@ namespace Legion {
       num_uncomplete_points = 0;
       num_uncommitted_points = 0;
       index_owner = NULL;
-      remote_owner_uid = 0;
       remote_unique_id = get_unique_id();
       origin_mapped = false;
       origin_mapped_complete = RtUserEvent::NO_RT_USER_EVENT;
@@ -11459,7 +11408,7 @@ namespace Legion {
       rez.serialize(index_owner);
       rez.serialize(remote_unique_id);
       rez.serialize(origin_mapped);
-      rez.serialize(remote_owner_uid);
+      rez.serialize(parent_ctx->did);
       rez.serialize(internal_space);
       if (!elide_future_return)
       {
@@ -11532,7 +11481,8 @@ namespace Legion {
       derez.deserialize(index_owner);
       derez.deserialize(remote_unique_id); 
       derez.deserialize(origin_mapped);
-      derez.deserialize(remote_owner_uid);
+      DistributedID context_did;
+      derez.deserialize(context_did);
       derez.deserialize(internal_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
@@ -11549,15 +11499,10 @@ namespace Legion {
       if (is_remote())
       {
         RtEvent ctx_ready;
-        parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+        parent_ctx =
+          runtime->find_or_request_inner_context(context_did, ctx_ready);
         if (ctx_ready.exists() && !ctx_ready.has_triggered())
-        {
-          // Need to wait if the profiler is going to want to check this
-          if (runtime->profiler != NULL)
-            ctx_ready.wait();
-          else
-            ready_events.insert(ctx_ready);
-        }
+          ctx_ready.wait();
       }
       else
         parent_ctx = index_owner->parent_ctx;
@@ -11685,7 +11630,6 @@ namespace Legion {
           Predicate::TRUE_PRED, this->task_id, get_provenance());
       result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_owner = this->index_owner;
-      result->remote_owner_uid = this->remote_owner_uid;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -11804,8 +11748,7 @@ namespace Legion {
         assert(finder != future_handles->handles.end());
 #endif
         FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-            parent_ctx->get_context_uid(), context_index, point,
-            get_provenance());
+            parent_ctx->did, context_index, point, get_provenance());
         if (functor != NULL)
         {
 #ifdef DEBUG_LEGION
@@ -12147,7 +12090,7 @@ namespace Legion {
       assert(finder != handles.end());
 #endif
       FutureImpl *impl = runtime->find_or_create_future(finder->second, 
-        parent_ctx->get_context_uid(), context_index, point, get_provenance());
+        parent_ctx->did, context_index, point, get_provenance());
       impl->set_future_result_size(future_size, runtime->address_space);
     }
 

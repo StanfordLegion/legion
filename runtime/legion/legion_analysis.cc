@@ -10172,7 +10172,8 @@ namespace Legion {
         migration_index(0), sample_count(0)
     //--------------------------------------------------------------------------
     {
-      context->add_reference();
+      context->add_nested_resource_ref(did);
+      context->add_nested_gc_ref(did);
       set_expr->add_nested_expression_reference(did);
       region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
@@ -10211,7 +10212,7 @@ namespace Legion {
 #endif
       if (replicated_owner_state != NULL)
         delete replicated_owner_state;
-      if (context->remove_reference())
+      if (context->remove_nested_resource_ref(did))
         delete context;
       if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
@@ -10334,6 +10335,9 @@ namespace Legion {
         delete tracing_postconditions;
         tracing_postconditions = NULL;
       }
+      // No need to check for deletion since we're still holding a 
+      // resource reference to the context as well
+      context->remove_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -11733,7 +11737,6 @@ namespace Legion {
         pack_state(rez, logical_owner_space, set_expr, true/*covers*/,
                     all_ones, true/*pack guards*/);
       }
-      pack_global_ref();
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones);
       // If we have any replicated state then we need to invalidate that
@@ -16389,7 +16392,7 @@ namespace Legion {
           const FieldMask phi_mask = it->second.get_valid_mask();
           FieldMaskSet<DeferredView> true_view;
           true_view.insert(fill_view, phi_mask);
-          PhiView *phi_view = new PhiView(runtime->forest,
+          PhiView *phi_view = new PhiView(runtime,
               runtime->get_available_distributed_id(),
               true_guard, false_guard, std::move(true_view), 
               std::move(it->second));
@@ -17174,7 +17177,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(region_node->handle);
         rez.serialize(context->get_replication_id());
-        rez.serialize(context->get_context_uid());
+        rez.serialize(context->did);
         // There be dragons here!
         // In the case where we first make a new equivalence set on a
         // remote node that is about to be the owner, we can't mark it
@@ -17237,10 +17240,9 @@ namespace Legion {
       derez.deserialize(did);
       LogicalRegion handle;
       derez.deserialize(handle);
-      ReplicationID repl_id;
+      DistributedID repl_id, ctx_did;
       derez.deserialize(repl_id);
-      UniqueID ctx_uid;
-      derez.deserialize(ctx_uid);
+      derez.deserialize(ctx_did);
       RegionNode *node = runtime->forest->get_node(handle);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
@@ -17255,7 +17257,12 @@ namespace Legion {
           context = manager->find_local_context();
       }
       if (context == NULL)
-        context = runtime->find_context(ctx_uid);
+      {
+        RtEvent ctx_ready;
+        context = runtime->find_or_request_inner_context(ctx_did, ctx_ready);
+        if (ctx_ready.exists() && !ctx_ready.has_triggered())
+          ctx_ready.wait();
+      }
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -17415,7 +17422,6 @@ namespace Legion {
             Runtime::merge_events(ready_events));
       else
         set->make_owner(runtime->address_space);
-      set->unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

@@ -2819,8 +2819,8 @@ namespace Legion {
      * reductions, and exchanges of information between the 
      * variaous shard tasks.
      */
-    class ShardManager : public Mapper::SelectShardingFunctorInput, 
-                          public Collectable {
+    class ShardManager : public DistributedCollectable, 
+                         public Mapper::SelectShardingFunctorInput {
     public:
       struct ShardManagerLaunchArgs :
         public LgTaskArgs<ShardManagerLaunchArgs> {
@@ -2832,13 +2832,6 @@ namespace Legion {
             shard(s) { }
       public:
         ShardTask *const shard;
-      };
-      struct ShardManagerDeleteArgs :
-        public LgTaskArgs<ShardManagerDeleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_DELETE_TASK_ID;
-      public:
-        ShardManager *manager;
       };
     public:
       enum BroadcastMessageKind {
@@ -2856,7 +2849,8 @@ namespace Legion {
         unsigned done_count;
       };
     public:
-      ShardManager(Runtime *rt, ReplicationID repl_id, 
+      ShardManager(Runtime *rt, DistributedID did,
+                   CollectiveMapping *mapping,
                    bool control, bool top, bool isomorphic_points,
                    const Domain &shard_domain,
                    std::vector<DomainPoint> &&shard_points,
@@ -2868,6 +2862,8 @@ namespace Legion {
       ~ShardManager(void);
     public:
       ShardManager& operator=(const ShardManager &rhs) = delete;
+    public:
+      void notify_local(void);
     public:
       inline RtBarrier get_shard_task_barrier(void) const
         { return shard_task_barrier; }
@@ -2998,11 +2994,9 @@ namespace Legion {
       void handle_find_or_create_collective_view(Deserializer &derez);
     public:
       static void handle_launch(const void *args);
-      static void handle_delete(const void *args);
     public:
       static void handle_launch(Deserializer &derez, Runtime *rt, 
                                 AddressSpaceID source);
-      static void handle_delete(Deserializer &derez, Runtime *rt);
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_post_execution(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
@@ -3039,9 +3033,6 @@ namespace Legion {
 #endif
       bool perform_semantic_attach(void);
     public:
-      Runtime *const runtime;
-      const ReplicationID repl_id;
-      const AddressSpaceID owner_space;
       const std::vector<DomainPoint> shard_points;
       const std::vector<DomainPoint> sorted_points;
       const std::vector<ShardID> shard_lookup;
@@ -3056,7 +3047,6 @@ namespace Legion {
       // Inheritted from Mapper::SelectShardingFunctorInput
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
-      CollectiveMapping*               collective_mapping;
       std::vector<ShardTask*>          local_shards;
       std::vector<DistributedID>       mapped_equivalence_dids;
     protected:

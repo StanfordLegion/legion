@@ -51,7 +51,7 @@ namespace Legion {
      */
     class LogicalView : public DistributedCollectable {
     public:
-      LogicalView(RegionTreeForest *ctx, DistributedID did,
+      LogicalView(Runtime *runtime, DistributedID did,
                   bool register_now, CollectiveMapping *mapping);
       virtual ~LogicalView(void);
     public:
@@ -116,8 +116,6 @@ namespace Legion {
       static inline bool is_collective_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
       static inline bool is_phi_did(DistributedID did);
-    public:
-      RegionTreeForest *const context;
     protected:
       mutable LocalLock view_lock;
     private:
@@ -167,9 +165,8 @@ namespace Legion {
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
-      InstanceView(RegionTreeForest *ctx, DistributedID did,
-                   UniqueID owner_context, bool register_now, 
-                   CollectiveMapping *mapping);
+      InstanceView(Runtime *runtime, DistributedID did,
+                   bool register_now, CollectiveMapping *mapping);
       virtual ~InstanceView(void);  
     public:
       virtual ApEvent fill_from(FillView *fill_view,
@@ -223,10 +220,6 @@ namespace Legion {
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
-    public:
-      // The ID of the context that made this view
-      // instance made for a virtual mapping
-      const UniqueID owner_context;
     }; 
 
     /**
@@ -236,9 +229,8 @@ namespace Legion {
      */
     class IndividualView : public InstanceView { 
     public:
-      IndividualView(RegionTreeForest *ctx, DistributedID did,
-                     PhysicalManager *man,
-                     AddressSpaceID logical_owner, UniqueID owner_context,
+      IndividualView(Runtime *runtime, DistributedID did,
+                     PhysicalManager *man, AddressSpaceID logical_owner,
                      bool register_now, CollectiveMapping *mapping); 
       virtual ~IndividualView(void);
     public:
@@ -454,8 +446,8 @@ namespace Legion {
     class CollectiveView : public InstanceView, 
                            public InstanceDeletionSubscriber {
     public:
-      CollectiveView(RegionTreeForest *ctx, DistributedID did,
-                     UniqueID owner_context, 
+      CollectiveView(Runtime *runtime, DistributedID did,
+                     DistributedID context_did,
                      const std::vector<IndividualView*> &views,
                      const std::vector<DistributedID> &instances,
                      bool register_now, CollectiveMapping *mapping); 
@@ -705,6 +697,7 @@ namespace Legion {
       static void handle_distribute_pointwise(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
     public:
+      const DistributedID context_did;
       const std::vector<DistributedID> instances;
     protected:
       const std::vector<IndividualView*> local_views;
@@ -919,7 +912,7 @@ namespace Legion {
       static void verify_current_to_filter(const FieldMask &dominated,
                                   EventFieldUsers &current_to_filter);
     public:
-      RegionTreeForest *const context;
+      RegionTreeForest *const forest;
       PhysicalManager *const manager;
       MaterializedView *const inst_view;
       IndexSpaceExpression *const view_expr;
@@ -1027,20 +1020,18 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
       public:
         DeferMaterializedViewArgs(DistributedID d, PhysicalManager *m,
-                                  AddressSpaceID log, UniqueID ctx)
+                                  AddressSpaceID log)
           : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
-            did(d), manager(m), logical_owner(log), context_uid(ctx) { }
+            did(d), manager(m), logical_owner(log) { }
       public:
         const DistributedID did;
         PhysicalManager *const manager;
         const AddressSpaceID logical_owner;
-        const UniqueID context_uid;
       };
     public:
-      MaterializedView(RegionTreeForest *ctx, DistributedID did,
+      MaterializedView(Runtime *runtime, DistributedID did,
                        AddressSpaceID logical_owner, PhysicalManager *manager,
-                       UniqueID owner_context, bool register_now,
-                       CollectiveMapping *mapping = NULL);
+                       bool register_now, CollectiveMapping *mapping = NULL);
       MaterializedView(const MaterializedView &rhs) = delete;
       virtual ~MaterializedView(void);
     public:
@@ -1135,8 +1126,7 @@ namespace Legion {
       static void handle_defer_materialized_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
                                      PhysicalManager *manager,
-                                     AddressSpaceID logical_owner, 
-                                     UniqueID context_uid);
+                                     AddressSpaceID logical_owner); 
     protected: 
       // Use a ExprView DAG to track the current users of this instance
       ExprView *current_users; 
@@ -1192,8 +1182,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = REPLICATED_VIEW_ALLOC;
     public:
-      ReplicatedView(RegionTreeForest *ctx, DistributedID did,
-                     UniqueID owner_context,
+      ReplicatedView(Runtime *runtime, DistributedID did, DistributedID ctx_did,
                      const std::vector<IndividualView*> &views,
                      const std::vector<DistributedID> &instances,
                      bool register_now, CollectiveMapping *mapping);
@@ -1223,20 +1212,18 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_VIEW_TASK_ID;
       public:
         DeferReductionViewArgs(DistributedID d, PhysicalManager *m,
-                               AddressSpaceID log, UniqueID ctx)
+                               AddressSpaceID log)
           : LgTaskArgs<DeferReductionViewArgs>(implicit_provenance),
-            did(d), manager(m), logical_owner(log), context_uid(ctx) { }
+            did(d), manager(m), logical_owner(log) { }
       public:
         const DistributedID did;
         PhysicalManager *const manager;
         const AddressSpaceID logical_owner;
-        const UniqueID context_uid;
       };
     public:
-      ReductionView(RegionTreeForest *ctx, DistributedID did,
+      ReductionView(Runtime *runtime, DistributedID did,
                     AddressSpaceID logical_owner, PhysicalManager *manager,
-                    UniqueID owner_context, bool register_now,
-                    CollectiveMapping *mapping = NULL);
+                    bool register_now, CollectiveMapping *mapping = NULL);
       ReductionView(const ReductionView &rhs) = delete;
       virtual ~ReductionView(void);
     public:
@@ -1326,8 +1313,7 @@ namespace Legion {
       static void handle_defer_reduction_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
                                      PhysicalManager *manager,
-                                     AddressSpaceID logical_owner, 
-                                     UniqueID context_uid);
+                                     AddressSpaceID logical_owner); 
     public:
       FillView *const fill_view;
     protected:
@@ -1346,8 +1332,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = ALLREDUCE_VIEW_ALLOC;
     public:
-      AllreduceView(RegionTreeForest *ctx, DistributedID did,
-                    UniqueID owner_context,
+      AllreduceView(Runtime *runtime, DistributedID did, DistributedID ctx_did,
                     const std::vector<IndividualView*> &views,
                     const std::vector<DistributedID> &instances,
                     bool register_now, CollectiveMapping *mapping,
@@ -1621,7 +1606,7 @@ namespace Legion {
      */
     class DeferredView : public LogicalView {
     public:
-      DeferredView(RegionTreeForest *ctx, DistributedID did,
+      DeferredView(Runtime *runtime, DistributedID did,
                    bool register_now, CollectiveMapping *mapping = NULL);
       virtual ~DeferredView(void);
     public:
@@ -1672,14 +1657,14 @@ namespace Legion {
       };
     public:
       // Don't know the fill value yet, will be set later
-      FillView(RegionTreeForest *ctx, DistributedID did,
+      FillView(Runtime *runtime, DistributedID did,
 #ifdef LEGION_SPY
                UniqueID fill_op_uid,
 #endif
                bool register_now,
                CollectiveMapping *mapping = NULL);
       // Already know the fill value
-      FillView(RegionTreeForest *ctx, DistributedID did,
+      FillView(Runtime *runtime, DistributedID did,
 #ifdef LEGION_SPY
                UniqueID fill_op_uid,
 #endif
@@ -1761,7 +1746,7 @@ namespace Legion {
         PhiView *const view;
       };
     public:
-      PhiView(RegionTreeForest *ctx, DistributedID did,
+      PhiView(Runtime *runtime, DistributedID did,
               PredEvent true_guard, PredEvent false_guard,
               FieldMaskSet<DeferredView> &&true_views,
               FieldMaskSet<DeferredView> &&false_views,
@@ -1844,7 +1829,7 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                           MATERIALIZED_VIEW_DC);
     }
 
@@ -1852,7 +1837,7 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_reduction_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                               REDUCTION_VIEW_DC);
     }
 
@@ -1860,7 +1845,7 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_replicated_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                           REPLICATED_VIEW_DC);
     }
 
@@ -1868,7 +1853,7 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_allreduce_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                               ALLREDUCE_VIEW_DC);
     }
 
@@ -1890,7 +1875,7 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_fill_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                                     FILL_VIEW_DC);
     }
 
@@ -1898,7 +1883,8 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_phi_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == PHI_VIEW_DC);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
+                                                    PHI_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -2120,7 +2106,7 @@ namespace Legion {
           // Neither one covers so we actually need to do the
           // full intersection test and see if next covers
           IndexSpaceExpression *overlap = 
-            context->intersect_index_spaces(expr, user->expr);
+            forest->intersect_index_spaces(expr, user->expr);
           if (overlap->is_empty())
             return false;
         }
@@ -2172,7 +2158,7 @@ namespace Legion {
       if (!user->covers && !next_covers)
       {
         IndexSpaceExpression *overlap = 
-          context->intersect_index_spaces(expr, user->expr);
+          forest->intersect_index_spaces(expr, user->expr);
         if (overlap->is_empty())
           return false;
       }
