@@ -617,6 +617,7 @@ namespace Legion {
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
       void register_dependence(Operation *consumer_op);
+      void process_future_response(Deserializer &derez);
     public:
       RtEvent record_future_map_registered(void);
       static void handle_future_map_future_request(Deserializer &derez,
