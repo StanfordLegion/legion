@@ -2337,7 +2337,8 @@ namespace Legion {
       if ((execution_context != NULL) && 
           execution_context->remove_base_gc_ref(SINGLE_TASK_REF))
         delete execution_context; 
-      if ((shard_manager != NULL) && shard_manager->remove_reference())
+      if ((shard_manager != NULL) && 
+          shard_manager->remove_base_gc_ref(SINGLE_TASK_REF))
         delete shard_manager;
 #ifdef DEBUG_LEGION
       premapped_instances.clear();
@@ -3740,7 +3741,7 @@ namespace Legion {
       assert(shard_manager == NULL);
 #endif
       shard_manager = manager;
-      shard_manager->add_reference();
+      shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -3882,7 +3883,8 @@ namespace Legion {
 #endif
         // First make a shard manager to handle the all the shard tasks
         const size_t total_shards = output.task_mappings.size();
-        const ReplicationID repl_context = runtime->get_unique_replication_id();
+        const DistributedID repl_context = 
+          runtime->get_available_distributed_id();
         if (runtime->legion_spy_enabled)
           LegionSpy::log_replication(get_unique_id(), repl_context,
                                      !output.control_replication_map.empty());
@@ -3957,13 +3959,27 @@ namespace Legion {
             shard_lookup.push_back(idx);
           }
         }
+        // Construct the collective mapping
+        std::vector<AddressSpaceID> spaces(output.task_mappings.size());
+        for (unsigned idx = 0; idx < spaces.size(); idx++)
+          spaces[idx] = runtime->find_address_space(
+              output.task_mappings[idx].target_procs.front());
+        std::sort(spaces.begin(), spaces.end());
+        // Uniquify them
+        std::vector<AddressSpaceID>::iterator last = 
+          std::unique(spaces.begin(), spaces.end());
+        spaces.erase(last, spaces.end());
+        // The shard manager will take ownership of this
+        CollectiveMapping *mapping =
+          new CollectiveMapping(spaces, runtime->legion_collective_radix);
         if (!output.control_replication_map.empty())
         {
-          shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
-              is_top_level_task(), isomorphic_points, output.shard_domain,
-              std::move(output.shard_points), std::move(sorted_points),
-              std::move(shard_lookup), runtime->address_space, this);
-          shard_manager->add_reference();
+          shard_manager = new ShardManager(runtime, repl_context, mapping,
+              true/*cr*/, is_top_level_task(), isomorphic_points, 
+              output.shard_domain, std::move(output.shard_points), 
+              std::move(sorted_points), std::move(shard_lookup), 
+              runtime->address_space, this);
+          shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
           if (output.control_replication_map.size() != total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Mapper %s specified a non-empty control replication "
@@ -4013,11 +4029,12 @@ namespace Legion {
         }
         else
         {
-          shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
-              is_top_level_task(), isomorphic_points, output.shard_domain,
-              std::move(output.shard_points), std::move(sorted_points),
-              std::move(shard_lookup), runtime->address_space, this);
-          shard_manager->add_reference();
+          shard_manager = new ShardManager(runtime, repl_context, mapping,
+              false/*cr*/, is_top_level_task(), isomorphic_points, 
+              output.shard_domain, std::move(output.shard_points),
+              std::move(sorted_points), std::move(shard_lookup), 
+              runtime->address_space, this);
+          shard_manager->add_base_gc_ref(SINGLE_TASK_REF);
           if (!runtime->unsafe_mapper)
           {
             // Currently we only support non-control replication of 
@@ -7938,9 +7955,6 @@ namespace Legion {
     ShardTask::~ShardTask(void)
     //--------------------------------------------------------------------------
     {
-      // Set our shard manager to NULL since we are not supposed to delete it
-      shard_manager = NULL;
-      SingleTask::deactivate(false/*free*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7963,7 +7977,9 @@ namespace Legion {
     void ShardTask::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      // Set our shard manager to NULL since we are not supposed to delete it
+      shard_manager = NULL;
+      SingleTask::deactivate(false/*free*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8256,7 +8272,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_shard(shard_manager->repl_id, shard_id, get_unique_id());
+        LegionSpy::log_shard(LEGION_DISTRIBUTED_ID_FILTER(shard_manager->did),
+                             shard_id, get_unique_id());
       // Check to see if we are control replicated or not
       if (shard_manager->control_replicated)
       {

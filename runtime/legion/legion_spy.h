@@ -941,17 +941,17 @@ namespace Legion {
 #endif
       }
 
-      static inline void log_replication(UniqueID uid, ReplicationID repl_id,
+      static inline void log_replication(UniqueID uid, DistributedID repl_id,
                                          bool control_replicated)
       {
-        log_spy.print("Replicate Task %llu %d %d", uid, repl_id,
+        log_spy.print("Replicate Task %llu %llu %d", uid, repl_id,
                                     (control_replicated ? 1 : 0));
       }
 
-      static inline void log_shard(ReplicationID repl_id, 
+      static inline void log_shard(DistributedID repl_id, 
                                    ShardID sid, UniqueID uid)
       {
-        log_spy.print("Replicate Shard %d %d %llu", repl_id, sid, uid);
+        log_spy.print("Replicate Shard %llu %d %llu", repl_id, sid, uid);
       }
 
       static inline void log_owner_shard(UniqueID uid, ShardID sid)

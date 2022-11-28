@@ -3354,7 +3354,6 @@ namespace Legion {
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
       void send_replicate_launch(AddressSpaceID target, Serializer &rez);
-      void send_replicate_delete(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
       void send_replicate_post_execution(AddressSpaceID target,
                                          Serializer &rez);
@@ -3701,7 +3700,6 @@ namespace Legion {
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
       void handle_replicate_launch(Deserializer &derez,AddressSpaceID source);
-      void handle_replicate_delete(Deserializer &derez);
       void handle_replicate_post_mapped(Deserializer &derez);
       void handle_replicate_post_execution(Deserializer &derez);
       void handle_replicate_trigger_complete(Deserializer &derez);
@@ -3882,6 +3880,7 @@ namespace Legion {
                                                       RtEvent &ready);
       InnerContext* find_or_request_inner_context(DistributedID did,
                                                   RtEvent &ready);
+      ShardManager* find_shard_manager(DistributedID did, bool can_fail=false);
     protected:
       template<typename T, MessageKind MK>
       DistributedCollectable* find_or_request_distributed_collectable(
@@ -4089,14 +4088,7 @@ namespace Legion {
       RegionTreeContext allocate_region_tree_context(void);
       void free_region_tree_context(RegionTreeContext tree_ctx); 
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
-        { return (uid % total_address_spaces); }
-    public:
-      void register_shard_manager(ReplicationID repl_id, 
-                                  ShardManager *manager);
-      void unregister_shard_manager(ReplicationID repl_id, 
-                                    bool reclaim_id);
-      ShardManager* find_shard_manager(ReplicationID repl_id, 
-                                       bool can_fail = false);
+        { return (uid % total_address_spaces); } 
     public:
       bool is_local(Processor proc) const;
       bool is_visible_memory(Processor proc, Memory mem);
@@ -4113,7 +4105,6 @@ namespace Legion {
       CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
       IndexSpaceExprID   get_unique_index_space_expr_id(void);
-      ReplicationID      get_unique_replication_id(void);
 #ifdef LEGION_SPY
       unsigned           get_unique_indirections_id(void);
 #endif
@@ -4251,7 +4242,6 @@ namespace Legion {
       std::atomic<unsigned> unique_index_tree_id;
       std::atomic<unsigned> unique_region_tree_id;
       std::atomic<unsigned> unique_field_id; 
-      std::atomic<unsigned> unique_control_replication_id;
       std::atomic<unsigned long long> unique_operation_id;
       std::atomic<unsigned long long> unique_code_descriptor_id;
       std::atomic<unsigned long long> unique_constraint_id;
@@ -4410,7 +4400,6 @@ namespace Legion {
     protected:
       // Keep track of managers for control replication execution
       mutable LocalLock shard_lock;
-      std::map<ReplicationID,ShardManager*> shard_managers;
       std::map<TaskID,ImplicitShardManager*> implicit_shard_managers;
     protected:
       // For generating random numbers
@@ -6029,8 +6018,6 @@ namespace Legion {
           break;
         case SEND_REPLICATE_LAUNCH:
           return TASK_VIRTUAL_CHANNEL;
-        case SEND_REPLICATE_DELETE:
-          break;
         case SEND_REPLICATE_POST_MAPPED:
           break;
         case SEND_REPLICATE_POST_EXECUTION:

@@ -10953,7 +10953,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      ReplicationID repl_id;
+      DistributedID repl_id;
       derez.deserialize(repl_id);
       DistributedID context_did;
       derez.deserialize(context_did);
@@ -12210,6 +12210,7 @@ namespace Legion {
       collective_guard_reentrant = false;
       logical_guard_reentrant = false;
 #endif
+      shard_manager->add_nested_resource_ref(did);
       size_t num_barriers = LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS;
       close_mapped_barriers.resize(num_barriers);
       refinement_ready_barriers.resize(num_barriers);
@@ -12228,6 +12229,8 @@ namespace Legion {
     ReplicateContext::~ReplicateContext(void)
     //--------------------------------------------------------------------------
     {
+      if (shard_manager->remove_nested_resource_ref(did))
+        delete shard_manager;
       if (returned_resource_ready_barrier.exists())
         returned_resource_ready_barrier.destroy_barrier();
       if (returned_resource_mapped_barrier.exists())
@@ -12237,10 +12240,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplicationID ReplicateContext::get_replication_id(void) const
+    DistributedID ReplicateContext::get_replication_id(void) const
     //--------------------------------------------------------------------------
     {
-      return shard_manager->repl_id;
+      return shard_manager->did;
     }
 
 #ifdef LEGION_USE_LIBDL
@@ -19736,7 +19739,7 @@ namespace Legion {
         CollectiveResult *result = new CollectiveResult(instances);
         result->add_reference();
         Serializer rez;
-        rez.serialize(shard_manager->repl_id);
+        rez.serialize(shard_manager->did);
         rez.serialize(tid_shard);
         rez.serialize(tid);
         rez.serialize<size_t>(instances.size());
@@ -20044,7 +20047,7 @@ namespace Legion {
       rez.serialize<size_t>(total_shards);
       rez.serialize(shard_manager->shard_points[owner_shard->shard_id]);
       rez.serialize(shard_manager->shard_domain);
-      rez.serialize(shard_manager->repl_id);
+      rez.serialize(shard_manager->did);
     }
 
     //--------------------------------------------------------------------------
@@ -21195,7 +21198,7 @@ namespace Legion {
         // shard manager to prevent it being collected before we're
         // done handling all the collectives
         if (collectives.empty())
-          shard_manager->add_reference();
+          shard_manager->add_nested_gc_ref(did);
         collectives[collective->collective_index] = collective;
         std::map<CollectiveID,std::vector<std::pair<void*,size_t> > >::
           iterator finder = pending_collective_updates.find(
@@ -21260,7 +21263,7 @@ namespace Legion {
           remove_reference = collectives.empty();
         }
       }
-      if (remove_reference && shard_manager->remove_reference())
+      if (remove_reference && shard_manager->remove_nested_gc_ref(did))
         delete shard_manager;
     }
 
@@ -21397,7 +21400,7 @@ namespace Legion {
       {
         // We're not the owner so forward this to the owner shard
         Serializer rez;
-        rez.serialize(shard_manager->repl_id);
+        rez.serialize(shard_manager->did);
         rez.serialize(target_shard);
         rez.serialize(region->handle);
         rez.serialize(target);

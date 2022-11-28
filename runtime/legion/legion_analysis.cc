@@ -17240,9 +17240,8 @@ namespace Legion {
       derez.deserialize(did);
       LogicalRegion handle;
       derez.deserialize(handle);
-      ReplicationID repl_id;
+      DistributedID repl_id, ctx_did;
       derez.deserialize(repl_id);
-      DistributedID ctx_did;
       derez.deserialize(ctx_did);
       RegionNode *node = runtime->forest->get_node(handle);
       AddressSpaceID logical_owner;

@@ -76,6 +76,7 @@ partition_pat   = re.compile(prefix + r'GC Partition (?P<did>[0-9]+) (?P<node>[0
 # Contexts
 inner_context_pat = re.compile(prefix + r'GC Inner Context (?P<did>[0-9]+) (?P<node>[0-9]+)')
 leaf_context_pat = re.compile(prefix + r'GC Leaf Context (?P<did>[0-9]+) (?P<node>[0-9]+)')
+shard_manager_pat = re.compile(prefix + r'GC Shard Manager (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Source Kinds
 source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_ ]+)')
 # Deletion Pattern
@@ -684,6 +685,13 @@ class LeafContext(Base):
     def __repr__(self):
         return 'Leaf Context '+str(self.did)+' (Node='+str(self.node)+')'
 
+class ShardManager(Base):
+    def __init__(self, did, node):
+        super(ShardManager,self).__init__(did, node)
+
+    def __repr__(self):
+        return 'Shard Manager '+str(self.did)+' (Node='+str(self.node)+')'
+
 class Instance(object):
     def __init__(self, iid, mem, kind):
         self.iid = iid
@@ -712,6 +720,7 @@ class State(object):
         self.partitions = {}
         self.inner_contexts = {}
         self.leaf_contexts = {}
+        self.shard_managers = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:
@@ -866,6 +875,11 @@ class State(object):
                     self.log_leaf_context(long_type(m.group('did')),
                                           long_type(m.group('node')))
                     continue
+                m = shard_manager_pat.match(line)
+                if m is not None:
+                    self.log_shard_manager(long_type(m.group('did')),
+                                           long_type(m.group('node')))
+                    continue
                 m = source_kind_pat.match(line)
                 if m is not None:
                     self.log_source_kind(int(m.group('kind')),
@@ -921,6 +935,8 @@ class State(object):
             context.update_nested_references(self)
         for context in itervalues(self.leaf_contexts):
             context.update_nested_references(self)
+        for manager in itervalues(self.shard_managers):
+            manager.update_nested_references(self)
         # Run the garbage collector
         gc.collect()
 
@@ -1009,6 +1025,9 @@ class State(object):
 
     def log_leaf_context(self, did, node):
         self.get_leaf_context(did, node)
+
+    def log_shard_manager(self, did, node):
+        self.get_shard_manager(did, node)
 
     def log_source_kind(self, kind, name):
         if kind not in self.src_names:
@@ -1149,6 +1168,15 @@ class State(object):
                 del self.unknowns[key]
         return self.leaf_contexts[key]
 
+    def get_shard_manager(self, did, node):
+        key = (did,node)
+        if key not in self.shard_managers:
+            self.shard_managers[key] = ShardManager(did, node)
+            if key in self.unknowns:
+                self.shard_managers[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.shard_managers[key]
+
     def get_obj(self, did, node):
         key = (did,node)
         if key in self.views:
@@ -1179,6 +1207,8 @@ class State(object):
             return self.inner_contexts[key]
         if key in self.leaf_contexts:
             return self.leaf_contexts[key]
+        if key in self.shard_managers:
+            return self.shard_managers[key]
         if key in self.unknowns:
             return self.unknowns[key]
         self.unknowns[key] = Base(did, node)
@@ -1227,6 +1257,9 @@ class State(object):
         for context in itervalues(self.leaf_contexts):
             print("Checking for cycles in "+repr(context))
             context.check_for_cycles(assert_on_error)
+        for manager in itervalues(self.shard_managers):
+            print("Checking for cycles in "+repr(manager))
+            manager.check_for_cycles(assert_on_error)
         print("NO CYCLES")
 
     def check_for_leaks(self, assert_on_error, verbose): 
@@ -1245,6 +1278,7 @@ class State(object):
         leaked_partitions = 0
         leaked_inner = 0
         leaked_leaves = 0
+        leaked_shards = 0
         for future in itervalues(self.futures):
             if not future.check_for_leaks(assert_on_error, verbose):
                 leaked_futures += 1
@@ -1291,6 +1325,9 @@ class State(object):
         for context in itervalues(self.leaf_contexts):
             if not context.check_for_leaks(assert_on_error, verbose):
                 leaked_leaves += 1
+        for manager in itervalues(self.shard_managers):
+            if not manager.check_for_leaks(assert_on_error, verbose):
+                leaked_shards += 1
         print("LEAK SUMMARY")
         if leaked_futures > 0:
             print("  LEAKED FUTURES: "+str(leaked_futures))
@@ -1367,6 +1404,11 @@ class State(object):
             if assert_on_error: assert False
         else:
             print("  Leaked Leaf Contexts: "+str(leaked_leaves))
+        if leaked_shards > 0:
+            print("  LEAKED SHARD MANAGERS: "+str(leaked_shards))
+            if assert_on_error: assert False
+        else:
+            print("  Leaked Shard Managers: "+str(leaked_shards))
 
 
 def main():

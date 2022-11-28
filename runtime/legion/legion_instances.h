@@ -521,10 +521,9 @@ namespace Legion {
     protected:
       mutable LocalLock inst_lock;
       std::set<InstanceDeletionSubscriber*> subscribers;
-      typedef std::pair<ReplicationID,DistributedID> ContextKey;
       typedef std::pair<IndividualView*,unsigned> ViewEntry;
-      std::map<ContextKey,ViewEntry> context_views;
-      std::map<ReplicationID,RtUserEvent> pending_views;
+      std::map<DistributedID,ViewEntry> context_views;
+      std::map<DistributedID,RtUserEvent> pending_views;
     protected:
       // Stuff for garbage collection
       GarbageCollectionState gc_state; 

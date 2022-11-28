@@ -41,6 +41,7 @@ namespace Legion {
       PHI_VIEW_DC = 0xF,
       LEAF_CONTEXT_DC = 0x10,
       INNER_CONTEXT_DC = 0x11,
+      SHARD_MANAGER_DC = 0x12,
       // be careful making this last one bigger than 0x20! see instance encoding
       DIST_TYPE_LAST_DC = 0x20,  // must be last
     };

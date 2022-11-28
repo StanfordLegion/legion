@@ -4150,7 +4150,7 @@ namespace Legion {
       assert(shard_domain != NULL);
 #endif
       shard_domain->add_nested_valid_ref(did);
-      shard_manager->add_reference();
+      shard_manager->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -4171,7 +4171,7 @@ namespace Legion {
       assert(shard_domain != NULL);
 #endif
       shard_domain->add_nested_valid_ref(did);
-      shard_manager->add_reference();
+      shard_manager->add_nested_gc_ref(did);
     }
 
     //--------------------------------------------------------------------------
@@ -4180,7 +4180,7 @@ namespace Legion {
     { 
       if (shard_domain->remove_nested_valid_ref(did))
         delete shard_domain;
-      if (shard_manager->remove_reference())
+      if (shard_manager->remove_nested_gc_ref(did))
         delete shard_manager;
       if (own_sharding_function)
         delete sharding_function.load();
@@ -6783,7 +6783,8 @@ namespace Legion {
                         task_id, mapper_id, local_proxy, local_task_name);
       top_context = implicit_top->get_context();
       // Now we need to make the shard manager
-      const ReplicationID repl_context = runtime->get_unique_replication_id();
+      const DistributedID repl_context = 
+        runtime->get_available_distributed_id();
       // Fill in the shard points
       std::vector<DomainPoint> points(total_shards);
       std::vector<DomainPoint> sorted_points;
@@ -6817,10 +6818,17 @@ namespace Legion {
       Domain shard_domain;
       if (isomorphic_points)
         shard_domain = Domain(DomainPoint(0),DomainPoint(total_shards-1));
-      ShardManager *manager = new ShardManager(runtime, repl_context,true/*cr*/,
-         true/*top level*/, isomorphic_points, shard_domain, std::move(points),
-         std::move(sorted_points), std::move(shard_lookup),
-         runtime->address_space, implicit_top);
+      // Make a collective mapping that the shard manager will own
+      std::vector<AddressSpaceID> spaces(runtime->total_address_spaces);
+      for (unsigned idx = 0; idx < spaces.size(); idx++)
+        spaces[idx] = idx;
+      // The shard manager will take ownership of this
+      CollectiveMapping *mapping =
+        new CollectiveMapping(spaces, runtime->legion_collective_radix);
+      ShardManager *manager = new ShardManager(runtime, repl_context,
+          mapping, true/*cr*/, true/*top level*/, isomorphic_points, 
+          shard_domain, std::move(points), std::move(sorted_points),
+          std::move(shard_lookup), runtime->address_space, implicit_top);
       shard_manager = manager;
       implicit_top->set_shard_manager(manager);
       // This is a dummy shard_mapping for now since we won't actually need
@@ -6857,7 +6865,7 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(it->second);
             rez.serialize(top_context->did);
-            rez.serialize(repl_context);
+            rez.serialize(manager->did);
           }
           runtime->send_control_replicate_implicit_response(it->first, rez);
         }
@@ -6969,7 +6977,7 @@ namespace Legion {
       derez.deserialize(manager);
       DistributedID context_did;
       derez.deserialize(context_did);
-      ReplicationID repl_id;
+      DistributedID repl_id;
       derez.deserialize(repl_id);
       ShardManager *shard_manager = runtime->find_shard_manager(repl_id);
       RtEvent context_ready;
@@ -12720,11 +12728,6 @@ namespace Legion {
               runtime->handle_replicate_launch(derez, remote_address_space);
               break;
             }
-          case SEND_REPLICATE_DELETE:
-            {
-              runtime->handle_replicate_delete(derez);
-              break;
-            }
           case SEND_REPLICATE_POST_MAPPED:
             {
               runtime->handle_replicate_post_mapped(derez);
@@ -16263,7 +16266,6 @@ namespace Legion {
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_control_replication_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
@@ -22754,14 +22756,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_replicate_delete(AddressSpaceID target,Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REPLICATE_DELETE>(
-                                                rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_replicate_post_mapped(AddressSpaceID target, 
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25022,13 +25016,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_replicate_delete(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ShardManager::handle_delete(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_replicate_post_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -26432,6 +26419,28 @@ namespace Legion {
         RemoteContext, SEND_REMOTE_CONTEXT_REQUEST>(did, ready);
       // Have to static cast since the memory might not have been initialized
       return static_cast<InnerContext*>(dc);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardManager* Runtime::find_shard_manager(DistributedID did, bool can_fail)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == SHARD_MANAGER_DC);
+#endif
+      if (can_fail)
+      {
+        const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
+        AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+        std::map<DistributedID,DistributedCollectable*>::const_iterator 
+          finder = dist_collectables.find(to_find);
+        if (finder == dist_collectables.end())
+          return NULL;
+        else
+          return static_cast<ShardManager*>(finder->second);
+      }
+      else
+        return static_cast<ShardManager*>(find_distributed_collectable(did));
     }
 
     //--------------------------------------------------------------------------
@@ -28144,49 +28153,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_shard_manager(ReplicationID repl_id, 
-                                         ShardManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(shard_lock);
-#ifdef DEBUG_LEGION
-      assert(shard_managers.find(repl_id) == shard_managers.end());
-#endif
-      shard_managers[repl_id] = manager;
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::unregister_shard_manager(
-                                         ReplicationID repl_id, bool reclaim_id)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(shard_lock);
-      std::map<ReplicationID,ShardManager*>::iterator
-        finder = shard_managers.find(repl_id);
-#ifdef DEBUG_LEGION
-      assert(finder != shard_managers.end());
-#endif
-      shard_managers.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardManager* Runtime::find_shard_manager(ReplicationID repl_id, 
-                                              bool can_fail)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock s_lock(shard_lock,1,false/*exclusive*/);
-      std::map<ReplicationID,ShardManager*>::const_iterator
-        finder = shard_managers.find(repl_id);
-      if (finder == shard_managers.end())
-      {
-        if (can_fail)
-          return NULL;
-        assert(false); // Should never get here
-      }
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::is_local(Processor proc) const
     //--------------------------------------------------------------------------
     {
@@ -28450,19 +28416,6 @@ namespace Legion {
       return result;
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    ReplicationID Runtime::get_unique_replication_id(void)
-    //--------------------------------------------------------------------------
-    {
-      ReplicationID result = 
-        unique_control_replication_id.fetch_add(runtime_stride); 
-#ifdef DEBUG_LEGION
-      assert(result > 0); // should never be giving out zero
-      assert(result <= unique_control_replication_id);
-#endif
-      return result;
-    }
 
     //--------------------------------------------------------------------------
     LegionErrorType Runtime::verify_requirement(
@@ -31722,11 +31675,6 @@ namespace Legion {
         case LG_CONTROL_REP_LAUNCH_TASK_ID:
           {
             ShardManager::handle_launch(args);
-            break;
-          }
-        case LG_CONTROL_REP_DELETE_TASK_ID:
-          {
-            ShardManager::handle_delete(args);
             break;
           }
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:

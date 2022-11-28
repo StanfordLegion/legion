@@ -7406,7 +7406,7 @@ namespace Legion {
           RtEvent subscribed = Runtime::create_rt_user_event();
           ShardManager *manager = repl_ctx->shard_manager;
           Serializer rez;
-          rez.serialize(manager->repl_id);
+          rez.serialize(manager->did);
           rez.serialize(owner_shard);
           rez.serialize(template_index);
           rez.serialize(REMOTE_BARRIER_SUBSCRIBE);
@@ -7731,7 +7731,7 @@ namespace Legion {
             if (!PhysicalTemplate::are_read_only_users(inst_users))
             {
               Serializer rez;
-              rez.serialize(manager->repl_id);
+              rez.serialize(manager->did);
               rez.serialize(source_shard);
               rez.serialize(template_index);
               rez.serialize(READ_ONLY_USERS_RESPONSE);
@@ -8190,7 +8190,7 @@ namespace Legion {
                 nit = notifications.begin(); nit != notifications.end(); nit++)
           {
             Serializer rez;
-            rez.serialize(manager->repl_id);
+            rez.serialize(manager->did);
             rez.serialize(nit->first);
             rez.serialize(template_index);
             rez.serialize(FRONTIER_BARRIER_REFRESH);
@@ -8320,7 +8320,7 @@ namespace Legion {
         if (nit->first != local_shard)
         {
           Serializer rez;
-          rez.serialize(manager->repl_id);
+          rez.serialize(manager->did);
           rez.serialize(nit->first);
           rez.serialize(template_index);
           rez.serialize(TEMPLATE_BARRIER_REFRESH);
@@ -8458,7 +8458,7 @@ namespace Legion {
         RtUserEvent done = Runtime::create_rt_user_event();
         ShardManager *manager = repl_ctx->shard_manager;
         Serializer rez;
-        rez.serialize(manager->repl_id);
+        rez.serialize(manager->did);
         rez.serialize(target_shard);
         rez.serialize(template_index);
         rez.serialize(UPDATE_MUTATED_INST);
@@ -8722,7 +8722,7 @@ namespace Legion {
           const RtUserEvent done = Runtime::create_rt_user_event();
           const AddressSpaceID target = manager->get_shard_space(sit->first);
           Serializer rez;
-          rez.serialize(manager->repl_id);
+          rez.serialize(manager->did);
           rez.serialize(sit->first);
           rez.serialize(template_index);
           rez.serialize(READ_ONLY_USERS_REQUEST);

@@ -1074,7 +1074,7 @@ namespace Legion {
         { return context_configuration.max_templates_per_trace; }
       void record_physical_trace_replay(RtEvent ready, bool replay);
       bool is_replaying_physical_trace(void);
-      virtual ReplicationID get_replication_id(void) const { return 0; }
+      virtual DistributedID get_replication_id(void) const { return 0; }
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
     public: // Garbage collection methods
@@ -2348,7 +2348,7 @@ namespace Legion {
         { return shard_collective_participating_shards; }
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; } 
-      virtual ReplicationID get_replication_id(void) const;
+      virtual DistributedID get_replication_id(void) const;
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -3348,7 +3348,7 @@ namespace Legion {
     public:
       virtual Task* get_task(void);
       virtual UniqueID get_unique_id(void) const;
-      virtual ReplicationID get_replication_id(void) const { return repl_id; }
+      virtual DistributedID get_replication_id(void) const { return repl_id; }
       void unpack_remote_context(Deserializer &derez);
       virtual InnerContext* find_parent_context(void);
     public:
@@ -3417,7 +3417,7 @@ namespace Legion {
       size_t total_shards;
       DomainPoint shard_point;
       Domain shard_domain;
-      ReplicationID repl_id;
+      DistributedID repl_id;
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     };
 
