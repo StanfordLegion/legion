@@ -1162,7 +1162,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* ReplIndexTask::create_future_map(TaskContext *ctx,
+    FutureMap ReplIndexTask::create_future_map(TaskContext *ctx,
                                 IndexSpace launch_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
@@ -4988,7 +4988,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* ReplMustEpochOp::create_future_map(TaskContext *ctx,
+    FutureMap ReplMustEpochOp::create_future_map(TaskContext *ctx,
                                 IndexSpace launch_space, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
@@ -9463,73 +9463,108 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplFutureMapImpl* ShardManager::deduplicate_future_map_creation(
+    FutureMap ShardManager::deduplicate_future_map_creation(
         ReplicateContext *ctx, Operation *op, IndexSpaceNode *domain,
         IndexSpaceNode *shard_domain, DistributedID did, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      if (local_shards.size() == 1)
-        return new ReplFutureMapImpl(ctx, this, op, domain, shard_domain,
-                            runtime, did, provenance, collective_mapping);
-      AutoLock m_lock(manager_lock);
-      // See if we already have this here or not
-      std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >::iterator
-        finder = created_future_maps.find(did);
-      if (finder != created_future_maps.end())
+      if (local_shards.size() > 1)
       {
-        ReplFutureMapImpl *result = finder->second.first;
+        AutoLock m_lock(manager_lock);
+        // See if we already have this here or not
+        std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >::iterator
+          finder = created_future_maps.find(did);
+        if (finder != created_future_maps.end())
+        {
+          FutureMap result(finder->second.first);
 #ifdef DEBUG_LEGION
-        assert(finder->second.second > 0);
+          assert(finder->second.second > 0);
 #endif
-        if (--finder->second.second == 0)
-          created_future_maps.erase(finder);
+          if (--finder->second.second == 0)
+          {
+            if (finder->second.first->remove_base_gc_ref(RUNTIME_REF))
+              assert(false); // should never be deleted
+            created_future_maps.erase(finder);
+          }
+          return result;
+        }
+        // Didn't find it so make it
+        ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, op,
+            domain, shard_domain, runtime, did, provenance, collective_mapping);
+        // Add a reference to it to keep it from being deleted and then 
+        // register it with the runtime
+        result->add_base_gc_ref(RUNTIME_REF);
+        result->register_with_runtime();
+        // Record it for the shards that come later
+        std::pair<ReplFutureMapImpl*,size_t> &pending = 
+          created_future_maps[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+        return FutureMap(result);
+      }
+      else
+      {
+        ReplFutureMapImpl *impl = new ReplFutureMapImpl(ctx, this, op, domain,
+            shard_domain, runtime, did, provenance, collective_mapping);
+        // Get a reference on it before we register it
+        FutureMap result(impl);
+        impl->register_with_runtime();
         return result;
       }
-      // Didn't find it so make it
-      ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, op,
-          domain, shard_domain, runtime, did, provenance, collective_mapping);
-      // Record it for the shards that come later
-      std::pair<ReplFutureMapImpl*,size_t> &pending = 
-        created_future_maps[did];
-      pending.first = result;
-      pending.second = local_shards.size() - 1;
-      return result;
     }
 
     //--------------------------------------------------------------------------
-    ReplFutureMapImpl* ShardManager::deduplicate_future_map_creation(
+    FutureMap ShardManager::deduplicate_future_map_creation(
         ReplicateContext *ctx, IndexSpaceNode *domain,
         IndexSpaceNode *shard_domain, size_t index,
         DistributedID did, ApEvent completion, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
-      if (local_shards.size() == 1)
-        return new ReplFutureMapImpl(ctx, this, runtime, domain, shard_domain,
-                      did, index, completion, provenance, collective_mapping);
-      AutoLock m_lock(manager_lock);
-      // See if we already have this here or not
-      std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >::iterator
-        finder = created_future_maps.find(did);
-      if (finder != created_future_maps.end())
+      if (local_shards.size() > 1)
       {
-        ReplFutureMapImpl *result = finder->second.first;
+        AutoLock m_lock(manager_lock);
+        // See if we already have this here or not
+        std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >::iterator
+          finder = created_future_maps.find(did);
+        if (finder != created_future_maps.end())
+        {
+          FutureMap result(finder->second.first);
 #ifdef DEBUG_LEGION
-        assert(finder->second.second > 0);
+          assert(finder->second.second > 0);
 #endif
-        if (--finder->second.second == 0)
-          created_future_maps.erase(finder);
+          if (--finder->second.second == 0)
+          {
+            if (finder->second.first->remove_base_gc_ref(RUNTIME_REF))
+              assert(false); // should never be deleted
+            created_future_maps.erase(finder);
+          }
+          return result;
+        }
+        // Didn't find it so make it
+        ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, runtime,
+                                domain, shard_domain, did, index, completion,
+                                provenance, collective_mapping);
+        // Add a reference to it to keep it from being deleted and then 
+        // register it with the runtime
+        result->add_base_gc_ref(RUNTIME_REF);
+        result->register_with_runtime();
+        // Record it for the shards that come later
+        std::pair<ReplFutureMapImpl*,size_t> &pending = 
+          created_future_maps[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+        return FutureMap(result);
+      }
+      else
+      {
+        ReplFutureMapImpl *impl = new ReplFutureMapImpl(ctx, this, runtime,
+            domain, shard_domain, did, index, completion,
+            provenance, collective_mapping);
+        // Get a reference on it before we register it
+        FutureMap result(impl);
+        impl->register_with_runtime();
         return result;
       }
-      // Didn't find it so make it
-      ReplFutureMapImpl *result = new ReplFutureMapImpl(ctx, this, runtime,
-                              domain, shard_domain, did, index, completion,
-                              provenance, collective_mapping);
-      // Record it for the shards that come later
-      std::pair<ReplFutureMapImpl*,size_t> &pending = 
-        created_future_maps[did];
-      pending.first = result;
-      pending.second = local_shards.size() - 1;
-      return result;
     }
 
     //--------------------------------------------------------------------------

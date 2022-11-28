@@ -569,6 +569,7 @@ namespace Legion {
     public:
       FutureMapImpl(TaskContext *ctx, Operation *op, IndexSpaceNode *domain,
                     Runtime *rt, DistributedID did, Provenance *provenance,
+                    bool register_now = true, 
                     CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index,

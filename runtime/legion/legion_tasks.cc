@@ -8856,8 +8856,8 @@ namespace Legion {
         if (launcher.predicate != Predicate::TRUE_PRED)
           initialize_predicate(launcher.predicate_false_future,
                                launcher.predicate_false_result);
-        future_map = FutureMap(
-         create_future_map(ctx, launch_space->handle, launcher.sharding_space));
+        future_map = 
+          create_future_map(ctx, launch_space->handle, launcher.sharding_space);
       }
       else
         elide_future_return = true;
@@ -10093,12 +10093,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* IndexTask::create_future_map(TaskContext *ctx,
+    FutureMap IndexTask::create_future_map(TaskContext *ctx,
                              IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, this->launch_space, runtime,
-          runtime->get_available_distributed_id(), get_provenance());
+      return FutureMap(new FutureMapImpl(ctx, this, this->launch_space,
+          runtime, runtime->get_available_distributed_id(), get_provenance()));
     }
 
     //--------------------------------------------------------------------------

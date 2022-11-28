@@ -3340,9 +3340,10 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o,
                                  IndexSpaceNode *domain, Runtime *rt,
                                  DistributedID did, Provenance *prov,
-                                 CollectiveMapping *mapping)
+                                 bool register_now, CollectiveMapping *mapping)
       : DistributedCollectable(rt, 
-          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), true, mapping),
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),
+          register_now, mapping),
         context(ctx), op(o), op_ctx_index(o->get_ctx_index()),
         op_gen(o->get_generation()), op_depth(o->get_context()->get_depth()),
 #ifdef LEGION_SPY
@@ -4158,7 +4159,8 @@ namespace Legion {
                                          IndexSpaceNode *shard_dom, Runtime *rt, 
                                          DistributedID did, Provenance *prov,
                                          CollectiveMapping *mapping)
-      : FutureMapImpl(ctx, op, domain, rt, did, prov, mapping),
+      : FutureMapImpl(ctx, op, domain, rt, did, prov,
+                      false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), op_uid(op->get_unique_op_id()),
         sharding_function(NULL), own_sharding_function(false),
@@ -4179,7 +4181,7 @@ namespace Legion {
                             size_t index, ApEvent completion, Provenance *prov,
                             CollectiveMapping *mapping)
       : FutureMapImpl(ctx, rt, domain, did, index, completion, prov, 
-                      true/*register now*/, mapping),
+                      false/*register now*/, mapping),
         shard_manager(man), shard_domain(shard_dom),
         op_depth(ctx->get_depth()), op_uid(ctx->get_unique_id()),
         sharding_function(NULL), own_sharding_function(false),
