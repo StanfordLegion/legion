@@ -129,7 +129,7 @@ impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // remove duplications
         let mut insts_set = BTreeSet::new();
-        for (_, elt) in self.0.iter().enumerate() {
+        for elt in self.0.iter() {
             let inst = self.1.find_inst(elt.inst_uid).unwrap();
             insts_set.insert(inst);
         }
@@ -416,25 +416,30 @@ pub struct CopyInstInfoDisplay<'a>(
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0 != None && self.1 != None {
-            write!(
-                f,
-                "src_inst=0x{:x}, dst_inst=0x{:x}",
-                self.0.unwrap().inst_id.unwrap().0,
-                self.1.unwrap().inst_id.unwrap().0
-            )
-        } else if self.0 == None {
-            write!(
-                f,
-                "Scatter: dst_indirect_inst=0x{:x}",
-                self.1.unwrap().inst_id.unwrap().0
-            )
-        } else {
-            write!(
-                f,
-                "Gather: src_indirect_inst=0x{:x}",
-                self.0.unwrap().inst_id.unwrap().0
-            )
+        match (self.0, self.1) {
+            (Some(src_inst), Some(dst_inst)) => {
+                write!(
+                    f,
+                    "src_inst=0x{:x}, dst_inst=0x{:x}",
+                    src_inst.inst_id.unwrap().0,
+                    dst_inst.inst_id.unwrap().0
+                )
+            }
+            (None, Some(dst_inst)) => {
+                write!(
+                    f,
+                    "Scatter: dst_indirect_inst=0x{:x}",
+                    dst_inst.inst_id.unwrap().0
+                )
+            }
+            (Some(src_inst), None) => {
+                write!(
+                    f,
+                    "Gather: src_indirect_inst=0x{:x}",
+                    src_inst.inst_id.unwrap().0
+                )
+            }
+            (None, None) => unreachable!(),
         }
     }
 }
@@ -465,14 +470,12 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // remove duplications
         let mut insts_set = BTreeSet::new();
-        for (_, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid);
-            if src_inst != None {
-                insts_set.insert(src_inst.unwrap());
+        for elt in self.0.iter() {
+            if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+                insts_set.insert(src_inst);
             }
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
-            if dst_inst != None {
-                insts_set.insert(dst_inst.unwrap());
+            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                insts_set.insert(dst_inst);
             }
         }
         write!(f, "[")?;
@@ -493,10 +496,7 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
 }
 
 #[derive(Debug)]
-pub struct FillInstInfoDisplay<'a>(
-    pub &'a Inst,
-    pub FieldID, // fid
-);
+pub struct FillInstInfoDisplay<'a>(pub &'a Inst, pub FieldID);
 
 impl fmt::Display for FillInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -529,7 +529,7 @@ impl fmt::Display for FillInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // remove duplications
         let mut insts_set = BTreeSet::new();
-        for (_, elt) in self.0.iter().enumerate() {
+        for elt in self.0.iter() {
             let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
             insts_set.insert(dst_inst);
         }
@@ -644,25 +644,20 @@ impl Chan {
         let name = match entry {
             ChanEntryRef::Copy(_, copy) => {
                 let nreqs = copy.copy_inst_infos.len();
-                let copy_type_str = match copy.copy_type.unwrap() {
-                    0 => "Copy",
-                    1 => "Gather",
-                    2 => "Scatter",
-                    3_u32..=u32::MAX => {
-                        assert!(false, "wrong channel type");
-                        ""
-                    }
-                };
                 if nreqs > 0 {
                     format!(
                         "{}: size={}, num reqs={}{}",
-                        copy_type_str,
-                        SizePretty(copy.size),
+                        copy.copy_kind.unwrap(),
+                        SizePretty(copy.size.unwrap()),
                         nreqs,
                         CopyInstInfoVec(&copy.copy_inst_infos, &state)
                     )
                 } else {
-                    format!("Copy: size={}, num reqs={}", SizePretty(copy.size), nreqs)
+                    format!(
+                        "Copy: size={}, num reqs={}",
+                        SizePretty(copy.size.unwrap()),
+                        nreqs
+                    )
                 }
             }
             ChanEntryRef::Fill(_, fill) => {
@@ -737,36 +732,36 @@ impl Chan {
         let slug = match (
             self.chan_id.src,
             self.chan_id.dst,
-            self.chan_id.channel_type,
+            self.chan_id.channel_kind,
         ) {
-            (Some(src), Some(dst), channel_type) => format!(
+            (Some(src), Some(dst), channel_kind) => format!(
                 "({}_Memory_0x{:x},_{}_Memory_0x{:x},_{})",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
                 &dst,
-                channel_type
+                channel_kind
             ),
-            (None, Some(dst), channel_type) => format!(
+            (None, Some(dst), channel_kind) => format!(
                 "(None,_{}_Memory_0x{:x},_{})",
                 mem_kind(dst),
                 dst,
-                channel_type
+                channel_kind
             ),
-            (Some(src), None, channel_type) => format!(
+            (Some(src), None, channel_kind) => format!(
                 "({}_Memory_0x{:x},_None,_{})",
                 mem_kind(src),
                 src,
-                channel_type
+                channel_kind
             ),
-            (None, None, _) => format!("(None,_None,_4)"),
+            (None, None, channel_kind) => format!("(None,_None,_{})", channel_kind),
             _ => unreachable!(),
         };
 
         let long_name = match (
             self.chan_id.src,
             self.chan_id.dst,
-            self.chan_id.channel_type,
+            self.chan_id.channel_kind,
         ) {
             (Some(src), Some(dst), _) => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
@@ -775,18 +770,10 @@ impl Chan {
                 mem_kind(dst),
                 &dst
             ),
-            (None, Some(dst), channel_type) => {
-                let channel_str = match channel_type {
-                    1 => "Fill",
-                    2 => "Gather",
-                    0_u32 | 3_u32..=u32::MAX => {
-                        assert!(false, "wrong channel type");
-                        ""
-                    }
-                };
+            (None, Some(dst), channel_kind) => {
                 format!(
                     "{} {} Memory 0x{:x} Channel",
-                    channel_str,
+                    channel_kind,
                     mem_kind(dst),
                     dst
                 )
@@ -799,7 +786,7 @@ impl Chan {
         let short_name = match (
             self.chan_id.src,
             self.chan_id.dst,
-            self.chan_id.channel_type,
+            self.chan_id.channel_kind,
         ) {
             (Some(src), Some(dst), _) => format!(
                 "{} to {}",
@@ -816,18 +803,10 @@ impl Chan {
                     state
                 )
             ),
-            (None, Some(dst), channel_type) => {
-                let channel_str = match channel_type {
-                    1 => "Fill",
-                    2 => "Gather",
-                    0_u32 | 3_u32..=u32::MAX => {
-                        assert!(false, "wrong channel type");
-                        ""
-                    }
-                };
+            (None, Some(dst), channel_kind) => {
                 format!(
                     "{} {}",
-                    channel_str,
+                    channel_kind,
                     MemShort(
                         mem_kind(dst),
                         state.mems.get(&dst),
