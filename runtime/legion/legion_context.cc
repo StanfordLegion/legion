@@ -10934,6 +10934,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(get_replication_id());
           rez.serialize(did);
+          rez.serialize(creator_did);
           rez.serialize(collective_did);
           mapping->pack(rez);
           rez.serialize<size_t>(individual_dids.size());
