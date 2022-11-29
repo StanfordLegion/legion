@@ -424,7 +424,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_owner());
+      assert(!is_logical_owner());
       assert(mask.pop_count() == reservations.size());
 #endif
       unsigned offset = 0;
