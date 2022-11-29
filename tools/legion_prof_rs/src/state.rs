@@ -2182,7 +2182,10 @@ impl SpyState {
     }
 
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
-        assert!(self.spy_ops.insert(op, SpyOp::new(pre, post)).is_none());
+        if let Some(old) = self.spy_ops.insert(op, SpyOp::new(pre, post)) {
+            assert_eq!(old.precondition, pre);
+            assert_eq!(old.postcondition, post);
+        }
         self.spy_op_by_precondition
             .entry(pre)
             .or_insert_with(|| BTreeSet::new())
