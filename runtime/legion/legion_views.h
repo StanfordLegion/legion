@@ -149,6 +149,7 @@ namespace Legion {
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner); }
       AddressSpaceID get_analysis_space(const DomainPoint &point) const;
+      void destroy_reservations(ApEvent all_done);
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -258,7 +259,7 @@ namespace Legion {
       const UniqueID owner_context;
       // This is the owner space for the purpose of logical analysis
       const AddressSpaceID logical_owner;
-    private:
+    protected:
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
       // top-level view for an instance needs to track this.
@@ -425,6 +426,7 @@ namespace Legion {
                                       const bool user_covers) const;
     public:
       size_t get_view_volume(void);
+      void find_all_done_events(std::set<ApEvent> &all_done) const;
     protected:
       void filter_local_users(ApEvent term_event);
       void filter_current_users(const EventFieldUsers &to_filter);
