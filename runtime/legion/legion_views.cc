@@ -193,7 +193,8 @@ namespace Legion {
     InstanceView::~InstanceView(void)
     //--------------------------------------------------------------------------
     { 
-    }
+
+    } 
 
 #ifdef ENABLE_VIEW_REPLICATION
     //--------------------------------------------------------------------------
@@ -223,7 +224,7 @@ namespace Legion {
       // Should only be called by derived classes
       assert(false);
     }
-#endif // ENABLE_VIEW_REPLICATION 
+#endif // ENABLE_VIEW_REPLICATION
 
     //--------------------------------------------------------------------------
     /*static*/ void InstanceView::handle_view_register_user(Deserializer &derez,
@@ -452,6 +453,23 @@ namespace Legion {
 #endif
       view_volume.store(result);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_all_done_events(std::set<ApEvent> &all_done) const
+    //--------------------------------------------------------------------------
+    {
+      // No need for any locks here since we're in the view destructor
+      // and there should be no more races between anything
+      for (EventFieldUsers::const_iterator it = current_epoch_users.begin();
+            it != current_epoch_users.end(); it++)
+        all_done.insert(it->first);
+      for (EventFieldUsers::const_iterator it = previous_epoch_users.begin();
+            it != previous_epoch_users.end(); it++)
+        all_done.insert(it->first);
+      for (FieldMaskSet<ExprView>::const_iterator it =
+            subviews.begin(); it != subviews.end(); it++)
+        it->first->find_all_done_events(all_done);
     }
 
     //--------------------------------------------------------------------------
@@ -2174,14 +2192,26 @@ namespace Legion {
     IndividualView::~IndividualView(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(view_reservations.empty() || !is_logical_owner());
+#endif
       if (manager->remove_nested_resource_ref(did))
         delete manager;
-      if (is_owner())
-      {
-        for (std::map<unsigned,Reservation>::iterator it =
-              view_reservations.begin(); it != view_reservations.end(); it++)
-          it->second.destroy_reservation();
-      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::destroy_reservations(ApEvent all_done)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      // No need for the lock here since we should be in a destructor
+      // and there should be no more races
+      for (std::map<unsigned,Reservation>::iterator it =
+            view_reservations.begin(); it != view_reservations.end(); it++)
+        it->second.destroy_reservation(all_done);
+      view_reservations.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -3180,7 +3210,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<Reservation> results;
-      if (is_owner())
+      if (is_logical_owner())
       {
         results.reserve(mask.pop_count());
         // We're the owner so we can make all the fields
@@ -3231,7 +3261,7 @@ namespace Legion {
             rez.serialize(source);
             rez.serialize(to_trigger);
           }
-          runtime->send_atomic_reservation_request(owner_space, rez);
+          runtime->send_atomic_reservation_request(logical_owner, rez);
           return to_trigger;
         }
       }
@@ -3270,7 +3300,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_owner());
+      assert(!is_logical_owner());
 #endif
       AutoLock v_lock(view_lock);
       unsigned offset = 0;
@@ -3551,6 +3581,15 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
+      // If we're the logical owner and we have atomic reservations then
+      // aggregate all the remaining users and destroy the reservations
+      // once they are all done
+      if (is_logical_owner() && !view_reservations.empty())
+      {
+        std::set<ApEvent> all_done;
+        current_users->find_all_done_events(all_done);
+        destroy_reservations(Runtime::merge_events(NULL, all_done));
+      }
       if ((current_users != NULL) && current_users->remove_reference())
         delete current_users;
 #ifdef ENABLE_VIEW_REPLICATION
@@ -5459,6 +5498,23 @@ namespace Legion {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     { 
+      // If we're the logical owner and we have atomic reservations then
+      // aggregate all the remaining users and destroy the reservations
+      // once they are all done
+      if (is_logical_owner() && !view_reservations.empty())
+      {
+        std::set<ApEvent> all_done;
+        for (EventFieldUsers::const_iterator it =
+              writing_users.begin(); it != writing_users.end(); it++)
+          all_done.insert(it->first);
+        for (EventFieldUsers::const_iterator it =
+              reduction_users.begin(); it != reduction_users.end(); it++)
+          all_done.insert(it->first);
+        for (EventFieldUsers::const_iterator it =
+              reading_users.begin(); it != reading_users.end(); it++)
+          all_done.insert(it->first);
+        destroy_reservations(Runtime::merge_events(NULL, all_done));
+      }
       // Remove references on any outstanding users we still have here
       if (!writing_users.empty())
       {

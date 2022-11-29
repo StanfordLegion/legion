@@ -237,6 +237,7 @@ namespace Legion {
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner); } 
       inline PhysicalManager* get_manager(void) const { return manager; }
+      void destroy_reservations(ApEvent all_done);
     public:
       virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
       virtual bool aliases(InstanceView *other) const;
@@ -904,6 +905,7 @@ namespace Legion {
                                       const bool user_covers) const;
     public:
       size_t get_view_volume(void);
+      void find_all_done_events(std::set<ApEvent> &all_done) const;
     protected:
       void filter_local_users(ApEvent term_event);
       void filter_current_users(const EventFieldUsers &to_filter);
