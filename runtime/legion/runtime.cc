@@ -23029,7 +23029,7 @@ namespace Legion {
         log_run.print("Legion endpoint task has Realm ID %d",
                       LG_ENDPOINT_TASK_ID);
 #ifdef LEGION_SEPARATE_META_TASKS
-        RUNTIME_CALL_DESCRIPTIONS(descs);
+        LG_TASK_DESCRIPTIONS(descs);
         for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
         {
           if (idx == LG_MESSAGE_ID)
