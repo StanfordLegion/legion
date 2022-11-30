@@ -277,7 +277,8 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::acquire_global_remote(AddressSpaceID &current)
+    bool DistributedCollectable::acquire_global_remote(AddressSpaceID &current,
+                                               int count, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -285,8 +286,18 @@ namespace Legion {
       {
         if (downgrade_owner == local_space)
         {
-          // If we succeed, then pack a global reference
-          sent_global_references++;
+          // We succeeded
+          if (source == local_space)
+          {
+            // If we're local we can add the references now
+#ifdef DEBUG_LEGION_GC
+            gc_references += count;
+#else
+            gc_references.fetch_add(count);
+#endif
+          }
+          else // Otherwise pack a reference to send back
+            sent_global_references++;
           return true;
         }
         else
@@ -319,18 +330,27 @@ namespace Legion {
       if (dc != NULL)
       {
         AddressSpaceID current_owner = dc->local_space;
-        if (dc->acquire_global_remote(current_owner))
+        if (dc->acquire_global_remote(current_owner, count, source))
         {
           // Successfully acquired (packed) a global reference
-          Serializer rez;
+          if (source != dc->local_space)
           {
-            RezCheck z2(rez);
-            rez.serialize(remote);
-            rez.serialize(count);
-            rez.serialize(result);
-            rez.serialize(ready);
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(remote);
+              rez.serialize(count);
+              rez.serialize(result);
+              rez.serialize(ready);
+            }
+            runtime->send_did_acquire_global_response(source, rez);
           }
-          runtime->send_did_acquire_global_response(source, rez);
+          else
+          {
+            // Might have been sent back to ourself eventually
+            result->store(true);
+            Runtime::trigger_event(ready);
+          }
         }
         else if (current_owner != dc->local_space)
         {
@@ -1434,7 +1454,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ValidDistributedCollectable::acquire_valid_remote(
-                                                        AddressSpaceID &current)
+                      AddressSpaceID &current, int count, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
@@ -1442,8 +1462,18 @@ namespace Legion {
       {
         if (downgrade_owner == local_space)
         {
-          // If we succeed, then pack a valid reference
-          sent_valid_references++;
+          // We succeeded
+          if (source == local_space)
+          {
+            // If we're local we can add the references now
+#ifdef DEBUG_LEGION_GC
+            valid_references += count;
+#else
+            valid_references.fetch_add(count);
+#endif
+          }
+          else // Otherwise pack a reference to send back
+            sent_valid_references++;
           return true;
         }
         else
@@ -1477,18 +1507,27 @@ namespace Legion {
       if (dc != NULL)
       {
         AddressSpaceID current_owner = dc->local_space;
-        if (dc->acquire_valid_remote(current_owner))
+        if (dc->acquire_valid_remote(current_owner, count, source))
         {
-          // Successfully acquired (packed) a valid reference
-          Serializer rez;
+          if (source != dc->local_space)
           {
-            RezCheck z2(rez);
-            rez.serialize(remote);
-            rez.serialize(count);
-            rez.serialize(result);
-            rez.serialize(ready);
+            // Successfully acquired (packed) a valid reference
+            Serializer rez;
+            {
+              RezCheck z2(rez);
+              rez.serialize(remote);
+              rez.serialize(count);
+              rez.serialize(result);
+              rez.serialize(ready);
+            }
+            runtime->send_did_acquire_valid_response(source, rez);
           }
-          runtime->send_did_acquire_valid_response(source, rez);
+          else
+          {
+            // Might have been sent back to ourself eventually
+            result->store(true);
+            Runtime::trigger_event(ready);
+          }
         }
         else if (current_owner != dc->local_space)
         {
