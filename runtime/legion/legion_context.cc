@@ -10918,7 +10918,7 @@ namespace Legion {
           view = new ReplicatedView(runtime, collective_did, creator_did,
               local_views, individual_dids, false/*register now*/, mapping);
         if (view->is_owner())
-          view->add_nested_gc_ref(did);
+          view->add_nested_gc_ref(creator_did);
         view->register_with_runtime();
         if (!done_events.empty())
           return Runtime::merge_events(done_events);
