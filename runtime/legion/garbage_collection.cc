@@ -176,41 +176,45 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
+      AddressSpaceID current_owner;
       {
         AutoLock gc(gc_lock);
-        switch (current_state)
+        // Check to see if we're on the downgrade owner which is the only
+        // place where it is safe to perform this check
+        if (downgrade_owner == local_space)
         {
-          case GLOBAL_REF_STATE:
-          case VALID_REF_STATE:
-            {
+          // If we're on the downgrade owner we can do the check here
+          switch (current_state)
+          {
+            case GLOBAL_REF_STATE:
+            case VALID_REF_STATE:
+              {
 #ifdef DEBUG_LEGION_GC
-              gc_references += cnt;
-              typename std::map<T,int>::iterator finder =
-                detailed_gc_references.find(source);
-              if (finder == detailed_gc_references.end())
-                detailed_gc_references[source] = cnt;
-              else
-                finder->second += cnt;
+                gc_references += cnt;
+                typename std::map<T,int>::iterator finder =
+                  detailed_gc_references.find(source);
+                if (finder == detailed_gc_references.end())
+                  detailed_gc_references[source] = cnt;
+                else
+                  finder->second += cnt;
 #else
-              gc_references.fetch_add(cnt);
+                gc_references.fetch_add(cnt);
 #endif
-              return true;
-            }
-          case LOCAL_REF_STATE:
-          case DELETED_REF_STATE:
-            {
-              return false;
-            }
-          default:
-            assert(false);
+                return true;
+              }
+            case LOCAL_REF_STATE:
+            case DELETED_REF_STATE:
+              {
+                return false;
+              }
+            default:
+              assert(false);
+          }
         }
-      }
+        else if (!is_global(false/*need lock*/))
+          return false;
 #ifdef DEBUG_LEGION_GC
-      else
-      {
-        AutoLock gc(gc_lock);
-        if (gc_references > 0)
+        else if (gc_references > 0)
         {
           gc_references += cnt;
           typename std::map<T,int>::iterator finder =
@@ -221,12 +225,10 @@ namespace Legion {
             finder->second += cnt;
           return true;
         }
+#endif
+        current_owner = downgrade_owner;
       }
-#endif
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-#endif
-      // Send the message to the owner to try to acquire the reference
+      // Send the message to the downgrade owner to try to acquire the reference
       std::atomic<bool> result(false);
       const RtUserEvent ready = Runtime::create_rt_user_event();
       Serializer rez;
@@ -234,11 +236,12 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(this);
+        rez.serialize(local_space);
         rez.serialize(cnt);
         rez.serialize(&result);
         rez.serialize(ready);
       }
-      runtime->send_did_acquire_global_request(owner_space, rez);
+      runtime->send_did_acquire_global_request(current_owner, rez);
       ready.wait();
       if (result.load())
       {
@@ -258,8 +261,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool DistributedCollectable::acquire_global_remote(AddressSpaceID &current)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (downgrade_owner == local_space)
+      {
+        switch (current_state)
+        {
+          case GLOBAL_REF_STATE:
+          case VALID_REF_STATE:
+            {
+              // If we succeed, then pack a global reference
+              sent_global_references++;
+              return true;
+            }
+          case LOCAL_REF_STATE:
+          case DELETED_REF_STATE:
+            {
+              return false;
+            }
+          default:
+            assert(false);
+        }
+      }
+      else if (is_global(false/*need lock*/))
+        current = downgrade_owner;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void DistributedCollectable::handle_global_acquire_request(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+                                          Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -267,6 +300,8 @@ namespace Legion {
       derez.deserialize(did);
       DistributedCollectable *remote;
       derez.deserialize(remote);
+      AddressSpaceID source;
+      derez.deserialize(source);
       int count;
       derez.deserialize(count);
       std::atomic<bool> *result;
@@ -276,31 +311,46 @@ namespace Legion {
 
       DistributedCollectable *dc = 
         runtime->weak_find_distributed_collectable(did);
-      if ((dc != NULL) && dc->check_global_and_increment(REMOTE_DID_REF))
+      if (dc != NULL)
       {
-        Serializer rez;
+        AddressSpaceID current_owner = dc->local_space;
+        if (dc->acquire_global_remote(current_owner))
         {
-          RezCheck z2(rez);
-          rez.serialize(remote);
-          rez.serialize(count);
-          rez.serialize(result);
-          rez.serialize(ready);
+          // Successfully acquired (packed) a global reference
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(remote);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_did_acquire_global_response(source, rez);
         }
-        runtime->send_did_acquire_global_response(source, rez);
-        // Wait for the event to be triggered and then remove
-        // the remote did ref that we added
-        ready.wait();
-        dc->remove_base_gc_ref(REMOTE_DID_REF);
+        else if (current_owner != dc->local_space)
+        {
+          // Not the owner anymore, so forward and keep chasing
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(remote);
+            rez.serialize(source);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_did_acquire_global_request(current_owner, rez);
+        }
+        else
+          // Failed so trigger the event
+          Runtime::trigger_event(ready);
         if (dc->remove_base_resource_ref(RUNTIME_REF))
           delete dc;
       }
       else
-      {
         // Failed so trigger the event
         Runtime::trigger_event(ready);
-        if ((dc != NULL) && dc->remove_base_resource_ref(RUNTIME_REF))
-          delete dc;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -320,6 +370,8 @@ namespace Legion {
 
       // Just add the valid reference for now
       local->add_gc_reference(count);
+      // Unpack the global reference added by acquire_global_remote
+      local->unpack_global_ref();
       result->store(true);
       Runtime::trigger_event(ready);
     }
@@ -1280,41 +1332,45 @@ namespace Legion {
 #endif
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
+      AddressSpaceID current_owner;
       {
         AutoLock gc(gc_lock);
-        switch (current_state)
+        // Check to see if we're on the downgrade owner which is the only
+        // place where it is safe to perform this check
+        if (downgrade_owner == local_space)
         {
-          case VALID_REF_STATE:
-            {
+          // If we're on the downgrade owner we can do the check here
+          switch (current_state)
+          {
+            case VALID_REF_STATE:
+              {
 #ifdef DEBUG_LEGION_GC
-              valid_references += cnt;
-              typename std::map<T,int>::iterator finder =
-                detailed_valid_references.find(source);
-              if (finder == detailed_valid_references.end())
-                detailed_valid_references[source] = cnt;
-              else
-                finder->second += cnt;
+                valid_references += cnt;
+                typename std::map<T,int>::iterator finder =
+                  detailed_valid_references.find(source);
+                if (finder == detailed_valid_references.end())
+                  detailed_valid_references[source] = cnt;
+                else
+                  finder->second += cnt;
 #else
-              valid_references.fetch_add(cnt);
+                valid_references.fetch_add(cnt);
 #endif
-              return true;
-            }
-          case GLOBAL_REF_STATE:
-          case LOCAL_REF_STATE:
-          case DELETED_REF_STATE:
-            {
-              return false;
-            }
-          default:
-            assert(false);
+                return true;
+              }
+            case GLOBAL_REF_STATE:
+            case LOCAL_REF_STATE:
+            case DELETED_REF_STATE:
+              {
+                return false;
+              }
+            default:
+              assert(false);
+          }
         }
-      }
+        else if (!is_valid(false/*need lock*/))
+          return false;
 #ifdef DEBUG_LEGION_GC
-      else
-      {
-        AutoLock gc(gc_lock);
-        if (valid_references > 0)
+        else if (valid_references > 0)
         {
           valid_references += cnt;
           typename std::map<T,int>::iterator finder =
@@ -1325,12 +1381,10 @@ namespace Legion {
             finder->second += cnt;
           return true;
         }
+#endif
+        current_owner = downgrade_owner;
       }
-#endif
-#ifdef DEBUG_LEGION
-      assert(!is_owner());
-#endif
-      // Send the message to the owner to try to acquire the reference
+      // Send the message to the downgrade owner to try to acquire the reference
       std::atomic<bool> result(false);
       const RtUserEvent ready = Runtime::create_rt_user_event();
       Serializer rez;
@@ -1338,6 +1392,7 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(this);
+        rez.serialize(local_space);
         rez.serialize(cnt);
         rez.serialize(&result);
         rez.serialize(ready);
@@ -1362,8 +1417,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ValidDistributedCollectable::acquire_valid_remote(
+                                                        AddressSpaceID &current)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock);
+      if (downgrade_owner == local_space)
+      {
+        switch (current_state)
+        {
+          case VALID_REF_STATE:
+            {
+              // If we succeed, then pack a valid reference
+              sent_valid_references++;
+              return true;
+            }
+          case GLOBAL_REF_STATE:
+          case LOCAL_REF_STATE:
+          case DELETED_REF_STATE:
+            {
+              return false;
+            }
+          default:
+            assert(false);
+        }
+      }
+      else if (is_valid(false/*need lock*/))
+        current = downgrade_owner;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ValidDistributedCollectable::handle_valid_acquire_request(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+                                          Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -1371,6 +1457,8 @@ namespace Legion {
       derez.deserialize(did);
       ValidDistributedCollectable *remote;
       derez.deserialize(remote);
+      AddressSpaceID source;
+      derez.deserialize(source);
       int count;
       derez.deserialize(count);
       std::atomic<bool> *result;
@@ -1381,31 +1469,46 @@ namespace Legion {
       ValidDistributedCollectable *dc = 
         static_cast<ValidDistributedCollectable*>(
             runtime->weak_find_distributed_collectable(did));
-      if ((dc != NULL) && dc->check_valid_and_increment(REMOTE_DID_REF))
+      if (dc != NULL)
       {
-        Serializer rez;
+        AddressSpaceID current_owner = dc->local_space;
+        if (dc->acquire_valid_remote(current_owner))
         {
-          RezCheck z2(rez);
-          rez.serialize(remote);
-          rez.serialize(count);
-          rez.serialize(result);
-          rez.serialize(ready);
+          // Successfully acquired (packed) a valid reference
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(remote);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_did_acquire_valid_response(source, rez);
         }
-        runtime->send_did_acquire_valid_response(source, rez);
-        // Wait for the event to be triggered and then remove
-        // the remote did ref that we added
-        ready.wait();
-        dc->remove_base_valid_ref(REMOTE_DID_REF);
+        else if (current_owner != dc->local_space)
+        {
+          // Not the owner anymore, so forward and keep chasing
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(remote);
+            rez.serialize(source);
+            rez.serialize(count);
+            rez.serialize(result);
+            rez.serialize(ready);
+          }
+          runtime->send_did_acquire_valid_request(current_owner, rez);
+        }
+        else
+          // Failed so trigger the event
+          Runtime::trigger_event(ready);
         if (dc->remove_base_resource_ref(RUNTIME_REF))
           delete dc;
       }
       else
-      {
         // Failed so trigger the event
         Runtime::trigger_event(ready);
-        if ((dc != NULL) && dc->remove_base_resource_ref(RUNTIME_REF))
-          delete dc;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1425,6 +1528,8 @@ namespace Legion {
 
       // Just add the valid reference for now
       local->add_valid_reference(count);
+      // Unpack the valid reference packed by acquire_valid_remote
+      local->unpack_valid_ref();
       result->store(true);
       Runtime::trigger_event(ready);
     }
