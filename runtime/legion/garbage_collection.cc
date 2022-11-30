@@ -99,10 +99,11 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::is_global(bool need_lock) const
+    template<bool NEED_LOCK>
+    bool DistributedCollectable::is_global(void) const
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
+      if (NEED_LOCK)
       {
         AutoLock gc(gc_lock);
         return (current_state == VALID_REF_STATE) || 
@@ -113,13 +114,16 @@ namespace Legion {
                 (current_state == GLOBAL_REF_STATE);
     }
 
+    template bool DistributedCollectable::is_global<true>(void) const;
+    template bool DistributedCollectable::is_global<false>(void) const;
+
     //--------------------------------------------------------------------------
     void DistributedCollectable::add_gc_reference(int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
 #endif
 #ifdef DEBUG_LEGION_GC
       gc_references += cnt;
@@ -135,7 +139,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
       assert(gc_references.load() >= cnt);
 #endif
       if (gc_references.fetch_sub(cnt) == cnt)
@@ -216,7 +220,7 @@ namespace Legion {
               assert(false);
           }
         }
-        else if (!is_global(false/*need lock*/))
+        else if (!is_global<false/*need lock*/>())
           return false;
 #ifdef DEBUG_LEGION_GC
         else if (gc_references > 0)
@@ -270,28 +274,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      if (downgrade_owner == local_space)
+      if (is_global<false/*need lock*/>())
       {
-        switch (current_state)
+        if (downgrade_owner == local_space)
         {
-          case GLOBAL_REF_STATE:
-          case VALID_REF_STATE:
-            {
-              // If we succeed, then pack a global reference
-              sent_global_references++;
-              return true;
-            }
-          case LOCAL_REF_STATE:
-          case DELETED_REF_STATE:
-            {
-              return false;
-            }
-          default:
-            assert(false);
+          // If we succeed, then pack a global reference
+          sent_global_references++;
+          return true;
         }
+        else
+          current = downgrade_owner;
       }
-      else if (is_global(false/*need lock*/))
-        current = downgrade_owner;
       return false;
     }
 
@@ -389,7 +382,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
 #endif
       gc_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
@@ -407,7 +400,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
 #endif
       gc_references++;
       std::map<DistributedID,int>::iterator finder = 
@@ -425,7 +418,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
       assert(gc_references >= cnt);
 #endif
       gc_references -= cnt;
@@ -449,7 +442,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
       assert(gc_references >= cnt);
 #endif
       gc_references--;
@@ -663,7 +656,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
 #endif
       sent_global_references += cnt;
     }
@@ -674,7 +667,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_global(false/*need lock*/));
+      assert(is_global<false/*need lock*/>());
 #endif
       received_global_references += cnt;
     }
@@ -1199,10 +1192,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ValidDistributedCollectable::is_valid(bool need_lock) const
+    template<bool NEED_LOCK>
+    bool ValidDistributedCollectable::is_valid(void) const
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
+      if (NEED_LOCK)
       {
         AutoLock gc(gc_lock);
         return (current_state == VALID_REF_STATE);
@@ -1211,13 +1205,16 @@ namespace Legion {
         return (current_state == VALID_REF_STATE);
     }
 
+    template bool ValidDistributedCollectable::is_valid<true>(void) const;
+    template bool ValidDistributedCollectable::is_valid<false>(void) const;
+
     //--------------------------------------------------------------------------
     void ValidDistributedCollectable::add_valid_reference(int cnt)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
 #endif
 #ifdef DEBUG_LEGION_GC
       valid_references += cnt;
@@ -1233,7 +1230,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
       assert(valid_references.load() >= cnt);
 #endif
       if (valid_references.fetch_sub(cnt) == cnt)
@@ -1249,7 +1246,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
 #endif
       valid_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
@@ -1267,7 +1264,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
 #endif
       valid_references += cnt;
       std::map<DistributedID,int>::iterator finder = 
@@ -1285,7 +1282,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
       assert(valid_references >= cnt);
 #endif
       valid_references -= cnt;
@@ -1309,7 +1306,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
       assert(valid_references >= cnt);
 #endif
       valid_references -= cnt;
@@ -1372,7 +1369,7 @@ namespace Legion {
               assert(false);
           }
         }
-        else if (!is_valid(false/*need lock*/))
+        else if (!is_valid<false/*need lock*/>())
           return false;
 #ifdef DEBUG_LEGION_GC
         else if (valid_references > 0)
@@ -1402,7 +1399,7 @@ namespace Legion {
         rez.serialize(&result);
         rez.serialize(ready);
       }
-      runtime->send_did_acquire_valid_request(owner_space, rez);
+      runtime->send_did_acquire_valid_request(current_owner, rez);
       ready.wait();
       if (result.load())
       {
@@ -1427,28 +1424,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      if (downgrade_owner == local_space)
+      if (is_valid<false/*need lock*/>())
       {
-        switch (current_state)
+        if (downgrade_owner == local_space)
         {
-          case VALID_REF_STATE:
-            {
-              // If we succeed, then pack a valid reference
-              sent_valid_references++;
-              return true;
-            }
-          case GLOBAL_REF_STATE:
-          case LOCAL_REF_STATE:
-          case DELETED_REF_STATE:
-            {
-              return false;
-            }
-          default:
-            assert(false);
+          // If we succeed, then pack a valid reference
+          sent_valid_references++;
+          return true;
         }
+        else
+          current = downgrade_owner;
       }
-      else if (is_valid(false/*need lock*/))
-        current = downgrade_owner;
       return false;
     }
 
@@ -1545,7 +1531,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
 #endif
       sent_valid_references += cnt;
     }
@@ -1556,7 +1542,7 @@ namespace Legion {
     {
       AutoLock gc(gc_lock);
 #ifdef DEBUG_LEGION
-      assert(is_valid(false/*need lock*/));
+      assert(is_valid<false/*need lock*/>());
 #endif
       received_valid_references += cnt;
     }
