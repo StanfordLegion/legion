@@ -11960,8 +11960,7 @@ namespace Legion {
             }
           case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
             {
-              runtime->handle_did_global_acquire_request(derez, 
-                                          remote_address_space);
+              runtime->handle_did_global_acquire_request(derez); 
               break;
             }
           case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
@@ -11971,8 +11970,7 @@ namespace Legion {
             }
           case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
             {
-              runtime->handle_did_valid_acquire_request(derez,
-                                        remote_address_space);
+              runtime->handle_did_valid_acquire_request(derez);
               break;
             }
           case DISTRIBUTED_VALID_ACQUIRE_RESPONSE:
@@ -24010,11 +24008,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_global_acquire_request(Deserializer &derez,
-                                                    AddressSpaceID source)
+    void Runtime::handle_did_global_acquire_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      DistributedCollectable::handle_global_acquire_request(this, derez,source);
+      DistributedCollectable::handle_global_acquire_request(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24025,12 +24022,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_valid_acquire_request(Deserializer &derez,
-                                                   AddressSpaceID source)
+    void Runtime::handle_did_valid_acquire_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ValidDistributedCollectable::handle_valid_acquire_request(this, derez,
-                                                                source);
+      ValidDistributedCollectable::handle_valid_acquire_request(this, derez);
     }
 
     //--------------------------------------------------------------------------

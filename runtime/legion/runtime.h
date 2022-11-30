@@ -3500,11 +3500,9 @@ namespace Legion {
       void handle_did_downgrade_response(Deserializer &derez);
       void handle_did_downgrade_success(Deserializer &derez);
       void handle_did_downgrade_update(Deserializer &derez);
-      void handle_did_global_acquire_request(Deserializer &derez,
-                                             AddressSpaceID source);
+      void handle_did_global_acquire_request(Deserializer &derez);
       void handle_did_global_acquire_response(Deserializer &derez);
-      void handle_did_valid_acquire_request(Deserializer &derez,
-                                            AddressSpaceID source);
+      void handle_did_valid_acquire_request(Deserializer &derez);
       void handle_did_valid_acquire_response(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);

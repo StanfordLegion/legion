@@ -251,6 +251,7 @@ namespace Legion {
       void add_gc_reference(int cnt);
       bool remove_gc_reference(int cnt);
       bool acquire_global(int cnt);
+      bool acquire_global_remote(AddressSpaceID &forward);
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
@@ -263,6 +264,7 @@ namespace Legion {
       bool remove_nested_gc_ref_internal(DistributedID source, int cnt);
       template<typename T>
       bool acquire_global(int cnt, T source, std::map<T,int> &gc_references);
+      bool acquire_global_remote(AddressSpaceID &forward);
     public:
       void add_base_resource_ref_internal(ReferenceSource source, int cnt); 
       void add_nested_resource_ref_internal(DistributedID source, int cnt); 
@@ -320,7 +322,7 @@ namespace Legion {
       static void handle_downgrade_update(Runtime *runtime,
                                           Deserializer &derez);
       static void handle_global_acquire_request(Runtime *runtime,
-                      Deserializer &derez, AddressSpaceID source);
+                                                Deserializer &derez);
       static void handle_global_acquire_response(Deserializer &derez);
     public:
       Runtime *const runtime;
@@ -386,6 +388,7 @@ namespace Legion {
       void add_valid_reference(int cnt);
       bool remove_valid_reference( int cnt);
       bool acquire_valid(int cnt);
+      bool acquire_valid_remote(AddressSpaceID &forward);
 #else
     public:
       void add_valid_reference(int cnt);
@@ -395,6 +398,7 @@ namespace Legion {
       bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
       template<typename T>
       bool acquire_valid(int cnt, T source, std::map<T,int> &valid_references);
+      bool acquire_valid_remote(AddressSpaceID &forward);
 #endif
     public:
       void pack_valid_ref(unsigned cnt = 1);
@@ -410,7 +414,7 @@ namespace Legion {
       virtual void notify_invalid(void) = 0;
     public:
       static void handle_valid_acquire_request(Runtime *runtime,
-                      Deserializer &derez, AddressSpaceID source);
+                                               Deserializer &derez);
       static void handle_valid_acquire_response(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION_GC
