@@ -269,6 +269,13 @@ namespace Legion {
         return false;
     }
 
+#ifdef DEBUG_LEGION_GC
+    template bool DistributedCollectable::acquire_global<ReferenceSource>(
+        int, ReferenceSource, std::map<ReferenceSource,int>&);
+    template bool DistributedCollectable::acquire_global<DistributedID>(
+        int, DistributedID, std::map<DistributedID,int>&);
+#endif
+
     //--------------------------------------------------------------------------
     bool DistributedCollectable::acquire_global_remote(AddressSpaceID &current)
     //--------------------------------------------------------------------------
@@ -1417,6 +1424,13 @@ namespace Legion {
       else
         return false;
     }
+
+#ifdef DEBUG_LEGION_GC
+    template bool ValidDistributedCollectable::acquire_valid<ReferenceSource>(
+        int, ReferenceSource, std::map<ReferenceSource,int>&);
+    template bool ValidDistributedCollectable::acquire_valid<DistributedID>(
+        int, DistributedID, std::map<DistributedID,int>&);
+#endif
 
     //--------------------------------------------------------------------------
     bool ValidDistributedCollectable::acquire_valid_remote(
