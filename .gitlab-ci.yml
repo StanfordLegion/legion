@@ -124,22 +124,22 @@ variables:
   PRIVILEGE_CHECKS: "1"
 
 .cxx11_normal: &cxx11_normal
-  CXXFLAGS: "-std=c++11"
+  CXXFLAGS: ""
   CXX_STANDARD: "11"
 .cxx11_hardened: &cxx11_hardened
-  CXXFLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+  CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "11"
 .cxx14_normal: &cxx14_normal
-  CXXFLAGS: "-std=c++14"
+  CXXFLAGS: ""
   CXX_STANDARD: "14"
 .cxx17_normal: &cxx17_normal
-  CXXFLAGS: "-std=c++17"
+  CXXFLAGS: ""
   CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
-  CXXFLAGS: "-std=c++20"
+  CXXFLAGS: ""
   CXX_STANDARD: "20"
 .cxx11_32bit_normal: &cxx11_32bit_normal
-  CXXFLAGS: "-std=c++11 -m32"
+  CXXFLAGS: "-m32"
   LDFLAGS: "-m32 -latomic"
   MARCH: "i686"
   CXX_STANDARD: "11"
