@@ -237,7 +237,8 @@ namespace Legion {
       void pack_global_ref(unsigned cnt = 1);
       void unpack_global_ref(unsigned cnt = 1); 
     public:
-      bool is_global(bool need_lock = true) const;
+      template<bool NEED_LOCK=true>
+      bool is_global(void) const;
       // Atomic check and increment operations 
       inline bool check_global_and_increment(ReferenceSource src, int cnt = 1);
       inline bool check_global_and_increment(DistributedID source, int cnt = 1);
@@ -375,7 +376,8 @@ namespace Legion {
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
     public:
-      bool is_valid(bool need_lock = true) const;
+      template<bool NEED_LOCK=true>
+      bool is_valid(void) const;
       bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
 #ifndef DEBUG_LEGION_GC
