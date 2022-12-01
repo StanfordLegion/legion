@@ -2840,10 +2840,15 @@ namespace Legion {
       public:
         ReplicatedOwnerState(bool valid);
       public:
-        inline bool is_valid(void) const { return !ready.exists(); }
+        inline bool is_valid(void) const { return valid; }
+        inline bool is_subscribed(void) const { return subscribed; }
       public:
         std::vector<AddressSpaceID> children;
         RtUserEvent ready;
+        bool valid;
+        // We might not be subscribed to the logical owner space if this
+        // replicated owner state was created as part of mapping
+        bool subscribed;
       };
     public:
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {

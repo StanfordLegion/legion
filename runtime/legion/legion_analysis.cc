@@ -11872,9 +11872,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(bool valid)
-      : ready(valid ? RtUserEvent::NO_RT_USER_EVENT : 
-              Runtime::create_rt_user_event())
+    EquivalenceSet::ReplicatedOwnerState::ReplicatedOwnerState(bool val)
+      : ready(val ? RtUserEvent::NO_RT_USER_EVENT : 
+              Runtime::create_rt_user_event()), valid(val), subscribed(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -11925,6 +11925,7 @@ namespace Legion {
               }
               runtime->send_equivalence_set_replication_request(
                                         logical_owner_space, rez);
+              replicated_owner_state->subscribed = true;
             }
           }
           else
@@ -11938,6 +11939,7 @@ namespace Legion {
             }
             runtime->send_equivalence_set_replication_request(
                                       logical_owner_space, rez);
+            replicated_owner_state->subscribed = true;
           }
         }
       }
@@ -11959,7 +11961,22 @@ namespace Legion {
         return true;
       }
       else
+      {
+        // If we're not already subscribed, then perform the subscription
+        if (!replicated_owner_state->is_subscribed() && (mapping == NULL))
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(0); // no mapping
+          }
+          runtime->send_equivalence_set_replication_request(
+                                    logical_owner_space, rez);
+          replicated_owner_state->subscribed = true;
+        }
         return false;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11969,12 +11986,17 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock eq(eq_lock);
-        logical_owner_space = owner;
+#ifdef DEBUG_LEGION
+        assert(replicated_owner_state != NULL);
+#endif
+        // Handle loops created by collective mappings that then wrap back
+        // through theselves tracing the chain of previous logical owner spaces
+        if (replicated_owner_state->is_valid())
+          return;
 #ifdef DEBUG_LEGION
         assert(!is_logical_owner());
-        assert(replicated_owner_state != NULL);
-        assert(!replicated_owner_state->is_valid());
 #endif
+        logical_owner_space = owner;
         // Send out messages to all the other nodes that requested them
         for (std::vector<AddressSpaceID>::const_iterator it =
               replicated_owner_state->children.begin(); it !=
@@ -11989,7 +12011,7 @@ namespace Legion {
           runtime->send_equivalence_set_replication_response(*it, rez);
         }
         to_trigger = replicated_owner_state->ready;
-        replicated_owner_state->ready = RtUserEvent::NO_RT_USER_EVENT;
+        replicated_owner_state->valid = true;
       }
       Runtime::trigger_event(to_trigger);
     }
@@ -12000,8 +12022,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+      // Handle loops created by collective mappings that then wrap back
+      // through theselves tracing the chain of previous logical owner spaces
+      if (replicated_owner_state == NULL)
+        return;
 #ifdef DEBUG_LEGION
-      assert(replicated_owner_state != NULL);
       assert(replicated_owner_state->is_valid());
 #endif
       // Forward on this message to any children
