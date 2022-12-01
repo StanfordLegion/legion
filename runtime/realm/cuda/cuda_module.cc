@@ -3729,7 +3729,7 @@ namespace Realm {
 
     CudaModule *cuda_module_singleton = 0;
 
-    CudaModule::CudaModule(void)
+    CudaModule::CudaModule(RuntimeImpl *_runtime)
       : Module("cuda")
       , cfg_zc_mem_size(64 << 20)
       , cfg_zc_ib_size(256 << 20)
@@ -3757,6 +3757,7 @@ namespace Realm {
       , cfg_hostreg_limit(1 << 30)
       , cfg_d2d_stream_priority(-1)
       , cfg_use_cuda_ipc(true)
+      , runtime(_runtime)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
       , uvm_base(0), uvmmem(0)
@@ -3767,6 +3768,7 @@ namespace Realm {
     {
       assert(!cuda_module_singleton);
       cuda_module_singleton = this;
+      rh_listener = new GPUReplHeapListener(this);
     }
       
     CudaModule::~CudaModule(void)
@@ -3774,6 +3776,7 @@ namespace Realm {
       delete_container_contents(gpu_info);
       assert(cuda_module_singleton == this);
       cuda_module_singleton = 0;
+      delete rh_listener;
     }
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
@@ -3838,7 +3841,7 @@ namespace Realm {
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
-      CudaModule *m = new CudaModule;
+      CudaModule *m = new CudaModule(runtime);
 
       // first order of business - read command line parameters
       {
@@ -4109,6 +4112,10 @@ namespace Realm {
 	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
 	assert(false);
       }
+
+      // make sure we hear about any changes to the size of the replicated
+      //  heap
+      runtime->repl_heap.add_listener(rh_listener);
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -4512,6 +4519,9 @@ namespace Realm {
 	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostUnregister)(*it) );
 	registered_host_ptrs.clear();
       }
+
+      // and clean up anything that was needed for the replicated heap
+      runtime->repl_heap.remove_listener(rh_listener);
 
       for(std::vector<GPU *>::iterator it = gpus.begin();
 	  it != gpus.end();

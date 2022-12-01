@@ -66,6 +66,7 @@ list(APPEND REALM_SRC
   realm/operation.inl
   realm/proc_impl.h         realm/proc_impl.cc
   realm/procset/procset_module.h realm/procset/procset_module.cc
+  realm/repl_heap.h         realm/repl_heap.cc
   realm/rsrv_impl.h         realm/rsrv_impl.cc
   realm/runtime_impl.h      realm/runtime_impl.cc
   realm/sampling_impl.h     realm/sampling_impl.cc

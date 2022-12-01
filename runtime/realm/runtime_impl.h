@@ -45,6 +45,7 @@
 
 #include "realm/bgwork.h"
 #include "realm/activemsg.h"
+#include "realm/repl_heap.h"
 
 namespace Realm {
 
@@ -333,6 +334,8 @@ namespace Realm {
       OperationTable optable;
 
       SamplingProfiler sampling_profiler;
+
+      ReplicatedHeap repl_heap; // used for sparsity maps, instance layouts
 
       class DeferredShutdown : public EventWaiter {
       public:
