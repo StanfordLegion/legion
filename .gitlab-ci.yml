@@ -69,10 +69,10 @@ variables:
   CC:  "clang-14"
   CXX: "clang++-14"
   F90: "gfortran-11"
-.hpcsdk212: &hpcsdk212
-  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvc"
-  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvc++"
-  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvfortran"
+.hpcsdk2211: &hpcsdk2211
+  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc"
+  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc++"
+  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvfortran"
   # cmake gets confused and can't figure out library arch
   EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 .icc212: &icc212
@@ -564,7 +564,7 @@ before_script:
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:221201
 .image_icc: &image_icc
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc
 .image_msvc169: &image_msvc169
@@ -1322,14 +1322,14 @@ darwin_power9_clang8_cxx17_debug_legion:
     <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
 
 # HPCSDK (nvc++) tests:
-hpcsdk212_cxx11_release_legion:
+hpcsdk2211_cxx11_release_legion:
   <<: [*linux, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk212, *release, *cxx11_normal, *legion]
-hpcsdk212_cxx11_debug_cmake_legion:
+    <<: [*hpcsdk2211, *release, *cxx11_normal, *legion]
+hpcsdk2211_cxx11_debug_cmake_legion:
   <<: [*linux, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
+    <<: [*hpcsdk2211, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
 
 # Intel compiler (icc/icpc) tests:
 icc212_cxx11_release_legion:
