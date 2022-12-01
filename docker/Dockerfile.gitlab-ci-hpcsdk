@@ -33,8 +33,13 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
 # delete a bunch of stuff we don't need (yet) - NOTE: this is only useful
 #  if you use docker-squash on the resulting image (docker build --squash
-#  only squashes the new layers we add here)
+#  only squashes the new layers we add here); see instructions below
 RUN rm -rf /opt/nvidia/hpc_sdk/Linux_x86_64/22.11/comm_libs/ && \
     rm -rf /opt/nvidia/hpc_sdk/Linux_x86_64/22.11/math_libs/ && \
     rm -rf /opt/nvidia/hpc_sdk/Linux_x86_64/22.11/profilers/ && \
     rm -rf /opt/nvidia/hpc_sdk/Linux_x86_64/22.11/examples/
+
+# process to squash the image:
+# pip3 install docker-squash
+# ~/.local/bin/docker-squash -t registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:YYMMDD-squash registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:YYMMDD
+# docker tag registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:YYMMDD-squash registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:YYMMDD
