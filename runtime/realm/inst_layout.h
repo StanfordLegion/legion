@@ -82,6 +82,10 @@ namespace Realm {
       //  in - can only be used once
       virtual void *allocate_memory(size_t bytes) = 0;
 
+      // after any changes to the contents of the memory, this must be
+      //  called to ensure all devices see the changes
+      virtual void commit_updates() = 0;
+
       struct PerField {
 	const PieceLookup::Instruction *start_inst;
 	unsigned inst_usage_mask;
