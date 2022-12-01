@@ -3724,12 +3724,13 @@ namespace Legion {
                                                   IndexSpaceExprID expr_id,
                                                   CollectiveMapping *mapping,
                                                   const bool add_root_reference,
-                                                  unsigned depth)
+                                                  unsigned depth,
+                                                  const bool tree_valid)
     //--------------------------------------------------------------------------
     { 
       IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
                                 did, is_ready, expr_id, initialized, depth,
-                                provenance, mapping);
+                                provenance, mapping, tree_valid);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3784,7 +3785,7 @@ namespace Legion {
     { 
       IndexSpaceCreator creator(this, sp, realm_is, false/*is domain*/, &parent,
                                 color, did, is_ready, 0/*expr id*/, initialized,
-                                depth, provenance, mapping);
+                                depth, provenance, mapping, true/*tree valid*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -7854,10 +7855,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
-        LegionColor c, DistributedID did,
-        RtEvent init, CollectiveMapping *mapping, Provenance *prov)
+        LegionColor c, DistributedID did, RtEvent init,
+        CollectiveMapping *mapping, Provenance *prov, bool tree_valid)
       : ValidDistributedCollectable(ctx->runtime, did, false/*register*/,
-          mapping), context(ctx), depth(d), color(c),
+          mapping, tree_valid), context(ctx), depth(d), color(c),
         provenance(prov), initialized(init)
     //--------------------------------------------------------------------------
     {
@@ -8071,11 +8072,11 @@ namespace Legion {
                                    DistributedID did, ApEvent ready,
                                    IndexSpaceExprID exp_id, RtEvent init,
                                    unsigned dep, Provenance *prov,
-                                   CollectiveMapping *map)
+                                   CollectiveMapping *map, bool tree_valid)
       : IndexTreeNode(ctx,
           (dep == UINT_MAX) ? ((par == NULL) ? 0 : par->depth + 1) : dep, c, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_SPACE_NODE_DC),
-          init, map, prov),
+          init, map, prov, tree_valid),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
@@ -8777,6 +8778,7 @@ namespace Legion {
         collective_mapping->pack(rez);
       else
         rez.serialize<size_t>(0); // total spaces
+      rez.serialize<bool>(recurse); // whether the tree is valid or not
       rez.serialize<size_t>(semantic_info.size());
       for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
@@ -8887,6 +8889,8 @@ namespace Legion {
       CollectiveMapping *mapping = NULL;
       if (num_spaces > 0)
         mapping = new CollectiveMapping(derez, num_spaces);
+      bool valid;
+      derez.deserialize<bool>(valid);
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
@@ -8894,7 +8898,7 @@ namespace Legion {
             true/*can fail*/, true/*first*/, true/*local only*/);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized, provenance,
-          ready_event, expr_id, mapping, false/*add root reference*/, depth);
+          ready_event,expr_id,mapping,false/*add root reference*/,depth,valid);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -8929,15 +8933,33 @@ namespace Legion {
       {
         // See if we're going to be sending the whole tree or not
         bool recurse = true;
-        if (target->check_valid_and_increment(REGION_TREE_REF))
+        if (target->parent == NULL)
         {
-          target->pack_valid_ref();
-          target->remove_base_valid_ref(REGION_TREE_REF);
+          if (target->check_valid_and_increment(REGION_TREE_REF))
+          {
+            target->pack_valid_ref();
+            target->remove_base_valid_ref(REGION_TREE_REF);
+          }
+          else
+          {
+            target->pack_global_ref();
+            recurse = false;
+          }
         }
         else
         {
-          target->pack_global_ref();
-          recurse = false;
+          // If we have a parent then we need to do the valid reference
+          // check on the partition since that keeps this tree valid
+          if (target->parent->check_valid_and_increment(REGION_TREE_REF))
+          {
+            target->parent->pack_valid_ref();
+            target->parent->remove_base_valid_ref(REGION_TREE_REF);
+          }
+          else
+          {
+            target->pack_global_ref();
+            recurse = false;
+          }
         }
         target->send_node(source, recurse);
         // Now send back the results
@@ -8969,7 +8991,12 @@ namespace Legion {
       bool recurse;
       derez.deserialize(recurse);
       if (recurse)
-        node->unpack_valid_ref();
+      {
+        if (node->parent == NULL)
+          node->unpack_valid_ref();
+        else
+          node->parent->unpack_valid_ref();
+      }
       else
         node->unpack_global_ref();
     }
@@ -9479,7 +9506,7 @@ namespace Legion {
                                  Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      init, mapping, prov), 
+                      init, mapping, prov, true/*tree valid*/),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
@@ -9520,7 +9547,7 @@ namespace Legion {
                                  ShardMapping *shard_map, Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
-                      init, map, prov),
+                      init, map, prov, true/*tree valid*/),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),

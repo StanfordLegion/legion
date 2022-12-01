@@ -211,10 +211,10 @@ namespace Legion {
     class DistributedCollectable {
     public:
       enum State {
-        DELETED_REF_STATE,
-        LOCAL_REF_STATE,
-        GLOBAL_REF_STATE,
-        VALID_REF_STATE, // a second global ref state
+        DELETED_REF_STATE = 0,
+        LOCAL_REF_STATE = 1,
+        GLOBAL_REF_STATE = 2,
+        VALID_REF_STATE = 3, // a second global ref state
       };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
@@ -299,16 +299,15 @@ namespace Legion {
       bool can_delete(AutoLock &gc);
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
-      virtual void process_downgrade_update(void);
+      virtual void process_downgrade_update(AutoLock &gc, State to_check);
       virtual void initialize_downgrade_state(AddressSpaceID owner);
-      virtual void update_instances_internal(AddressSpaceID remote_inst);
-      void check_for_downgrade(AddressSpaceID downgrade_owner, 
-                               bool need_lock = true);
+      void check_for_downgrade(AddressSpaceID downgrade_owner); 
+      void process_downgrade_request(AddressSpaceID owner, State to_check);
       bool process_downgrade_response(AddressSpaceID notready,
                                               uint64_t total_sent,
                                               uint64_t total_received);
-      void send_downgrade_notifications(void);
-      bool process_downgrade_success(void);
+      void send_downgrade_notifications(State to_downgrade);
+      void process_downgrade_success(State old_state);
       AddressSpaceID get_downgrade_target(AddressSpaceID owner) const;
     public:
       static void handle_downgrade_request(Runtime *runtime,
@@ -369,7 +368,8 @@ namespace Legion {
     public:
       ValidDistributedCollectable(Runtime *rt, DistributedID did,
                                   bool register_with_runtime = true,
-                                  CollectiveMapping *mapping = NULL);
+                                  CollectiveMapping *mapping = NULL,
+                                  bool start_in_valid_state = true);
       ValidDistributedCollectable(const ValidDistributedCollectable &rhs);
       virtual ~ValidDistributedCollectable(void);     
     public:
@@ -407,9 +407,8 @@ namespace Legion {
     protected:
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
-      virtual void process_downgrade_update(void);
+      virtual void process_downgrade_update(AutoLock &gc, State to_check);
       virtual void initialize_downgrade_state(AddressSpaceID owner);
-      virtual void update_instances_internal(AddressSpaceID remote_inst);
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;
@@ -429,7 +428,7 @@ namespace Legion {
       std::map<DistributedID,int> detailed_nested_valid_references;
 #endif
     protected:
-      uint64_t  sent_valid_references, received_valid_references;
+      uint64_t sent_valid_references, received_valid_references;
     };
 
     //--------------------------------------------------------------------------

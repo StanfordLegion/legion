@@ -589,14 +589,6 @@ namespace Legion {
               !collective_mapping->contains(remote_inst));
 #endif
       AutoLock gc(gc_lock);
-      update_instances_internal(remote_inst); 
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::update_instances_internal(
-                                                     AddressSpaceID remote_inst)
-    //--------------------------------------------------------------------------
-    {
       // Handle a very unusual case here were we weren't able to perform the
       // deletion because there was a packed reference, but we didn't know
       // where to send it to yet
@@ -609,6 +601,7 @@ namespace Legion {
 #endif
         Serializer rez;
         rez.serialize(did);
+        rez.serialize(current_state);
         runtime->send_did_downgrade_update(remote_inst, rez);
         downgrade_owner = remote_inst;
       }
@@ -720,7 +713,7 @@ namespace Legion {
               if (remaining_responses > 0)
                 return false;
               // Send messages to see if we can perform the deletion
-              check_for_downgrade(downgrade_owner, false/*need lock*/);
+              check_for_downgrade(downgrade_owner);
               return false;
             }
             else
@@ -755,7 +748,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_downgrade_notifications(void)
+    void DistributedCollectable::send_downgrade_notifications(State downgrade)
     //--------------------------------------------------------------------------
     {
       // Ready to downgrade, send the messages and then do our local one
@@ -773,6 +766,7 @@ namespace Legion {
         {
           Serializer rez;
           rez.serialize(did);
+          rez.serialize(downgrade);
           for (std::vector<AddressSpaceID>::const_iterator it =
                 children.begin(); it != children.end(); it++)
             runtime->send_did_downgrade_success(*it, rez);
@@ -784,6 +778,7 @@ namespace Legion {
         {
           Serializer rez;
           rez.serialize(did);
+          rez.serialize(downgrade);
           struct {
             void apply(AddressSpaceID space)
             { 
@@ -807,6 +802,7 @@ namespace Legion {
         // to get all the remote instances
         Serializer rez;
         rez.serialize(did);
+        rez.serialize(downgrade);
         runtime->send_did_downgrade_success(owner_space, rez);
       }
     }
@@ -816,6 +812,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(gc_references == 0);
       assert(current_state == GLOBAL_REF_STATE);
 #endif
       // Downgrade the state first so that we don't duplicate the callback
@@ -830,7 +827,7 @@ namespace Legion {
       gc.release();
       // Can do this without holding the lock as the remote_instances data
       // structure should no longer be changing
-      send_downgrade_notifications();
+      send_downgrade_notifications(GLOBAL_REF_STATE);
       notify_local();
       // Unregister this with the runtime
       if (registered_with_runtime)
@@ -851,16 +848,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::check_for_downgrade(AddressSpaceID owner,
-                                                     bool need_lock)
+    void DistributedCollectable::check_for_downgrade(AddressSpaceID owner)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock gc(gc_lock);
-        check_for_downgrade(owner, false/*need lock*/);
-        return;
-      }
 #ifdef DEBUG_LEGION
       assert(remaining_responses == 0);
 #endif
@@ -884,6 +874,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
+              rez.serialize(current_state);
               rez.serialize(owner);
             }
             for (std::vector<AddressSpaceID>::const_iterator it =
@@ -900,6 +891,7 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
+              rez.serialize(current_state);
               rez.serialize(owner);
             }
             struct {
@@ -933,6 +925,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(did);
+            rez.serialize(current_state);
             rez.serialize(owner);
           }
           runtime->send_did_downgrade_request(owner_space, rez);
@@ -1001,6 +994,8 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      State to_check;
+      derez.deserialize(to_check);
       AddressSpaceID downgrade_owner;
       derez.deserialize(downgrade_owner);
 
@@ -1008,7 +1003,33 @@ namespace Legion {
       // distributed collectable so wait until it is ready
       DistributedCollectable *dc = 
         runtime->find_distributed_collectable(did, true/*wait*/);
-      dc->check_for_downgrade(downgrade_owner);
+      dc->process_downgrade_request(downgrade_owner, to_check);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::process_downgrade_request(AddressSpaceID owner,
+                                                           State to_check)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner != local_space); // we should be remote here
+#endif
+      AutoLock gc(gc_lock);
+      // If the owner is asking us to downgrade a state that is less than
+      // our current state then that is because the downgrade from our 
+      // current state has already been done on the owner and we should
+      // perform our local down grade to reflect that first
+      while (current_state != to_check)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_check < current_state);
+#endif
+        perform_downgrade(gc);
+      }
+#ifdef DEBUG_LEGION
+      assert(LOCAL_REF_STATE < current_state);
+#endif
+      check_for_downgrade(owner);
     }
 
     //--------------------------------------------------------------------------
@@ -1082,6 +1103,7 @@ namespace Legion {
               downgrade_owner = notready_owner;
               Serializer rez;
               rez.serialize(did);
+              rez.serialize(current_state);
               runtime->send_did_downgrade_update(notready_owner, rez);
             }
             else
@@ -1090,7 +1112,7 @@ namespace Legion {
               // but there are still packed references in flight so we need
               // to keep trying to perform the downgrade until we find one
               // of these nodes and find the reference
-              check_for_downgrade(downgrade_owner, false/*need lock*/);
+              check_for_downgrade(downgrade_owner);
             }
           }
         }
@@ -1131,11 +1153,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool DistributedCollectable::process_downgrade_success(void)
+    void DistributedCollectable::process_downgrade_success(State to_downgrade)
     //--------------------------------------------------------------------------
     {
       AutoLock gc(gc_lock);
-      return perform_downgrade(gc);
+      // Check to see if this state has already been downgraded already
+      // because a check_for_downgrade got here first
+      if (to_downgrade == current_state)
+        perform_downgrade(gc);
+#ifdef DEBUG_LEGION
+      else
+        assert(current_state < to_downgrade);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1145,26 +1174,43 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
+      State to_downgrade;
+      derez.deserialize(to_downgrade);
 
-      // Can get a race here where this arrives before the object is created
-      // in the case of ValidDistributedCollectable objects that are no
-      // longer valid and send this to update the object
-      DistributedCollectable *dc = 
-        runtime->find_distributed_collectable(did, true/*wait*/);
-      if (dc->process_downgrade_success())
-        delete dc;
+      // These can race with checks for downgrades from other states and
+      // therefore it's possible for these to arrive even after the object
+      // itself has been deleted so we need a weak find here
+      DistributedCollectable *dc =
+        runtime->weak_find_distributed_collectable(did);
+      if (dc != NULL)
+      {
+        dc->process_downgrade_success(to_downgrade);
+        if (dc->remove_base_resource_ref(RUNTIME_REF))
+          delete dc;
+      }
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::process_downgrade_update(void)
+    void DistributedCollectable::process_downgrade_update(AutoLock &gc,
+                                                          State to_check)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(downgrade_owner != local_space);
 #endif
+      // It's possible we get this notification before the update saying
+      // that the downgrade from the previous state has been successful
+      // so make sure to update accordingly
+      while (to_check != current_state)
+      {
+#ifdef DEBUG_LEGION
+        assert(to_check < current_state);
+#endif
+        perform_downgrade(gc);
+      }
       downgrade_owner = local_space;
       if (gc_references == 0)
-        check_for_downgrade(downgrade_owner, false/*need lock*/);
+        check_for_downgrade(downgrade_owner);
     }
 
     //--------------------------------------------------------------------------
@@ -1174,13 +1220,15 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
+      State state;
+      derez.deserialize(state);
 
       // It's possible for this to race with the creation and registration
       // of this distributed collectable so wait for it to be ready
       DistributedCollectable *dc =
         runtime->find_distributed_collectable(did, true/*wait*/);
       AutoLock gc(dc->gc_lock);
-      dc->process_downgrade_update();
+      dc->process_downgrade_update(gc, state);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1189,8 +1237,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ValidDistributedCollectable::ValidDistributedCollectable(Runtime *rt,
-                 DistributedID id, bool do_registration, CollectiveMapping *map)
-      : DistributedCollectable(rt, id, do_registration, map, VALID_REF_STATE),
+                                                  DistributedID id, 
+                                                  bool do_registration, 
+                                                  CollectiveMapping *map,
+                                                  bool start_in_valid_state)
+      : DistributedCollectable(rt, id, do_registration, map,
+          start_in_valid_state ? VALID_REF_STATE : GLOBAL_REF_STATE),
         valid_references(0), sent_valid_references(0),
         received_valid_references(0)
     //--------------------------------------------------------------------------
@@ -1611,9 +1663,12 @@ namespace Legion {
     {
       if (current_state == VALID_REF_STATE)
       {
+#ifdef DEBUG_LEGION
+        assert(valid_references == 0);
+#endif
         // Send messages while holding the lock because the remote_instances
         // data structure might still be changing
-        send_downgrade_notifications();
+        send_downgrade_notifications(VALID_REF_STATE);
         // Downgrade the state first so that we don't duplicate the callback
         current_state = GLOBAL_REF_STATE;
         // Add a gc reference here prevent downgrades from the global ref
@@ -1644,20 +1699,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::process_downgrade_update(void)
+    void ValidDistributedCollectable::process_downgrade_update(AutoLock &gc,
+                                                               State to_check)
     //--------------------------------------------------------------------------
     {
-      if (current_state == VALID_REF_STATE)
+#ifdef DEBUG_LEGION
+      assert(downgrade_owner != local_space);
+#endif
+      // It's possible we get this notification before the update saying
+      // that the downgrade from the previous state has been successful
+      // so make sure to update accordingly
+      while (to_check != current_state)
       {
 #ifdef DEBUG_LEGION
-        assert(downgrade_owner != local_space);
+        assert(to_check < current_state);
 #endif
+        perform_downgrade(gc);
+      }
+      if (current_state == VALID_REF_STATE)
+      {
         downgrade_owner = local_space;
         if (valid_references == 0)
-          check_for_downgrade(downgrade_owner, false/*need lock*/);
+          check_for_downgrade(downgrade_owner);
       }
       else
-        DistributedCollectable::process_downgrade_update();
+        DistributedCollectable::process_downgrade_update(gc, to_check);
     }
 
     //--------------------------------------------------------------------------
@@ -1673,25 +1739,6 @@ namespace Legion {
       }
       else
         DistributedCollectable::initialize_downgrade_state(owner);
-    }
-
-    //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::update_instances_internal(
-                                                     AddressSpaceID remote_inst)
-    //--------------------------------------------------------------------------
-    {
-      if (current_state != VALID_REF_STATE)
-      {
-#ifdef DEBUG_LEGION
-        assert(current_state == GLOBAL_REF_STATE);
-#endif
-        // We're no longer valid so make sure that this new instance also
-        // knows that we're no longer valid either
-        Serializer rez;
-        rez.serialize(did);
-        runtime->send_did_downgrade_success(remote_inst, rez);
-      }
-      DistributedCollectable::update_instances_internal(remote_inst);
     }
 
   }; // namespace Internal 
