@@ -5536,10 +5536,15 @@ namespace Legion {
           break;
         case DISTRIBUTED_DOWNGRADE_SUCCESS:
           break;
+        // Put downgrade updates and acquire requests
+        // on same ordered virtual channel so that 
+        // acquire requests cannot starve out an owner
+        // update while it is in flight by circling
+        // around and around
         case DISTRIBUTED_DOWNGRADE_UPDATE:
-          break;
+          return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
-          break;
+          return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
           break;
         case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
