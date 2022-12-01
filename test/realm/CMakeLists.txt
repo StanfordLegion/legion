@@ -50,6 +50,7 @@ list(APPEND REALM_TESTS
   sparse_construct
   extres_alias
   reservations
+  multiaffine
   )
 
 if(Legion_USE_CUDA)
@@ -58,6 +59,7 @@ if(Legion_USE_CUDA)
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
+  set(CUDASRC_multiaffine multiaffine_gpu.cu)
 
   list(APPEND REALM_TESTS cuda_arrays)
   set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)
