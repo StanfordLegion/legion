@@ -25595,13 +25595,13 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       PhysicalInstance source_instance;
+      const Realm::ExternalMemoryResource resource(
+          reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
+          future_result_size, true/*read only*/);
       const ApEvent src_ready(
           PhysicalInstance::create_external_instance(
-            source_instance, runtime->runtime_system_memory, ilg, 
-            Realm::ExternalMemoryResource(
-             reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
-             future_result_size, true/*read only*/),
-            Realm::ProfilingRequestSet()));
+            source_instance, resource.suggested_memory(), ilg,
+            resource, Realm::ProfilingRequestSet()));
       FutureInstance source(serdez_redop_buffer, future_result_size, 
           ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
           false/*own alloc*/, source_instance);

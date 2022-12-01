@@ -719,7 +719,8 @@ namespace Legion {
                                   IndexSpaceExprID expr_id = 0,
                                   CollectiveMapping *mapping = NULL,
                                   const bool add_root_reference = false,
-                                  unsigned depth = UINT_MAX);
+                                  unsigned depth = UINT_MAX,
+                                  const bool tree_valid = true);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode &par, LegionColor color,
                                   DistributedID did, RtEvent initialized,
@@ -1927,7 +1928,7 @@ namespace Legion {
       IndexTreeNode(RegionTreeForest *ctx, unsigned depth,
                     LegionColor color, DistributedID did,
                     RtEvent init_event, CollectiveMapping *mapping,
-                    Provenance *provenance);
+                    Provenance *provenance, bool tree_valid);
       virtual ~IndexTreeNode(void);
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
@@ -2037,7 +2038,7 @@ namespace Legion {
                      DistributedID did, ApEvent index_space_ready,
                      IndexSpaceExprID expr_id, RtEvent initialized,
                      unsigned depth, Provenance *provenance,
-                     CollectiveMapping *mapping);
+                     CollectiveMapping *mapping, bool tree_valid);
       IndexSpaceNode(const IndexSpaceNode &rhs) = delete;
       virtual ~IndexSpaceNode(void);
     public:
@@ -2362,7 +2363,7 @@ namespace Legion {
                       DistributedID did, ApEvent ready_event,
                       IndexSpaceExprID expr_id, RtEvent init,
                       unsigned depth, Provenance *provenance,
-                      CollectiveMapping *mapping);
+                      CollectiveMapping *mapping, bool tree_valid);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs) = delete;
       virtual ~IndexSpaceNodeT(void);
     public:
@@ -2911,10 +2912,10 @@ namespace Legion {
                         bool is_dom, IndexPartNode *p, LegionColor c, 
                         DistributedID d, ApEvent a, IndexSpaceExprID e,
                         RtEvent init, unsigned dp, Provenance *prov,
-                        CollectiveMapping *m)
+                        CollectiveMapping *m, bool valid)
         : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
           color(c), did(d), ready(a), expr_id(e), initialized(init), depth(dp),
-          provenance(prov), mapping(m), result(NULL) { }
+          provenance(prov), mapping(m), tree_valid(valid), result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
@@ -2923,7 +2924,7 @@ namespace Legion {
             creator->space, creator->parent, creator->color, creator->bounds,
             creator->is_domain, creator->did, creator->ready, creator->expr_id,
             creator->initialized, creator->depth, creator->provenance,
-            creator->mapping);
+            creator->mapping, creator->tree_valid);
       }
     public:
       RegionTreeForest *const forest;
@@ -2939,6 +2940,7 @@ namespace Legion {
       const unsigned depth;
       Provenance *const provenance;
       CollectiveMapping *const mapping;
+      const bool tree_valid;
       IndexSpaceNode *result;
     };
 
