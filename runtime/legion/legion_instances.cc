@@ -962,7 +962,8 @@ namespace Legion {
         kind(k), external_pointer(-1UL), producer_event(p_event),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
-        valid_references(0)
+        valid_references(0), sent_valid_references(0),
+        received_valid_references(0)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,
@@ -1525,6 +1526,27 @@ namespace Legion {
       // Nothing to do here 
     } 
 
+    //--------------------------------------------------------------------------
+    void PhysicalManager::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      // We should always be holding a valid reference when we
+      // pack a valid reference so the state should always be valid
+      assert(gc_state == VALID_GC_STATE);
+#endif
+      sent_valid_references++;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+      received_valid_references++;
+    }
+
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void PhysicalManager::add_base_valid_ref_internal(
@@ -1604,7 +1626,7 @@ namespace Legion {
         return notify_invalid();
       else
         return false;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PhysicalManager::add_valid_reference(int cnt, bool need_check)
@@ -2359,8 +2381,10 @@ namespace Legion {
               assert(collection_ready.has_triggered());
 #endif
               // Check to see if there were any collection guards we
-              // were unable to acquire on remote nodes
-              if (failed_collection_count.load() > 0)
+              // were unable to acquire on remote nodes or whether there
+              // are still packed valid reference outstanding
+              if ((failed_collection_count.load() > 0) ||
+                  (total_sent_references != total_received_references))
               {
                 // See if we're the last release, if not then we
                 // keep it in this state

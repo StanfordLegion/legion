@@ -594,9 +594,11 @@ namespace Legion {
       bool empty(void) const;
     public:
       void merge(TraceViewSet &target) const;
-      void pack(Serializer &rez, AddressSpaceID target) const;
+      void pack(Serializer &rez, AddressSpaceID target, 
+                const bool pack_references) const;
       void unpack(Deserializer &derez, size_t num_views,
                   AddressSpaceID source, std::set<RtEvent> &ready_events);
+      void unpack_references(void) const;
     public:
       void dump(void) const;
     protected:

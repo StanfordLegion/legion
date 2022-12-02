@@ -3071,7 +3071,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::pack(Serializer &rez, AddressSpaceID target) const
+    void TraceViewSet::pack(Serializer &rez, AddressSpaceID target,
+                            const bool pack_references) const
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(conditions.size());
@@ -3086,6 +3087,8 @@ namespace Legion {
           it->first->pack_expression(rez, target);
           rez.serialize(it->second);
         }
+        if (pack_references)
+          vit->first->pack_valid_ref();
       }
     }
 
@@ -3118,6 +3121,15 @@ namespace Legion {
         if (ready.exists() && !ready.has_triggered())
           ready_events.insert(ready);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::unpack_references(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); vit++)
+        vit->first->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------

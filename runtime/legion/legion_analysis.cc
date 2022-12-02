@@ -16998,15 +16998,15 @@ namespace Legion {
           rez.serialize(target);
           rez.serialize(region_node->handle);
           if (previews != NULL)
-            previews->pack(rez, target_space);
+            previews->pack(rez, target_space, true/*pack references*/);
           else
             rez.serialize<size_t>(0);
           if (antiviews != NULL)
-            antiviews->pack(rez, target_space);
+            antiviews->pack(rez, target_space, true/*pack references*/);
           else
             rez.serialize<size_t>(0);
           if (postviews != NULL)
-            postviews->pack(rez, target_space);
+            postviews->pack(rez, target_space, true/*pack references*/);
           else
             rez.serialize<size_t>(0);
           rez.serialize(ready_event);
@@ -17475,7 +17475,7 @@ namespace Legion {
       pack_updates(rez, target, valid_updates, initialized_updates,
            reduction_updates, restricted_updates, released_updates, 
            &read_only_guards, &reduction_fill_guards, precondition_updates, 
-           anticondition_updates, postcondition_updates);
+           anticondition_updates, postcondition_updates, true/*pack refs*/);
       if (precondition_updates != NULL)
         delete precondition_updates;
       if (anticondition_updates != NULL)
@@ -17500,7 +17500,8 @@ namespace Legion {
               const FieldMaskSet<CopyFillGuard> *reduction_fill_updates,
               const TraceViewSet *precondition_updates,
               const TraceViewSet *anticondition_updates,
-              const TraceViewSet *postcondition_updates)
+              const TraceViewSet *postcondition_updates,
+              const bool pack_references)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(valid_updates.size());
@@ -17515,6 +17516,8 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           rez.serialize(it->second);
+          if (pack_references)
+            it->first->pack_valid_ref();
         }
       }
       rez.serialize<size_t>(initialized_updates.size());
@@ -17537,6 +17540,8 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           it->second->pack_expression(rez, target);
+          if (pack_references)
+            it->first->pack_valid_ref();
         }
       }
       rez.serialize<size_t>(restricted_updates.size());
@@ -17552,6 +17557,8 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           rez.serialize(it->second);
+          if (pack_references)
+            it->first->pack_valid_ref();
         }
       }
       rez.serialize<size_t>(released_updates.size());
@@ -17566,6 +17573,8 @@ namespace Legion {
         {
           rez.serialize(it->first->did);
           rez.serialize(it->second);
+          if (pack_references)
+            it->first->pack_valid_ref();
         }
       }
       if ((read_only_updates != NULL) && !read_only_updates->empty())
@@ -17594,15 +17603,15 @@ namespace Legion {
       else
         rez.serialize<size_t>(0);
       if (precondition_updates != NULL)
-        precondition_updates->pack(rez, target); 
+        precondition_updates->pack(rez, target, pack_references); 
       else
         rez.serialize<size_t>(0);
       if (anticondition_updates != NULL)
-        anticondition_updates->pack(rez, target); 
+        anticondition_updates->pack(rez, target, pack_references); 
       else
         rez.serialize<size_t>(0);
       if (postcondition_updates != NULL)
-        postcondition_updates->pack(rez, target); 
+        postcondition_updates->pack(rez, target, pack_references); 
       else
         rez.serialize<size_t>(0);
     }
@@ -17814,7 +17823,8 @@ namespace Legion {
                   restricted_updates, released_updates, precondition_updates,
                   anticondition_updates, postcondition_updates, 
                   &read_only_updates, &reduction_fill_updates,
-                  applied_events, true/*need lock*/, forward_to_owner);
+                  applied_events, true/*need lock*/, forward_to_owner, 
+                  true/*unpack references*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17918,7 +17928,7 @@ namespace Legion {
           dargs->precondition_updates, dargs->anticondition_updates,
           dargs->postcondition_updates, dargs->read_only_updates,
           dargs->reduction_fill_updates, applied_events, 
-          true/*needs lock*/, dargs->forward_to_owner);
+          true/*needs lock*/, dargs->forward_to_owner, true/*unpack refs*/);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->done_event, 
             Runtime::merge_events(applied_events));
@@ -18038,7 +18048,8 @@ namespace Legion {
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
             restricted_updates, released_updates, precondition_updates,
             anticondition_updates, postcondition_updates, NULL/*guards*/,
-            NULL/*guards*/, applied_events, false/*no lock*/, forward_to_owner);
+            NULL/*guards*/, applied_events, false/*no lock*/, forward_to_owner,
+            false/*unpack references*/);
       if (invalidate_overlap)
       {
         if (!set_expr->is_empty())
@@ -18485,7 +18496,8 @@ namespace Legion {
                   FieldMaskSet<CopyFillGuard> *read_only_guard_updates,
                   FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
                   std::set<RtEvent> &applied_events, 
-                  const bool needs_lock, const bool forward_to_owner)
+                  const bool needs_lock, const bool forward_to_owner,
+                  const bool unpack_references)
     //--------------------------------------------------------------------------
     {
       if (needs_lock)
@@ -18495,7 +18507,8 @@ namespace Legion {
                     restricted_updates, released_updates, precondition_updates,
                     anticondition_updates, postcondition_updates, 
                     read_only_guard_updates, reduction_fill_guard_updates,
-                    applied_events, false/*needs lock*/, forward_to_owner);
+                    applied_events, false/*needs lock*/, forward_to_owner,
+                    unpack_references);
         return;
       }
       if (forward_to_owner && !is_logical_owner())
@@ -18547,7 +18560,8 @@ namespace Legion {
                      initialized_updates, reduction_updates, restricted_updates,
                      released_updates, read_only_guard_updates, 
                      reduction_fill_guard_updates, precondition_updates,
-                     anticondition_updates, postcondition_updates);
+                     anticondition_updates, postcondition_updates, 
+                     !unpack_references);
         }
         runtime->send_equivalence_set_clone_response(logical_owner_space, rez);
         applied_events.insert(done_event);
@@ -18564,6 +18578,12 @@ namespace Legion {
         else
           record_instances(it->first, false/*covers*/,
               it->second.get_valid_mask(), it->second);
+        if (unpack_references)
+        {
+          for (FieldMaskSet<LogicalView>::const_iterator vit =
+                it->second.begin(); vit != it->second.end(); vit++)
+            vit->first->unpack_valid_ref();
+        }
       }
       for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
             initialized_updates.begin(); it != initialized_updates.end(); it++)
@@ -18576,7 +18596,16 @@ namespace Legion {
       for (std::map<unsigned,std::list<
             std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
             it = reduction_updates.begin(); it != reduction_updates.end(); it++)
+      {
         update_reductions(it->first, it->second);
+        if (unpack_references)
+        {
+          for (std::list<std::pair<InstanceView*,
+                                   IndexSpaceExpression*> >::const_iterator
+                vit = it->second.begin(); vit != it->second.end(); vit++)
+            vit->first->unpack_valid_ref();
+        }
+      }
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::const_iterator rit =
             restricted_updates.begin(); rit != restricted_updates.end(); rit++)
@@ -18584,14 +18613,26 @@ namespace Legion {
         const bool covers = (rit->first->get_volume() == dst_volume);
         for (FieldMaskSet<InstanceView>::const_iterator it =
               rit->second.begin(); it != rit->second.end(); it++)
+        {
           record_restriction(covers ? set_expr : rit->first, covers,
                              it->second, it->first);
+          if (unpack_references)
+            it->first->unpack_valid_ref();
+        }
       }
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::iterator it =
             released_updates.begin(); it != released_updates.end(); it++)
+      {
         update_released(it->first, (it->first->get_volume() == dst_volume),
                         it->second);
+        if (unpack_references)
+        {
+          for (FieldMaskSet<InstanceView>::const_iterator vit =
+                it->second.begin(); vit != it->second.end(); vit++)
+            vit->first->unpack_valid_ref();
+        }
+      }
       if (precondition_updates != NULL)
       {
         if (tracing_preconditions == NULL)
@@ -18600,6 +18641,8 @@ namespace Legion {
                              region_node);
         else
           precondition_updates->merge(*tracing_preconditions);
+        if (unpack_references)
+          precondition_updates->unpack_references();
       }
       if (anticondition_updates != NULL)
       {
@@ -18609,6 +18652,8 @@ namespace Legion {
                              region_node);
         else
           anticondition_updates->merge(*tracing_anticonditions);
+        if (unpack_references)
+          precondition_updates->unpack_references();
       }
       if (postcondition_updates != NULL)
       {
@@ -18618,6 +18663,8 @@ namespace Legion {
                              region_node);
         else
           postcondition_updates->merge(*tracing_postconditions);
+        if (unpack_references)
+          precondition_updates->unpack_references();
       }
     }
 
@@ -18786,6 +18833,12 @@ namespace Legion {
           wait_on.wait();
       }
       target->receive_capture(previews, antiviews, postviews, ready_events); 
+      if (previews != NULL)
+        previews->unpack_references();
+      if (antiviews != NULL)
+        antiviews->unpack_references();
+      if (postviews != NULL)
+        postviews->unpack_references();
       if (!ready_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
       else

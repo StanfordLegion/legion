@@ -371,6 +371,9 @@ namespace Legion {
       inline bool acquire_instance(DistributedID source);
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+    public:
+      void pack_valid_ref(void);
+      void unpack_valid_ref(void);
     protected:
       // Internal valid reference counting 
       void add_valid_reference(int cnt, bool need_check = true);
@@ -546,6 +549,7 @@ namespace Legion {
 #else
       std::atomic<int> valid_references;
 #endif
+      uint64_t sent_valid_references, received_valid_references;
 #ifdef DEBUG_LEGION_GC
     private:
       std::map<ReferenceSource,int> detailed_base_valid_references;

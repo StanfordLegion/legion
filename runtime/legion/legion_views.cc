@@ -193,7 +193,6 @@ namespace Legion {
     InstanceView::~InstanceView(void)
     //--------------------------------------------------------------------------
     { 
-
     } 
 
 #ifdef ENABLE_VIEW_REPLICATION
@@ -2243,6 +2242,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       manager->remove_nested_gc_ref(did);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      manager->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->unpack_valid_ref();
+      unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -4981,6 +4996,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
     void FillView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -5297,6 +5326,32 @@ namespace Legion {
       for (FieldMaskSet<DeferredView>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
         it->first->remove_nested_gc_ref(did);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->pack_valid_ref();
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->unpack_valid_ref();
+      for (FieldMaskSet<DeferredView>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->unpack_valid_ref();
+      unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
