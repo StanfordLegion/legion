@@ -2181,6 +2181,7 @@ namespace Legion {
         collective_mapping->get_children(owner_space, local_space, children);
         if (!children.empty())
         {
+<<<<<<< HEAD
           Serializer rez;
           {
             RezCheck z(rez);
@@ -2192,6 +2193,12 @@ namespace Legion {
             pack_global_ref();
             runtime->send_gc_notify(*it, rez);
           }
+=======
+          rez.serialize<size_t>(gc_events.size());
+          for (std::set<ApEvent>::const_iterator it =
+                gc_events.begin(); it != gc_events.end(); it++)
+            rez.serialize(*it);
+>>>>>>> control_replication
         }
       }
       std::set<InstanceDeletionSubscriber*> to_notify;
