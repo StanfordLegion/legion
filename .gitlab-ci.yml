@@ -489,6 +489,12 @@ before_script:
     - linux
     - compute
 
+# For tests that require AVX:
+.linux_avx: &linux_avx
+  tags:
+    - linux
+    - avx
+
 # For CUDA tests, always use a specific machine:
 .p100: &p100
   tags:
@@ -1323,11 +1329,11 @@ darwin_power9_clang8_cxx17_debug_legion:
 
 # HPCSDK (nvc++) tests:
 hpcsdk2211_cxx11_release_legion:
-  <<: [*linux, *image_hpcsdk, *tests]
+  <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
     <<: [*hpcsdk2211, *release, *cxx11_normal, *legion]
 hpcsdk2211_cxx11_debug_cmake_legion:
-  <<: [*linux, *image_hpcsdk, *tests]
+  <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
     <<: [*hpcsdk2211, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
 
