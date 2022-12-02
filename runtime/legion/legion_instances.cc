@@ -1693,6 +1693,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(target);
           rez.serialize(done);
+          rez.serialize(did);
           manager->pack_gc_events(rez);
         }
         runtime->send_gc_acquired(source, rez);
@@ -1745,7 +1746,6 @@ namespace Legion {
         if (!gc_events.empty())
         {
           rez.serialize<size_t>(gc_events.size());
-          rez.serialize(did);
           for (std::set<ApEvent>::const_iterator it =
                 gc_events.begin(); it != gc_events.end(); it++)
             rez.serialize(*it);
