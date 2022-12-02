@@ -256,6 +256,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InstanceView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      manager->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->unpack_valid_ref();
+      unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
     AddressSpaceID InstanceView::get_analysis_space(const DomainPoint &p) const
     //--------------------------------------------------------------------------
     {
@@ -4034,6 +4050,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
     void FillView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -4198,6 +4228,32 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
         it->first->remove_nested_gc_ref(did);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->pack_valid_ref();
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->unpack_valid_ref();
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->unpack_valid_ref();
+      unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -4486,6 +4542,26 @@ namespace Legion {
             local_instances.begin(); it != local_instances.end(); it++)
         if ((*it)->remove_nested_gc_ref(did))
           delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        (*it)->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        (*it)->unpack_valid_ref();
+      unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------

@@ -86,6 +86,9 @@ namespace Legion {
       inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+    public:
+      virtual void pack_valid_ref(void) = 0;
+      virtual void unpack_valid_ref(void) = 0;
     protected:
 #ifndef DEBUG_LEGION_GC
       void add_valid_reference(int cnt);
@@ -157,6 +160,8 @@ namespace Legion {
     public:
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public: 
       // Entry point functions for doing physical dependence analysis
       virtual void add_initial_user(ApEvent term_event,
@@ -910,6 +915,8 @@ namespace Legion {
       FillView& operator=(const FillView &rhs);
     public:
       virtual void notify_local(void) { /*nothing to do*/ }
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -982,6 +989,8 @@ namespace Legion {
       virtual void notify_local(void);
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public:
       virtual void send_view(AddressSpaceID target);
     public:
@@ -1032,6 +1041,8 @@ namespace Legion {
       virtual void notify_local(void);
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
