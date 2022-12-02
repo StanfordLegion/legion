@@ -18597,14 +18597,24 @@ namespace Legion {
             std::pair<InstanceView*,IndexSpaceExpression*> > >::iterator
             it = reduction_updates.begin(); it != reduction_updates.end(); it++)
       {
-        update_reductions(it->first, it->second);
         if (unpack_references)
         {
+          // Need to make a local copy here since this can destroy the list
+          std::vector<InstanceView*> local_reductions;
+          local_reductions.reserve(it->second.size());
           for (std::list<std::pair<InstanceView*,
                                    IndexSpaceExpression*> >::const_iterator
                 vit = it->second.begin(); vit != it->second.end(); vit++)
-            vit->first->unpack_valid_ref();
+            local_reductions.push_back(vit->first);
+          // Update the reductions
+          update_reductions(it->first, it->second);
+          // Then unpack our valid references
+          for (std::vector<InstanceView*>::const_iterator it =
+                local_reductions.begin(); it != local_reductions.end(); it++)
+            (*it)->unpack_valid_ref();
         }
+        else
+          update_reductions(it->first, it->second);
       }
       for (LegionMap<IndexSpaceExpression*,
             FieldMaskSet<InstanceView> >::const_iterator rit =
