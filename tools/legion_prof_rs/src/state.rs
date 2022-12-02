@@ -2183,8 +2183,8 @@ impl SpyState {
 
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
         if let Some(old) = self.spy_ops.insert(op, SpyOp::new(pre, post)) {
-            assert_eq!(old.precondition, pre);
-            assert_eq!(old.postcondition, post);
+            assert!(old.precondition.0 == 0 || old.precondition == pre);
+            assert!(old.postcondition.0 == 0 || old.postcondition == post);
         }
         self.spy_op_by_precondition
             .entry(pre)
