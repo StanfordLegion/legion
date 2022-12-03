@@ -398,7 +398,8 @@ namespace Legion {
       virtual void notify_local(void);
     public:
       bool can_collect(bool &already_collected) const;
-      bool acquire_collect(std::set<ApEvent> &gc_events);
+      bool acquire_collect(std::set<ApEvent> &gc_events, 
+          uint64_t &sent_valid, uint64_t received_valid);
       bool collect(RtEvent &collected);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
@@ -444,6 +445,7 @@ namespace Legion {
     public:
       PieceIteratorImpl* create_piece_iterator(IndexSpaceNode *privilege_node);
       void record_instance_user(ApEvent term_event, std::set<RtEvent> &applied);
+      void process_remote_reference_mismatch(uint64_t sent, uint64_t received);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool meets_regions(const std::vector<LogicalRegion> &regions,
@@ -488,6 +490,8 @@ namespace Legion {
       static void handle_garbage_collection_acquire(Runtime *runtime,
           Deserializer &derez);
       static void handle_garbage_collection_failed(Deserializer &derez);
+      static void handle_garbage_collection_mismatch(Runtime *runtime,
+          Deserializer &derez);
       static void handle_garbage_collection_notify(Runtime *runtime,
           Deserializer &derez);
       static void handle_garbage_collection_priority_update(Runtime *runtime,

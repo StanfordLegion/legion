@@ -3187,6 +3187,18 @@ namespace Legion {
       void send_collective_view_release(AddressSpaceID target, Serializer &rez);
       void send_collective_view_notification(AddressSpaceID target,
                                              Serializer &rez);
+      void send_collective_view_make_valid(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_collective_view_make_invalid(AddressSpaceID target, 
+                                             Serializer &rez);
+      void send_collective_view_invalidate_request(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_collective_view_invalidate_response(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_collective_view_add_remote_reference(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_collective_view_remove_remote_reference(AddressSpaceID target,
+                                                        Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
@@ -3344,6 +3356,7 @@ namespace Legion {
       void send_gc_response(AddressSpaceID target, Serializer &rez);
       void send_gc_acquire(AddressSpaceID target, Serializer &rez);
       void send_gc_failed(AddressSpaceID target, Serializer &rez);
+      void send_gc_mismatch(AddressSpaceID target, Serializer &rez);
       void send_gc_notify(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_request(AddressSpaceID target, Serializer &rez);
       void send_gc_debug_response(AddressSpaceID target, Serializer &rez);
@@ -3552,6 +3565,12 @@ namespace Legion {
       void handle_collective_view_deletion(Deserializer &derez);
       void handle_collective_view_release(Deserializer &derez);
       void handle_collective_view_notification(Deserializer &derez);
+      void handle_collective_view_make_valid(Deserializer &derez);
+      void handle_collective_view_make_invalid(Deserializer &derez);
+      void handle_collective_view_invalidate_request(Deserializer &derez);
+      void handle_collective_view_invalidate_response(Deserializer &derez);
+      void handle_collective_view_add_remote_reference(Deserializer &derez);
+      void handle_collective_view_remove_remote_reference(Deserializer &derez);
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
@@ -3684,6 +3703,7 @@ namespace Legion {
       void handle_gc_response(Deserializer &derez);
       void handle_gc_acquire(Deserializer &derez);
       void handle_gc_failed(Deserializer &derez);
+      void handle_gc_mismatch(Deserializer &derez);
       void handle_gc_notify(Deserializer &derez);
       void handle_gc_debug_request(Deserializer &derez, AddressSpaceID source);
       void handle_gc_debug_response(Deserializer &derez);
@@ -5804,6 +5824,21 @@ namespace Legion {
           break;
         case SEND_COLLECTIVE_VIEW_NOTIFICATION:
           break;
+        // All these collective messages need to go on the same
+        // virtual channel since they all need to be ordered 
+        // with respect to each other
+        case SEND_COLLECTIVE_VIEW_MAKE_VALID:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_VIEW_MAKE_INVALID:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_VIEW_INVALIDATE_REQUEST:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_VIEW_INVALIDATE_RESPONSE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_VIEW_ADD_REMOTE_REFERENCE:
+          return REFERENCE_VIRTUAL_CHANNEL;
+        case SEND_COLLECTIVE_VIEW_REMOVE_REMOTE_REFERENCE:
+          return REFERENCE_VIRTUAL_CHANNEL;
         case SEND_CREATE_TOP_VIEW_REQUEST:
           break;
         case SEND_CREATE_TOP_VIEW_RESPONSE:
@@ -5992,6 +6027,8 @@ namespace Legion {
         case SEND_GC_ACQUIRE:
           break;
         case SEND_GC_FAILED:
+          break;
+        case SEND_GC_MISMATCH:
           break;
         case SEND_GC_NOTIFY:
           // This one goes on the resource virtual channel because there

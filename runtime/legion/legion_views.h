@@ -121,7 +121,7 @@ namespace Legion {
       static inline bool is_phi_did(DistributedID did);
     protected:
       mutable LocalLock view_lock;
-    private:
+    protected:
 #ifdef DEBUG_LEGION_GC
       int valid_references;
 #else
@@ -453,6 +453,13 @@ namespace Legion {
     class CollectiveView : public InstanceView, 
                            public InstanceDeletionSubscriber {
     public:
+      enum ValidState {
+        FULL_VALID_STATE,
+        PENDING_VALID_STATE,
+        PENDING_INVALID_STATE,
+        NOT_VALID_STATE, 
+      };
+    public:
       CollectiveView(Runtime *runtime, DistributedID did,
                      DistributedID context_did,
                      const std::vector<IndividualView*> &views,
@@ -674,7 +681,13 @@ namespace Legion {
                                     std::vector<ApUserEvent> &ready_events,
                                     std::vector<std::vector<ApEvent> > &terms,
                                     const PhysicalTraceInfo *trace_info,
-                                    const bool symbolic) const;
+                                    const bool symbolic);
+    protected:
+      void make_valid(bool need_lock);
+      bool make_invalid(bool need_lock);
+      bool perform_invalidate_request(uint64_t generation, bool need_lock);
+      bool perform_invalidate_response(uint64_t generation, uint64_t sent,
+                          uint64_t received, bool failed, bool need_lock);
     public:
       static void handle_register_user_request(Runtime *runtime,
                                     Deserializer &derez);
@@ -706,6 +719,16 @@ namespace Legion {
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_pointwise(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
+      static void handle_make_valid(Runtime *runtime, Deserializer &derez);
+      static void handle_make_invalid(Runtime *runtime, Deserializer &derez);
+      static void handle_invalidate_request(Runtime *runtime, 
+                                            Deserializer &derez);
+      static void handle_invalidate_response(Runtime *runtime,
+                                             Deserializer &derez);
+      static void handle_add_remote_reference(Runtime *runtime, 
+                                              Deserializer &derez);
+      static void handle_remove_remote_reference(Runtime *runtime,
+                                                 Deserializer &derez);
     public:
       const DistributedID context_did;
       const std::vector<DistributedID> instances;
@@ -751,6 +774,14 @@ namespace Legion {
         bool local_initialized;
       };
       std::map<RendezvousKey,UserRendezvous> rendezvous_users;
+    private:
+      // For valid state tracking
+      ValidState valid_state;
+      uint32_t remaining_invalidation_responses;
+      uint64_t invalidation_generation;
+      uint64_t total_valid_sent, total_valid_received;
+      uint64_t sent_valid_references, received_valid_references;
+      bool invalidation_failed;
     private:
       // Use this flag to deduplicate deletion notifications from our instances
       std::atomic<bool> deletion_notified;

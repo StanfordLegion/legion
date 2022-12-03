@@ -1989,7 +1989,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::acquire_collect(std::set<ApEvent> &remote_events)
+    bool PhysicalManager::acquire_collect(std::set<ApEvent> &remote_events,
+                                  uint64_t &sent_valid, uint64_t received_valid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2004,6 +2005,8 @@ namespace Legion {
 #endif
       gc_state = PENDING_COLLECTED_GC_STATE;
       remote_events.swap(gc_events);
+      sent_valid = sent_valid_references;
+      received_valid = received_valid_references;
       return true;
     }
 
@@ -2080,7 +2083,8 @@ namespace Legion {
         ready.wait();
       std::set<ApEvent> gc_events;
       const AddressSpaceID owner = manager->owner_space;
-      if (!manager->acquire_collect(gc_events))
+      uint64_t sent_valid = 0, received_valid = 0;
+      if (!manager->acquire_collect(gc_events, sent_valid, received_valid))
       {
         Serializer rez;
         {
@@ -2101,6 +2105,22 @@ namespace Legion {
           const ApEvent remote = Runtime::merge_events(NULL, gc_events);
           if (remote.exists())
             manager->record_instance_user(remote, ready_events);
+        }
+        // If we have different numbers of sent and received valid
+        // references then we need to tell the owner that too
+        if (sent_valid != received_valid)
+        {
+          const RtUserEvent notified = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(sent_valid);
+            rez.serialize(received_valid);
+            rez.serialize(notified);
+          }
+          runtime->send_gc_mismatch(owner, rez);
+          ready_events.insert(notified);
         }
         const AddressSpaceID local = manager->local_space;
         // Check to see if we need to broadcast this out to more places
@@ -2147,6 +2167,40 @@ namespace Legion {
       derez.deserialize(done);
 
       target->fetch_add(1);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::process_remote_reference_mismatch(
+                                               uint64_t sent, uint64_t received)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(gc_state == PENDING_COLLECTED_GC_STATE);
+#endif
+      sent_valid_references += sent;
+      received_valid_references += received;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_garbage_collection_mismatch(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      uint64_t remote_sent, remote_received;
+      derez.deserialize(remote_sent);
+      derez.deserialize(remote_received);
+      RtUserEvent done;
+      derez.deserialize(done);
+      // Should still be able to find this manager here
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+          runtime->find_distributed_collectable(did));
+      manager->process_remote_reference_mismatch(remote_sent, remote_received);
       Runtime::trigger_event(done);
     }
 
@@ -2280,6 +2334,8 @@ namespace Legion {
       // If it's already collected then we're done
       if (gc_state == COLLECTED_GC_STATE)
         return true;
+      bool has_local_references = false;
+      uint64_t local_valid_sent = 0, local_valid_received = 0;
       if (is_owner())
       {
         // Check to see if anyone is already performing a deletion
@@ -2288,6 +2344,11 @@ namespace Legion {
         {
           gc_state = PENDING_COLLECTED_GC_STATE;
           failed_collection_count.store(0);
+          // Pull a copy of these onto the stack in case we fail to 
+          // collect and we need to restore them
+          local_valid_sent = sent_valid_references;
+          local_valid_received = received_valid_references;
+          has_local_references = true;
           std::vector<RtEvent> ready_events;
           if (collective_mapping != NULL)
           {
@@ -2373,7 +2434,15 @@ namespace Legion {
           // the collection was in progress
           case VALID_GC_STATE:
           case COLLECTABLE_GC_STATE:
-            break;
+            {
+              // Restore our local sent/received counts
+              if (has_local_references)
+              {
+                sent_valid_references = local_valid_sent;
+                received_valid_references = local_valid_received;
+              }
+              break;
+            }
           case PENDING_COLLECTED_GC_STATE:
             {
 #ifdef DEBUG_LEGION
@@ -2384,8 +2453,14 @@ namespace Legion {
               // were unable to acquire on remote nodes or whether there
               // are still packed valid reference outstanding
               if ((failed_collection_count.load() > 0) ||
-                  (total_sent_references != total_received_references))
+                  (sent_valid_references != received_valid_references))
               {
+                // Restore our local sent/received counts
+                if (has_local_references)
+                {
+                  sent_valid_references = local_valid_sent;
+                  received_valid_references = local_valid_received;
+                }
                 // See if we're the last release, if not then we
                 // keep it in this state
                 if (--pending_changes == 0)

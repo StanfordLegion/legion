@@ -12162,6 +12162,36 @@ namespace Legion {
               runtime->handle_collective_view_notification(derez);
               break;
             }
+          case SEND_COLLECTIVE_VIEW_MAKE_VALID:
+            {
+              runtime->handle_collective_view_make_valid(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_MAKE_INVALID:
+            {
+              runtime->handle_collective_view_make_invalid(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_INVALIDATE_REQUEST:
+            {
+              runtime->handle_collective_view_invalidate_request(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_INVALIDATE_RESPONSE:
+            {
+              runtime->handle_collective_view_invalidate_response(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_ADD_REMOTE_REFERENCE:
+            {
+              runtime->handle_collective_view_add_remote_reference(derez);
+              break;
+            }
+          case SEND_COLLECTIVE_VIEW_REMOVE_REMOTE_REFERENCE:
+            {
+              runtime->handle_collective_view_remove_remote_reference(derez);
+              break;
+            }
           case SEND_CREATE_TOP_VIEW_REQUEST:
             {
               runtime->handle_create_top_view_request(derez,
@@ -12675,6 +12705,11 @@ namespace Legion {
           case SEND_GC_FAILED:
             {
               runtime->handle_gc_failed(derez);
+              break;
+            }
+          case SEND_GC_MISMATCH:
+            {
+              runtime->handle_gc_mismatch(derez);
               break;
             }
           case SEND_GC_NOTIFY:
@@ -21860,6 +21895,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_make_valid(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_VIEW_MAKE_VALID>(
+                                                        rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_make_invalid(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_VIEW_MAKE_INVALID>(
+                                                          rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_invalidate_request(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_VIEW_INVALIDATE_REQUEST>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_invalidate_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_VIEW_INVALIDATE_RESPONSE>(
+            rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_add_remote_reference(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_VIEW_ADD_REMOTE_REFERENCE>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_collective_view_remove_remote_reference(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_COLLECTIVE_VIEW_REMOVE_REMOTE_REFERENCE>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_create_top_view_request(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -22666,6 +22756,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<SEND_GC_FAILED>(rez,
+                                true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_gc_mismatch(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_GC_MISMATCH>(rez,
                                 true/*flush*/, true/*response*/);
     }
 
@@ -24124,6 +24222,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_make_valid(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_make_valid(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_make_invalid(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_make_invalid(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_invalidate_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_invalidate_request(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_invalidate_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_invalidate_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_add_remote_reference(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_add_remote_reference(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_view_remove_remote_reference(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_remove_remote_reference(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_create_top_view_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -24909,6 +25052,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_garbage_collection_failed(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_gc_mismatch(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_garbage_collection_mismatch(this, derez);
     }
 
     //--------------------------------------------------------------------------

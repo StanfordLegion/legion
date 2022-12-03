@@ -828,6 +828,12 @@ namespace Legion {
       SEND_COLLECTIVE_VIEW_DELETION,
       SEND_COLLECTIVE_VIEW_RELEASE,
       SEND_COLLECTIVE_VIEW_NOTIFICATION,
+      SEND_COLLECTIVE_VIEW_MAKE_VALID,
+      SEND_COLLECTIVE_VIEW_MAKE_INVALID,
+      SEND_COLLECTIVE_VIEW_INVALIDATE_REQUEST,
+      SEND_COLLECTIVE_VIEW_INVALIDATE_RESPONSE,
+      SEND_COLLECTIVE_VIEW_ADD_REMOTE_REFERENCE,
+      SEND_COLLECTIVE_VIEW_REMOVE_REMOTE_REFERENCE,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
@@ -921,6 +927,7 @@ namespace Legion {
       SEND_GC_RESPONSE,
       SEND_GC_ACQUIRE,
       SEND_GC_FAILED,
+      SEND_GC_MISMATCH,
       SEND_GC_NOTIFY,
       SEND_GC_DEBUG_REQUEST,
       SEND_GC_DEBUG_RESPONSE,
@@ -1083,6 +1090,12 @@ namespace Legion {
         "Send Collective View Deletion",                              \
         "Send Collective View Release",                               \
         "Send Collective View Deletion Notification",                 \
+        "Send Collective View Make Valid",                            \
+        "Send Collective View Make Invalid",                          \
+        "Send Collective View Invalidate Request",                    \
+        "Send Collective View Invalidate Response",                   \
+        "Send Collective View Add Remote Reference",                  \
+        "Send Collective View Remove Remote Reference",               \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \
@@ -1176,6 +1189,7 @@ namespace Legion {
         "Send GC Response",                                           \
         "Send GC Acquire Request",                                    \
         "Send GC Acquire Failed",                                     \
+        "Send GC Packed Reference Mismatch",                          \
         "Send GC Notify Collected",                                   \
         "Send GC Debug Request",                                      \
         "Send GC Debug Response",                                     \

@@ -78,7 +78,7 @@ namespace Legion {
                                                 ReferenceSource source, int cnt)
     //--------------------------------------------------------------------------
     {
-      AutoLock v_loc(view_lock);
+      AutoLock v_lock(view_lock);
       valid_references += cnt;
       std::map<ReferenceSource,int>::iterator finder = 
         detailed_base_valid_references.find(source);
@@ -6270,7 +6270,9 @@ namespace Legion {
                                    const std::vector<DistributedID> &insts,
                                    bool register_now,CollectiveMapping *mapping)
       : InstanceView(rt, id, register_now, mapping), context_did(ctx_did),
-        instances(insts), local_views(views), deletion_notified(false) 
+        instances(insts), local_views(views), valid_state(NOT_VALID_STATE),
+        invalidation_generation(0), sent_valid_references(0),
+        received_valid_references(0), deletion_notified(false) 
     //--------------------------------------------------------------------------
     {
       for (std::vector<IndividualView*>::const_iterator it =
@@ -6324,23 +6326,430 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CollectiveView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert((valid_state == PENDING_VALID_STATE) ||
+          (valid_state == FULL_VALID_STATE));
+#endif
+      sent_valid_references++;
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert((valid_state == PENDING_VALID_STATE) ||
+          (valid_state == FULL_VALID_STATE));
+#endif
+      received_valid_references++;
+    }
+
+    //--------------------------------------------------------------------------
     void CollectiveView::notify_valid(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<IndividualView*>::const_iterator it =
-            local_views.begin(); it != local_views.end(); it++)
-        (*it)->add_nested_valid_ref(did);
+      if (is_owner())
+      {
+#ifdef DEBUG_LEGION
+        assert((valid_state == NOT_VALID_STATE) ||
+            (valid_state == PENDING_INVALID_STATE));
+#endif
+        // If we're not in a pending invalid state then send out the 
+        // notifications to all the nodes in the collective that we are 
+        // now valid they should hold valid references on all their local views
+        if (valid_state != PENDING_INVALID_STATE)
+          make_valid(false/*need lock*/);
+        else // We can promote ourselves up to fully valid
+          valid_state = FULL_VALID_STATE;
+      }
+      else
+      {
+        if (valid_state == NOT_VALID_STATE)
+        {
+          if (!local_views.empty())
+          {
+            // Add our local valid references
+            for (std::vector<IndividualView*>::const_iterator it =
+                  local_views.begin(); it != local_views.end(); it++)
+              (*it)->add_nested_valid_ref(did);
+            // This marks that we've already added our local view valid
+            // references and don't need to add them again when we get
+            // the valid notification from our parent
+            valid_state = PENDING_VALID_STATE;
+          }
+          else // remote instance not in the collective
+            valid_state = FULL_VALID_STATE;
+        }
+        else if (valid_state == PENDING_INVALID_STATE)
+          valid_state = PENDING_VALID_STATE;
+        // Not the owner so need to send a message on down the chain
+        // to make the owner valid and ensure all the nodes are keeping
+        // a valid reference
+        Serializer rez;
+        rez.serialize(did);
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          runtime->send_collective_view_add_remote_reference(
+              collective_mapping->get_parent(owner_space, local_space), rez);
+        else
+          runtime->send_collective_view_add_remote_reference(owner_space, rez);
+      }
       add_base_gc_ref(INTERNAL_VALID_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::make_valid(bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock v_lock(view_lock);
+        make_valid(false/*need lock*/);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!local_views.empty());
+        assert(is_owner() || collective_mapping->contains(local_space));
+#endif
+        // Send the messages to the children to get them in flight
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            rez.serialize(did);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              runtime->send_collective_view_make_valid(*it, rez);
+          }
+        }
+        // If we haven't already then add our references
+        if (valid_state != PENDING_VALID_STATE)
+        {
+          for (std::vector<IndividualView*>::const_iterator it =
+                local_views.begin(); it != local_views.end(); it++)
+            (*it)->add_nested_valid_ref(did);
+        }
+        valid_state = FULL_VALID_STATE;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_make_valid(Runtime *runtime,
+                                                      Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_distributed_collectable(did, true/*wait*/));
+      view->make_valid(true/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::make_invalid(bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock v_lock(view_lock);
+        return make_invalid(false/*need lock*/);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(valid_state == FULL_VALID_STATE);
+        assert(is_owner() || collective_mapping->contains(local_space));
+#endif
+        // Send it upstream to any children 
+        if (collective_mapping != NULL)
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            rez.serialize(did);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              runtime->send_collective_view_make_invalid(*it, rez);
+          }
+        }
+        valid_state = NOT_VALID_STATE;
+        for (std::vector<IndividualView*>::const_iterator it =
+              local_views.begin(); it != local_views.end(); it++)
+          (*it)->remove_nested_valid_ref(did);
+        return remove_base_gc_ref(INTERNAL_VALID_REF);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_make_invalid(Runtime *runtime,
+                                                        Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_distributed_collectable(did));
+      if (view->make_invalid(true/*need lock*/))
+        delete view;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::perform_invalidate_request(uint64_t generation,
+                                                    bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock v_lock(view_lock);
+        return perform_invalidate_request(generation, false/*need lock*/);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert((invalidation_generation < generation) || is_owner());
+#endif
+        // See if we're going to fail right away
+        if ((valid_state == PENDING_VALID_STATE) || 
+            (valid_state == FULL_VALID_STATE))
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(generation);
+            rez.serialize<bool>(true/*fail*/);
+          }
+          if ((collective_mapping != NULL) && 
+              collective_mapping->contains(local_space))
+            runtime->send_collective_view_invalidate_response(
+                collective_mapping->get_parent(owner_space, local_space), rez);
+          else
+            runtime->send_collective_view_invalidate_response(owner_space, rez);
+          return false;
+        }
+        invalidation_failed = false;
+        invalidation_generation = generation;
+        total_valid_sent = 0;
+        total_valid_received = 0;
+        remaining_invalidation_responses = 1;
+        // Send out messages to all our copies to check if there are still
+        // valid references anywhere that we need to be aware of
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+        {
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            rez.serialize(did);
+            rez.serialize(invalidation_generation);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              runtime->send_collective_view_invalidate_request(*it, rez);
+            remaining_invalidation_responses += children.size();
+          }
+        }
+        if (is_owner() && has_remote_instances())
+        {
+          Serializer rez;
+          rez.serialize(did);
+          rez.serialize(invalidation_generation);
+          struct InvalidFunctor {
+            InvalidFunctor(Serializer &z, Runtime *rt, unsigned &cnt) 
+              : rez(z), runtime(rt), count(cnt) { }
+            inline void apply(AddressSpaceID target)
+            {
+              if (target == runtime->address_space)
+                return;
+              runtime->send_collective_view_invalidate_request(target, rez);
+              count++;
+            }
+            Serializer &rez;
+            Runtime *const runtime;
+            unsigned &count;
+          };
+          InvalidFunctor functor(rez, runtime,remaining_invalidation_responses);
+          map_over_remote_instances(functor);
+        }
+        // Now we can perform our local arrival 
+        return perform_invalidate_response(generation, sent_valid_references, 
+            received_valid_references, false/*fail*/, false/*need lock*/); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_invalidate_request(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      uint64_t generation;
+      derez.deserialize(generation);
+
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_distributed_collectable(did, true/*wait*/));
+      if (view->perform_invalidate_request(generation, true/*need lock*/))
+        delete view;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::perform_invalidate_response(uint64_t generation,
+      uint64_t total_sent, uint64_t total_received, bool failed, bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock v_lock(view_lock);
+        return perform_invalidate_response(generation, total_sent, 
+                      total_received, failed, false/*need lock*/);
+      }
+      else
+      {
+        // If this response is stale then we don't need to do anything
+        if (generation < invalidation_generation)
+          return false;
+        if (!failed)
+        {
+          total_valid_sent += total_sent;
+          total_valid_received += total_received;
+        }
+        else
+          invalidation_failed = true;
+#ifdef DEBUG_LEGION
+        assert(remaining_invalidation_responses > 0);
+#endif
+        if (--remaining_invalidation_responses == 0)
+        {
+          // Check that we are still not valid
+          if (!invalidation_failed &&
+              ((valid_state == PENDING_VALID_STATE) ||
+               (valid_state == FULL_VALID_STATE)))
+            invalidation_failed = true;
+          if (!is_owner())
+          {
+            // Send the response back to the owner
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(generation);
+              rez.serialize(invalidation_failed);
+              if (!invalidation_failed)
+              {
+                rez.serialize(total_valid_sent);
+                rez.serialize(total_valid_received);
+              }
+            }
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              runtime->send_collective_view_invalidate_response(
+                  collective_mapping->get_parent(owner_space, local_space),rez);
+            else
+              runtime->send_collective_view_invalidate_response(owner_space, 
+                                                                rez);
+          }
+          else
+            return make_invalid(false/*need lock*/);
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_invalidate_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+      uint64_t generation, total_sent = 0, total_received = 0;
+      derez.deserialize(generation);
+      bool failed;
+      derez.deserialize(failed);
+      if (!failed)
+      {
+        derez.deserialize(total_sent);
+        derez.deserialize(total_received);
+      }
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_distributed_collectable(did));
+      if (view->perform_invalidate_response(generation, total_sent, 
+            total_received, failed, true/*need lock*/))
+        delete view;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_add_remote_reference(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_distributed_collectable(did, true/*wait*/));
+      view->add_base_valid_ref(REMOTE_DID_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::handle_remove_remote_reference(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID did;
+      derez.deserialize(did);
+
+      CollectiveView *view = static_cast<CollectiveView*>(
+          runtime->find_distributed_collectable(did));
+      if (view->remove_base_valid_ref(REMOTE_DID_REF))
+        delete view;
     }
 
     //--------------------------------------------------------------------------
     bool CollectiveView::notify_invalid(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<IndividualView*>::const_iterator it =
-            local_views.begin(); it != local_views.end(); it++)
-        (*it)->remove_nested_valid_ref(did);
-      return remove_base_gc_ref(INTERNAL_VALID_REF);
+      valid_state = PENDING_INVALID_STATE;
+      if (is_owner())
+      {
+        // We're the owner so we need to see if it is safe to actually
+        // downgrade the valid state of this collective view which means
+        // checking that none of our copies are valid on any node
+        // Start by bumping the collection generation 
+        invalidation_generation++;
+        return perform_invalidate_request(invalidation_generation, 
+                                          false/*need lock*/);
+      }
+      else
+      {
+        // Not the owner so send a message down the chain to remove the
+        // valid reference that we added when we became valid
+        Serializer rez;
+        rez.serialize(did);
+        if ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space))
+          runtime->send_collective_view_remove_remote_reference(
+              collective_mapping->get_parent(owner_space, local_space), rez);
+        else
+          runtime->send_collective_view_remove_remote_reference(owner_space,
+                                                                rez);
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -7909,6 +8318,23 @@ namespace Legion {
           rendezvous.global_registered = Runtime::create_rt_user_event();
           rendezvous.local_applied = Runtime::create_rt_user_event();
           rendezvous.global_applied = Runtime::create_rt_user_event();
+          // This is very subtle!
+          // For a collective view to become valid, we need to know
+          // that a valid reference is added on all the nodes where
+          // there are local views. It's unclear whether the analysis
+          // performing this registration will actually try to record
+          // the collective view with an equivalence set that will add
+          // a nested valid reference or not, but to be safe we make
+          // sure that all collective views are valid at the point of
+          // registration such that the follow-on decrement after the
+          // registration will only invalidate the collective view if
+          // the view wasn't registered with a collective analysis
+#ifdef DEBUG_LEGION_GC
+          if (valid_references++ == 0)
+#else
+          if (valid_references.fetch_add(1) == 0)
+#endif
+            notify_valid();
         }
         else if (!finder->second.local_initialized)
         {
@@ -7929,7 +8355,15 @@ namespace Legion {
           expr->add_nested_expression_reference(did);
           finder->second.remaining_local_arrivals = local_collective_arrivals;
           finder->second.local_initialized = true;
-        } 
+          // This is very subtle!
+          // See similar comment above for what we are doing here
+#ifdef DEBUG_LEGION_GC
+          if (valid_references++ == 0)
+#else
+          if (valid_references.fetch_add(1) == 0)
+#endif
+            notify_valid();
+        }
         if (term_event.exists())
           finder->second.local_term_events[target_index].push_back(term_event);
         // Record the applied events
@@ -8247,7 +8681,7 @@ namespace Legion {
                                 std::vector<ApUserEvent> &ready_events,
                                 std::vector<std::vector<ApEvent> > &term_events,
                                 const PhysicalTraceInfo *trace_info,
-                                const bool symbolic) const
+                                const bool symbolic)
     //--------------------------------------------------------------------------
     {
       // First send out any messages to the children so they can start
@@ -8303,6 +8737,17 @@ namespace Legion {
       if (expr->remove_nested_expression_reference(did))
         delete expr;
       delete trace_info;
+      // Remove the valid reference that we added for registration
+      AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+      assert(valid_references > 0);
+#endif
+#ifdef DEBUG_LEGION_GC
+      if ((--valid_references) == 0)
+#else
+      if (valid_references.fetch_sub(1) == 1)
+#endif
+        notify_invalid();
     }
 
     //--------------------------------------------------------------------------
