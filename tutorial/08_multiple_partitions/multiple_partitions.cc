@@ -28,7 +28,7 @@ using namespace Legion;
  * provides by allowing multiple views onto the
  * same logical region.  We compute a simple 5-point
  * 1D stencil using the standard formula:
- * f'(x) = (-f(x+2h) + 8f(x+h) - 8f(x-h) + f(x-2h))/12h
+ * f'(x) = (-f(x-2h) + 8f(x-h) - 8f(x+h) + f(x+2h))/12h
  * For simplicity we'll assume h=1.
  */
 
