@@ -5022,8 +5022,43 @@ class DataflowTraverser(object):
             # If we've already traversed this then we can skip the verification
             if fill.record_version_number(self.state):
                 return False
-            assert fill.fill_op in self.state.fill_ops or self.op.replayed or \
-                    fill.fill_op.index_owner in self.state.fill_ops
+            if fill.fill_op not in self.state.fill_ops and not self.op.replayed and \
+                    fill.fill_op.index_owner not in self.state.fill_ops:
+                # There is one last check we can do here which is whether 
+                # these are fill operations in a control replicated context
+                # and therefore they just need to be the same operation in
+                # their respective contexts
+                same_fill = False
+                if fill.fill_op.index_owner is None:
+                    context = fill.fill_op.context
+                    if context.shard is not None:
+                        index = context.operations.index(fill.fill_op)
+                        for op in self.state.fill_ops:
+                            assert op.context.shard is not None
+                            op_index = op.context.operations.index(op)
+                            if op_index == index:
+                                same_fill = True
+                                break
+                else:
+                    context = fill.fill_op.index_owner.context
+                    if context.shard is not None:
+                        index = context.operations.index(fill.fill_op.index_owner)
+                        for op in self.state.fill_ops:
+                            assert op.context.shard is not None
+                            op_index = op.context.operations.index(op)
+                            if op_index == index:
+                                same_fill = True
+                                break
+                if not same_fill:
+                    print("ERROR: Not using same fill operation for "+
+                            str(fill)+" on field "+str(self.dst_field)+
+                            " for op "+self.error_str)
+                    self.failed_analysis = True
+                    if self.op.state.eq_graph_on_error:
+                        self.op.state.dump_eq_graph(eq_key)
+                    if self.op.state.assert_on_error:
+                        assert False
+                    return False
             if self.across:
                 fill.record_across_version_number(self.point, self.dst_field,
                                                   self.dst_tree, self.dst_version)
@@ -8799,7 +8834,7 @@ class Task(object):
                     assert self.op.context
                     return self.op.context.find_enclosing_context_depth(our_req, mappings)
                 else:
-                    if mappings:
+                    if mappings and self.used_instances:
                         for fid,inst in iteritems(mappings):
                             self.used_instances.add((inst,fid))
                     return depth
