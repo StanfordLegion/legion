@@ -4764,6 +4764,7 @@ class DataflowTraverser(object):
         # 2. A dataflow path to a prevous valid instances and path to each of the
         #    reductions in the currently set of pending reductions
         self.dataflow_stack = list()
+        self.dataflow_copy = list()
         self.dataflow_stack.append(dst_inst)
         self.reduction_stack = list()
         # IDs of the reduction epochs in order applied
@@ -4860,7 +4861,12 @@ class DataflowTraverser(object):
             # Normal copy case
             # Check to see if this is part of the dataflow path
             if copy.dsts[dst_index] is not self.dataflow_stack[-1]:
-                return False
+                # Traverse through non-dataflow copies as they might
+                # be an additional copy to another read-only region
+                # requirement for our same task
+                # See a multi-node run of region_reduce_aliased.rg for example
+                self.dataflow_copy.append(False)
+                return True
             # Check to see if we reached the end of the dataflow path
             if self.reduction_stack:
                 # If we have reductions, then we need to check to see if the src
@@ -4881,6 +4887,7 @@ class DataflowTraverser(object):
                     return False
             # Not done with the dataflow path yet
             self.dataflow_stack.append(src)
+            self.dataflow_copy.append(True)
             return True
         else:
             # Reduction copy case
@@ -4893,11 +4900,13 @@ class DataflowTraverser(object):
                     if copy.dsts[dst_index] in self.state.previous_instances:
                         self.found_dataflow_path = True
                 self.reduction_stack.append(src)
+                self.dataflow_copy.append(True)
                 return True
-            elif copy.dsts[dst_index] is self.reduction_stack[-1]:
+            elif self.reduction_stack and copy.dsts[dst_index] is self.reduction_stack[-1]:
                 # Hierarchical reduction case: we're traversing backwards
                 # through the tree or butterfly network, append it and keep going
                 self.reduction_stack.append(src)
+                self.dataflow_copy.append(True)
                 return True
             else:
                 # This is a new reduction that isn't reducing to the reduction
@@ -4906,6 +4915,8 @@ class DataflowTraverser(object):
                 return False
 
     def post_visit_copy(self, copy, eq_key):
+        if not self.dataflow_copy.pop():
+            return
         dst_index = copy.dst_fields.index(self.dst_field)
         if not self.failed_analysis:
             src = copy.srcs[dst_index]
@@ -7028,17 +7039,20 @@ class Operation(object):
                     return False
                 # Finally record ourselves as the next fence
                 logical_op.context.current_fence = self
-        elif self.points is not None:
+        elif self.is_index_op():
             # For index space operations we'll perform all their operations
             # separately so everything gets updated individually
-            if self.kind == INDEX_TASK_KIND:
-                for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
-                    if not point.op.perform_op_logical_verification(logical_op, previous_deps):
-                        return False
-            else:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_logical_verification(logical_op, previous_deps):
-                        return False
+            if self.points:
+                if self.kind == INDEX_TASK_KIND:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
+                        if not point.op.perform_op_logical_verification(logical_op, previous_deps):
+                            return False
+                else:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_logical_verification(logical_op, previous_deps):
+                            return False
+            else: # Better be in a control replicated context to not have any points
+                assert self.launch_shape.empty() or self.context.shard is not None
         else:
             # This is a single operation
             assert self.launch_shape is None
@@ -7865,24 +7879,21 @@ class Operation(object):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
-        # If we're part of a control replication environment only do
-        # this operation if we are the owner
-        if self.owner_shard is not None:
-            assert self.context.shard is not None
-            if self.owner_shard != self.context.shard:
-                return True
+        # If we're control replicated we should only be here if we're the owner
+        assert self.owner_shard is None or self.owner_shard == self.context.shard
         # If we are an index space task, only do our points
-        if self.kind == INDEX_TASK_KIND and self.points:
-            for point in itervalues(self.points):
-                if not point.op.perform_op_physical_verification(perform_checks):
-                    return False
-            return True
-        # Handle other index space operations too
-        elif self.is_index_op(): 
+        if self.is_index_op():
             if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks):
-                        return False
+                if self.kind == INDEX_TASK_KIND:
+                    for point in itervalues(self.points):
+                        if not point.op.perform_op_physical_verification(perform_checks):
+                            return False
+                else:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_physical_verification(perform_checks):
+                            return False
+            else: # Better be in a control replicated context to not have any points
+                assert self.launch_shape.empty() or self.context.shard is not None
             return True
         prefix = ''
         if self.context:
@@ -7979,24 +7990,21 @@ class Operation(object):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
-        # If we're part of a control replication environment only do
-        # this operation if we are the owner
-        if self.owner_shard is not None:
-            assert self.context.shard is not None
-            if self.owner_shard != self.context.shard:
-                return True
+        # If we're control replicated we should only be here if we're the owner
+        assert self.owner_shard is None or self.owner_shard == self.context.shard
         # If we are an index space task, only do our points
-        if self.kind == INDEX_TASK_KIND and self.points:
-            for point in itervalues(self.points):
-                if not point.op.perform_op_registration_verification(perform_checks):
-                    return False
-            return True
-        # Handle other index space operations too
-        elif self.is_index_op(): 
+        if self.is_index_op():
             if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_registration_verification(perform_checks):
-                        return False
+                if self.kind == INDEX_TASK_KIND:
+                    for point in itervalues(self.points):
+                        if not point.op.perform_op_registration_verification(perform_checks):
+                            return False
+                else:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_registration_verification(perform_checks):
+                            return False
+            else: # Better be in a control replicated context to not have any points
+                assert self.launch_shape.empty() or self.context.shard is not None
             return True
         # Some kinds of operations don't need to perform registration
         if self.kind == COPY_OP_KIND or self.kind == DELETION_OP_KIND \
@@ -8870,6 +8878,11 @@ class Task(object):
                 replicated = False
                 for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None:
+                        assert op.context.shard is not None
+                        if op.owner_shard != op.context.shard:
+                            continue
                     if not op.perform_op_physical_verification(perform_checks, replicated):
                         success = False
                         break
@@ -8880,6 +8893,9 @@ class Task(object):
                 replicated = False
                 for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None and op.owner_shard != op.context.shard:
+                        continue
                     if not op.perform_op_registration_verification(perform_checks, replicated):
                         success = False
                         break
