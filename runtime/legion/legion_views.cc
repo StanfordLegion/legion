@@ -6665,7 +6665,7 @@ namespace Legion {
               runtime->send_collective_view_invalidate_response(owner_space, 
                                                                 rez);
           }
-          else
+          else if (!invalidation_failed)
             return make_invalid(false/*need lock*/);
         }
       }
