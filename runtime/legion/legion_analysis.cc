@@ -18646,35 +18646,53 @@ namespace Legion {
       if (precondition_updates != NULL)
       {
         if (tracing_preconditions == NULL)
+        {
           tracing_preconditions =
             new TraceViewSet(runtime->forest, *precondition_updates, did,
                              region_node);
+          if (unpack_references)
+            tracing_preconditions->unpack_references();
+        }
         else
+        {
           precondition_updates->merge(*tracing_preconditions);
-        if (unpack_references)
-          precondition_updates->unpack_references();
+          if (unpack_references)
+            precondition_updates->unpack_references();
+        }
       }
       if (anticondition_updates != NULL)
       {
         if (tracing_anticonditions == NULL)
+        {
           tracing_anticonditions =
             new TraceViewSet(runtime->forest, *anticondition_updates, did,
                              region_node);
+          if (unpack_references)
+            tracing_anticonditions->unpack_references();
+        }
         else
+        {
           anticondition_updates->merge(*tracing_anticonditions);
-        if (unpack_references)
-          precondition_updates->unpack_references();
+          if (unpack_references)
+            precondition_updates->unpack_references();
+        }
       }
       if (postcondition_updates != NULL)
       {
         if (tracing_postconditions == NULL)
+        {
           tracing_postconditions =
             new TraceViewSet(runtime->forest, *postcondition_updates, did,
                              region_node);
+          if (unpack_references)
+            tracing_postconditions->unpack_references();
+        }
         else
+        {
           postcondition_updates->merge(*tracing_postconditions);
-        if (unpack_references)
-          precondition_updates->unpack_references();
+          if (unpack_references)
+            precondition_updates->unpack_references();
+        }
       }
     }
 
