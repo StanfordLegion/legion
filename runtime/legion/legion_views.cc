@@ -6364,7 +6364,7 @@ namespace Legion {
         // now valid they should hold valid references on all their local views
         if (valid_state != PENDING_INVALID_STATE)
           make_valid(false/*need lock*/);
-        else // We can promote ourselves up to fully valid
+        else // We can promote ourselves up to fully valid again
           valid_state = FULL_VALID_STATE;
       }
       else
@@ -6384,6 +6384,7 @@ namespace Legion {
           }
           else // remote instance not in the collective
             valid_state = FULL_VALID_STATE;
+          add_base_gc_ref(INTERNAL_VALID_REF);
         }
         else if (valid_state == PENDING_INVALID_STATE)
           valid_state = PENDING_VALID_STATE;
@@ -6399,7 +6400,6 @@ namespace Legion {
         else
           runtime->send_collective_view_add_remote_reference(owner_space, rez);
       }
-      add_base_gc_ref(INTERNAL_VALID_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -6437,6 +6437,7 @@ namespace Legion {
           for (std::vector<IndividualView*>::const_iterator it =
                 local_views.begin(); it != local_views.end(); it++)
             (*it)->add_nested_valid_ref(did);
+          add_base_gc_ref(INTERNAL_VALID_REF);
         }
         valid_state = FULL_VALID_STATE;
       }
@@ -6750,6 +6751,11 @@ namespace Legion {
         else
           runtime->send_collective_view_remove_remote_reference(owner_space,
                                                                 rez);
+        // Nodes which aren't part of the collective won't be getting a
+        // make_invalid call so they can remove their reference now
+        if ((collective_mapping == NULL) || 
+            !collective_mapping->contains(local_space))
+          return remove_base_gc_ref(INTERNAL_VALID_REF);
       }
       return false;
     }
