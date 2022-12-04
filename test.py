@@ -762,8 +762,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     if 'GPU_ARCH' in env:
         cmdline.append('-DLegion_CUDA_ARCH=%s' % env['GPU_ARCH'])
     cmdline.append('-DLegion_USE_HIP=%s' % ('ON' if env['USE_HIP'] == '1' else 'OFF'))
-    if 'GPU_ARCH' in env:
-        cmdline.append('-DLegion_HIP_ARCH=%s' % env['GPU_ARCH'])
+    if 'HIP_ARCH' in env:
+        cmdline.append('-DLegion_HIP_ARCH=%s' % env['HIP_ARCH'])
     if 'THRUST_PATH' in env and env['USE_COMPLEX'] == '1':
         cmdline.append('-DHIP_THRUST_ROOT_DIR=%s' % env['THRUST_PATH'])
     cmdline.append('-DLegion_USE_NVTX=%s' % ('ON' if env['USE_NVTX'] == '1' else 'OFF'))
@@ -803,6 +803,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     # if MARCH is set in the environment, give that to cmake as BUILD_MARCH
     if 'MARCH' in env:
         cmdline.append('-DBUILD_MARCH=' + env['MARCH'])
+    # add cxx standard
+    if 'CXX_STANDARD' in env:
+        cmdline.append('-DCMAKE_CXX_STANDARD=' + env['CXX_STANDARD'])
     # cmake before 3.16 doesn't know how to look for CUDAHOSTCXX
     if 'CUDAHOSTCXX' in env:
         cmdline.append('-DCMAKE_CUDA_HOST_COMPILER=' + env['CUDAHOSTCXX'])
@@ -887,7 +890,7 @@ def report_mode(debug, max_dim, launcher,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir, use_nvtx):
+                use_gcov, use_cmake, use_rdir, use_nvtx, cxx_standard):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -931,6 +934,7 @@ def report_mode(debug, max_dim, launcher,
     print('###   * RDIR:       %s' % use_rdir)
     print('###   * NVTX:       %s' % use_nvtx)
     print('###   * Max DIM:    %s' % max_dim)
+    print('###   * CXX STD:    %s' % cxx_standard)
     print('#'*60)
     print()
     sys.stdout.flush()
@@ -1028,6 +1032,12 @@ def run_tests(test_modules=None,
         raise Exception('Network(s) is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
 
+    # CXX Standard
+    cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
+    # if not use cmake, let's add -std=c++NN to CXXFLAGS
+    if use_cmake == False:
+        os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
+
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
     if check_ownership:
@@ -1043,7 +1053,7 @@ def run_tests(test_modules=None,
                 use_hdf, use_fortran, use_spy, use_prof,
                 use_bounds_checks, use_privilege_checks, use_complex,
                 use_shared_objects,
-                use_gcov, use_cmake, use_rdir, use_nvtx)
+                use_gcov, use_cmake, use_rdir, use_nvtx, cxx_standard)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
