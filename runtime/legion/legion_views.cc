@@ -6467,7 +6467,8 @@ namespace Legion {
       else
       {
 #ifdef DEBUG_LEGION
-        assert(valid_state == FULL_VALID_STATE);
+        assert((valid_state == FULL_VALID_STATE) ||
+            (valid_state == PENDING_INVALID_STATE));
         assert(is_owner() || collective_mapping->contains(local_space));
 #endif
         // Send it upstream to any children 
@@ -6675,6 +6676,7 @@ namespace Legion {
                                           Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
       uint64_t generation, total_sent = 0, total_received = 0;
