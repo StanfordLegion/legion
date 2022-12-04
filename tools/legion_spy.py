@@ -8834,9 +8834,14 @@ class Task(object):
                     assert self.op.context
                     return self.op.context.find_enclosing_context_depth(our_req, mappings)
                 else:
-                    if mappings and self.used_instances:
-                        for fid,inst in iteritems(mappings):
-                            self.used_instances.add((inst,fid))
+                    if mappings:
+                        if self.used_instances is not None:
+                            for fid,inst in iteritems(mappings):
+                                self.used_instances.add((inst,fid))
+                        else:
+                            assert self.shard is not None # Control replicated task
+                            for fid,inst in iteritems(mappings):
+                                self.op.context.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
         # If we get here this is a created privilege flowing back
