@@ -399,7 +399,7 @@ namespace Legion {
     public:
       bool can_collect(bool &already_collected) const;
       bool acquire_collect(std::set<ApEvent> &gc_events, 
-          uint64_t &sent_valid, uint64_t received_valid);
+          uint64_t &sent_valid, uint64_t &received_valid);
       bool collect(RtEvent &collected);
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 

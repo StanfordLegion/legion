@@ -1990,7 +1990,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PhysicalManager::acquire_collect(std::set<ApEvent> &remote_events,
-                                  uint64_t &sent_valid, uint64_t received_valid)
+                                 uint64_t &sent_valid, uint64_t &received_valid)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
