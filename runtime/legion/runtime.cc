@@ -2985,9 +2985,12 @@ namespace Legion {
         Realm::InstanceLayoutGeneric *ilg =
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
+        // If it is not an external allocation then ignore suggested_memory
+        // because we know we're making this on top of an existing instance
         PhysicalInstance result;
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
-             result, memory, ilg, *alt_resource, Realm::ProfilingRequestSet()));
+             result, external_allocation ? alt_resource->suggested_memory() :
+              memory, ilg, *alt_resource, Realm::ProfilingRequestSet()));
         own_inst = true;
         if (resource == NULL)
           delete alt_resource;
@@ -3018,9 +3021,12 @@ namespace Legion {
           Realm::InstanceLayoutGeneric *ilg =
             Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
                 rect_space, constraints, dim_order);
+          // If it is not an external allocation then ignore suggested_memory
+          // because we know we're making this on top of an existing instance
           PhysicalInstance result;
-          RtEvent inst_ready(PhysicalInstance::create_external_instance(
-                result, memory, ilg, *resource, Realm::ProfilingRequestSet()));
+          RtEvent inst_ready(PhysicalInstance::create_external_instance(result,
+                external_allocation ? resource->suggested_memory() : memory,
+                ilg, *resource, Realm::ProfilingRequestSet()));
           instance.store(result);
           own_instance.store(true);
           Runtime::trigger_event(ready_event, inst_ready);
@@ -10339,8 +10345,10 @@ namespace Legion {
           {
             const Realm::ExternalMemoryResource resource(base_ptr, 
                                         size, false/*read only*/);
-            use_event = RtEvent(PhysicalInstance::create_external(instance,
-                                memory, ilg->clone(), resource, requests));
+            // Ignore suggest_memory here since we know we're making
+            // this on top of another instance in this memory
+            use_event = RtEvent(PhysicalInstance::create_external_instance(
+                  instance, memory, ilg->clone(), resource, requests));
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
             assert(remaining_capacity >= size);
