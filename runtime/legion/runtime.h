@@ -577,11 +577,14 @@ namespace Legion {
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
       FutureMapImpl(TaskContext *ctx, Operation *op, IndexSpaceNode *domain,
-                    Runtime *rt, DistributedID did, Provenance *provenance);
+                    Runtime *rt, DistributedID did, Provenance *provenance,
+                    bool register_now = true, 
+                    CollectiveMapping *mapping = NULL);
       FutureMapImpl(TaskContext *ctx, Runtime *rt, IndexSpaceNode *domain,
                     DistributedID did, size_t index,
                     ApEvent completion, Provenance *provenance,
-                    bool register_now = true); // remote
+                    bool register_now = true, 
+                    CollectiveMapping *mapping = NULL); // remote
       FutureMapImpl(TaskContext *ctx, Operation *op, size_t index,
                     GenerationID gen, int depth, 
 #ifdef LEGION_SPY
@@ -609,11 +612,8 @@ namespace Legion {
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
       bool reset_all_futures(void);
-      // Use this method to detect when we're wrapped by an argument
-      // map which is mainly needed in control replication
-      virtual void argument_map_wrap(void) { }
     public:
-      void pack_future_map(Serializer &rez);
+      void pack_future_map(Serializer &rez, AddressSpaceID target);
       static FutureMap unpack_future_map(Runtime *runtime,
           Deserializer &derez, TaskContext *ctx);
     public:
@@ -621,11 +621,13 @@ namespace Legion {
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
     public:
       // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
-      virtual void get_shard_local_futures(
+      virtual FutureImpl* find_shard_local_future(ShardID shard,
+                                                  const DomainPoint &point);
+      virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
       void register_dependence(Operation *consumer_op);
+      void process_future_response(Deserializer &derez);
     public:
       RtEvent record_future_map_registered(void);
       static void handle_future_map_future_request(Deserializer &derez,
@@ -677,11 +679,11 @@ namespace Legion {
       virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
-      virtual void argument_map_wrap(void);
     public:
       // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
-      virtual void get_shard_local_futures(
+      virtual FutureImpl* find_shard_local_future(ShardID shard,
+                                                  const DomainPoint &point);
+      virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
       FutureMapImpl *const previous;
@@ -701,98 +703,50 @@ namespace Legion {
      */
     class ReplFutureMapImpl : public FutureMapImpl {
     public:
-      struct PendingRequest {
-      public:
-        PendingRequest(void) { }
-        PendingRequest(const DomainPoint &p, DistributedID src,
-                       RtUserEvent done, bool intern)
-          : point(p), src_did(src), done_event(done), internal(intern) { }
-      public:
-        DomainPoint point;
-        DistributedID src_did;
-        RtUserEvent done_event;
-        bool internal;
-      };
-      struct ReclaimFutureMapArgs :
-        public LgTaskArgs<ReclaimFutureMapArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_RECLAIM_FUTURE_MAP_TASK_ID;
-      public:
-        ReclaimFutureMapArgs(ReplicateContext *c, 
-                             ReplFutureMapImpl *map, UniqueID uid)
-          : LgTaskArgs<ReclaimFutureMapArgs>(uid),
-            ctx(c), impl(map) { }
-      public:
-        ReplicateContext *const ctx;
-        ReplFutureMapImpl *const impl;
-      };
-    public:
-      ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
+      ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Operation *op,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
-                        Runtime *rt, DistributedID did, Provenance *provenance);
-      ReplFutureMapImpl(ReplicateContext *ctx, Runtime *rt,
+                        Runtime *rt, DistributedID did, Provenance *provenance,
+                        CollectiveMapping *collective_mapping);
+      ReplFutureMapImpl(TaskContext *ctx, ShardManager *man, Runtime *rt,
                         IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
                         DistributedID did, size_t index,
                         ApEvent completion, Provenance *provenance,
-                        bool register_now = true);
-      ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
+                        CollectiveMapping *collective_mapping);
+      ReplFutureMapImpl(const ReplFutureMapImpl &rhs) = delete;
       virtual ~ReplFutureMapImpl(void);
     public:
-      ReplFutureMapImpl& operator=(const ReplFutureMapImpl &rhs);
+      ReplFutureMapImpl& operator=(const ReplFutureMapImpl &rhs) = delete;
     public:
       virtual bool is_replicate_future_map(void) const { return true; }
-    public:
-      // Override this so we can trigger our deletion barrier
-      virtual void notify_local(void);
     public:
       virtual Future get_future(const DomainPoint &point,
                                 bool internal, RtEvent *wait_on = NULL);
       virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
-      virtual void argument_map_wrap(void) { has_non_trivial_call = true; }
     public:
       // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(const DomainPoint &point);
-      virtual void get_shard_local_futures(
+      virtual FutureImpl* find_shard_local_future(ShardID shard,
+                                                  const DomainPoint &point);
+      virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
-      void set_sharding_function(ShardingFunction *function, bool own = false);
-      void handle_future_map_request(Deserializer &derez);
-    protected:
-      void process_future_map_request(const DomainPoint &point,
-                                      DistributedID src_did,
-                                      const bool internal,
-                                      RtUserEvent done_event);
+      bool set_sharding_function(ShardingFunction *function, bool own = false);
+      RtEvent get_sharding_function_ready(void);
     public:
-      static void handle_future_map_response(Deserializer &derez,
-                                             Runtime *runtime);
-      static void handle_future_map_reclaim(const void *args);
-    public:
-      ReplicateContext *const repl_ctx;
+      ShardManager *const shard_manager;
       IndexSpaceNode *const shard_domain;
-      const unsigned future_map_barrier_index;
-      const RtBarrier future_map_barrier;
-      const CollectiveID collective_index; // in case we have to do all-to-all
       // Unlike normal future maps, we know these only ever exist on the
       // node where they are made so we store their producer op information
       // in case they have to make futures from remote shards
       const int op_depth; 
       const UniqueID op_uid;
     protected:
-      std::vector<PendingRequest> pending_future_map_requests;
       RtUserEvent sharding_function_ready;
-      ShardingFunction *sharding_function;
+      std::atomic<ShardingFunction*> sharding_function;
       // Whether the future map owns the sharding function
       bool own_sharding_function;
-      std::atomic<bool> collective_performed;
-      // For replicated future maps we track whether there have been any
-      // non-triival calls to this shard of the future map. If there are
-      // then we know there could be non-trivial calls in other shards.
-      // Conversely, if there are no non-trivial calls here then there
-      // shouldn't be in other shards as well because of the rules of
-      // control replication.
-      bool has_non_trivial_call;
+      bool collective_performed;
     };
 
     /**
@@ -2416,7 +2370,8 @@ namespace Legion {
       };
     public:
       ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
-       ShardManager *manager, ShardingID sharding_id, bool skip_checks = false);
+                       ShardManager *manager, ShardingID sharding_id, 
+                       bool skip_checks = false, bool own_functor = false);
       ShardingFunction(const ShardingFunction &rhs) = delete;
       virtual ~ShardingFunction(void);
     public:
@@ -2433,6 +2388,7 @@ namespace Legion {
       const ShardingID sharding_id;
       const bool use_points;
       const bool skip_checks;
+      const bool own_functor;
     protected:
       mutable LocalLock sharding_lock;
       std::map<ShardKey,IndexSpace/*result*/> shard_index_spaces;
@@ -3225,10 +3181,6 @@ namespace Legion {
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
                                            Serializer &rez);
-      void send_control_replicate_future_map_request(AddressSpaceID target, 
-                                                     Serializer &rez);
-      void send_control_replicate_future_map_response(AddressSpaceID target,
-                                                      Serializer &rez);
       void send_control_replicate_disjoint_complete_request(
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_disjoint_complete_response(
@@ -3503,11 +3455,9 @@ namespace Legion {
       void handle_did_downgrade_response(Deserializer &derez);
       void handle_did_downgrade_success(Deserializer &derez);
       void handle_did_downgrade_update(Deserializer &derez);
-      void handle_did_global_acquire_request(Deserializer &derez,
-                                             AddressSpaceID source);
+      void handle_did_global_acquire_request(Deserializer &derez);
       void handle_did_global_acquire_response(Deserializer &derez);
-      void handle_did_valid_acquire_request(Deserializer &derez,
-                                            AddressSpaceID source);
+      void handle_did_valid_acquire_request(Deserializer &derez);
       void handle_did_valid_acquire_response(Deserializer &derez);
       void handle_created_region_contexts(Deserializer &derez,  
                                           AddressSpaceID source);
@@ -3675,8 +3625,6 @@ namespace Legion {
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
       void handle_control_replicate_collective_message(Deserializer &derez);
-      void handle_control_replicate_future_map_request(Deserializer &derez);
-      void handle_control_replicate_future_map_response(Deserializer &derez);
       void handle_control_replicate_disjoint_complete_request(
                                                            Deserializer &derez);
       void handle_control_replicate_disjoint_complete_response(
@@ -5425,8 +5373,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      if (precondition.exists())
-        LegionSpy::log_event_dependence(precondition, result);
+      LegionSpy::log_reservation_acquire(r, precondition, result);
 #endif
       return result;
     }
@@ -5598,10 +5545,15 @@ namespace Legion {
           break;
         case DISTRIBUTED_DOWNGRADE_SUCCESS:
           break;
+        // Put downgrade updates and acquire requests
+        // on same ordered virtual channel so that 
+        // acquire requests cannot starve out an owner
+        // update while it is in flight by circling
+        // around and around
         case DISTRIBUTED_DOWNGRADE_UPDATE:
-          break;
+          return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_GLOBAL_ACQUIRE_REQUEST:
-          break;
+          return REFERENCE_VIRTUAL_CHANNEL;
         case DISTRIBUTED_GLOBAL_ACQUIRE_RESPONSE:
           break;
         case DISTRIBUTED_VALID_ACQUIRE_REQUEST:
@@ -5673,10 +5625,6 @@ namespace Legion {
         case SEND_FUTURE_MAP_REQUEST:
           break;
         case SEND_FUTURE_MAP_RESPONSE:
-          break;
-        case SEND_REPL_FUTURE_MAP_REQUEST:
-          break;
-        case SEND_REPL_FUTURE_MAP_RESPONSE:
           break;
         case SEND_REPL_DISJOINT_COMPLETE_REQUEST:
           break;

@@ -1044,7 +1044,6 @@ namespace Legion {
                             std::set<RtEvent> &preconditions);
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
       void handle_collective_message(Deserializer &derez);
-      void handle_future_map_request(Deserializer &derez);
       void handle_disjoint_complete_request(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
@@ -1203,7 +1202,7 @@ namespace Legion {
     public:
       // Make this a virtual method so for control replication we can 
       // create a different type of future map for the task
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+      virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       // Also virtual for control replication override
       virtual void initialize_concurrent_analysis(bool replay);

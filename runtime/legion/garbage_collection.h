@@ -211,10 +211,10 @@ namespace Legion {
     class DistributedCollectable {
     public:
       enum State {
-        DELETED_REF_STATE,
-        LOCAL_REF_STATE,
-        GLOBAL_REF_STATE,
-        VALID_REF_STATE, // a second global ref state
+        DELETED_REF_STATE = 0,
+        LOCAL_REF_STATE = 1,
+        GLOBAL_REF_STATE = 2,
+        VALID_REF_STATE = 3, // a second global ref state
       };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
@@ -237,7 +237,8 @@ namespace Legion {
       void pack_global_ref(unsigned cnt = 1);
       void unpack_global_ref(unsigned cnt = 1); 
     public:
-      bool is_global(bool need_lock = true) const;
+      template<bool NEED_LOCK=true>
+      bool is_global(void) const;
       // Atomic check and increment operations 
       inline bool check_global_and_increment(ReferenceSource src, int cnt = 1);
       inline bool check_global_and_increment(DistributedID source, int cnt = 1);
@@ -246,6 +247,8 @@ namespace Legion {
       void add_gc_reference(int cnt);
       bool remove_gc_reference(int cnt);
       bool acquire_global(int cnt);
+      bool acquire_global_remote(AddressSpaceID &forward, 
+                                 int count, AddressSpaceID source);
     private:
       void add_resource_reference(int cnt);
       bool remove_resource_reference(int cnt);
@@ -258,6 +261,8 @@ namespace Legion {
       bool remove_nested_gc_ref_internal(DistributedID source, int cnt);
       template<typename T>
       bool acquire_global(int cnt, T source, std::map<T,int> &gc_references);
+      bool acquire_global_remote(AddressSpaceID &forward,
+                                 int count, AddressSpaceID source);
     public:
       void add_base_resource_ref_internal(ReferenceSource source, int cnt); 
       void add_nested_resource_ref_internal(DistributedID source, int cnt); 
@@ -294,16 +299,15 @@ namespace Legion {
       bool can_delete(AutoLock &gc);
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
-      virtual void process_downgrade_update(void);
+      virtual void process_downgrade_update(AutoLock &gc, State to_check);
       virtual void initialize_downgrade_state(AddressSpaceID owner);
-      virtual void update_instances_internal(AddressSpaceID remote_inst);
-      void check_for_downgrade(AddressSpaceID downgrade_owner, 
-                               bool need_lock = true);
+      void check_for_downgrade(AddressSpaceID downgrade_owner); 
+      void process_downgrade_request(AddressSpaceID owner, State to_check);
       bool process_downgrade_response(AddressSpaceID notready,
                                               uint64_t total_sent,
                                               uint64_t total_received);
-      void send_downgrade_notifications(void);
-      bool process_downgrade_success(void);
+      void send_downgrade_notifications(State to_downgrade);
+      void process_downgrade_success(State old_state);
       AddressSpaceID get_downgrade_target(AddressSpaceID owner) const;
     public:
       static void handle_downgrade_request(Runtime *runtime,
@@ -315,7 +319,7 @@ namespace Legion {
       static void handle_downgrade_update(Runtime *runtime,
                                           Deserializer &derez);
       static void handle_global_acquire_request(Runtime *runtime,
-                      Deserializer &derez, AddressSpaceID source);
+                                                Deserializer &derez);
       static void handle_global_acquire_response(Deserializer &derez);
     public:
       Runtime *const runtime;
@@ -364,7 +368,8 @@ namespace Legion {
     public:
       ValidDistributedCollectable(Runtime *rt, DistributedID did,
                                   bool register_with_runtime = true,
-                                  CollectiveMapping *mapping = NULL);
+                                  CollectiveMapping *mapping = NULL,
+                                  bool start_in_valid_state = true);
       ValidDistributedCollectable(const ValidDistributedCollectable &rhs);
       virtual ~ValidDistributedCollectable(void);     
     public:
@@ -373,7 +378,8 @@ namespace Legion {
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
     public:
-      bool is_valid(bool need_lock = true) const;
+      template<bool NEED_LOCK=true>
+      bool is_valid(void) const;
       bool check_valid_and_increment(ReferenceSource source,int cnt = 1);
       bool check_valid_and_increment(DistributedID source, int cnt = 1);
 #ifndef DEBUG_LEGION_GC
@@ -381,6 +387,8 @@ namespace Legion {
       void add_valid_reference(int cnt);
       bool remove_valid_reference( int cnt);
       bool acquire_valid(int cnt);
+      bool acquire_valid_remote(AddressSpaceID &forward,
+                                int count, AddressSpaceID source);
 #else
     public:
       void add_valid_reference(int cnt);
@@ -390,6 +398,8 @@ namespace Legion {
       bool remove_nested_valid_ref_internal(DistributedID source, int cnt);
       template<typename T>
       bool acquire_valid(int cnt, T source, std::map<T,int> &valid_references);
+      bool acquire_valid_remote(AddressSpaceID &forward,
+                                int count, AddressSpaceID source);
 #endif
     public:
       void pack_valid_ref(unsigned cnt = 1);
@@ -397,15 +407,14 @@ namespace Legion {
     protected:
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
-      virtual void process_downgrade_update(void);
+      virtual void process_downgrade_update(AutoLock &gc, State to_check);
       virtual void initialize_downgrade_state(AddressSpaceID owner);
-      virtual void update_instances_internal(AddressSpaceID remote_inst);
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;
     public:
       static void handle_valid_acquire_request(Runtime *runtime,
-                      Deserializer &derez, AddressSpaceID source);
+                                               Deserializer &derez);
       static void handle_valid_acquire_response(Deserializer &derez);
     protected:
 #ifdef DEBUG_LEGION_GC
@@ -419,7 +428,7 @@ namespace Legion {
       std::map<DistributedID,int> detailed_nested_valid_references;
 #endif
     protected:
-      uint64_t  sent_valid_references, received_valid_references;
+      uint64_t sent_valid_references, received_valid_references;
     };
 
     //--------------------------------------------------------------------------

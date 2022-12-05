@@ -2732,7 +2732,7 @@ namespace Legion {
                            Provenance *provenance);
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+      virtual FutureMap create_future_map(TaskContext *ctx,
                       IndexSpace domain, IndexSpace shard_space); 
       // Another virtual method to override for control replication
       virtual void instantiate_tasks(InnerContext *ctx,

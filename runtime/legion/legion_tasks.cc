@@ -8273,22 +8273,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_future_map_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_future_map_request(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void ShardTask::handle_disjoint_complete_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -8872,8 +8856,8 @@ namespace Legion {
         if (launcher.predicate != Predicate::TRUE_PRED)
           initialize_predicate(launcher.predicate_false_future,
                                launcher.predicate_false_result);
-        future_map = FutureMap(
-         create_future_map(ctx, launch_space->handle, launcher.sharding_space));
+        future_map = 
+          create_future_map(ctx, launch_space->handle, launcher.sharding_space);
       }
       else
         elide_future_return = true;
@@ -10109,12 +10093,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* IndexTask::create_future_map(TaskContext *ctx,
+    FutureMap IndexTask::create_future_map(TaskContext *ctx,
                              IndexSpace launch_space, IndexSpace sharding_space) 
     //--------------------------------------------------------------------------
     {
-      return new FutureMapImpl(ctx, this, this->launch_space, runtime,
-          runtime->get_available_distributed_id(), get_provenance());
+      return FutureMap(new FutureMapImpl(ctx, this, this->launch_space,
+          runtime, runtime->get_available_distributed_id(), get_provenance()));
     }
 
     //--------------------------------------------------------------------------
@@ -11263,7 +11247,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(future_map.impl != NULL);
 #endif
-          future_map.impl->pack_future_map(rez);
+          future_map.impl->pack_future_map(rez, target);
         }
         if (predicate_false_future.impl != NULL)
           predicate_false_future.impl->pack_future(rez);
@@ -11285,14 +11269,14 @@ namespace Legion {
       if (points.empty())
       {
         if (point_arguments.impl != NULL)
-          point_arguments.impl->pack_future_map(rez);
+          point_arguments.impl->pack_future_map(rez, target);
         else
           rez.serialize<DistributedID>(0);
         rez.serialize<size_t>(point_futures.size());
         for (unsigned idx = 0; idx < point_futures.size(); idx++)
         {
           FutureMapImpl *impl = point_futures[idx].impl;
-          impl->pack_future_map(rez);
+          impl->pack_future_map(rez, target);
         }
         rez.serialize(concurrent_precondition);
       }

@@ -201,22 +201,27 @@ namespace Legion {
     InstanceView::~InstanceView(void)
     //--------------------------------------------------------------------------
     { 
+#ifdef DEBUG_LEGION
+      assert(atomic_reservations.empty() || !is_logical_owner());
+#endif
       if (manager->remove_nested_resource_ref(did))
         delete manager;
-      if (!atomic_reservations.empty())
-      {
-        // If this is the owner view, delete any atomic reservations
-        if (is_owner())
-        {
-          for (std::map<FieldID,Reservation>::iterator it = 
-                atomic_reservations.begin(); it != 
-                atomic_reservations.end(); it++)
-          {
-            it->second.destroy_reservation();
-          }
-        }
-        atomic_reservations.clear();
-      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::destroy_reservations(ApEvent all_done)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      // No need for the lock here since we should be in a destructor
+      // and there should be no more races
+      for (std::map<FieldID,Reservation>::iterator it =
+            atomic_reservations.begin(); it !=
+            atomic_reservations.end(); it++)
+        it->second.destroy_reservation(all_done);
+      atomic_reservations.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -248,6 +253,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       manager->remove_nested_gc_ref(did);
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      manager->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      manager->unpack_valid_ref();
+      unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -310,7 +331,7 @@ namespace Legion {
       assert(mask.pop_count() == reservations.size());
 #endif
       unsigned offset = 0;
-      if (is_owner())
+      if (is_logical_owner())
       {
         AutoLock v_lock(view_lock);
         for (int idx = mask.find_first_set(); idx >= 0;
@@ -356,7 +377,7 @@ namespace Legion {
             rez.serialize(needed_fields);
             rez.serialize(wait_on);
           }
-          runtime->send_atomic_reservation_request(owner_space, rez);
+          runtime->send_atomic_reservation_request(logical_owner, rez);
           wait_on.wait();
           // Now retake the lock and get the remaining reservations
           AutoLock v_lock(view_lock, 1, false);
@@ -419,7 +440,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_owner());
+      assert(!is_logical_owner());
       assert(mask.pop_count() == reservations.size());
 #endif
       unsigned offset = 0;
@@ -863,6 +884,23 @@ namespace Legion {
 #endif
       view_volume.store(result);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::find_all_done_events(std::set<ApEvent> &all_done) const
+    //--------------------------------------------------------------------------
+    {
+      // No need for any locks here since we're in the view destructor
+      // and there should be no more races between anything
+      for (EventFieldUsers::const_iterator it = current_epoch_users.begin();
+            it != current_epoch_users.end(); it++)
+        all_done.insert(it->first);
+      for (EventFieldUsers::const_iterator it = previous_epoch_users.begin();
+            it != previous_epoch_users.end(); it++)
+        all_done.insert(it->first);
+      for (FieldMaskSet<ExprView>::const_iterator it =
+            subviews.begin(); it != subviews.end(); it++)
+        it->first->find_all_done_events(all_done);
     }
 
     //--------------------------------------------------------------------------
@@ -2611,6 +2649,15 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
+      // If we're the logical owner and we have atomic reservations then
+      // aggregate all the remaining users and destroy the reservations
+      // once they are all done
+      if (is_logical_owner() && !atomic_reservations.empty())
+      {
+        std::set<ApEvent> all_done;
+        current_users->find_all_done_events(all_done);
+        destroy_reservations(Runtime::merge_events(NULL, all_done));
+      }
       if ((current_users != NULL) && current_users->remove_reference())
         delete current_users;
 #ifdef ENABLE_VIEW_REPLICATION
@@ -4003,6 +4050,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FillView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
     void FillView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -4167,6 +4228,32 @@ namespace Legion {
       for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
         it->first->remove_nested_gc_ref(did);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->pack_valid_ref();
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhiView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            true_views.begin(); it != true_views.end(); it++)
+        it->first->unpack_valid_ref();
+      for (LegionMap<LogicalView*,FieldMask>::const_iterator it =
+            false_views.begin(); it != false_views.end(); it++)
+        it->first->unpack_valid_ref();
+      unpack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -4458,6 +4545,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardedView::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      pack_global_ref();
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        (*it)->pack_valid_ref();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedView::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<PhysicalManager*>::const_iterator it =
+            local_instances.begin(); it != local_instances.end(); it++)
+        (*it)->unpack_valid_ref();
+      unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
     void ShardedView::send_view(AddressSpaceID target) 
     //--------------------------------------------------------------------------
     {
@@ -4623,6 +4730,24 @@ namespace Legion {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     { 
+      // If we're the logical owner and we have atomic reservations then
+      // aggregate all the remaining users and destroy the reservations
+      // once they are all done
+      if (is_logical_owner() && !atomic_reservations.empty())
+      {
+        std::set<ApEvent> all_done;
+        for (EventFieldUsers::const_iterator it =
+              initialization_users.begin(); it !=
+              initialization_users.end(); it++)
+          all_done.insert(it->first);
+        for (EventFieldUsers::const_iterator it =
+              reduction_users.begin(); it != reduction_users.end(); it++)
+          all_done.insert(it->first);
+        for (EventFieldUsers::const_iterator it =
+              reading_users.begin(); it != reading_users.end(); it++)
+          all_done.insert(it->first);
+        destroy_reservations(Runtime::merge_events(NULL, all_done));
+      }
       // Remove references on any outstanding users we still have here
       if (!initialization_users.empty())
       {

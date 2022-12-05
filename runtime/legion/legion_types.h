@@ -369,7 +369,6 @@ namespace Legion {
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
-      LG_RECLAIM_FUTURE_MAP_TASK_ID,
       LG_DEFER_COMPOSITE_COPY_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_REMOTE_PHYSICAL_REQUEST_TASK_ID,
@@ -488,7 +487,6 @@ namespace Legion {
         "Defer Phi View Registration",                            \
         "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
-        "Reclaim Future Map",                                     \
         "Defer Composite Copy",                                   \
         "Tighten Index Space",                                    \
         "Remote Physical Context Request",                        \
@@ -825,8 +823,6 @@ namespace Legion {
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
-      SEND_REPL_FUTURE_MAP_REQUEST,
-      SEND_REPL_FUTURE_MAP_RESPONSE,
       SEND_REPL_DISJOINT_COMPLETE_REQUEST,
       SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
       SEND_REPL_INTRA_SPACE_DEP,
@@ -1056,8 +1052,6 @@ namespace Legion {
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
-        "Send Replicate Future Map Request",                          \
-        "Send Replicate Future Map Response",                         \
         "Send Replicate Disjoint Complete Request",                   \
         "Send Replicate Disjoint Complete Response",                  \
         "Send Replicate Intra Space Dependence",                      \
@@ -1506,7 +1500,7 @@ namespace Legion {
     enum CollectiveIndexLocation {
       //COLLECTIVE_LOC_0 = 0, 
       COLLECTIVE_LOC_1 = 1,
-      //COLLECTIVE_LOC_2 = 2,
+      COLLECTIVE_LOC_2 = 2,
       COLLECTIVE_LOC_3 = 3,
       COLLECTIVE_LOC_4 = 4, 
       COLLECTIVE_LOC_5 = 5,
@@ -2058,6 +2052,7 @@ namespace Legion {
     friend class Internal::ReplFenceOp;                     \
     friend class Internal::ReplAttachOp;                    \
     friend class Internal::ReplDetachOp;                    \
+    friend class Internal::ShardManager;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     template<int, typename>                                 \
