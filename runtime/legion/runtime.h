@@ -355,14 +355,14 @@ namespace Legion {
                         ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
                         FutureInstance *existing = NULL);
       void mark_sampled(void);
-      void broadcast_result(AddressSpaceID source); // must be holding lock
+      void broadcast_result(void); // must be holding lock
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
     protected:
       RtEvent invoke_callback(void); // must be holding lock
       void perform_callback(void);
       void perform_broadcast(void);
       // must be holding lock
-      void pack_future_result(Serializer &rez, AddressSpaceID source) const;
+      void pack_future_result(Serializer &rez) const;
     public:
       RtEvent record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
@@ -397,6 +397,7 @@ namespace Legion {
     private:
       mutable LocalLock future_lock;
       RtUserEvent subscription_event;
+      AddressSpaceID result_set_space;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
       std::map<Memory,FutureInstance*> instances;
