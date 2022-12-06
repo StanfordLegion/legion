@@ -633,8 +633,7 @@ namespace Legion {
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
         producer_context_index((o == NULL) ? SIZE_MAX : o->get_ctx_index()),
-        provenance(prov), future_complete(complete), 
-        result_set_space(local_space), canonical_instance(NULL), 
+        provenance(prov), future_complete(complete), canonical_instance(NULL), 
         metadata(NULL), metasize(0), future_size((fsize == NULL) ? 0 : *fsize), 
         upper_bound_size((fsize == NULL) ? SIZE_MAX : *fsize),
         callback_functor(NULL), own_callback_functor(false),
@@ -670,8 +669,7 @@ namespace Legion {
         producer_uid(uid),
 #endif
         producer_context_index(op_ctx_index), producer_point(op_point),
-        provenance(prov), future_complete(complete), 
-        result_set_space(local_space), canonical_instance(NULL),
+        provenance(prov), future_complete(complete), canonical_instance(NULL),
         metadata(NULL), metasize(0), future_size(0),
         upper_bound_size(SIZE_MAX), callback_functor(NULL),
         own_callback_functor(false), future_size_set(false)
@@ -1500,27 +1498,7 @@ namespace Legion {
       upper_bound_size = size;
       future_size = size;
       future_size_set = true;
-      if (is_owner())
-      {
-        if (!subscribers.empty())
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(size);
-          }
-          for (std::set<AddressSpaceID>::const_iterator it =
-                subscribers.begin(); it != subscribers.end(); it++)
-          {
-            if (((*it) == source) || ((*it) == local_space))
-              continue;
-            pack_global_ref();
-            runtime->send_future_result_size(*it, rez);
-          }
-        }
-      }
-      else if (source == local_space)
+      if (!is_owner() && (source == local_space))
       {
         // Send the message back to the owner so it can broadcast it out
         // to any subscribers
@@ -1532,6 +1510,23 @@ namespace Legion {
         }
         pack_global_ref();
         runtime->send_future_result_size(owner_space, rez);
+      }
+      if (!subscribers.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(size);
+        }
+        for (std::set<AddressSpaceID>::const_iterator it =
+              subscribers.begin(); it != subscribers.end(); it++)
+        {
+          if (((*it) == source) || ((*it) == local_space))
+            continue;
+          pack_global_ref();
+          runtime->send_future_result_size(*it, rez);
+        }
       }
       // Check to see if there are any pending instances to make now
       if (future_size > 0)
@@ -1598,16 +1593,9 @@ namespace Legion {
       if (!pending_instances.empty())
         create_pending_instances();
       if (!is_owner())
-      {
-        // If we're the first set then we need to tell the owner
-        // that we are the ones with the value
-        // This is literally an empty message
-        Serializer rez;
-        rez.serialize(did);
-        pack_global_ref();
-        runtime->send_future_notification(owner_space, rez); 
-      }
-      else if (!subscribers.empty())
+        // The owner always needs to be told of the result
+        subscribers.insert(owner_space);
+      if (!subscribers.empty())
       {
         if ((canonical_instance != NULL) && 
             canonical_instance->can_pack_by_value() &&
@@ -1621,7 +1609,7 @@ namespace Legion {
               LG_LATENCY_WORK_PRIORITY, precondition);
         }
         else
-          broadcast_result(subscribers, false/*need lock*/);
+          broadcast_result(local_space);
       }
       if (subscription_event.exists())
       {
@@ -1857,7 +1845,7 @@ namespace Legion {
       subscription_event = RtUserEvent::NO_RT_USER_EVENT;
       // Check for any subscribers that we need to tell about the result
       if (!subscribers.empty())
-        broadcast_result(subscribers, false/*need lock*/);
+        broadcast_result(local_space);
     }
 
     //--------------------------------------------------------------------------
@@ -1865,7 +1853,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
-      broadcast_result(subscribers, false/*need lock*/);
+      broadcast_result(local_space);
     }
 
     //--------------------------------------------------------------------------
@@ -1924,7 +1912,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::unpack_future(Deserializer &derez)
+    void FutureImpl::unpack_result(Deserializer &derez)
     //-------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -1966,6 +1954,10 @@ namespace Legion {
         create_pending_instances();
       Runtime::trigger_event(subscription_event);
       subscription_event = RtUserEvent::NO_RT_USER_EVENT;
+      AddressSpaceID source;
+      derez.deserialize(source);
+      if (!subscribers.empty())
+        broadcast_result(source);
     }
 
     //--------------------------------------------------------------------------
@@ -2020,12 +2012,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FutureImpl::subscribe(void)
+    RtEvent FutureImpl::subscribe(bool need_lock)
     //--------------------------------------------------------------------------
     {
       if (!empty.load() && (callback_functor == NULL))
         return RtEvent::NO_RT_EVENT;
-      AutoLock f_lock(future_lock);
+      if (need_lock)
+      {
+        AutoLock f_lock(future_lock);
+        return subscribe(false/*need lock*/);
+      }
       // See if we lost the race
       if (empty.load())
       {
@@ -2038,7 +2034,12 @@ namespace Legion {
             Serializer rez;
             rez.serialize(did);
             pack_global_ref();
-            runtime->send_future_subscription(owner_space, rez);
+            if ((collective_mapping != NULL) && 
+                collective_mapping->contains(local_space))
+              runtime->send_future_subscription(
+                 collective_mapping->get_parent(owner_space, local_space), rez);
+            else
+              runtime->send_future_subscription(owner_space, rez);
           }
           else
             record_subscription(local_space, false/*need lock*/);
@@ -2177,18 +2178,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::broadcast_result(std::set<AddressSpaceID> &targets,
-                                      const bool need_lock)
+    void FutureImpl::broadcast_result(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      if (targets.empty())
-        return;
-      if (need_lock)
-      {
-        AutoLock f_lock(future_lock,1,false/*exclusive*/);
-        broadcast_result(targets, false/*need lock*/);
-        return;
-      }
 #ifdef DEBUG_LEGION
       assert(!empty.load());
 #endif
@@ -2197,35 +2189,32 @@ namespace Legion {
         // Handle the special case where the only subscriber is the local
         // node so we can lazily defer this until later and the user
         // actually asks us for the result
-        if (!targets.empty() && ((targets.size() > 1) ||
-              (targets.find(local_space) == targets.end())))
+        if (!subscribers.empty() && ((subscribers.size() > 1) ||
+              (subscribers.find(local_space) == subscribers.end())))
         {
           // If we still have a callback to perform do
           // that now to get it in flight, it will send
           // out any updates to subscribers
           invoke_callback();
-          // Make sure these targets are all in the set of subscribers
-          // so that the callback will broadcast them later
-          subscribers.insert(targets.begin(), targets.end());
         }
         return;
       }
       Serializer rez;
       bool packed = false;
       for (std::set<AddressSpaceID>::const_iterator it = 
-            targets.begin(); it != targets.end(); it++)
+            subscribers.begin(); it != subscribers.end(); it++)
       {
-        if ((*it) == local_space)
+        if (((*it) == local_space) || ((*it) == source))
           continue;
         if (!packed)
         {
-          pack_future_result(rez);
+          pack_future_result(rez, source);
           packed = true;
         }
         pack_global_ref();
         runtime->send_future_result(*it, rez);
       }
-      targets.clear();
+      subscribers.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -2233,9 +2222,6 @@ namespace Legion {
                                          bool need_lock)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
       if (need_lock)
       {
         AutoLock f_lock(future_lock);
@@ -2244,41 +2230,34 @@ namespace Legion {
       }
       if (empty.load())
       {
-        // See if we know who has the result
-        if (result_set_space != local_space)
+        // Send the future size back to the subscriber so they
+        // can have it to be able to create instances
+        if (future_size_set && (subscriber != local_space))
         {
-          // We don't have the result, but we know who does so 
-          // request that they send it out to the target
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize<size_t>(1); // size
-            rez.serialize(subscriber);
+            rez.serialize(future_size);
           }
           pack_global_ref();
-          runtime->send_future_broadcast(result_set_space, rez);
+          runtime->send_future_result_size(subscriber, rez);
         }
-        else
+        if (is_owner())
         {
-          // We don't know yet, so save this for later
 #ifdef DEBUG_LEGION
           assert(subscribers.find(subscriber) == subscribers.end());
 #endif
           subscribers.insert(subscriber);
-          // Send the future size back to the subscriber so they
-          // can have it to be able to create instances
-          if (future_size_set && (subscriber != local_space))
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(future_size);
-            }
-            pack_global_ref();
-            runtime->send_future_result_size(subscriber, rez);
-          }
+        }
+        else
+        {
+          // Not the owner, we should be in a collective future
+#ifdef DEBUG_LEGION
+          assert(collective_mapping != NULL);
+          assert(collective_mapping->contains(local_space));
+#endif
+          subscribe(false/*needs lock*/);
         }
       }
       else
@@ -2309,21 +2288,12 @@ namespace Legion {
           }
           subscribers.insert(subscriber);  
         }
-        // Check for a latent subscription message for the future
-        // where the future was ultimately set and ignore it
-        else if (subscriber != result_set_space)
-        {
-          // We've got the result so we can't send it back right away
-          Serializer rez;
-          pack_future_result(rez);
-          pack_global_ref();
-          runtime->send_future_result(subscriber, rez);
-        }
       }
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::pack_future_result(Serializer &rez) const
+    void FutureImpl::pack_future_result(Serializer &rez, 
+                                        AddressSpaceID source) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(did);
@@ -2346,35 +2316,7 @@ namespace Legion {
       if (metasize > 0)
         rez.serialize(metadata, metasize);
       rez.serialize(upper_bound_size);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureImpl::notify_remote_set(AddressSpaceID remote_space)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock f_lock(future_lock);
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(result_set_space == local_space);
-      assert(result_set_space != remote_space);
-#endif
-      result_set_space = remote_space;
-      if (!subscribers.empty())
-      {
-        // Pack these up and send them to the remote space
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize<size_t>(subscribers.size());
-          for (std::set<AddressSpaceID>::const_iterator it = 
-               subscribers.begin(); it != subscribers.end(); it++)
-            rez.serialize(*it);
-        }
-        pack_global_ref();
-        runtime->send_future_broadcast(remote_space, rez);
-        subscribers.clear();
-      }
+      rez.serialize(source);
     }
 
     //--------------------------------------------------------------------------
@@ -2411,7 +2353,7 @@ namespace Legion {
 #else
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
-      future->unpack_future(derez);
+      future->unpack_result(derez);
       future->unpack_global_ref();
     }
 
@@ -2443,7 +2385,8 @@ namespace Legion {
     {
       DistributedID did;
       derez.deserialize(did);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      DistributedCollectable *dc = 
+        runtime->find_distributed_collectable(did, true/*wait*/);
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
       assert(future != NULL);
@@ -2451,52 +2394,6 @@ namespace Legion {
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
       future->record_subscription(source, true/*need lock*/);
-      future->unpack_global_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void FutureImpl::handle_future_notification(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DistributedID did;
-      derez.deserialize(did);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
-      assert(future != NULL);
-#else
-      FutureImpl *future = static_cast<FutureImpl*>(dc);
-#endif
-      future->notify_remote_set(source);
-      future->unpack_global_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void FutureImpl::handle_future_broadcast(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
-      assert(future != NULL);
-#else
-      FutureImpl *future = static_cast<FutureImpl*>(dc);
-#endif
-      size_t num_subscribers;
-      derez.deserialize(num_subscribers);
-      std::set<AddressSpaceID> subscribers;
-      for (unsigned idx = 0; idx < num_subscribers; idx++)
-      {
-        AddressSpaceID subscriber;
-        derez.deserialize(subscriber);
-        subscribers.insert(subscriber);
-      }
-      future->broadcast_result(subscribers, true/*need lock*/);
       future->unpack_global_ref();
     }
 
@@ -12225,16 +12122,6 @@ namespace Legion {
           case SEND_FUTURE_SUBSCRIPTION:
             {
               runtime->handle_future_subscription(derez, remote_address_space);
-              break;
-            }
-          case SEND_FUTURE_NOTIFICATION:
-            {
-              runtime->handle_future_notification(derez, remote_address_space);
-              break;
-            }
-          case SEND_FUTURE_BROADCAST:
-            {
-              runtime->handle_future_broadcast(derez);
               break;
             }
           case SEND_FUTURE_CREATE_INSTANCE_REQUEST:
@@ -22103,27 +21990,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_future_notification(AddressSpaceID target,
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This also has to happen on the reference virtual channel to prevent
-      // the owner from being deleted before its references are removed
-      find_messenger(target)->send_message<SEND_FUTURE_NOTIFICATION>(rez,
-                                        true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_future_broadcast(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // We need all these to be ordered, preferably with respect to 
-      // reference removals too so put them on the reference virtual channel
-      find_messenger(target)->send_message<SEND_FUTURE_BROADCAST>(rez,
-                                                        true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_future_create_instance_request(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24151,21 +24017,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureMapImpl::handle_future_map_future_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_future_notification(Deserializer &derez, 
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      FutureImpl::handle_future_notification(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_future_broadcast(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FutureImpl::handle_future_broadcast(derez, this);
     }
 
     //--------------------------------------------------------------------------

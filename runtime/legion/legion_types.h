@@ -819,8 +819,6 @@ namespace Legion {
       SEND_FUTURE_RESULT,
       SEND_FUTURE_RESULT_SIZE,
       SEND_FUTURE_SUBSCRIPTION,
-      SEND_FUTURE_NOTIFICATION,
-      SEND_FUTURE_BROADCAST,
       SEND_FUTURE_CREATE_INSTANCE_REQUEST,
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
@@ -1048,8 +1046,6 @@ namespace Legion {
         "Send Future Result",                                         \
         "Send Future Result Size",                                    \
         "Send Future Subscription",                                   \
-        "Send Future Notification",                                   \
-        "Send Future Broadcast",                                      \
         "Send Future Create Instance Request",                        \
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \

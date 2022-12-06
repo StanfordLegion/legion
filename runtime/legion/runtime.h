@@ -323,7 +323,7 @@ namespace Legion {
       // in the system memory and should always make a local FutureInstance
       void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
-      void unpack_future(Deserializer &derez);
+      void unpack_result(Deserializer &derez);
       void unpack_instances(Deserializer &derez);
       // Reset the future in case we need to restart the
       // computation for resiliency reasons
@@ -331,7 +331,7 @@ namespace Legion {
       // Request that we get meta data for the future on this node
       // The return event here will indicate when we have local data
       // that is valid to access for this particular future
-      RtEvent subscribe(void);
+      RtEvent subscribe(bool need_lock = true);
       size_t get_upper_bound_size(void);
       void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
       void pack_future(Serializer &rez);
@@ -355,15 +355,14 @@ namespace Legion {
                         ApUserEvent inst_ready = ApUserEvent::NO_AP_USER_EVENT,
                         FutureInstance *existing = NULL);
       void mark_sampled(void);
-      void broadcast_result(std::set<AddressSpaceID> &targets,
-                            const bool need_lock);
+      void broadcast_result(AddressSpaceID source); // must be holding lock
       void record_subscription(AddressSpaceID subscriber, bool need_lock);
-      void notify_remote_set(AddressSpaceID remote_space);
     protected:
       RtEvent invoke_callback(void); // must be holding lock
       void perform_callback(void);
       void perform_broadcast(void);
-      void pack_future_result(Serializer &rez) const; // must be holding lock
+      // must be holding lock
+      void pack_future_result(Serializer &rez, AddressSpaceID source) const;
     public:
       RtEvent record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
@@ -371,9 +370,6 @@ namespace Legion {
                                   Runtime *runtime, AddressSpaceID source);
       static void handle_future_subscription(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID source);
-      static void handle_future_notification(Deserializer &derez, Runtime *rt,
-                                             AddressSpaceID source);
-      static void handle_future_broadcast(Deserializer &derez, Runtime *rt);
       static void handle_future_create_instance_request(Deserializer &derez,
                                                         Runtime *runtime);
       static void handle_future_create_instance_response(Deserializer &derez,
@@ -403,7 +399,6 @@ namespace Legion {
       RtUserEvent subscription_event;
       // On the owner node, keep track of the registered waiters
       std::set<AddressSpaceID> subscribers;
-      AddressSpaceID result_set_space; // space on which the result was set
       std::map<Memory,FutureInstance*> instances;
       FutureInstance *canonical_instance;
     private:
@@ -3162,8 +3157,6 @@ namespace Legion {
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_result_size(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
-      void send_future_notification(AddressSpaceID target, Serializer &rez);
-      void send_future_broadcast(AddressSpaceID target, Serializer &rez);
       void send_future_create_instance_request(AddressSpaceID target,
                                                Serializer &rez);
       void send_future_create_instance_response(AddressSpaceID target,
@@ -3493,9 +3486,6 @@ namespace Legion {
                                      AddressSpaceID source);
       void handle_future_subscription(Deserializer &derez, 
                                       AddressSpaceID source);
-      void handle_future_notification(Deserializer &derez,
-                                      AddressSpaceID source);
-      void handle_future_broadcast(Deserializer &derez);
       void handle_future_create_instance_request(Deserializer &derez);
       void handle_future_create_instance_response(Deserializer &derez);
       void handle_future_map_future_request(Deserializer &derez,
@@ -5604,10 +5594,6 @@ namespace Legion {
         case SEND_FUTURE_RESULT_SIZE:
           break;
         case SEND_FUTURE_SUBSCRIPTION:
-          break;
-        case SEND_FUTURE_NOTIFICATION:
-          break;
-        case SEND_FUTURE_BROADCAST:
           break;
         case SEND_FUTURE_CREATE_INSTANCE_REQUEST:
           break;
