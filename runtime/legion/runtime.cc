@@ -1919,7 +1919,7 @@ namespace Legion {
       AutoLock f_lock(future_lock);
 #ifdef DEBUG_LEGION
       assert(empty.load());
-      assert(subscription_event.exists());
+      assert(subscription_event.exists() || is_owner());
       assert(metadata == NULL);
 #endif
       canonical_instance = FutureInstance::unpack_instance(derez, runtime);
@@ -1952,8 +1952,11 @@ namespace Legion {
       empty.store(false);
       if (!pending_instances.empty())
         create_pending_instances();
-      Runtime::trigger_event(subscription_event);
-      subscription_event = RtUserEvent::NO_RT_USER_EVENT;
+      if (subscription_event.exists())
+      {
+        Runtime::trigger_event(subscription_event);
+        subscription_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
       AddressSpaceID source;
       derez.deserialize(source);
       if (!subscribers.empty())
