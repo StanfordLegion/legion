@@ -8081,7 +8081,7 @@ class Operation(object):
                         return False
         else:
             # Attach operations do not register themselves as users currently in legion
-            if self.reqs and self.kind != ATTACH_OP_KIND:
+            if self.reqs:
                 for index,req in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks,
                                                 registration=True, replicated=replicated):
