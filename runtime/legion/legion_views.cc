@@ -10042,7 +10042,7 @@ namespace Legion {
             }
             rez.serialize(origin);
           }
-          runtime->send_collective_distribute_broadcast(origin, rez);
+          runtime->send_collective_distribute_broadcast(*it, rez);
           recorded_events.insert(recorded);
           applied_events.insert(applied);
         }
