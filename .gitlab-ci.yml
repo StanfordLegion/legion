@@ -397,7 +397,9 @@ before_script:
       fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
-        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
+        # Rely on kokkos' auto-detect for the build.  This will need to be
+        # modified to include all sm-major for universal builds later on
+        #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
         #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_CUDA_DIR=${CUDA}"
         export CUDA_PATH="${CUDA}/lib64"
         #export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
@@ -506,7 +508,6 @@ before_script:
   GPU_ARCH: "60"
   # cmake needs to know where to find libcuda.so
   CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
