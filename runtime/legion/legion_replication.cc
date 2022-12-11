@@ -245,8 +245,6 @@ namespace Legion {
       launch_space = NULL;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      future_collective_id = UINT_MAX;
-      future_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -260,8 +258,6 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (future_collective != NULL)
-        delete future_collective;
       deactivate_individual_task();
       runtime->free_repl_individual_task(this);
     }
@@ -462,26 +458,7 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
       complete_mapping(mapped_precondition);
-      if ((must_epoch == NULL) && !elide_future_return &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
-      {
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-        assert(future_collective == NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-        future_collective = new FutureBroadcast(repl_ctx, 
-                future_collective_id, owner_shard, result.impl);
-        const RtEvent future_ready = 
-          future_collective->perform_collective_wait(false/*block*/);
-        // Do the stuff to record that this is mapped and executed
-        complete_execution(future_ready);
-      }
-      else
-        complete_execution();
+      complete_execution();
       trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
     }
@@ -512,33 +489,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::trigger_task_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // Before doing the normal thing we have to exchange broadcast/receive
-      // the future result, can skip this though if we're part of a must epoch
-      // We should also skip this if we were predicated false
-      if ((must_epoch == NULL) && !elide_future_return &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()) 
-          && (owner_shard == repl_ctx->owner_shard->shard_id))
-      {
-#ifdef DEBUG_LEGION
-        assert(future_collective == NULL);
-#endif
-        future_collective = new FutureBroadcast(repl_ctx, 
-                future_collective_id, owner_shard, result.impl);
-        future_collective->broadcast_future();
-      }
-      IndividualTask::trigger_task_complete();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
@@ -552,9 +502,26 @@ namespace Legion {
       else
         handle = ctx->find_index_launch_space(index_domain, get_provenance());
       launch_space = runtime->forest->get_node(handle);
-      if (!elide_future_return)
-        future_collective_id = 
-          ctx->get_next_collective_index(COLLECTIVE_LOC_1);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureImpl* ReplIndividualTask::create_future(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      return new FutureImpl(parent_ctx, runtime, true/*register*/,
+              runtime->get_available_distributed_id(),
+              this, gen, context_index, index_point,
+#ifdef LEGION_SPY
+              unique_op_id,
+#endif
+              parent_ctx->get_depth(), get_provenance(),
+              &repl_ctx->shard_manager->get_collective_mapping());
     }
 
     //--------------------------------------------------------------------------
@@ -6180,6 +6147,9 @@ namespace Legion {
             else
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             complete_mapping(mapping_fence_barrier);
+            // Set the future result if it was needed
+            if (result.impl != NULL)
+              result.impl->set_result(execution_fence_barrier, NULL);
             // We can always trigger the completion event when these are done
             if (!request_early_complete(execution_fence_barrier))
               complete_execution(
@@ -12881,73 +12851,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Future Broadcast 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast::FutureBroadcast(ReplicateContext *ctx, CollectiveID id,
-                                     ShardID source, FutureImpl *i)
-      : BroadcastCollective(ctx, id, source), impl(i)
-    //--------------------------------------------------------------------------
-    {
-      if (source == ctx->owner_shard->shard_id)
-        ready = impl->subscribe();
-    }
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast::FutureBroadcast(const FutureBroadcast &rhs)
-      : BroadcastCollective(rhs), impl(rhs.impl)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast::~FutureBroadcast(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast& FutureBroadcast::operator=(const FutureBroadcast &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::pack_collective(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      FutureInstance *instance = impl->get_canonical_instance();
-      if (instance != NULL)
-        instance->pack_instance(rez, false/*pack ownership*/);
-      else
-        rez.serialize<size_t>(0);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::unpack_collective(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FutureInstance *instance = 
-        FutureInstance::unpack_instance(derez, context->runtime);
-      impl->set_result(instance);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::broadcast_future(void)
-    //--------------------------------------------------------------------------
-    {
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      perform_collective_async();
-    }
-
-    /////////////////////////////////////////////////////////////
     // Buffer Exchange 
     /////////////////////////////////////////////////////////////
 
@@ -14458,9 +14361,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     ConsensusMatchExchange<T>::ConsensusMatchExchange(ReplicateContext *ctx,
-             CollectiveIndexLocation loc, Future f, void *out, ApUserEvent trig)
+                           CollectiveIndexLocation loc, Future f, void *out)
       : ConsensusMatchBase(ctx, loc), to_complete(f),
-        output(static_cast<T*>(out)), to_trigger(trig)
+        output(static_cast<T*>(out))
     //--------------------------------------------------------------------------
     {
     }
@@ -14470,7 +14373,7 @@ namespace Legion {
     ConsensusMatchExchange<T>::ConsensusMatchExchange(
                                               const ConsensusMatchExchange &rhs)
       : ConsensusMatchBase(rhs), to_complete(rhs.to_complete),
-        output(rhs.output), to_trigger(rhs.to_trigger)
+        output(rhs.output)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14604,7 +14507,6 @@ namespace Legion {
       // A little bit of help from the replicate context to complete the future
       context->help_complete_future(to_complete, &next_index, 
                         sizeof(next_index), false/*own*/);
-      Runtime::trigger_event(NULL, to_trigger);
     }
 
     template class ConsensusMatchExchange<uint8_t>;

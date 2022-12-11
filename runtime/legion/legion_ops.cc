@@ -3063,11 +3063,10 @@ namespace Legion {
       bool set_future = false;
       if (result_future.impl == NULL)
       {
-        const size_t future_size = sizeof(bool);
         Future temp = Future(
               new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
         if (result_future.impl == NULL)
@@ -8852,15 +8851,9 @@ namespace Legion {
       initialize_memoizable();
       fence_kind = kind;
       if (need_future)
-      {
-        const size_t future_size = 0;
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), completion_event,
-              get_provenance(), &future_size, track ? this : NULL));
-        // We can set the future result right now because we know that it
-        // will not be complete until we are complete ourselves
-        result.impl->set_result(NULL);
-      }
+              runtime->get_available_distributed_id(),
+              get_provenance(), track ? this : NULL));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id, context_index);
@@ -8957,6 +8950,9 @@ namespace Legion {
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
+            // Set the future result if it was needed
+            if (result.impl != NULL)
+              result.impl->set_result(execution_precondition, NULL);
             if (!request_early_complete(execution_precondition))
               complete_execution(
                   Runtime::protect_event(execution_precondition));
@@ -9051,6 +9047,8 @@ namespace Legion {
     void FenceOp::complete_replay(ApEvent fence_complete_event)
     //--------------------------------------------------------------------------
     {
+      if (result.impl != NULL)
+        result.impl->set_result(fence_complete_event, NULL);
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(NULL, completion_event, fence_complete_event);
       need_completion_trigger = false;
@@ -13963,8 +13961,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), get_completion_event(), 
-            get_provenance(), NULL/*no known future size*/, this));
+            runtime->get_available_distributed_id(),
+            get_provenance(), this));
       collective = dc;
       if (runtime->legion_spy_enabled)
       {
@@ -21733,10 +21731,9 @@ namespace Legion {
       requirement.privilege = flush ? LEGION_READ_WRITE : LEGION_WRITE_DISCARD;
       requirement.prop = LEGION_EXCLUSIVE;
       // Create the future result that we will complete when we're done
-      const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, unordered);
@@ -21970,7 +21967,7 @@ namespace Legion {
     {
       // Can be NULL if this is a PointDetachOp
       if (result.impl != NULL)
-        result.impl->set_result(NULL, 0, true/*own*/);
+        result.impl->set_result(ApEvent::NO_AP_EVENT, NULL, 0, true/*own*/);
       InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_LEGION
@@ -22177,10 +22174,9 @@ namespace Legion {
         points.push_back(point);
       }
       // Create the future result that we will complete when we're done
-      const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
@@ -22283,7 +22279,7 @@ namespace Legion {
     void IndexDetachOp::complete_detach(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(NULL, 0, true/*own*/);
+      result.impl->set_result(ApEvent::NO_AP_EVENT, NULL, 0, true/*own*/);
       complete_operation();
     }
 
@@ -22533,11 +22529,13 @@ namespace Legion {
           if (it->impl != NULL)
             preconditions.insert(*it);
       }
+#if 0
       const size_t future_size = (measurement == LEGION_MEASURE_SECONDS) ?
         sizeof(double) : sizeof(long long);
+#endif
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(),
@@ -22750,9 +22748,7 @@ namespace Legion {
       }
       return_type_size = launcher.return_type_size;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), get_completion_event(),
-            get_provenance(), (launcher.return_type_size < SIZE_MAX) ?
-              &launcher.return_type_size : NULL/*no size*/, this));
+            runtime->get_available_distributed_id(), get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_tunable_operation(ctx->get_unique_id(),
@@ -22943,9 +22939,10 @@ namespace Legion {
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), get_completion_event(), 
-              get_provenance(),
-              (serdez_redop_fns == NULL) ? &redop->sizeof_rhs : NULL, this));
+              runtime->get_available_distributed_id(), get_provenance(), this));
+      if (serdez_redop_fns == NULL)
+        result.impl->set_future_result_size(redop->sizeof_rhs, 
+                                            runtime->address_space);
       mapper_id = map_id;
       tag = t;
       deterministic = is_deterministic;
@@ -23197,6 +23194,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent executed;
+      ApEvent done;
       if (serdez_redop_fns == NULL)
         executed = all_reduce_redop();
       else if (serdez_upper_bound < SIZE_MAX)
@@ -23219,17 +23217,17 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
               redop_id, future_result_size)
         }
-        ApEvent done = finalize_serdez_targets(executed);
+        done = finalize_serdez_targets(executed);
         if (request_early_complete(done))
           executed = RtEvent::NO_RT_EVENT;
       }
       else
       {
-        ApEvent done = finalize_serdez_targets(executed);
+        done = finalize_serdez_targets(executed);
         if (request_early_complete(done))
           executed = RtEvent::NO_RT_EVENT;
       }
-      result.impl->set_results(targets);
+      result.impl->set_results(done, targets);
       complete_execution(executed);
     }
 

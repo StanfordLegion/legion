@@ -622,8 +622,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now,
-            DistributedID did, ApEvent complete, Provenance *prov,
-            const size_t *fsize /*=NULL*/, Operation *o /*= NULL*/) 
+            DistributedID did, Provenance *prov, Operation *o /*= NULL*/) 
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           register_now), context(ctx),
@@ -633,11 +632,9 @@ namespace Legion {
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
         producer_context_index((o == NULL) ? SIZE_MAX : o->get_ctx_index()),
-        provenance(prov), future_complete(complete), canonical_instance(NULL), 
-        metadata(NULL), metasize(0), future_size((fsize == NULL) ? 0 : *fsize), 
-        upper_bound_size((fsize == NULL) ? SIZE_MAX : *fsize),
-        callback_functor(NULL), own_callback_functor(false),
-        future_size_set(fsize != NULL)
+        provenance(prov), canonical_instance(NULL), metadata(NULL), metasize(0),
+        future_size(0), upper_bound_size(SIZE_MAX), callback_functor(NULL),
+        own_callback_functor(false), future_size_set(false)
     //--------------------------------------------------------------------------
     {
       empty.store(true);
@@ -654,22 +651,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(TaskContext *ctx, Runtime *rt, bool register_now, 
-                           DistributedID did,
-                           ApEvent complete, Operation *o, GenerationID gen,
+                           DistributedID did, Operation *o, GenerationID gen,
                            size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
                            UniqueID uid,
 #endif
-                           int depth, Provenance *prov)
+                           int depth, Provenance *prov, CollectiveMapping *map)
       : DistributedCollectable(rt, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
-          register_now), context(ctx),
+          register_now, map), context(ctx),
         producer_op(o), op_gen(gen), producer_depth(depth),
 #ifdef LEGION_SPY
         producer_uid(uid),
 #endif
         producer_context_index(op_ctx_index), producer_point(op_point),
-        provenance(prov), future_complete(complete), canonical_instance(NULL),
+        provenance(prov), canonical_instance(NULL),
         metadata(NULL), metasize(0), future_size(0),
         upper_bound_size(SIZE_MAX), callback_functor(NULL),
         own_callback_functor(false), future_size_set(false)
@@ -757,17 +753,18 @@ namespace Legion {
       if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
         implicit_context->record_blocking_call();
       bool poisoned = false;
-      if (!future_complete.has_triggered_faultaware(poisoned))
+      const ApEvent complete = get_ready_event();
+      if (!complete.has_triggered_faultaware(poisoned))
       {
         TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
-          future_complete.wait_faultaware(poisoned);
+          complete.wait_faultaware(poisoned);
           context->end_task_wait();
         }
         else
-          future_complete.wait_faultaware(poisoned);
+          complete.wait_faultaware(poisoned);
       }
       if (poisoned)
         implicit_context->raise_poison_exception();
@@ -808,22 +805,6 @@ namespace Legion {
            bool check_extent, bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (implicit_context != NULL))
-      {
-        if (!implicit_context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
-             "Waiting on a future in non-leaf task %s "
-             "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance "
-             "degradation. Warning string: %s",
-             implicit_context->get_task_name(), 
-             implicit_context->get_unique_id(),
-             (warning_string == NULL) ? "" : warning_string)
-      }
-      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-        implicit_context->record_blocking_call();
-      mark_sampled();
       const RtEvent ready_event = subscribe();
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
@@ -832,21 +813,7 @@ namespace Legion {
           (implicit_context != NULL) ? 
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
-      bool poisoned = false;
-      if (!future_complete.has_triggered_faultaware(poisoned))
-      {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
-        {
-          context->begin_task_wait(false/*from runtime*/);
-          future_complete.wait_faultaware(poisoned);
-          context->end_task_wait();
-        }
-        else
-          future_complete.wait_faultaware(poisoned);
-      }
-      if (poisoned)
-        implicit_context->raise_poison_exception();
+      wait(silence_warnings, warning_string);
       if (extent_in_bytes != NULL)
       {
         if (check_extent)
@@ -877,6 +844,7 @@ namespace Legion {
       }
       if (instance == NULL)
         return NULL;
+      bool poisoned = false;
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
       {
@@ -924,22 +892,6 @@ namespace Legion {
         else
           memory = runtime->runtime_system_memory;
       }
-      if (runtime->runtime_warnings && !silence_warnings && 
-          (implicit_context != NULL))
-      {
-        if (!implicit_context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
-             "Waiting on a future to make an accessor in non-leaf task %s "
-             "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance "
-             "degradation. Warning string: %s",
-             implicit_context->get_task_name(), 
-             implicit_context->get_unique_id(),
-             (warning_string == NULL) ? "" : warning_string)
-      }
-      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
-        implicit_context->record_blocking_call();
-      mark_sampled();
       const RtEvent ready_event = subscribe();
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
@@ -948,21 +900,7 @@ namespace Legion {
           (implicit_context != NULL) ? 
            implicit_context->owner_task->get_unique_op_id() : 0, true/*eager*/);
       // Wait to make sure that the future is complete first
-      bool poisoned = false;
-      if (!future_complete.has_triggered_faultaware(poisoned))
-      {
-        TaskContext *context = implicit_context;
-        if (context != NULL)
-        {
-          context->begin_task_wait(false/*from runtime*/);
-          future_complete.wait_faultaware(poisoned);
-          context->end_task_wait();
-        }
-        else
-          future_complete.wait_faultaware(poisoned);
-      }
-      if (poisoned)
-        implicit_context->raise_poison_exception();
+      wait(silence_warnings, warning_string); 
       if (empty.load())
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
             "Accessing empty future when making an accessor! (UID %lld)",
@@ -985,6 +923,7 @@ namespace Legion {
       // Should never be set to true here
       assert(!dummy_owner);
 #endif
+      bool poisoned = false;
       const ApEvent inst_ready = instance->get_ready();
       if (!inst_ready.has_triggered_faultaware(poisoned))
       {
@@ -1263,14 +1202,14 @@ namespace Legion {
 #endif
       // Check to see if we have it
       {
-        AutoLock f_lock(future_lock,1,false/*exclusive*/);
+        AutoLock f_lock(future_lock);
         std::map<Memory,FutureInstance*>::const_iterator finder =
           instances.find(target);
         if (finder != instances.end())
           return finder->second->ready_event;
         // Handle the case where we have a future with no payload
         if (!empty.load() && (canonical_instance == NULL))
-          return future_complete;
+          return get_ready_event(false/*need lock*/);
       }
       // Make an event and request it
       const ApUserEvent ready = Runtime::create_ap_user_event(NULL);
@@ -1399,7 +1338,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(FutureInstance *instance,void *meta,size_t size)
+    void FutureImpl::set_result(ApEvent complete, FutureInstance *instance,
+                                void *meta, size_t size)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1422,12 +1362,12 @@ namespace Legion {
       }
       metadata = meta;
       metasize = size;
-      finish_set_future();
+      finish_set_future(complete);
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_results(const std::vector<FutureInstance*> &insts,
-                                 void *meta, size_t size)
+    void FutureImpl::set_results(ApEvent complete,
+             const std::vector<FutureInstance*> &insts, void *meta, size_t size)
     //--------------------------------------------------------------------------
     {
       AutoLock f_lock(future_lock);
@@ -1455,11 +1395,12 @@ namespace Legion {
       }
       metadata = meta;
       metasize = size;
-      finish_set_future();
+      finish_set_future(complete);
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::set_result(FutureFunctor *functor, bool own,Processor proc)
+    void FutureImpl::set_result(ApEvent complete, FutureFunctor *functor, 
+                                bool own, Processor proc)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1476,7 +1417,7 @@ namespace Legion {
       callback_functor = functor;
       own_callback_functor = own;
       callback_proc = proc;
-      finish_set_future();
+      finish_set_future(complete);
     }
 
     //--------------------------------------------------------------------------
@@ -1485,7 +1426,7 @@ namespace Legion {
     {
       FutureInstance *instance = 
         FutureInstance::create_local(value, size, own, runtime);
-      set_result(instance);
+      set_result(ApEvent::NO_AP_EVENT, instance);
     }
 
     //--------------------------------------------------------------------------
@@ -1579,7 +1520,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::finish_set_future(void)
+    void FutureImpl::finish_set_future(ApEvent complete)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1589,6 +1530,16 @@ namespace Legion {
       // must be called while we are already holding the lock
       future_size = (canonical_instance == NULL) ? 0 : canonical_instance->size;
       future_size_set = true;
+      if (future_complete.exists())
+      {
+        // If there's already a complete here then we know that it is a 
+        // user event that we need to trigger
+        ApUserEvent to_trigger;
+        to_trigger.id = future_complete.id;
+        Runtime::trigger_event(NULL, to_trigger, complete);
+      }
+      else
+        future_complete = complete;
       empty.store(false); 
       result_set_space = local_space;
       if (!pending_instances.empty())
@@ -1942,6 +1893,16 @@ namespace Legion {
       else
         future_size = 0;
       future_size_set = true;
+      if (future_complete.exists())
+      {
+        ApUserEvent to_trigger;
+        to_trigger.id = future_complete.id;
+        ApEvent precondition;
+        derez.deserialize(precondition);
+        Runtime::trigger_event(NULL, to_trigger, precondition);
+      }
+      else
+        derez.deserialize(future_complete);
       derez.deserialize(metasize);
       if (metasize > 0)
       {
@@ -2000,6 +1961,20 @@ namespace Legion {
       bool was_sampled = sampled.load();
       sampled.store(false);
       return was_sampled;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FutureImpl::get_ready_event(bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock f_lock(future_lock);
+        return get_ready_event(false/*need lock*/);
+      }
+      if (empty.load() && !future_complete.exists())
+        future_complete = Runtime::create_ap_user_event(NULL);
+      return future_complete;
     }
 
     //--------------------------------------------------------------------------
@@ -2322,6 +2297,7 @@ namespace Legion {
       }
       else
         rez.serialize<size_t>(0);
+      rez.serialize(future_complete);
       rez.serialize(metasize);
       if (metasize > 0)
         rez.serialize(metadata, metasize);
@@ -3456,7 +3432,7 @@ namespace Legion {
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
-              completion_event, op, op_gen, op_ctx_index, point,
+              op, op_gen, op_ctx_index, point,
 #ifdef LEGION_SPY
             op_uid,
 #endif
@@ -4189,7 +4165,7 @@ namespace Legion {
         // the point that we will fill in later
         FutureImpl *result = new FutureImpl(context, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
-              completion_event, op, op_gen, op_ctx_index, point,
+              op, op_gen, op_ctx_index, point,
 #ifdef LEGION_SPY
             op_uid,
 #endif
@@ -26181,7 +26157,7 @@ namespace Legion {
       }
       InnerContext *context = find_context(context_uid);
       FutureImpl *result = new FutureImpl(context, this, false/*register*/, did,
-             ApEvent::NO_AP_EVENT, op, gen, op_ctx_index, op_point,
+             op, gen, op_ctx_index, op_point,
 #ifdef LEGION_SPY
              op_uid,
 #endif
@@ -28385,18 +28361,6 @@ namespace Legion {
 
       // Made it here, then there is no error
       return LEGION_NO_ERROR;
-    }
-
-    //--------------------------------------------------------------------------
-    Future Runtime::help_create_future(TaskContext *ctx, ApEvent complete_event, 
-                                       Provenance *provenance,
-                                       const size_t *future_size/*NULL*/,
-                                       Operation *op /*= NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      return Future(new FutureImpl(ctx, this, true/*register*/,
-                                   get_available_distributed_id(),
-                                   complete_event, provenance, future_size,op));
     }
 
     //--------------------------------------------------------------------------

@@ -662,28 +662,6 @@ namespace Legion {
     };
 
     /**
-     * \class FutureBroadcast
-     * A class for broadcasting a future result to all the shards
-     */
-    class FutureBroadcast : public BroadcastCollective {
-    public:
-      FutureBroadcast(ReplicateContext *ctx, CollectiveID id, 
-                      ShardID source, FutureImpl *impl);
-      FutureBroadcast(const FutureBroadcast &rhs);
-      virtual ~FutureBroadcast(void);
-    public:
-      FutureBroadcast& operator=(const FutureBroadcast &rhs);
-    public:
-      virtual void pack_collective(Serializer &rez) const;
-      virtual void unpack_collective(Deserializer &derez);
-    public:
-      void broadcast_future(void);
-    protected:
-      FutureImpl *const impl;
-      RtEvent ready;
-    };
-
-    /**
      * \class BufferExchange
      * A class for doing an all-to-all exchange of byte buffers
      */
@@ -1001,7 +979,7 @@ namespace Legion {
     class ConsensusMatchExchange : ConsensusMatchBase {
     public:
       ConsensusMatchExchange(ReplicateContext *ctx, CollectiveIndexLocation loc,
-                      Future to_complete, void *output, ApUserEvent to_trigger);
+                             Future to_complete, void *output);
       ConsensusMatchExchange(const ConsensusMatchExchange &rhs);
       virtual ~ConsensusMatchExchange(void);
     public:
@@ -1015,7 +993,6 @@ namespace Legion {
     protected:
       Future to_complete;
       T *const output;
-      const ApUserEvent to_trigger;
       std::map<T,size_t> element_counts;
 #ifdef DEBUG_LEGION
       size_t max_elements;
@@ -1319,8 +1296,8 @@ namespace Legion {
       virtual void shard_off(RtEvent mapped_precondition);
       virtual void prepare_map_must_epoch(void);
     public:
-      // Override these so we can broadcast the future result
-      virtual void trigger_task_complete(void);
+      // Override this so it can broadcast the future result
+      virtual FutureImpl* create_future(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
@@ -1329,8 +1306,6 @@ namespace Legion {
       IndexSpaceNode *launch_space;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      CollectiveID future_collective_id; // id for the future broadcast 
-      FutureBroadcast *future_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

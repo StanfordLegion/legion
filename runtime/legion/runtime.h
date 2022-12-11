@@ -256,18 +256,22 @@ namespace Legion {
         bool eager;
       };
     public:
+      // This constructor provides the complete size and effects event
+      // at the point the future is constructed so they don't need to
+      // be provided later with set_future_result_size 
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future,
-                 DistributedID did,
-                 ApEvent complete, Provenance *provenance,
-                 const size_t *future_size = NULL, Operation *op = NULL);
+                 DistributedID did, Provenance *provenance,
+                 Operation *op = NULL);
+      // This constructor is for futures made by tasks or other operations
+      // which do not know the size or effects for the operation until later
       FutureImpl(TaskContext *ctx, Runtime *rt, bool register_future, 
-                 DistributedID did,
-                 ApEvent complete, Operation *op, GenerationID gen,
+                 DistributedID did, Operation *op, GenerationID gen,
                  size_t op_ctx_index, const DomainPoint &op_point,
 #ifdef LEGION_SPY
                  UniqueID op_uid,
 #endif
-                 int op_depth, Provenance *provenance);
+                 int op_depth, Provenance *provenance,
+                 CollectiveMapping *mapping = NULL);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:
@@ -306,21 +310,23 @@ namespace Legion {
                     bool internal = false);
       size_t get_untyped_size(void);
       const void *get_metadata(size_t *metasize);
-      ApEvent get_ready_event(void) const { return future_complete; }
+      ApEvent get_ready_event(bool need_lock = true);
       // A special function for predicates to peek
       // at the boolean value of a future if it is set
       // Must have called request internal buffer first and event must trigger
       bool get_boolean_value(TaskContext *ctx);
     public:
       // This will simply save the value of the future
-      void set_result(FutureInstance *instance, 
+      void set_result(ApEvent complete, FutureInstance *instance, 
                       void *metadata = NULL, size_t metasize = 0);
-      void set_results(const std::vector<FutureInstance*> &instances,
+      void set_results(ApEvent complete,
+                      const std::vector<FutureInstance*> &instances,
                       void *metadata = NULL, size_t metasize = 0);
-      void set_result(FutureFunctor *callback_functor, bool own,
-                      Processor functor_proc);
+      void set_result(ApEvent complete, FutureFunctor *callback_functor,
+                      bool own, Processor functor_proc);
       // This is the same as above but for data that we know is visible
       // in the system memory and should always make a local FutureInstance
+      // and for which we know that there is no completion effects
       void set_local(const void *value, size_t size, bool own = false);
       // This will save the value of the future locally
       void unpack_result(Deserializer &derez);
@@ -348,7 +354,7 @@ namespace Legion {
       void register_remote(AddressSpaceID sid);
       void set_future_result_size(size_t size, AddressSpaceID source);
     protected:
-      void finish_set_future(void); // must be holding lock
+      void finish_set_future(ApEvent complete); // must be holding lock
       void create_pending_instances(void); // must be holding lock
       FutureInstance* find_or_create_instance(Memory memory, Operation *op,
                         UniqueID op_uid, bool eager, bool need_lock = true,
@@ -393,7 +399,6 @@ namespace Legion {
       const size_t producer_context_index;
       const DomainPoint producer_point;
       Provenance *const provenance;
-      const ApEvent future_complete;
     private:
       mutable LocalLock future_lock;
       RtUserEvent subscription_event;
@@ -412,6 +417,9 @@ namespace Legion {
       // This is the upper bound size prior to being refined
       // down to a precise size when the future is finally set
       size_t upper_bound_size; 
+      // The event denoting when all the effects represented by
+      // this future are actually complete
+      ApEvent future_complete;
     private:
       // Instances that need to be made once canonical instance is set
       std::map<Memory,PendingInstance> pending_instances;
@@ -4013,10 +4021,6 @@ namespace Legion {
                                          FieldID &bad_field);
     public:
       // Methods for helping with dumb nested class scoping problems
-      Future help_create_future(TaskContext *ctx, ApEvent complete,
-                                Provenance *provenance,
-                                const size_t *future_size = NULL,
-                                Operation *op = NULL);
       IndexSpace help_create_index_space_handle(TypeTag type_tag);
     public:
       unsigned generate_random_integer(void);

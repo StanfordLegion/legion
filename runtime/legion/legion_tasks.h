@@ -773,6 +773,9 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2); 
+      // Virtual method for creating the future for this task so that
+      // we can overload for control replication
+      virtual FutureImpl* create_future(void);
     public:
       virtual void resolve_false(bool speculated, bool launched);
       virtual bool distribute_task(void);
@@ -1358,7 +1361,7 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance);
-      void handle_future(const DomainPoint &point,
+      void handle_future(ApEvent complete, const DomainPoint &point,
                          FutureInstance *instance, void *metadata, 
                          size_t metasize, FutureFunctor *functor,
                          Processor future_proc, bool own_functor); 

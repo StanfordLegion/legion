@@ -1497,7 +1497,7 @@ namespace Legion {
     // Ones that have been commented out are free to be reused
     enum CollectiveIndexLocation {
       //COLLECTIVE_LOC_0 = 0, 
-      COLLECTIVE_LOC_1 = 1,
+      //COLLECTIVE_LOC_1 = 1,
       COLLECTIVE_LOC_2 = 2,
       COLLECTIVE_LOC_3 = 3,
       COLLECTIVE_LOC_4 = 4, 
