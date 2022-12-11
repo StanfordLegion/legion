@@ -775,7 +775,7 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2); 
       // Virtual method for creating the future for this task so that
       // we can overload for control replication
-      virtual FutureImpl* create_future(void);
+      virtual Future create_future(void);
     public:
       virtual void resolve_false(bool speculated, bool launched);
       virtual bool distribute_task(void);

@@ -505,7 +505,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* ReplIndividualTask::create_future(void)
+    Future ReplIndividualTask::create_future(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -514,14 +514,9 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      return new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(),
-              this, gen, context_index, index_point,
-#ifdef LEGION_SPY
-              unique_op_id,
-#endif
-              parent_ctx->get_depth(), get_provenance(),
-              &repl_ctx->shard_manager->get_collective_mapping());
+      DistributedID future_did = repl_ctx->get_next_distributed_id();
+      return repl_ctx->shard_manager->deduplicate_future_creation(
+          repl_ctx, future_did, this, index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -6120,6 +6115,8 @@ namespace Legion {
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             // We're mapped when everyone is mapped
             complete_mapping(mapping_fence_barrier);
+            if (result.impl != NULL)
+              result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
             complete_execution();
             break;
           }
@@ -9430,6 +9427,63 @@ namespace Legion {
       }
       if (wait_on.exists() && !wait_on.has_triggered())
         wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    Future ShardManager::deduplicate_future_creation(ReplicateContext *ctx,
+               DistributedID did, Operation *op, const DomainPoint &index_point)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shards.size() > 1)
+      {
+        AutoLock m_lock(manager_lock);
+        // See if we already have the future or not
+        std::map<DistributedID,std::pair<FutureImpl*,size_t> >::iterator
+          finder = created_futures.find(did);
+        if (finder != created_futures.end())
+        {
+          Future result(finder->second.first);
+#ifdef DEBUG_LEGION
+          assert(finder->second.second > 0);
+#endif
+          if (--finder->second.second == 0)
+          {
+            if (finder->second.first->remove_base_gc_ref(RUNTIME_REF))
+              assert(false); // should never be deleted
+            created_futures.erase(finder);
+          }
+          return result;
+        }
+        // Didn't find it so make it
+        FutureImpl *result = new FutureImpl(ctx, runtime, false/*register*/,
+            did, op, op->get_generation(), op->get_ctx_index(), index_point,
+#ifdef LEGION_SPY
+            op->get_unique_op_id(),
+#endif
+            ctx->get_depth(), op->get_provenance(), collective_mapping);
+        // Add a reference to it to keep it from being deleted and then 
+        // register it with the runtime
+        result->add_base_gc_ref(RUNTIME_REF);
+        result->register_with_runtime();
+        // Record it for the shards that come later
+        std::pair<FutureImpl*,size_t> &pending = created_futures[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+        return Future(result);
+      }
+      else
+      {
+        FutureImpl *impl = new FutureImpl(ctx, runtime, false/*register*/,
+            did, op, op->get_generation(), op->get_ctx_index(), index_point,
+#ifdef LEGION_SPY
+            op->get_unique_op_id(),
+#endif
+            ctx->get_depth(), op->get_provenance(), collective_mapping);
+        // Get a reference on it before we register it
+        Future result(impl);
+        impl->register_with_runtime();
+        return result;
+      }
     }
 
     //--------------------------------------------------------------------------

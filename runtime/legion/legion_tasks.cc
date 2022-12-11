@@ -6024,7 +6024,7 @@ namespace Legion {
       if (launcher.elide_future_return)
         elide_future_return = true;
       else
-        result = Future(create_future());
+        result = create_future();
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
       if (top_level)
@@ -6059,16 +6059,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* IndividualTask::create_future(void)
+    Future IndividualTask::create_future(void)
     //--------------------------------------------------------------------------
     {
-      return new FutureImpl(parent_ctx, runtime, true/*register*/,
+      return Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
               this, gen, context_index, index_point,
 #ifdef LEGION_SPY
               unique_op_id,
 #endif
-              parent_ctx->get_depth(), get_provenance());
+              parent_ctx->get_depth(), get_provenance()));
     }
 
     //--------------------------------------------------------------------------

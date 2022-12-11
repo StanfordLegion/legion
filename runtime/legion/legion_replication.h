@@ -1297,7 +1297,7 @@ namespace Legion {
       virtual void prepare_map_must_epoch(void);
     public:
       // Override this so it can broadcast the future result
-      virtual FutureImpl* create_future(void);
+      virtual Future create_future(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
@@ -2511,6 +2511,8 @@ namespace Legion {
                       const FieldMask &mask, DistributedID did, bool &first);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
                                 std::vector<unsigned> &indexes);
+      Future deduplicate_future_creation(ReplicateContext *ctx,
+          DistributedID did, Operation *op, const DomainPoint &point);
       FutureMap deduplicate_future_map_creation(ReplicateContext *ctx,
           Operation *op, IndexSpaceNode *domain, IndexSpaceNode *shard_domain,
           DistributedID did, Provenance *provenance); 
@@ -2646,6 +2648,7 @@ namespace Legion {
     protected:
       std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
                                         created_equivalence_sets;
+      std::map<DistributedID,std::pair<FutureImpl*,size_t> > created_futures;
       std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >
                                         created_future_maps;
       // ApEvents describing the completion of each shard

@@ -8929,6 +8929,8 @@ namespace Legion {
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
+            if (result.impl != NULL)
+              result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
             complete_execution();
             break;
           }
