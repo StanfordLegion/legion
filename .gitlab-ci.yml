@@ -505,7 +505,6 @@ before_script:
 .p100_base: &p100_base
   IS_P100_JOB: "1"
   USE_CUDA: "1"
-  GPU_ARCH: "60"
   # cmake needs to know where to find libcuda.so
   CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
