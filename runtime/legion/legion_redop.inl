@@ -653,7 +653,7 @@ namespace Legion {
   void SumReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -709,7 +709,7 @@ namespace Legion {
   void SumReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -905,7 +905,7 @@ namespace Legion {
   void SumReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -957,7 +957,7 @@ namespace Legion {
   void SumReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -1074,7 +1074,7 @@ namespace Legion {
   void SumReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     atomicAdd(&lhs,rhs);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -1141,7 +1141,7 @@ namespace Legion {
   void SumReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     atomicAdd(&rhs1, rhs2);
 #else
     // 16-bit atomics are not supported prior to volta
@@ -1697,7 +1697,7 @@ namespace Legion {
   void DiffReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -1753,7 +1753,7 @@ namespace Legion {
   void DiffReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -1949,7 +1949,7 @@ namespace Legion {
   void DiffReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -2001,7 +2001,7 @@ namespace Legion {
   void DiffReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -2132,7 +2132,7 @@ namespace Legion {
   void DiffReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2208,7 +2208,7 @@ namespace Legion {
   void DiffReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2787,7 +2787,7 @@ namespace Legion {
   void ProdReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -2858,7 +2858,7 @@ namespace Legion {
   void ProdReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -3171,7 +3171,7 @@ namespace Legion {
   void ProdReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -3238,7 +3238,7 @@ namespace Legion {
   void ProdReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -3454,7 +3454,7 @@ namespace Legion {
   void ProdReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -3530,7 +3530,7 @@ namespace Legion {
   void ProdReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4021,7 +4021,7 @@ namespace Legion {
   void DivReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4092,7 +4092,7 @@ namespace Legion {
   void DivReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4405,7 +4405,7 @@ namespace Legion {
   void DivReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -4472,7 +4472,7 @@ namespace Legion {
   void DivReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -4688,7 +4688,7 @@ namespace Legion {
   void DivReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -4764,7 +4764,7 @@ namespace Legion {
   void DivReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -5348,7 +5348,7 @@ namespace Legion {
   void MaxReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -5420,7 +5420,7 @@ namespace Legion {
   void MaxReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -5728,7 +5728,7 @@ namespace Legion {
   void MaxReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -5796,7 +5796,7 @@ namespace Legion {
   void MaxReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -6015,7 +6015,7 @@ namespace Legion {
   void MaxReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6092,7 +6092,7 @@ namespace Legion {
   void MaxReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6516,7 +6516,7 @@ namespace Legion {
   void MinReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6588,7 +6588,7 @@ namespace Legion {
   void MinReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -6896,7 +6896,7 @@ namespace Legion {
   void MinReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -6964,7 +6964,7 @@ namespace Legion {
   void MinReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -7183,7 +7183,7 @@ namespace Legion {
   void MinReduction<__half>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7265,7 +7265,7 @@ namespace Legion {
   void MinReduction<__half>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7596,7 +7596,7 @@ namespace Legion {
   void OrReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7667,7 +7667,7 @@ namespace Legion {
   void OrReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -7968,7 +7968,7 @@ namespace Legion {
   void OrReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -8035,7 +8035,7 @@ namespace Legion {
   void OrReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -8334,7 +8334,7 @@ namespace Legion {
   void AndReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -8405,7 +8405,7 @@ namespace Legion {
   void AndReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -8706,7 +8706,7 @@ namespace Legion {
   void AndReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -8773,7 +8773,7 @@ namespace Legion {
   void AndReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
@@ -9160,7 +9160,7 @@ namespace Legion {
   void XorReduction<int16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -9231,7 +9231,7 @@ namespace Legion {
   void XorReduction<int16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     // Type punning like this is illegal in C++ but the
     // CUDA manual has an example just like it so fuck it
@@ -9532,7 +9532,7 @@ namespace Legion {
   void XorReduction<uint16_t>::apply<false>(LHS &lhs, RHS rhs)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = lhs, oldval;
     do {
       oldval = newval;
@@ -9599,7 +9599,7 @@ namespace Legion {
   void XorReduction<uint16_t>::fold<false>(RHS &rhs1, RHS rhs2)
   {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-#if __CUDA_ARCH__ >= 700
+#if (__CUDA_ARCH__ >= 700) && (__CUDACC_VER_MAJOR__ >= 10)
     RHS newval = rhs1, oldval;
     do {
       oldval = newval;
