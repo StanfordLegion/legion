@@ -6444,6 +6444,7 @@ namespace Legion {
                                             true/*track parent*/,
                                             false/*top level*/,
                                             false/*implicit top level*/,
+                                            false/*must epoch*/,
                                             outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new single task with unique id %lld "
@@ -22821,7 +22822,7 @@ namespace Legion {
         InnerContext *parent = owner_task->get_context();
         Future result =
           task->initialize_task(parent, launcher, provenance, 
-              true/*track*/, false/*top level*/, false/*implicit*/,
+              false/*track*/, false/*top level*/, false/*implicit*/,
               false/*must epoch*/, outputs);
         inline_child_task(task);
         return result;
@@ -22854,7 +22855,7 @@ namespace Legion {
           launch_space = find_index_launch_space(launcher.launch_domain,
                                                  provenance);
         FutureMap result = task->initialize_task(parent, launcher, launch_space,
-                                                 provenance, outputs);
+                                           provenance, false/*track*/, outputs);
         inline_child_task(task);
         return result;
       }
@@ -22885,7 +22886,7 @@ namespace Legion {
           launch_space = find_index_launch_space(launcher.launch_domain,
                                                  provenance);
         Future result = task->initialize_task(parent, launcher, launch_space, 
-                                  provenance, redop, deterministic, outputs);
+                    provenance, redop, deterministic, false/*track*/, outputs);
         inline_child_task(task);
         return result;
       }
