@@ -7927,7 +7927,7 @@ namespace Legion {
       // This is a kind of deletion so make sure it is ordered
       AutoLock c_lock(collection_lock);
       // This a collection so make sure we're ordered with other collections
-      std::vector<PhysicalManager*> to_delete, delete_now;
+      std::vector<PhysicalManager*> to_delete, delete_now, external;
       {
         AutoLock m_lock(manager_lock);
         for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
@@ -7937,6 +7937,13 @@ namespace Legion {
           for (TreeInstances::iterator it =
                 cit->second.begin(); it != cit->second.end(); /*nothing*/)
           {
+            if (it->first->is_external_instance())
+            {
+              external.push_back(it->first);
+              TreeInstances::iterator delete_it = it++;
+              cit->second.erase(delete_it);
+              continue;
+            }
             if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
                 it->first->is_owner())
             {
@@ -7974,6 +7981,14 @@ namespace Legion {
             delete_now.begin(); it != delete_now.end(); it++)
         if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
           delete (*it);
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            external.begin(); it != external.end(); it++)
+      {
+        if ((*it)->is_external_instance())
+          (*it)->perform_deletion(runtime->address_space);
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8693,7 +8708,7 @@ namespace Legion {
       // This is a collection so we need to order it with respect to
       // to other collections
       AutoLock c_lock(collection_lock);
-      std::vector<PhysicalManager*> to_delete, delete_now;
+      std::vector<PhysicalManager*> to_delete, delete_now, external;
       {
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator finder = 
@@ -8703,6 +8718,13 @@ namespace Legion {
           for (TreeInstances::iterator it =
                 finder->second.begin(); it != finder->second.end(); /*nothing*/)
           {
+            if (it->first->is_external_instance())
+            {
+              external.push_back(it->first);
+              TreeInstances::iterator delete_it = it++;
+              finder->second.erase(delete_it);
+              continue;
+            }
             if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
                 it->first->is_owner())
             {
@@ -8735,6 +8757,14 @@ namespace Legion {
             delete_now.begin(); it != delete_now.end(); it++)
         if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
           delete (*it);
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            external.begin(); it != external.end(); it++)
+      {
+        if ((*it)->is_external_instance())
+          (*it)->perform_deletion(runtime->address_space);
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------

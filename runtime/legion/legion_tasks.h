@@ -761,7 +761,8 @@ namespace Legion {
                              const TaskLauncher &launcher,
                              Provenance *provenance,
                              bool track = true, bool top_level=false,
-                             bool implicit_top_level = false,
+                             bool implicit_top_level = false, 
+                             bool must_epoch_launch = false,
                              std::vector<OutputRequirement> *outputs = NULL);
       void perform_base_dependence_analysis(void);
     protected:

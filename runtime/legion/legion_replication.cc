@@ -444,8 +444,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         sharding_collective->elide_collective();
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      IndividualTask::resolve_false(speculated, launched);
+      // Only set the future on shard 0 (note we know that all the shards
+      // have resolved false so we don't need to ask the sharding functor
+      // which one we want to do the work)
+      if (repl_ctx->owner_shard->shard_id > 0)
+      {
+        resolve_speculation();
+        shard_off(RtEvent::NO_RT_EVENT);
+      }
+      else
+        IndividualTask::resolve_false(speculated, launched);
     }
 
     //--------------------------------------------------------------------------
@@ -4908,7 +4921,8 @@ namespace Legion {
         ReplIndividualTask *task = 
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx],
-                              provenance, false/*track*/);
+                              provenance, false/*track*/, false/*top level*/,
+                              false/*implicit*/, true/*must epoch*/);
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -7051,6 +7065,7 @@ namespace Legion {
     {
       activate_detach_op();
       resource_barrier = RtBarrier::NO_RT_BARRIER;
+      effects_barrier = ApBarrier::NO_AP_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -7074,6 +7089,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif     
       resource_barrier = repl_ctx->get_next_detach_resource_barrier();
+      effects_barrier = repl_ctx->get_next_detach_effects_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -7112,7 +7128,6 @@ namespace Legion {
       // references when we are done mapping
       manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       ShardedView *sharded_view = region.impl->get_sharded_view();
-      ApEvent detach_event;
       if ((sharded_view != NULL) || (is_owner_shard))
       {
         // Everybody does registration and filtering in the case
@@ -7154,7 +7169,9 @@ namespace Legion {
       else
         Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
       complete_mapping(resource_barrier);
-
+      // We're detached when all the points agree that we are detached
+      Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
+      detach_event = effects_barrier;
       if (!request_early_complete(detach_event))
         complete_execution(Runtime::protect_event(detach_event));
       else
@@ -7457,6 +7474,7 @@ namespace Legion {
     {
       activate_index_detach();
       sharding_function = NULL;
+      effects_barrier = ApBarrier::NO_AP_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -7488,6 +7506,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Get the projection ID which we know is valid on the external resources
       requirement.projection = resources.impl->get_projection();
@@ -7500,6 +7522,16 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path, tracker);
+      effects_barrier = repl_ctx->get_next_detach_effects_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplIndexDetachOp::get_complete_effects(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(effects_barrier, 1/*arrivals*/,
+          IndexDetachOp::get_complete_effects());
+      return effects_barrier;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9461,6 +9493,9 @@ namespace Legion {
             op->get_unique_op_id(),
 #endif
             ctx->get_depth(), op->get_provenance(), collective_mapping);
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(), 
+                  result->get_ready_event(), index_point);
         // Add a reference to it to keep it from being deleted and then 
         // register it with the runtime
         result->add_base_gc_ref(RUNTIME_REF);
@@ -9479,6 +9514,9 @@ namespace Legion {
             op->get_unique_op_id(),
 #endif
             ctx->get_depth(), op->get_provenance(), collective_mapping);
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(), 
+                  impl->get_ready_event(), index_point);
         // Get a reference on it before we register it
         Future result(impl);
         impl->register_with_runtime();

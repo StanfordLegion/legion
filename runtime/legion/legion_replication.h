@@ -2148,6 +2148,7 @@ namespace Legion {
         std::map<std::pair<LogicalRegion,FieldID>,ReplDetachOp*> &detachments);
     public:
       RtBarrier resource_barrier;
+      ApBarrier effects_barrier;
     };
 
     /**
@@ -2167,8 +2168,10 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual ApEvent get_complete_effects(void);
     protected:
       ShardingFunction *sharding_function;
+      ApBarrier effects_barrier;
     };
 
     /**

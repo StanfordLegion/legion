@@ -5932,6 +5932,7 @@ namespace Legion {
                                            bool track /*=true*/,
                                            bool top_level /*=false*/,
                                            bool implicit_top_level /*=false*/,
+                                           bool must_epoch_launch /*=false*/,
                               std::vector<OutputRequirement> *outputs /*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -6023,7 +6024,7 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       if (launcher.elide_future_return)
         elide_future_return = true;
-      else
+      else if (!must_epoch_launch)
         result = create_future();
       check_empty_field_requirements(); 
       // If this is the top-level task we can record some extra properties
@@ -6052,8 +6053,6 @@ namespace Legion {
           ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
           LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
-        LegionSpy::log_future_creation(unique_op_id, 
-              result.impl->get_ready_event(), index_point);
       }
       return result;
     }
@@ -6062,13 +6061,17 @@ namespace Legion {
     Future IndividualTask::create_future(void)
     //--------------------------------------------------------------------------
     {
-      return Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
+      FutureImpl *impl = new FutureImpl(parent_ctx, runtime, true/*register*/,
               runtime->get_available_distributed_id(),
               this, gen, context_index, index_point,
 #ifdef LEGION_SPY
               unique_op_id,
 #endif
-              parent_ctx->get_depth(), get_provenance()));
+              parent_ctx->get_depth(), get_provenance());
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_future_creation(unique_op_id, 
+                impl->get_ready_event(), index_point);
+      return Future(impl);
     }
 
     //--------------------------------------------------------------------------

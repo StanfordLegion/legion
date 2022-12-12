@@ -17389,6 +17389,7 @@ namespace Legion {
                                             true /*track*/,
                                             false /*top_level*/,
                                             false /*implicit_top_level*/,
+                                            false /*must epoch*/,
                                             outputs);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
@@ -22819,7 +22820,9 @@ namespace Legion {
         IndividualTask *task = runtime->get_available_individual_task(); 
         InnerContext *parent = owner_task->get_context();
         Future result =
-          task->initialize_task(parent, launcher, provenance, outputs);
+          task->initialize_task(parent, launcher, provenance, 
+              true/*track*/, false/*top level*/, false/*implicit*/,
+              false/*must epoch*/, outputs);
         inline_child_task(task);
         return result;
       }

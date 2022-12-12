@@ -14866,7 +14866,10 @@ namespace Legion {
       {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
-                                          provenance, false/*track*/);
+                                          provenance, false/*track*/,
+                                          false/*top level*/,
+                                          false/*implicit*/,
+                                          true/*must epoch*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -21754,6 +21757,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      detach_event = ApEvent::NO_AP_EVENT;
       flush = true;
     }
 
@@ -21920,7 +21924,7 @@ namespace Legion {
       assert(external_views.size() == 1);
 #endif
       InstanceView *ext_view = external_views[0];
-      ApEvent detach_event = 
+      detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
                                          version_info, ext_view,
                                          trace_info, map_applied_conditions);
@@ -21969,7 +21973,7 @@ namespace Legion {
     {
       // Can be NULL if this is a PointDetachOp
       if (result.impl != NULL)
-        result.impl->set_result(ApEvent::NO_AP_EVENT, NULL, 0, true/*own*/);
+        result.impl->set_result(detach_event, NULL, 0, true/*own*/);
       InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_LEGION
@@ -22115,6 +22119,7 @@ namespace Legion {
         (*it)->deactivate();
       points.clear();
       map_applied_conditions.clear();
+      point_effects.clear();
       result = Future();
     }
 
@@ -22264,12 +22269,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexDetachOp::handle_point_complete(void)
+    void IndexDetachOp::handle_point_complete(ApEvent point_effect)
     //--------------------------------------------------------------------------
     {
       bool complete_now = false;
       {
         AutoLock o_lock(op_lock);
+        if (point_effect.exists())
+          point_effects.push_back(point_effect);
         points_completed++;
         complete_now = complete_request && (points.size() == points_completed);
       }
@@ -22278,10 +22285,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent IndexDetachOp::get_complete_effects(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!point_effects.empty())
+        return Runtime::merge_events(NULL, point_effects);
+      else
+        return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexDetachOp::complete_detach(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(ApEvent::NO_AP_EVENT, NULL, 0, true/*own*/);
+      result.impl->set_result(get_complete_effects(), NULL, 0, true/*own*/);
       complete_operation();
     }
 
@@ -22467,7 +22484,7 @@ namespace Legion {
     void PointDetachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      owner->handle_point_complete();
+      owner->handle_point_complete(detach_event);
       DetachOp::trigger_complete();
     }
 
