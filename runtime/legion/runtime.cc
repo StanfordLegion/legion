@@ -2077,6 +2077,10 @@ namespace Legion {
       rez.serialize(context->get_unique_id());
       rez.serialize(producer_context_index);
       rez.serialize(producer_point);
+      if (collective_mapping != NULL)
+        collective_mapping->pack(rez);
+      else
+        rez.serialize<size_t>(0); // no collective mapping
       if (provenance != NULL)
         provenance->serialize(rez);
       else
@@ -2104,16 +2108,37 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       DomainPoint point;
       derez.deserialize(point);
+      size_t collective_spaces;
+      derez.deserialize(collective_spaces);
+      CollectiveMapping *collective_mapping = (collective_spaces == 0) ? NULL :
+        new CollectiveMapping(derez, collective_spaces);
       AutoProvenance provenance(Provenance::deserialize(derez));
-      Future result(runtime->find_or_create_future(future_did, context_uid,
-                                            op_ctx_index, point, provenance,
-                                            op, op_gen,
+      // If there's a collective mapping then check to see if this node is
+      // contained in the set and therefore we can just wait for the future
+      if ((collective_mapping == NULL) ||
+          !collective_mapping->contains(runtime->address_space))
+      {
+        Future result(runtime->find_or_create_future(future_did, context_uid,
+                                              op_ctx_index, point, provenance,
+                                              op, op_gen,
 #ifdef LEGION_SPY
-                                            op_uid,
+                                              op_uid,
 #endif
-                                            op_depth));
-      result.impl->unpack_global_ref();
-      return result;
+                                              op_depth));
+        result.impl->unpack_global_ref();
+        if (collective_mapping != NULL)
+          delete collective_mapping;
+        return result;
+      }
+      else
+      {
+        // Wait until we find it here
+        Future result(static_cast<FutureImpl*>(
+              runtime->find_distributed_collectable(future_did, true/*wait*/)));
+        result.impl->unpack_global_ref();
+        delete collective_mapping;
+        return result;
+      }
     }
 
     //--------------------------------------------------------------------------
