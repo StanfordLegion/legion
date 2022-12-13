@@ -799,11 +799,7 @@ namespace Legion {
       // Our cached set of index spaces for immediate domains
       std::map<Domain,IndexSpace> index_launch_spaces;
     protected:
-#ifdef LEGION_MALLOC_INSTANCES
-      std::vector<std::pair<PhysicalInstance,uintptr_t> > task_local_instances;
-#else
       std::set<PhysicalInstance> task_local_instances;
-#endif
     protected:
       bool task_executed;
       bool has_inline_accessor;

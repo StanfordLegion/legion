@@ -42,9 +42,15 @@
 #include <sys/mman.h>
 #ifdef LEGION_USE_CUDA
 #include <cuda.h>
+#ifdef LEGION_MALLOC_INSTANCES
+#include "realm/cuda/cuda_access.h"
+#endif
 #endif
 #ifdef LEGION_USE_HIP
 #include <hip/hip_runtime.h>
+#ifdef LEGION_MALLOC_INSTANCES
+#include "realm/hip/hip_access.h"
+#endif
 #endif
 
 #define REPORT_DUMMY_CONTEXT(message)                        \
@@ -8062,11 +8068,10 @@ namespace Legion {
           it->first->force_deletion();
       current_instances.clear();
 #ifdef LEGION_MALLOC_INSTANCES
-      for (std::map<RtEvent,uintptr_t>::const_iterator it = 
+      for (std::map<RtEvent,PhysicalInstance>::const_iterator it = 
             pending_collectables.begin(); it != 
             pending_collectables.end(); it++)
-        if (it->second > 0)
-          free_legion_instance(it->first, it->second);
+        free_legion_instance(it->first, it->second);
       pending_collectables.clear();
 #endif
     }
@@ -10253,15 +10258,9 @@ namespace Legion {
             instance = PhysicalInstance::NO_INST;
           }
 #else
-          uintptr_t base_ptr = allocate_legion_instance(size);
-          if (base_ptr != NULL)
+          use_event = allocate_legion_instance(ilg->clone(), requests,instance);
+          if (instance.exists())
           {
-            const Realm::ExternalMemoryResource resource(base_ptr, 
-                                        size, false/*read only*/);
-            // Ignore suggest_memory here since we know we're making
-            // this on top of another instance in this memory
-            use_event = RtEvent(PhysicalInstance::create_external_instance(
-                  instance, memory, ilg->clone(), resource, requests));
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
             assert(remaining_capacity >= size);
@@ -10735,35 +10734,49 @@ namespace Legion {
 
 #ifdef LEGION_MALLOC_INSTANCES
     //--------------------------------------------------------------------------
-    uintptr_t MemoryManager::allocate_legion_instance(size_t footprint,
-                                                      bool needs_deferral)
+    RtEvent MemoryManager::allocate_legion_instance(
+                                Realm::InstanceLayoutGeneric *layout,
+                                const Realm::ProfilingRequestSet &requests,
+                                PhysicalInstance &instance, bool needs_deferral)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner);
-      assert(footprint > 0);
 #endif
-      uintptr_t result = 0;
+      RtEvent result;
+      const size_t footprint = layout->bytes_used;
       switch (memory.kind())
       {
         case Memory::SYSTEM_MEM:
         case Memory::SOCKET_MEM:
           {
             void *ptr = NULL;
-            if (posix_memalign(&ptr, 32/*alignment*/, footprint))
-              result = 0;
-            else
-              result = (uintptr_t)ptr;
+            if (footprint > 0)
+            {
+              if (posix_memalign(&ptr, 32/*alignment*/, footprint))
+                return result; // failed
+            }
+            const Realm::ExternalMemoryResource resource(
+                (uintptr_t)ptr, footprint, false/*read only*/);
+            result = 
+              RtEvent(PhysicalInstance::create_external_instance(instance,
+                  resource.suggested_memory(), layout, resource, requests));
             break;
           }
         case Memory::REGDMA_MEM:
           {
             void *ptr = NULL;
-            if (posix_memalign(&ptr, 32/*alignment*/, footprint))
-              result = 0;
-            else
-              result = (uintptr_t)ptr;
-            mlock((void*)result, footprint);
+            if (footprint > 0)
+            {
+              if (posix_memalign(&ptr, 32/*alignment*/, footprint))
+                return result; // failed
+              mlock(ptr, footprint);
+            }
+            const Realm::ExternalMemoryResource resource(
+                (uintptr_t)ptr, footprint, false/*read only*/);
+            result = 
+              RtEvent(PhysicalInstance::create_external_instance(instance,
+                  resource.suggested_memory(), layout, resource, requests));
             break;
           }
 #ifdef LEGION_USE_CUDA
@@ -10772,7 +10785,7 @@ namespace Legion {
           {
             if (needs_deferral)
             {
-              MallocInstanceArgs args(this, footprint, &result);
+              MallocInstanceArgs args(this, layout, &requests, &instance);
               const RtEvent wait_on = 
                 runtime->issue_application_processor_task(args,
                   LG_LATENCY_WORK_PRIORITY, local_gpu);
@@ -10786,30 +10799,36 @@ namespace Legion {
               if (memory.kind() == Memory::GPU_FB_MEM)
               {
                 CUdeviceptr ptr;
-                if (cuMemAlloc(&ptr, footprint) == CUDA_SUCCESS)
-                  result = (uintptr_t)ptr;
-                else
-                  result = 0;
+                if ((footprint > 0) && 
+                    (cuMemAlloc(&ptr, footprint) != CUDA_SUCCESS))
+                  return result;
+                CUdevice device;
+                if (cuCtxGetDevice(&device) != CUDA_SUCCESS)
+                  return result;
+                const Realm::ExternalCudaMemoryResource resource(
+                    device, (uintptr_t)ptr, footprint, false/*read only*/);
+                result = 
+                  RtEvent(PhysicalInstance::create_external_instance(instance,
+                    resource.suggested_memory(), layout, resource, requests));
               }
               else
               {
                 void *ptr = NULL;
-                if (cuMemHostAlloc(&ptr, footprint, CU_MEMHOSTALLOC_PORTABLE |
-                      CU_MEMHOSTALLOC_DEVICEMAP) == CUDA_SUCCESS)
-                {
-                  result = (uintptr_t)ptr;
-                  // Check that the device pointer is the same as the host
-                  CUdeviceptr gpuptr;
-                  if (cuMemHostGetDevicePointer(&gpuptr,ptr,0) == CUDA_SUCCESS)
-                  {
-                    if (ptr != (void*)gpuptr)
-                      result = 0;
-                  }
-                  else
-                    result = 0;
-                }
-                else
-                  result = 0;
+                if ((footprint > 0) && 
+                    (cuMemHostAlloc(&ptr, footprint, CU_MEMHOSTALLOC_PORTABLE |
+                      CU_MEMHOSTALLOC_DEVICEMAP) != CUDA_SUCCESS))
+                  return result;
+                // Check that the device pointer is the same as the host
+                CUdeviceptr gpuptr;
+                if (cuMemHostGetDevicePointer(&gpuptr,ptr,0) != CUDA_SUCCESS)
+                  return result;
+                if (ptr != (void*)gpuptr)
+                  return result;
+                const Realm::ExternalCudaPinnedHostResource resource(
+                    (uintptr_t)ptr, footprint, false/*read only*/);
+                result =
+                  RtEvent(PhysicalInstance::create_external_instance(instance,
+                    resource.suggested_memory(), layout, resource, requests));
               }
             }
             break;
@@ -10821,7 +10840,7 @@ namespace Legion {
           {
             if (needs_deferral)
             {
-              MallocInstanceArgs args(this, footprint, &result);
+              MallocInstanceArgs args(this, layout, &requests, &instance);
               const RtEvent wait_on =
                 runtime->issue_application_processor_task(args,
                   LG_LATENCY_WORK_PRIORITY, local_gpu);
@@ -10835,31 +10854,36 @@ namespace Legion {
               if (memory.kind() == Memory::GPU_FB_MEM)
               {
                 hipDeviceptr_t ptr;
-                if (hipMalloc((void **)&ptr, footprint) == hipSuccess)
-                  result = (uintptr_t)ptr;
-                else
-                  result = 0;
+                if ((footprint > 0) && 
+                    (hipMalloc((void **)&ptr, footprint) != hipSuccess))
+                  return result;
+                int device;
+                if (hipGetDevice(&device) != hipSuccess)
+                  return result;
+                const Realm::ExternalHipMemoryResource resource(
+                    device, (uintptr_t)ptr, footprint, false/*read only*/);
+                result =
+                  RtEvent(PhysicalInstance::create_external_instance(instance,
+                    resource.suggested_memory(), layout, resource, requests));
               }
               else
               {
                 void *ptr = NULL;
-                if (hipHostMalloc(&ptr, footprint, hipHostMallocPortable |
-                      hipHostMallocMapped) == hipSuccess)
-                {
-                  result = (uintptr_t)ptr;
-                  // Check that the device pointer is the same as the host
-                  hipDeviceptr_t gpuptr;
-                  if (hipHostGetDevicePointer((void **)&gpuptr,ptr,0)
-                        == hipSuccess)
-                  {
-                    if (ptr != (void*)gpuptr)
-                      result = 0;
-                  }
-                  else
-                    result = 0;
-                }
-                else
-                  result = 0;
+                if ((footprint > 0) && 
+                    (hipHostMalloc(&ptr, footprint, hipHostMallocPortable |
+                      hipHostMallocMapped) != hipSuccess))
+                  return result;
+                hipDeviceptr_t gpuptr;
+                if (hipHostGetDevicePointer((void **)&gpuptr,ptr,0) 
+                      != hipSuccess)
+                  return result;
+                if (ptr != (void*)gpuptr)
+                  return result;
+                const Realm::ExternalHipPinnedHostResource resource(
+                    (uintptr_t)ptr, footprint, false/*read only*/);
+                result =
+                  RtEvent(PhysicalInstance::create_external_instance(instance,
+                    resource.suggested_memory(), layout, resource, requests));
               }
             }
             break;
@@ -10870,19 +10894,20 @@ namespace Legion {
               "Unsupported memory kind for LEGION_MALLOC_INSTANCES %d",
               memory.kind())
       }
-      if (result > 0)
+      if (instance.exists())
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-        assert(allocations.find(result) == allocations.end());
+        assert(allocations.find(instance) == allocations.end());
 #endif
-        allocations[result] = footprint;
+        allocations[instance] = footprint;
       }
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::record_legion_instance(InstanceManager *man,uintptr_t p)
+    void MemoryManager::record_legion_instance(InstanceManager *man, 
+                                               PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10892,7 +10917,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(legion_instances.find(man) == legion_instances.end());
 #endif
-      legion_instances[man] = p;
+      legion_instances[man] = instance;
     }
 
     //--------------------------------------------------------------------------
@@ -10902,40 +10927,39 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
-      uintptr_t ptr;
+      PhysicalInstance instance;
       {
         AutoLock m_lock(manager_lock);
-        std::map<InstanceManager*,uintptr_t>::iterator finder = 
+        std::map<InstanceManager*,PhysicalInstance>::iterator finder = 
           legion_instances.find(man);
 #ifdef DEBUG_LEGION
         assert(finder != legion_instances.end());
 #endif
-        ptr = finder->second;
+        instance = finder->second;
         legion_instances.erase(finder);
       }
-      free_legion_instance(defer, ptr);
+      free_legion_instance(defer, instance);
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::free_legion_instance(RtEvent defer, uintptr_t ptr,
-                                             bool needs_defer)
+    void MemoryManager::free_legion_instance(RtEvent defer, 
+                                    PhysicalInstance instance, bool needs_defer)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner);
+      assert(instance.exists());
 #endif
-      if (ptr == 0)
-        return;
       size_t size;
       {
         AutoLock m_lock(manager_lock);
         if (defer.exists() && !defer.has_triggered())
         {
-          std::map<RtEvent,uintptr_t>::iterator finder = 
+          std::map<RtEvent,PhysicalInstance>::iterator finder = 
             pending_collectables.find(defer);
           if (finder == pending_collectables.end())
           {
-            FreeInstanceArgs args(this, ptr);
+            FreeInstanceArgs args(this, instance);
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
             if (local_gpu.exists())
               runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
@@ -10947,10 +10971,11 @@ namespace Legion {
 #endif
           }
           else
-            finder->second = ptr;
+            finder->second = instance;
           return;
         }
-        std::map<uintptr_t,size_t>::iterator finder = allocations.find(ptr);
+        std::map<PhysicalInstance,size_t>::iterator finder = 
+          allocations.find(instance);
 #ifdef DEBUG_LEGION
         assert(finder != allocations.end());
 #endif
@@ -10958,25 +10983,28 @@ namespace Legion {
         allocations.erase(finder);
       }
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
-      if (needs_defer &&
-          ((memory.kind() == Z_COPY_MEM) || (memory.kind() == GPU_FB_MEM)))
+      if (needs_defer && (size > 0) &&
+          ((memory.kind() == Memory::Z_COPY_MEM) || 
+           (memory.kind() == Memory::GPU_FB_MEM)))
       {
         // Put the allocation back in for when we go to look
         // for it on the second pass
         {
           AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-          assert(allocations.find(ptr) == allocations.end());
+          assert(allocations.find(instance) == allocations.end());
 #endif
-          allocations[ptr] = size;
+          allocations[instance] = size;
         }
-        FreeInstanceArgs args(this, ptr);
+        FreeInstanceArgs args(this, instance);
         runtime->issue_application_processor_task(args, LG_LOW_PRIORITY, 
                                                   local_gpu, defer);
         return;
       }
 #endif
-      free_external_allocation(ptr, size);
+      if (size > 0)
+        free_external_allocation((uintptr_t)instance.pointer_untyped(0,0),size);
+      instance.destroy(defer);
     }
 
     //--------------------------------------------------------------------------
@@ -10984,8 +11012,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const MallocInstanceArgs *margs = (const MallocInstanceArgs*)args;
-      *(margs->ptr) = margs->manager->allocate_legion_instance(margs->size, 
-                                                     false/*nneds defer*/);
+      const RtEvent ready = margs->manager->allocate_legion_instance(
+          margs->layout, *(margs->requests), *(margs->instance), 
+          false/*needs defer*/);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -10993,8 +11024,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const FreeInstanceArgs *fargs = (const FreeInstanceArgs*)args;
-      fargs->manager->free_legion_instance(RtEvent::NO_RT_EVENT, fargs->ptr, 
-                                                      false/*needs defer*/);
+      fargs->manager->free_legion_instance(RtEvent::NO_RT_EVENT, 
+                                         fargs->instance, false/*needs defer*/);
     }
 #endif
 
@@ -20664,24 +20695,6 @@ namespace Legion {
       AddressSpaceID result = handle.address_space();
       return result;
     } 
-
-#ifdef LEGION_MALLOC_INSTANCES
-    //--------------------------------------------------------------------------
-    uintptr_t Runtime::allocate_deferred_instance(Memory memory, size_t size,
-                                                  bool free)
-    //--------------------------------------------------------------------------
-    {
-      MemoryManager *manager = find_memory_manager(memory);
-      // Note that we don't need to defer this because this call had to 
-      // come from an application processor where we can do the call
-      // to allocate directly (e.g. CUDA contexts are already here)
-      uintptr_t result = manager->allocate_legion_instance(size,false/*defer*/);
-      if (free)
-        manager->free_legion_instance(
-            RtEvent(Processor::get_current_finish_event()), result, false);
-      return result;
-    }
-#endif
 
     //--------------------------------------------------------------------------
     MessageManager* Runtime::find_messenger(AddressSpaceID sid)
