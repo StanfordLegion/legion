@@ -2227,14 +2227,11 @@ namespace Legion {
           pack_global_ref();
           runtime->send_future_result_size(subscriber, rez);
         }
-        if (is_owner())
-        {
 #ifdef DEBUG_LEGION
-          assert(subscribers.find(subscriber) == subscribers.end());
+        assert(subscribers.find(subscriber) == subscribers.end());
 #endif
-          subscribers.insert(subscriber);
-        }
-        else
+        subscribers.insert(subscriber);
+        if (!is_owner())
         {
           // Not the owner, we should be in a collective future
 #ifdef DEBUG_LEGION
@@ -2246,6 +2243,11 @@ namespace Legion {
       }
       else
       {
+        // Handle the race where the subscription from the node that
+        // ultimately set the future result arrives after the future
+        // result makes it here
+        if (subscriber == result_set_space)
+          return;
         if (callback_functor != NULL)
         {
           invoke_callback();
