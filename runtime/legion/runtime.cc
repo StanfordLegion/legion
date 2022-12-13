@@ -2246,7 +2246,7 @@ namespace Legion {
         // Handle the race where the subscription from the node that
         // ultimately set the future result arrives after the future
         // result makes it here
-        if (subscriber == result_set_space)
+        if ((subscriber == result_set_space) && (subscriber != local_space))
           return;
         if (callback_functor != NULL)
         {
