@@ -78,14 +78,19 @@ REGISTER_REALM_MODULE_STATIC(Realm::LLVMJit::LLVMJitModule);
 REGISTER_REALM_MODULE_STATIC(Realm::HDF5::HDF5Module);
 #endif
 
+#if defined REALM_USE_UCX
+#include "realm/ucx/ucp_module.h"
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::UCPModule, "ucx", 1);
+#endif
+
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module, "gasnet1", 1);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module, "gasnet1", 2);
 #endif
 
 #ifdef REALM_USE_GASNETEX
 #include "realm/gasnetex/gasnetex_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule, "gasnetex", 2);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule, "gasnetex", 3);
 #endif
 
 #if defined REALM_USE_MPI

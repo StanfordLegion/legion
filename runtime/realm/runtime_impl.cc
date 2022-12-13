@@ -390,7 +390,7 @@ namespace Realm {
       return realm_library_version;
     }
 
-#if defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
+#if defined(REALM_USE_UCX) || defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
     // global flag that tells us if a realm runtime has already been
     //  initialized in this process - some underlying libraries (e.g. mpi,
     //  gasnet, kokkos) do not permit reinitialization
@@ -402,9 +402,12 @@ namespace Realm {
     //  (instead of e.g. mpi spawner information)
     bool Runtime::network_init(int *argc, char ***argv)
     {
-#if defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
+#if defined(REALM_USE_UCX) || defined(REALM_USE_MPI) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_KOKKOS)
       if(runtime_initialized) {
         fprintf(stderr, "ERROR: reinitialization not supported by these Realm components:"
+#ifdef REALM_USE_UCX
+                " ucx"
+#endif
 #ifdef REALM_USE_MPI
                 " mpi"
 #endif
