@@ -2129,7 +2129,8 @@ namespace Legion {
       derez.deserialize(collective_spaces);
       CollectiveMapping *collective_mapping = (collective_spaces == 0) ? NULL :
         new CollectiveMapping(derez, collective_spaces);
-      collective_mapping->add_reference();
+      if (collective_mapping != NULL)
+        collective_mapping->add_reference();
       AutoProvenance provenance(Provenance::deserialize(derez));
       Future result(runtime->find_or_create_future(future_did, context_uid,
                                             op_ctx_index, point, provenance,
