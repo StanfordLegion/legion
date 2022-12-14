@@ -65,7 +65,7 @@ namespace Legion {
       for (std::vector<Future>::const_iterator it =
             futures.begin(); it != futures.end(); it++)
         if (it->impl != NULL)
-          it->impl->pack_future(rez);
+          it->impl->pack_future(rez, target);
         else
           rez.serialize<DistributedID>(0);
       rez.serialize(grants.size());
@@ -6691,9 +6691,9 @@ namespace Legion {
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
-        result.impl->pack_future(rez);
+        result.impl->pack_future(rez, target);
         if (predicate_false_future.impl != NULL)
-          predicate_false_future.impl->pack_future(rez);
+          predicate_false_future.impl->pack_future(rez, target);
         else
           rez.serialize<DistributedID>(0);
         rez.serialize(predicate_false_size);
@@ -11274,7 +11274,7 @@ namespace Legion {
           future_map.impl->pack_future_map(rez, target);
         }
         if (predicate_false_future.impl != NULL)
-          predicate_false_future.impl->pack_future(rez);
+          predicate_false_future.impl->pack_future(rez, target);
         else
           rez.serialize<DistributedID>(0);
         rez.serialize(predicate_false_size);

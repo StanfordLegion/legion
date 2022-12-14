@@ -340,7 +340,7 @@ namespace Legion {
       RtEvent subscribe(bool need_lock = true);
       size_t get_upper_bound_size(void);
       void get_future_coordinates(TaskTreeCoordinates &coordinates) const;
-      void pack_future(Serializer &rez);
+      void pack_future(Serializer &rez, AddressSpaceID target);
       static Future unpack_future(Runtime *runtime, 
           Deserializer &derez, Operation *op = NULL, GenerationID op_gen = 0,
 #ifdef LEGION_SPY
@@ -3795,7 +3795,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                         UniqueID op_uid = 0,
 #endif
-                                        int op_depth = 0);
+                                        int op_depth = 0,
+                                        CollectiveMapping *mapping = NULL);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                           TaskContext *ctx, size_t index, IndexSpace domain,
                           ApEvent completion, Provenance *provenance);

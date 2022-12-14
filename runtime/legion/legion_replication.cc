@@ -11340,7 +11340,7 @@ namespace Legion {
       rez.serialize(collective_index);
       rez.serialize(stage);
       AutoLock c_lock(collective_lock, 1, false/*exclusive*/);
-      pack_collective_stage(rez, stage);
+      pack_collective_stage(target, rez, stage);
     }
 
     //--------------------------------------------------------------------------
@@ -11647,7 +11647,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureAllReduceCollective::pack_collective_stage(
+    void FutureAllReduceCollective::pack_collective_stage(ShardID target,
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
@@ -12002,8 +12002,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename REDOP>
-    void AllReduceCollective<REDOP>::pack_collective_stage(Serializer &rez,
-                                                           int stage)
+    void AllReduceCollective<REDOP>::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       // The first time we pack a stage we merge any values that we had
@@ -12380,8 +12380,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CrossProductCollective::pack_collective_stage(Serializer &rez, 
-                                                       int stage)
+    void CrossProductCollective::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(non_empty_handles.size());
@@ -12538,8 +12538,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndirectRecordExchange::pack_collective_stage(Serializer &rez,
-                                                       int stage)
+    void IndirectRecordExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(all_records.size());
@@ -12686,8 +12686,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldDescriptorExchange::pack_collective_stage(Serializer &rez,
-                                                        int stage)
+    void FieldDescriptorExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       // Always make a stage precondition and send it back
@@ -12983,7 +12983,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BufferExchange::pack_collective_stage(Serializer &rez, int stage)
+    void BufferExchange::pack_collective_stage(ShardID target,
+                                               Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
@@ -13099,16 +13100,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureNameExchange::pack_collective_stage(Serializer &rez, int stage)
+    void FutureNameExchange::pack_collective_stage(ShardID target,
+                                                   Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
+      const AddressSpaceID target_space = manager->get_mapping()[target];
       for (std::map<DomainPoint,Future>::const_iterator it = 
             results.begin(); it != results.end(); it++)
       {
         rez.serialize(it->first);
         if (it->second.impl != NULL)
-          it->second.impl->pack_future(rez);
+          it->second.impl->pack_future(rez, target_space);
         else
           rez.serialize<DistributedID>(0);
       }
@@ -13406,8 +13409,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochMappingExchange::pack_collective_stage(Serializer &rez,
-                                                         int stage)
+    void MustEpochMappingExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(processors.size());
@@ -13672,8 +13675,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochDependenceExchange::pack_collective_stage(Serializer &rez,
-                                                            int stage)
+    void MustEpochDependenceExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mapping_dependences.size());
@@ -13755,8 +13758,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochCompletionExchange::pack_collective_stage(Serializer &rez,
-                                                            int stage)
+    void MustEpochCompletionExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(tasks_mapped.size());
@@ -13849,8 +13852,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedMappingExchange::pack_collective_stage(Serializer &rez, 
-                                                       int stage)
+    void ShardedMappingExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mappings.size());
@@ -14050,7 +14053,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TemplateIndexExchange::pack_collective_stage(Serializer &rez,int stage)
+    void TemplateIndexExchange::pack_collective_stage(ShardID target,
+                                                      Serializer &rez,int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(index_counts.size());
@@ -14295,7 +14299,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UnorderedExchange::pack_collective_stage(Serializer &rez, int stage)
+    void UnorderedExchange::pack_collective_stage(ShardID target,
+                                                  Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       pack_counts(rez, index_space_counts);
@@ -14492,8 +14497,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    void ConsensusMatchExchange<T>::pack_collective_stage(Serializer &rez, 
-                                                          int stage)
+    void ConsensusMatchExchange<T>::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(element_counts.size());
@@ -14645,8 +14650,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VerifyReplicableExchange::pack_collective_stage(Serializer &rez, 
-                                                         int stage)
+    void VerifyReplicableExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(unique_hashes.size());
@@ -14734,7 +14739,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputSizeExchange::pack_collective_stage(Serializer &rez, int stage)
+    void OutputSizeExchange::pack_collective_stage(ShardID target,
+                                                   Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(all_output_sizes.size());
@@ -14833,8 +14839,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachLaunchSpace::pack_collective_stage(Serializer &rez,
-                                                       int stage)
+    void IndexAttachLaunchSpace::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(nonzeros);
@@ -14928,7 +14934,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachUpperBound::pack_collective_stage(Serializer &rez,int stage)
+    void IndexAttachUpperBound::pack_collective_stage(ShardID target,
+                                                      Serializer &rez,int stage)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)
@@ -15056,8 +15063,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachExchange::pack_collective_stage(Serializer &rez,
-                                                    int stage)
+    void IndexAttachExchange::pack_collective_stage(ShardID target,
+                                                    Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(shard_spaces.size());
@@ -15163,8 +15170,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachCoregions::pack_collective_stage(Serializer &rez,
-                                                     int stage)
+    void IndexAttachCoregions::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(region_points.size());
@@ -15423,8 +15430,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ImplicitShardingFunctor::pack_collective_stage(Serializer &rez, 
-                                                        int stage)
+    void ImplicitShardingFunctor::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(implicit_sharding.size());

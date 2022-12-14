@@ -1111,7 +1111,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          pack_future(rez);
+          pack_future(rez, target_space);
           rez.serialize(target);
           rez.serialize(task_uid);
           rez.serialize(send_event);
@@ -2070,10 +2070,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::pack_future(Serializer &rez)
+    void FutureImpl::pack_future(Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
+      pack_global_ref();
       rez.serialize<DistributedID>(did);
+      if ((collective_mapping != NULL) && collective_mapping->contains(target))
+      {
+        rez.serialize<bool>(true); // collective
+        return;
+      }
+      else
+        rez.serialize<bool>(false); // collective
       rez.serialize(context->get_unique_id());
       rez.serialize(producer_context_index);
       rez.serialize(producer_point);
@@ -2085,7 +2093,6 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
-      pack_global_ref();
     }
 
     //--------------------------------------------------------------------------
@@ -2102,6 +2109,16 @@ namespace Legion {
       derez.deserialize(future_did);
       if (future_did == 0)
         return Future();
+      bool collective;
+      derez.deserialize(collective);
+      if (collective)
+      {
+        // Wait until we find it here
+        Future result(static_cast<FutureImpl*>(
+              runtime->find_distributed_collectable(future_did, true/*wait*/)));
+        result.impl->unpack_global_ref();
+        return result;
+      }
       UniqueID context_uid;
       derez.deserialize(context_uid);
       size_t op_ctx_index;
@@ -2112,33 +2129,20 @@ namespace Legion {
       derez.deserialize(collective_spaces);
       CollectiveMapping *collective_mapping = (collective_spaces == 0) ? NULL :
         new CollectiveMapping(derez, collective_spaces);
+      collective_mapping->add_reference();
       AutoProvenance provenance(Provenance::deserialize(derez));
-      // If there's a collective mapping then check to see if this node is
-      // contained in the set and therefore we can just wait for the future
-      if ((collective_mapping == NULL) ||
-          !collective_mapping->contains(runtime->address_space))
-      {
-        Future result(runtime->find_or_create_future(future_did, context_uid,
-                                              op_ctx_index, point, provenance,
-                                              op, op_gen,
+      Future result(runtime->find_or_create_future(future_did, context_uid,
+                                            op_ctx_index, point, provenance,
+                                            op, op_gen,
 #ifdef LEGION_SPY
-                                              op_uid,
+                                            op_uid,
 #endif
-                                              op_depth));
-        result.impl->unpack_global_ref();
-        if (collective_mapping != NULL)
-          delete collective_mapping;
-        return result;
-      }
-      else
-      {
-        // Wait until we find it here
-        Future result(static_cast<FutureImpl*>(
-              runtime->find_distributed_collectable(future_did, true/*wait*/)));
-        result.impl->unpack_global_ref();
+                                            op_depth, collective_mapping));
+      result.impl->unpack_global_ref();
+      if ((collective_mapping != NULL) && 
+          collective_mapping->remove_reference())
         delete collective_mapping;
-        return result;
-      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -26206,7 +26210,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                                UniqueID op_uid,
 #endif
-                                               int op_depth)
+                                               int op_depth, 
+                                               CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       did &= LEGION_DISTRIBUTED_ID_MASK; 
@@ -26231,7 +26236,7 @@ namespace Legion {
 #ifdef LEGION_SPY
              op_uid,
 #endif
-             op_depth, provenance);
+             op_depth, provenance, mapping);
       // Retake the lock and see if we lost the race
       RtEvent ready;
       {

@@ -212,7 +212,8 @@ namespace Legion {
       virtual ~AllGatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
-      virtual void pack_collective_stage(Serializer &rez, int stage) = 0;
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage) = 0;
       virtual void unpack_collective_stage(Deserializer &derez, int stage) = 0;
     public:
       virtual void perform_collective_async(RtEvent pre = RtEvent::NO_RT_EVENT);
@@ -279,7 +280,8 @@ namespace Legion {
           const ReductionOp *redop, bool deterministic);
       virtual ~FutureAllReduceCollective(void);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void set_shadow_instance(FutureInstance *shadow);
@@ -321,7 +323,8 @@ namespace Legion {
       AllReduceCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~AllReduceCollective(void);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void async_all_reduce(typename REDOP::RHS value);
@@ -382,7 +385,8 @@ namespace Legion {
         : AllGatherCollective(ctx, id) { }
       virtual ~ValueExchange(void) { }
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage)
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage)
       {
         rez.serialize<size_t>(values.size());
         for (typename std::set<T>::const_iterator it = values.begin();
@@ -529,7 +533,8 @@ namespace Legion {
     public:
       void exchange_partitions(std::map<IndexSpace,IndexPartition> &handles);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     protected:
       std::map<IndexSpace,IndexPartition> non_empty_handles;
@@ -577,7 +582,8 @@ namespace Legion {
           std::vector<std::vector<IndirectRecord>*> &targets,
           std::vector<IndirectRecord> &local_records);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
       virtual RtEvent post_complete_exchange(void);
     protected:
@@ -607,7 +613,8 @@ namespace Legion {
       // Have to call this with the completion event
       ApEvent exchange_completion(ApEvent complete_event);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       std::set<ApEvent> ready_events;
@@ -674,7 +681,8 @@ namespace Legion {
     public:
       BufferExchange& operator=(const BufferExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       const std::map<ShardID,std::pair<void*,size_t> >&
@@ -698,7 +706,8 @@ namespace Legion {
     public:
       FutureNameExchange& operator=(const FutureNameExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_future_names(std::map<DomainPoint,FutureImpl*> &futures);
@@ -759,7 +768,8 @@ namespace Legion {
     public:
       MustEpochMappingExchange& operator=(const MustEpochMappingExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_must_epoch_mappings(ShardID shard_id, 
@@ -796,7 +806,8 @@ namespace Legion {
       MustEpochDependenceExchange& operator=(
                                   const MustEpochDependenceExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_must_epoch_dependences(
@@ -820,7 +831,8 @@ namespace Legion {
       MustEpochCompletionExchange& operator=(
                                     const MustEpochCompletionExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_must_epoch_completion(RtEvent mapped, ApEvent complete,
@@ -845,7 +857,8 @@ namespace Legion {
     public:
       ShardedMappingExchange& operator=(const ShardedMappingExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void initiate_exchange(const InstanceSet &mappings,
@@ -873,7 +886,8 @@ namespace Legion {
     public:
       TemplateIndexExchange& operator=(const TemplateIndexExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void initiate_exchange(const std::vector<int> &indexes);
@@ -897,7 +911,8 @@ namespace Legion {
     public:
       UnorderedExchange& operator=(const UnorderedExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       bool exchange_unordered_ops(const std::list<Operation*> &unordered_ops,
@@ -985,7 +1000,8 @@ namespace Legion {
     public:
       ConsensusMatchExchange& operator=(const ConsensusMatchExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       bool match_elements_async(const void *input, size_t num_elements);
@@ -1014,7 +1030,8 @@ namespace Legion {
     public:
       VerifyReplicableExchange& operator=(const VerifyReplicableExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       typedef std::map<std::pair<uint64_t,uint64_t>,ShardID> ShardHashes;
@@ -1040,7 +1057,8 @@ namespace Legion {
     public:
       OutputSizeExchange& operator=(const OutputSizeExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       RtEvent exchange_output_sizes(void);
@@ -1063,7 +1081,8 @@ namespace Legion {
     public:
       IndexAttachLaunchSpace& operator=(const IndexAttachLaunchSpace &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_counts(size_t count);
@@ -1088,7 +1107,8 @@ namespace Legion {
     public:
       IndexAttachUpperBound& operator=(const IndexAttachUpperBound &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       RegionTreeNode* find_upper_bound(RegionTreeNode *node);
@@ -1112,7 +1132,8 @@ namespace Legion {
     public:
       IndexAttachExchange& operator=(const IndexAttachExchange &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       void exchange_spaces(std::vector<IndexSpace> &spaces);
@@ -1155,7 +1176,8 @@ namespace Legion {
     public:
       IndexAttachCoregions& operator=(const IndexAttachCoregions &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
       virtual RtEvent post_complete_exchange(void);
     public:
@@ -1184,7 +1206,8 @@ namespace Legion {
     public:
       ImplicitShardingFunctor& operator=(const ImplicitShardingFunctor &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       virtual ShardID shard(const DomainPoint &point,
@@ -1243,7 +1266,8 @@ namespace Legion {
         : AllGatherCollective<false>(ctx, 
             ctx->get_next_collective_index(loc, true/*logical*/)), tree(t) { }
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage) 
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage) 
         { tree->serialize(rez); }
       virtual void unpack_collective_stage(Deserializer &derez, int stage)
         { tree->deserialize(derez); }
@@ -1268,7 +1292,8 @@ namespace Legion {
     public:
       SlowBarrier& operator=(const SlowBarrier &rhs);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage) { }
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage) { }
       virtual void unpack_collective_stage(Deserializer &derez, int stage) { }
     };
 
