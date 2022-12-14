@@ -245,8 +245,6 @@ namespace Legion {
       launch_space = NULL;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      future_collective_id = UINT_MAX;
-      future_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -260,8 +258,6 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (future_collective != NULL)
-        delete future_collective;
       deactivate_individual_task();
       runtime->free_repl_individual_task(this);
     }
@@ -448,8 +444,21 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         sharding_collective->elide_collective();
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      IndividualTask::resolve_false(speculated, launched);
+      // Only set the future on shard 0 (note we know that all the shards
+      // have resolved false so we don't need to ask the sharding functor
+      // which one we want to do the work)
+      if (repl_ctx->owner_shard->shard_id > 0)
+      {
+        resolve_speculation();
+        shard_off(RtEvent::NO_RT_EVENT);
+      }
+      else
+        IndividualTask::resolve_false(speculated, launched);
     }
 
     //--------------------------------------------------------------------------
@@ -462,26 +471,7 @@ namespace Legion {
           ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
       complete_mapping(mapped_precondition);
-      if ((must_epoch == NULL) && !elide_future_return &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()))
-      {
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-        assert(future_collective == NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-        future_collective = new FutureBroadcast(repl_ctx, 
-                future_collective_id, owner_shard, result.impl);
-        const RtEvent future_ready = 
-          future_collective->perform_collective_wait(false/*block*/);
-        // Do the stuff to record that this is mapped and executed
-        complete_execution(future_ready);
-      }
-      else
-        complete_execution();
+      complete_execution();
       trigger_children_complete(ApEvent::NO_AP_EVENT);
       trigger_children_committed();
     }
@@ -512,33 +502,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::trigger_task_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // Before doing the normal thing we have to exchange broadcast/receive
-      // the future result, can skip this though if we're part of a must epoch
-      // We should also skip this if we were predicated false
-      if ((must_epoch == NULL) && !elide_future_return &&
-          ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists()) 
-          && (owner_shard == repl_ctx->owner_shard->shard_id))
-      {
-#ifdef DEBUG_LEGION
-        assert(future_collective == NULL);
-#endif
-        future_collective = new FutureBroadcast(repl_ctx, 
-                future_collective_id, owner_shard, result.impl);
-        future_collective->broadcast_future();
-      }
-      IndividualTask::trigger_task_complete();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
@@ -552,9 +515,21 @@ namespace Legion {
       else
         handle = ctx->find_index_launch_space(index_domain, get_provenance());
       launch_space = runtime->forest->get_node(handle);
-      if (!elide_future_return)
-        future_collective_id = 
-          ctx->get_next_collective_index(COLLECTIVE_LOC_1);
+    }
+
+    //--------------------------------------------------------------------------
+    Future ReplIndividualTask::create_future(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      DistributedID future_did = repl_ctx->get_next_distributed_id();
+      return repl_ctx->shard_manager->deduplicate_future_creation(
+          repl_ctx, future_did, this, index_point);
     }
 
     //--------------------------------------------------------------------------
@@ -4946,7 +4921,8 @@ namespace Legion {
         ReplIndividualTask *task = 
           runtime->get_available_repl_individual_task();
         task->initialize_task(ctx, launcher.single_tasks[idx],
-                              provenance, false/*track*/);
+                              provenance, false/*track*/, false/*top level*/,
+                              false/*implicit*/, true/*must epoch*/);
         task->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -6153,6 +6129,8 @@ namespace Legion {
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             // We're mapped when everyone is mapped
             complete_mapping(mapping_fence_barrier);
+            if (result.impl != NULL)
+              result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
             complete_execution();
             break;
           }
@@ -6180,6 +6158,9 @@ namespace Legion {
             else
               Runtime::phase_barrier_arrive(mapping_fence_barrier, 1/*count*/);
             complete_mapping(mapping_fence_barrier);
+            // Set the future result if it was needed
+            if (result.impl != NULL)
+              result.impl->set_result(execution_fence_barrier, NULL);
             // We can always trigger the completion event when these are done
             if (!request_early_complete(execution_fence_barrier))
               complete_execution(
@@ -7084,6 +7065,7 @@ namespace Legion {
     {
       activate_detach_op();
       resource_barrier = RtBarrier::NO_RT_BARRIER;
+      effects_barrier = ApBarrier::NO_AP_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -7107,6 +7089,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif     
       resource_barrier = repl_ctx->get_next_detach_resource_barrier();
+      effects_barrier = repl_ctx->get_next_detach_effects_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -7145,7 +7128,6 @@ namespace Legion {
       // references when we are done mapping
       manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
       ShardedView *sharded_view = region.impl->get_sharded_view();
-      ApEvent detach_event;
       if ((sharded_view != NULL) || (is_owner_shard))
       {
         // Everybody does registration and filtering in the case
@@ -7187,7 +7169,9 @@ namespace Legion {
       else
         Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
       complete_mapping(resource_barrier);
-
+      // We're detached when all the points agree that we are detached
+      Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
+      detach_event = effects_barrier;
       if (!request_early_complete(detach_event))
         complete_execution(Runtime::protect_event(detach_event));
       else
@@ -7490,6 +7474,7 @@ namespace Legion {
     {
       activate_index_detach();
       sharding_function = NULL;
+      effects_barrier = ApBarrier::NO_AP_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -7521,6 +7506,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(sharding_function != NULL);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Get the projection ID which we know is valid on the external resources
       requirement.projection = resources.impl->get_projection();
@@ -7533,6 +7522,16 @@ namespace Legion {
                                                    requirement,
                                                    projection_info,
                                                    privilege_path, tracker);
+      effects_barrier = repl_ctx->get_next_detach_effects_barrier();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplIndexDetachOp::get_complete_effects(void)
+    //--------------------------------------------------------------------------
+    {
+      Runtime::phase_barrier_arrive(effects_barrier, 1/*arrivals*/,
+          IndexDetachOp::get_complete_effects());
+      return effects_barrier;
     }
 
     /////////////////////////////////////////////////////////////
@@ -9463,6 +9462,69 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ShardManager::deduplicate_future_creation(ReplicateContext *ctx,
+               DistributedID did, Operation *op, const DomainPoint &index_point)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shards.size() > 1)
+      {
+        AutoLock m_lock(manager_lock);
+        // See if we already have the future or not
+        std::map<DistributedID,std::pair<FutureImpl*,size_t> >::iterator
+          finder = created_futures.find(did);
+        if (finder != created_futures.end())
+        {
+          Future result(finder->second.first);
+#ifdef DEBUG_LEGION
+          assert(finder->second.second > 0);
+#endif
+          if (--finder->second.second == 0)
+          {
+            if (finder->second.first->remove_base_gc_ref(RUNTIME_REF))
+              assert(false); // should never be deleted
+            created_futures.erase(finder);
+          }
+          return result;
+        }
+        // Didn't find it so make it
+        FutureImpl *result = new FutureImpl(ctx, runtime, false/*register*/,
+            did, op, op->get_generation(), op->get_ctx_index(), index_point,
+#ifdef LEGION_SPY
+            op->get_unique_op_id(),
+#endif
+            ctx->get_depth(), op->get_provenance(), collective_mapping);
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(), 
+                  result->get_ready_event(), index_point);
+        // Add a reference to it to keep it from being deleted and then 
+        // register it with the runtime
+        result->add_base_gc_ref(RUNTIME_REF);
+        result->register_with_runtime();
+        // Record it for the shards that come later
+        std::pair<FutureImpl*,size_t> &pending = created_futures[did];
+        pending.first = result;
+        pending.second = local_shards.size() - 1;
+        return Future(result);
+      }
+      else
+      {
+        FutureImpl *impl = new FutureImpl(ctx, runtime, false/*register*/,
+            did, op, op->get_generation(), op->get_ctx_index(), index_point,
+#ifdef LEGION_SPY
+            op->get_unique_op_id(),
+#endif
+            ctx->get_depth(), op->get_provenance(), collective_mapping);
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_future_creation(op->get_unique_op_id(), 
+                  impl->get_ready_event(), index_point);
+        // Get a reference on it before we register it
+        Future result(impl);
+        impl->register_with_runtime();
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     FutureMap ShardManager::deduplicate_future_map_creation(
         ReplicateContext *ctx, Operation *op, IndexSpaceNode *domain,
         IndexSpaceNode *shard_domain, DistributedID did, Provenance *provenance)
@@ -11278,7 +11340,7 @@ namespace Legion {
       rez.serialize(collective_index);
       rez.serialize(stage);
       AutoLock c_lock(collective_lock, 1, false/*exclusive*/);
-      pack_collective_stage(rez, stage);
+      pack_collective_stage(target, rez, stage);
     }
 
     //--------------------------------------------------------------------------
@@ -11585,7 +11647,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureAllReduceCollective::pack_collective_stage(
+    void FutureAllReduceCollective::pack_collective_stage(ShardID target,
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
@@ -11940,8 +12002,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename REDOP>
-    void AllReduceCollective<REDOP>::pack_collective_stage(Serializer &rez,
-                                                           int stage)
+    void AllReduceCollective<REDOP>::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       // The first time we pack a stage we merge any values that we had
@@ -12318,8 +12380,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CrossProductCollective::pack_collective_stage(Serializer &rez, 
-                                                       int stage)
+    void CrossProductCollective::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(non_empty_handles.size());
@@ -12476,8 +12538,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndirectRecordExchange::pack_collective_stage(Serializer &rez,
-                                                       int stage)
+    void IndirectRecordExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(all_records.size());
@@ -12624,8 +12686,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FieldDescriptorExchange::pack_collective_stage(Serializer &rez,
-                                                        int stage)
+    void FieldDescriptorExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       // Always make a stage precondition and send it back
@@ -12881,73 +12943,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Future Broadcast 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast::FutureBroadcast(ReplicateContext *ctx, CollectiveID id,
-                                     ShardID source, FutureImpl *i)
-      : BroadcastCollective(ctx, id, source), impl(i)
-    //--------------------------------------------------------------------------
-    {
-      if (source == ctx->owner_shard->shard_id)
-        ready = impl->subscribe();
-    }
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast::FutureBroadcast(const FutureBroadcast &rhs)
-      : BroadcastCollective(rhs), impl(rhs.impl)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast::~FutureBroadcast(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FutureBroadcast& FutureBroadcast::operator=(const FutureBroadcast &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::pack_collective(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      FutureInstance *instance = impl->get_canonical_instance();
-      if (instance != NULL)
-        instance->pack_instance(rez, false/*pack ownership*/);
-      else
-        rez.serialize<size_t>(0);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::unpack_collective(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      FutureInstance *instance = 
-        FutureInstance::unpack_instance(derez, context->runtime);
-      impl->set_result(instance);
-    }
-
-    //--------------------------------------------------------------------------
-    void FutureBroadcast::broadcast_future(void)
-    //--------------------------------------------------------------------------
-    {
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      perform_collective_async();
-    }
-
-    /////////////////////////////////////////////////////////////
     // Buffer Exchange 
     /////////////////////////////////////////////////////////////
 
@@ -12988,7 +12983,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BufferExchange::pack_collective_stage(Serializer &rez, int stage)
+    void BufferExchange::pack_collective_stage(ShardID target,
+                                               Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
@@ -13104,16 +13100,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureNameExchange::pack_collective_stage(Serializer &rez, int stage)
+    void FutureNameExchange::pack_collective_stage(ShardID target,
+                                                   Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(results.size());
+      const AddressSpaceID target_space = manager->get_mapping()[target];
       for (std::map<DomainPoint,Future>::const_iterator it = 
             results.begin(); it != results.end(); it++)
       {
         rez.serialize(it->first);
         if (it->second.impl != NULL)
-          it->second.impl->pack_future(rez);
+          it->second.impl->pack_future(rez, target_space);
         else
           rez.serialize<DistributedID>(0);
       }
@@ -13411,8 +13409,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochMappingExchange::pack_collective_stage(Serializer &rez,
-                                                         int stage)
+    void MustEpochMappingExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(processors.size());
@@ -13677,8 +13675,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochDependenceExchange::pack_collective_stage(Serializer &rez,
-                                                            int stage)
+    void MustEpochDependenceExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mapping_dependences.size());
@@ -13760,8 +13758,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochCompletionExchange::pack_collective_stage(Serializer &rez,
-                                                            int stage)
+    void MustEpochCompletionExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(tasks_mapped.size());
@@ -13854,8 +13852,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedMappingExchange::pack_collective_stage(Serializer &rez, 
-                                                       int stage)
+    void ShardedMappingExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(mappings.size());
@@ -14055,7 +14053,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TemplateIndexExchange::pack_collective_stage(Serializer &rez,int stage)
+    void TemplateIndexExchange::pack_collective_stage(ShardID target,
+                                                      Serializer &rez,int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(index_counts.size());
@@ -14300,7 +14299,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void UnorderedExchange::pack_collective_stage(Serializer &rez, int stage)
+    void UnorderedExchange::pack_collective_stage(ShardID target,
+                                                  Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       pack_counts(rez, index_space_counts);
@@ -14458,9 +14458,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename T>
     ConsensusMatchExchange<T>::ConsensusMatchExchange(ReplicateContext *ctx,
-             CollectiveIndexLocation loc, Future f, void *out, ApUserEvent trig)
+                           CollectiveIndexLocation loc, Future f, void *out)
       : ConsensusMatchBase(ctx, loc), to_complete(f),
-        output(static_cast<T*>(out)), to_trigger(trig)
+        output(static_cast<T*>(out))
     //--------------------------------------------------------------------------
     {
     }
@@ -14470,7 +14470,7 @@ namespace Legion {
     ConsensusMatchExchange<T>::ConsensusMatchExchange(
                                               const ConsensusMatchExchange &rhs)
       : ConsensusMatchBase(rhs), to_complete(rhs.to_complete),
-        output(rhs.output), to_trigger(rhs.to_trigger)
+        output(rhs.output)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14497,8 +14497,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    void ConsensusMatchExchange<T>::pack_collective_stage(Serializer &rez, 
-                                                          int stage)
+    void ConsensusMatchExchange<T>::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(element_counts.size());
@@ -14604,7 +14604,6 @@ namespace Legion {
       // A little bit of help from the replicate context to complete the future
       context->help_complete_future(to_complete, &next_index, 
                         sizeof(next_index), false/*own*/);
-      Runtime::trigger_event(NULL, to_trigger);
     }
 
     template class ConsensusMatchExchange<uint8_t>;
@@ -14651,8 +14650,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VerifyReplicableExchange::pack_collective_stage(Serializer &rez, 
-                                                         int stage)
+    void VerifyReplicableExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(unique_hashes.size());
@@ -14740,7 +14739,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OutputSizeExchange::pack_collective_stage(Serializer &rez, int stage)
+    void OutputSizeExchange::pack_collective_stage(ShardID target,
+                                                   Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(all_output_sizes.size());
@@ -14839,8 +14839,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachLaunchSpace::pack_collective_stage(Serializer &rez,
-                                                       int stage)
+    void IndexAttachLaunchSpace::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize(nonzeros);
@@ -14934,7 +14934,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachUpperBound::pack_collective_stage(Serializer &rez,int stage)
+    void IndexAttachUpperBound::pack_collective_stage(ShardID target,
+                                                      Serializer &rez,int stage)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)
@@ -15062,8 +15063,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachExchange::pack_collective_stage(Serializer &rez,
-                                                    int stage)
+    void IndexAttachExchange::pack_collective_stage(ShardID target,
+                                                    Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(shard_spaces.size());
@@ -15169,8 +15170,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexAttachCoregions::pack_collective_stage(Serializer &rez,
-                                                     int stage)
+    void IndexAttachCoregions::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(region_points.size());
@@ -15429,8 +15430,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ImplicitShardingFunctor::pack_collective_stage(Serializer &rez, 
-                                                        int stage)
+    void ImplicitShardingFunctor::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(implicit_sharding.size());

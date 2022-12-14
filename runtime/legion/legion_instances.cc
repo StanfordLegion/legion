@@ -2321,7 +2321,8 @@ namespace Legion {
                         const ReductionOp *op /*= NULL*/,
                         ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
       : PhysicalManager(ctx, desc, encode_instance_did(did, 
-           (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
+           (k == EXTERNAL_ATTACHED_INSTANCE_KIND), 
+           (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now,
@@ -2957,7 +2958,7 @@ namespace Legion {
           instance.destroy(deferred_deletion);
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      if (!is_external_instance())
+      if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
 #endif
 #else
@@ -3004,7 +3005,7 @@ namespace Legion {
           instance.destroy();
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      if (!is_external_instance())
+      if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #endif
 #endif
@@ -4308,9 +4309,9 @@ namespace Legion {
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       ApEvent ready;
-#ifndef LEGION_MALLOC_INSTANCES
       if (runtime->profiler != NULL)
         runtime->profiler->add_inst_request(requests, creator_id);
+#ifndef LEGION_MALLOC_INSTANCES
       ready = ApEvent(PhysicalInstance::create_instance(instance,
             memory_manager->memory, inst_layout, requests, precondition));
       // Wait for the profiling response
@@ -4319,24 +4320,16 @@ namespace Legion {
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      uintptr_t base_ptr = 0;
-      if (instance_footprint > 0)
+      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout, 
+                                                      requests, instance));
+      if (!instance.exists())
       {
-        base_ptr = 
-          memory_manager->allocate_legion_instance(instance_footprint);
-        if (base_ptr == 0)
-        {
-          if (unsat_kind != NULL)
-            *unsat_kind = LEGION_MEMORY_CONSTRAINT;
-          if (unsat_index != NULL)
-            *unsat_index = 0;
-          return NULL;
-        }
+        if (unsat_kind != NULL)
+          *unsat_kind = LEGION_MEMORY_CONSTRAINT;
+        if (unsat_index != NULL)
+          *unsat_index = 0;
+        return NULL;
       }
-      Realm::ExternalMemoryResource resource(base_ptr,
-          inst_layout->bytes_used, false/*read only*/);
-      ready = ApEvent(PhysicalInstance::create_external_instance(instance,
-                memory_manager->memory, inst_layout, resource, requests));
 #endif
       // If we couldn't make it then we are done
       if (!instance.exists())
@@ -4431,7 +4424,7 @@ namespace Legion {
           assert(false); // illegal specialized case
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      memory_manager->record_legion_instance(result, base_ptr); 
+      memory_manager->record_legion_instance(result, instance);
 #endif
 #ifdef DEBUG_LEGION
       assert(result != NULL);
