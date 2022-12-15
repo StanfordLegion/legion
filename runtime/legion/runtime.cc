@@ -1978,8 +1978,13 @@ namespace Legion {
         AutoLock f_lock(future_lock);
         return get_ready_event(false/*need lock*/);
       }
-      if (empty.load() && !future_complete.exists())
-        future_complete = Runtime::create_ap_user_event(NULL);
+      if (empty.load())
+      {
+        if (!future_complete.exists())
+          future_complete = Runtime::create_ap_user_event(NULL);
+        if (!subscription_event.exists())
+          subscribe(false/*need lock*/);
+      }
       return future_complete;
     }
 
