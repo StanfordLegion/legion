@@ -1745,8 +1745,6 @@ namespace Legion {
       if (launched)
         return;
 #ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        sharding_collective->elide_collective();
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
@@ -1756,10 +1754,7 @@ namespace Legion {
       // have resolved false so we don't need to ask the sharding functor
       // which one we want to do the work)
       if (repl_ctx->owner_shard->shard_id > 0)
-      {
-        resolve_speculation();
         shard_off(RtEvent::NO_RT_EVENT);
-      }
       else
         IndividualTask::resolve_false(speculated, launched);
     }

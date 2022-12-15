@@ -2312,6 +2312,13 @@ namespace Legion {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      // There are some cases right now where we can shard off a task that
+      // is being replayed and it will clean everything up before we even
+      // get to call this function, so handle that case for now, although
+      // this should go away as we move to making replay decisions in the
+      // mapping stage of the pipeline
+      if (mapping_tracker == NULL)
+        return;
 #ifdef DEBUG_LEGION
       assert(mapping_tracker != NULL);
 #endif
