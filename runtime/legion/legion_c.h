@@ -1312,7 +1312,8 @@ extern "C" {
                                          legion_color_t color /* = AUTO_GENERATE_ID */,
                                          legion_mapper_id_t id /* = 0 */,
                                          legion_mapping_tag_id_t tag /* = 0 */,
-                                         legion_partition_kind_t part_kind /* = DISJOINT_KIND */);
+                                         legion_partition_kind_t part_kind /* = DISJOINT_KIND */,
+    legion_untyped_buffer_t map_arg);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1331,7 +1332,8 @@ extern "C" {
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
-    legion_mapping_tag_id_t tag /* = 0 */);
+    legion_mapping_tag_id_t tag /* = 0 */,
+    legion_untyped_buffer_t map_arg);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1350,7 +1352,8 @@ extern "C" {
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
-    legion_mapping_tag_id_t tag /* = 0 */);
+    legion_mapping_tag_id_t tag /* = 0 */,
+    legion_untyped_buffer_t map_arg);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1369,7 +1372,8 @@ extern "C" {
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
-    legion_mapping_tag_id_t tag /* = 0 */);
+    legion_mapping_tag_id_t tag /* = 0 */,
+    legion_untyped_buffer_t map_arg);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1388,7 +1392,8 @@ extern "C" {
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     legion_color_t color /* = AUTO_GENERATE_ID */,
     legion_mapper_id_t id /* = 0 */,
-    legion_mapping_tag_id_t tag /* = 0 */);
+    legion_mapping_tag_id_t tag /* = 0 */,
+    legion_untyped_buffer_t map_arg);
 
   /**
    * @return Caller takes ownership of return value.
