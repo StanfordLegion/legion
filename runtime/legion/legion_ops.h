@@ -4028,6 +4028,7 @@ namespace Legion {
       VersionInfo version_info;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
+      ApEvent detach_event;
       Future result;
       bool flush;
     };
@@ -4069,8 +4070,10 @@ namespace Legion {
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
     public:
+      // Override for control replication
+      virtual ApEvent get_complete_effects(void);
       void complete_detach(void);
-      void handle_point_complete(void);
+      void handle_point_complete(ApEvent point_effects);
       void handle_point_commit(void);
     protected:
       void activate_index_detach(void);
@@ -4084,6 +4087,7 @@ namespace Legion {
       IndexSpaceNode*                               launch_space;
       std::vector<PointDetachOp*>                   points;
       std::set<RtEvent>                             map_applied_conditions;
+      std::vector<ApEvent>                          point_effects;
       Future                                        result;
       unsigned                                      parent_req_index;
       unsigned                                      points_completed;
