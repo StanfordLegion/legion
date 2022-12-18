@@ -28971,18 +28971,7 @@ namespace Legion {
       LayoutConstraints *constraints = 
         new LayoutConstraints(layout_id, this, registrar,
             false/*internal*/, did, collective_mapping);
-      if (register_layout(constraints))
-      {
-        // These constraints are available on all the nodes so if we own
-        // them then record that we have remote instances for everything else
-        if ((did > 0) && constraints->is_owner())
-        {
-          for (AddressSpaceID space = 0; space < total_address_spaces; space++)
-            if (space != address_space)
-              constraints->update_remote_instances(space);
-        }
-      }
-      else
+      if (!register_layout(constraints))
         // If someone else already registered this ID then we delete our object
         delete constraints;
       return layout_id;
