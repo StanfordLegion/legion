@@ -38,8 +38,9 @@ namespace Legion {
       FIELD_SPACE_DC = 0xC,
       REGION_TREE_NODE_DC = 0xD,
       EQUIVALENCE_SET_DC = 0xE,
+      CONSTRAINT_SET_DC = 0xF,
       // be careful making this last one bigger than 0x10! see instance encoding
-      DIST_TYPE_LAST_DC = 0xF,  // must be last
+      DIST_TYPE_LAST_DC = 0x10,  // must be last
     };
 
     enum ReferenceSource {

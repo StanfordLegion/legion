@@ -14353,8 +14353,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
                                      Runtime *rt, bool inter, DistributedID did)
-      : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
-          rt->get_available_distributed_id(), false/*register*/),
+      : LayoutConstraintSet(), DistributedCollectable(rt,
+          LEGION_DISTRIBUTED_HELP_ENCODE((did > 0) ? did : 
+            rt->get_available_distributed_id(), CONSTRAINT_SET_DC),
+          false/*register*/),
         layout_id(lay_id), handle(h), internal(inter), constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
@@ -14366,10 +14368,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
-      const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
+                                     const LayoutConstraintRegistrar &registrar,
+                                     bool inter, DistributedID did,
+                                     CollectiveMapping *collective_mapping)
       : LayoutConstraintSet(registrar.layout_constraints), 
-        DistributedCollectable(rt, (did > 0) ? did : 
-            rt->get_available_distributed_id(), false/*register with runtime*/), 
+        DistributedCollectable(rt, LEGION_DISTRIBUTED_HELP_ENCODE((did > 0) 
+              ? did : rt->get_available_distributed_id(), CONSTRAINT_SET_DC),
+            false/*register with runtime*/, collective_mapping),
         layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -14391,7 +14396,8 @@ namespace Legion {
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
-          rt->get_available_distributed_id(), false/*register with runtime*/), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(rt->get_available_distributed_id(), 
+            CONSTRAINT_SET_DC), false/*register with runtime*/),
         layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -14466,8 +14472,7 @@ namespace Legion {
     void LayoutConstraints::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        runtime->unregister_layout(layout_id);
+      runtime->unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -16994,6 +16999,13 @@ namespace Legion {
         &pending_constraints = get_pending_constraint_table();
       if (!pending_constraints.empty())
       {
+        // Create a collective mapping for all the nodes
+        std::vector<AddressSpaceID> all_spaces(total_address_spaces);
+        for (unsigned idx = 0; idx < all_spaces.size(); idx++)
+          all_spaces[idx] = idx;
+        CollectiveMapping *mapping = 
+          new CollectiveMapping(all_spaces, legion_collective_radix);
+        mapping->add_reference();
         // Update the next available constraint
         while (pending_constraints.find(unique_constraint_id) !=
                 pending_constraints.end())
@@ -17039,11 +17051,13 @@ namespace Legion {
             if (did != expected_did)
               assert(false);
           }
-          register_layout(it->second, it->first, expected_did);
+          register_layout(it->second, it->first, expected_did, mapping);
         }
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
+        if (mapping->remove_reference())
+          delete mapping;
       }
     }
 
@@ -17431,7 +17445,6 @@ namespace Legion {
       // the mappers as they may want to look at the rank table
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
-      initialize_mappers(); 
       // Pull in any static registrations that were done
       register_static_variants();
       register_static_constraints();
@@ -17439,6 +17452,8 @@ namespace Legion {
       register_static_sharding_functors();
       // Initialize our virtual manager and our mappers
       initialize_virtual_manager();
+      // Initialize the mappers
+      initialize_mappers(); 
       // Finally perform the registration callback methods
       std::vector<RegistrationCallback> &registration_callbacks
         = get_pending_registration_callbacks();
@@ -28946,14 +28961,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraintID Runtime::register_layout(
                                 const LayoutConstraintRegistrar &registrar,
-                                LayoutConstraintID layout_id, DistributedID did)
+                                LayoutConstraintID layout_id, DistributedID did,
+                                CollectiveMapping *collective_mapping)
     //--------------------------------------------------------------------------
     {
       if (layout_id == LEGION_AUTO_GENERATE_ID)
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
+        new LayoutConstraints(layout_id, this, registrar,
+            false/*internal*/, did, collective_mapping);
       if (register_layout(constraints))
       {
         // These constraints are available on all the nodes so if we own

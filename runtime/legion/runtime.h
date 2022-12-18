@@ -2114,7 +2114,8 @@ namespace Legion {
                         Runtime *runtime, bool inter, DistributedID did = 0);
       LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar, 
-                        bool inter, DistributedID did = 0);
+                        bool inter, DistributedID did = 0,
+                        CollectiveMapping *collective_mapping = NULL);
       LayoutConstraints(LayoutConstraintID layout_id,
                         Runtime *runtime, const LayoutConstraintSet &cons,
                         FieldSpace handle, bool inter);
@@ -4468,7 +4469,8 @@ namespace Legion {
     public:
       LayoutConstraintID register_layout(
           const LayoutConstraintRegistrar &registrar, 
-          LayoutConstraintID id, DistributedID did = 0);
+          LayoutConstraintID id, DistributedID did = 0,
+          CollectiveMapping *collective_mapping = NULL);
       LayoutConstraints* register_layout(FieldSpace handle,
                const LayoutConstraintSet &cons, bool internal);
       bool register_layout(LayoutConstraints *new_constraints);
