@@ -27,6 +27,7 @@ import readline
 import threading
 import importlib
 import traceback
+import warnings
 
 from legion_cffi import ffi, lib as c
 
@@ -110,6 +111,15 @@ class LegionOutputStream(object):
 # Replace the output stream with one that will deduplicate
 # printing for any control-replicated tasks
 sys.stdout = LegionOutputStream(sys.stdout)
+
+
+# Also direct output from the `warnings` module to this deduplicated
+# stdout. This avoids flooding of output in control replicated
+# applications that use `warnings`. This method of doing so
+# was taken from https://stackoverflow.com/a/858928.
+def customwarn(message, category, filename, lineno, file=None, line=None):
+    sys.stdout.write(warnings.formatwarning(message, category, filename, lineno))
+warnings.showwarning = customwarn
 
 
 def input_args(filter_runtime_options=False):

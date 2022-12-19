@@ -3063,11 +3063,10 @@ namespace Legion {
       bool set_future = false;
       if (result_future.impl == NULL)
       {
-        const size_t future_size = sizeof(bool);
         Future temp = Future(
               new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
         if (result_future.impl == NULL)
@@ -8852,15 +8851,9 @@ namespace Legion {
       initialize_memoizable();
       fence_kind = kind;
       if (need_future)
-      {
-        const size_t future_size = 0;
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), completion_event,
-              get_provenance(), &future_size, track ? this : NULL));
-        // We can set the future result right now because we know that it
-        // will not be complete until we are complete ourselves
-        result.impl->set_result(NULL);
-      }
+              runtime->get_available_distributed_id(),
+              get_provenance(), track ? this : NULL));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id, context_index);
@@ -8936,6 +8929,8 @@ namespace Legion {
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
+            if (result.impl != NULL)
+              result.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
             complete_execution();
             break;
           }
@@ -8957,6 +8952,9 @@ namespace Legion {
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
+            // Set the future result if it was needed
+            if (result.impl != NULL)
+              result.impl->set_result(execution_precondition, NULL);
             if (!request_early_complete(execution_precondition))
               complete_execution(
                   Runtime::protect_event(execution_precondition));
@@ -9051,6 +9049,8 @@ namespace Legion {
     void FenceOp::complete_replay(ApEvent fence_complete_event)
     //--------------------------------------------------------------------------
     {
+      if (result.impl != NULL)
+        result.impl->set_result(fence_complete_event, NULL);
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(NULL, completion_event, fence_complete_event);
       need_completion_trigger = false;
@@ -13970,8 +13970,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), get_completion_event(), 
-            get_provenance(), NULL/*no known future size*/, this));
+            runtime->get_available_distributed_id(),
+            get_provenance(), this));
       collective = dc;
       if (runtime->legion_spy_enabled)
       {
@@ -14825,8 +14825,7 @@ namespace Legion {
       // Make a new future map for storing our results
       // We'll fill it in later
       sharding_space = launcher.sharding_space;
-      result_map = FutureMap(create_future_map(ctx, launch_space, 
-                                               sharding_space));
+      result_map = create_future_map(ctx, launch_space, sharding_space);
       instantiate_tasks(ctx, launcher); 
       map_id = launcher.map_id;
       tag = launcher.mapping_tag;
@@ -14843,13 +14842,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMapImpl* MustEpochOp::create_future_map(TaskContext *ctx,
+    FutureMap MustEpochOp::create_future_map(TaskContext *ctx,
               IndexSpace domain, IndexSpace shard_space)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *launch_node = runtime->forest->get_node(domain);
-      return new FutureMapImpl(ctx, this, launch_node,
-            runtime, runtime->get_available_distributed_id(), get_provenance());
+      return FutureMap(new FutureMapImpl(ctx, this, launch_node, runtime,
+              runtime->get_available_distributed_id(), get_provenance()));
     }
 
     //--------------------------------------------------------------------------
@@ -14874,7 +14873,10 @@ namespace Legion {
       {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
-                                          provenance, false/*track*/);
+                                          provenance, false/*track*/,
+                                          false/*top level*/,
+                                          false/*implicit*/,
+                                          true/*must epoch*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -21741,10 +21743,9 @@ namespace Legion {
       requirement.privilege = flush ? LEGION_READ_WRITE : LEGION_WRITE_DISCARD;
       requirement.prop = LEGION_EXCLUSIVE;
       // Create the future result that we will complete when we're done
-      const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, unordered);
@@ -21763,6 +21764,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      detach_event = ApEvent::NO_AP_EVENT;
       flush = true;
     }
 
@@ -21929,7 +21931,7 @@ namespace Legion {
       assert(external_views.size() == 1);
 #endif
       InstanceView *ext_view = external_views[0];
-      ApEvent detach_event = 
+      detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
                                          version_info, ext_view,
                                          trace_info, map_applied_conditions);
@@ -21978,7 +21980,7 @@ namespace Legion {
     {
       // Can be NULL if this is a PointDetachOp
       if (result.impl != NULL)
-        result.impl->set_result(NULL, 0, true/*own*/);
+        result.impl->set_result(detach_event, NULL, 0, true/*own*/);
       InstanceSet references;
       region.impl->get_references(references);
 #ifdef DEBUG_LEGION
@@ -22124,6 +22126,7 @@ namespace Legion {
         (*it)->deactivate();
       points.clear();
       map_applied_conditions.clear();
+      point_effects.clear();
       result = Future();
     }
 
@@ -22185,10 +22188,9 @@ namespace Legion {
         points.push_back(point);
       }
       // Create the future result that we will complete when we're done
-      const size_t future_size = 0;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_detach_operation(parent_ctx->get_unique_id(),
@@ -22274,12 +22276,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexDetachOp::handle_point_complete(void)
+    void IndexDetachOp::handle_point_complete(ApEvent point_effect)
     //--------------------------------------------------------------------------
     {
       bool complete_now = false;
       {
         AutoLock o_lock(op_lock);
+        if (point_effect.exists())
+          point_effects.push_back(point_effect);
         points_completed++;
         complete_now = complete_request && (points.size() == points_completed);
       }
@@ -22288,10 +22292,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent IndexDetachOp::get_complete_effects(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!point_effects.empty())
+        return Runtime::merge_events(NULL, point_effects);
+      else
+        return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     void IndexDetachOp::complete_detach(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(NULL, 0, true/*own*/);
+      result.impl->set_result(get_complete_effects(), NULL, 0, true/*own*/);
       complete_operation();
     }
 
@@ -22477,7 +22491,7 @@ namespace Legion {
     void PointDetachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      owner->handle_point_complete();
+      owner->handle_point_complete(detach_event);
       DetachOp::trigger_complete();
     }
 
@@ -22541,11 +22555,13 @@ namespace Legion {
           if (it->impl != NULL)
             preconditions.insert(*it);
       }
+#if 0
       const size_t future_size = (measurement == LEGION_MEASURE_SECONDS) ?
         sizeof(double) : sizeof(long long);
+#endif
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(), get_completion_event(),
-                get_provenance(), &future_size, this));
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(),
@@ -22758,9 +22774,7 @@ namespace Legion {
       }
       return_type_size = launcher.return_type_size;
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-            runtime->get_available_distributed_id(), get_completion_event(),
-            get_provenance(), (launcher.return_type_size < SIZE_MAX) ?
-              &launcher.return_type_size : NULL/*no size*/, this));
+            runtime->get_available_distributed_id(), get_provenance(), this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_tunable_operation(ctx->get_unique_id(),
@@ -22951,9 +22965,10 @@ namespace Legion {
       redop = runtime->get_reduction(redop_id);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop_id);
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
-              runtime->get_available_distributed_id(), get_completion_event(), 
-              get_provenance(),
-              (serdez_redop_fns == NULL) ? &redop->sizeof_rhs : NULL, this));
+              runtime->get_available_distributed_id(), get_provenance(), this));
+      if (serdez_redop_fns == NULL)
+        result.impl->set_future_result_size(redop->sizeof_rhs, 
+                                            runtime->address_space);
       mapper_id = map_id;
       tag = t;
       deterministic = is_deterministic;
@@ -23100,13 +23115,13 @@ namespace Legion {
         Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
             rect_space, constraints, dim_order);
       PhysicalInstance source_instance;
+      const Realm::ExternalMemoryResource resource(
+          reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
+          future_result_size, true/*read only*/);
       const ApEvent src_ready(
           PhysicalInstance::create_external_instance(
-            source_instance, runtime->runtime_system_memory, ilg, 
-            Realm::ExternalMemoryResource(
-             reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
-             future_result_size, true/*read only*/),
-            Realm::ProfilingRequestSet()));
+            source_instance, resource.suggested_memory(), ilg,
+            resource, Realm::ProfilingRequestSet()));
       FutureInstance source(serdez_redop_buffer, future_result_size, 
           ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
           false/*own alloc*/, source_instance);
@@ -23205,6 +23220,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent executed;
+      ApEvent done;
       if (serdez_redop_fns == NULL)
         executed = all_reduce_redop();
       else if (serdez_upper_bound < SIZE_MAX)
@@ -23227,17 +23243,17 @@ namespace Legion {
               parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
               redop_id, future_result_size)
         }
-        ApEvent done = finalize_serdez_targets(executed);
+        done = finalize_serdez_targets(executed);
         if (request_early_complete(done))
           executed = RtEvent::NO_RT_EVENT;
       }
       else
       {
-        ApEvent done = finalize_serdez_targets(executed);
+        done = finalize_serdez_targets(executed);
         if (request_early_complete(done))
           executed = RtEvent::NO_RT_EVENT;
       }
-      result.impl->set_results(targets);
+      result.impl->set_results(done, targets);
       complete_execution(executed);
     }
 

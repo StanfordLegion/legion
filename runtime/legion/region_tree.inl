@@ -2123,9 +2123,9 @@ namespace Legion {
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const void *bounds, bool is_domain, DistributedID did, 
         ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
-        Provenance *prov, CollectiveMapping *mapping)
+        Provenance *prov, CollectiveMapping *mapping, bool tree_valid)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
-          dep, prov, mapping), linearization_ready(false)
+          dep, prov, mapping, tree_valid), linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -4565,7 +4565,7 @@ namespace Legion {
         // is the same as the color space of the new partition
         // Get the shard-local futures for this future map            
         std::map<DomainPoint,FutureImpl*> shard_local_futures;
-        future_map->get_shard_local_futures(shard_local_futures);
+        future_map->get_shard_local_futures(local_shard, shard_local_futures);
         for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
              shard_local_futures.begin(); it != shard_local_futures.end(); it++)
         {
@@ -4621,7 +4621,7 @@ namespace Legion {
             {
               // If the future map can have this future, see if it is
               // a local future
-              future = future_map->find_shard_local_future(key);
+              future = future_map->find_shard_local_future(local_shard, key);
               if (future == NULL)
                 continue;
             }

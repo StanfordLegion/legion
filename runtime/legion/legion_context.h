@@ -799,11 +799,7 @@ namespace Legion {
       // Our cached set of index spaces for immediate domains
       std::map<Domain,IndexSpace> index_launch_spaces;
     protected:
-#ifdef LEGION_MALLOC_INSTANCES
-      std::vector<std::pair<PhysicalInstance,uintptr_t> > task_local_instances;
-#else
       std::set<PhysicalInstance> task_local_instances;
-#endif
     protected:
       bool task_executed;
       bool has_inline_accessor;
@@ -2089,11 +2085,18 @@ namespace Legion {
       };
       struct LRBroadcast {
       public:
-        LRBroadcast(void) : tid(0), double_buffer(0) { }
+        LRBroadcast(void) : tid(0), double_buffer(false) { }
         LRBroadcast(RegionTreeID t, DistributedID d, bool db) :
           tid(t), did(d), double_buffer(db) { }
       public:
         RegionTreeID tid;
+        DistributedID did;
+        bool double_buffer;
+      };
+      struct DIDBroadcast {
+        DIDBroadcast(void) : did(0), double_buffer(false) { }
+        DIDBroadcast(DistributedID d, bool db) : did(d), double_buffer(db) { }
+      public:
         DistributedID did;
         bool double_buffer;
       };
@@ -2827,7 +2830,6 @@ namespace Legion {
                                        bool replicate = false);
     public:
       void handle_collective_message(Deserializer &derez);
-      void handle_future_map_request(Deserializer &derez);
       void handle_disjoint_complete_request(Deserializer &derez);
       static void handle_disjoint_complete_response(Deserializer &derez, 
                                                     Runtime *runtime);
@@ -2852,6 +2854,8 @@ namespace Legion {
       void increase_pending_field_spaces(unsigned count, bool double_buffer);
       void increase_pending_fields(unsigned count, bool double_buffer);
       void increase_pending_region_trees(unsigned count, bool double_buffer);
+      void increase_pending_distributed_ids(unsigned count, bool double_buffer);
+      DistributedID get_next_distributed_id(void);
       bool create_shard_partition(Operation *op, IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
           PartitionKind part_kind, LegionColor partition_color,
@@ -2864,12 +2868,6 @@ namespace Legion {
       void register_collective(ShardCollective *collective);
       ShardCollective* find_or_buffer_collective(Deserializer &derez);
       void unregister_collective(ShardCollective *collective);
-    public:
-      // Future map methods
-      unsigned peek_next_future_map_barrier_index(void) const;
-      void register_future_map(ReplFutureMapImpl *map);
-      ReplFutureMapImpl* find_or_buffer_future_map_request(Deserializer &derez);
-      void unregister_future_map(ReplFutureMapImpl *map);
     public:
       // Physical template methods
       size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
@@ -2900,6 +2898,8 @@ namespace Legion {
         { return deletion_execution_barrier.next(this); }
       inline RtBarrier get_next_detach_resource_barrier(void)
         { return detach_resource_barrier.next(this); }
+      inline ApBarrier get_next_detach_effects_barrier(void)
+        { return detach_effects_barrier.next(this); }
       inline ApBarrier get_next_future_map_wait_barrier(void)
         { return future_map_wait_barrier.next(this); }
       inline RtBarrier get_next_dependent_partition_barrier(void)
@@ -2940,14 +2940,6 @@ namespace Legion {
           if (next_refinement_ready_bar_index ==
               refinement_ready_barriers.size())
             next_refinement_ready_bar_index = 0;
-          return result;
-        }
-      inline RtBarrier get_next_future_map_barrier(void)
-        {
-          const RtBarrier result = future_map_barriers[
-            next_future_map_bar_index++].next(this);
-          if (next_future_map_bar_index == future_map_barriers.size())
-            next_future_map_bar_index = 0;
           return result;
         }
       // Note this method always returns two barrier generations
@@ -3056,9 +3048,6 @@ namespace Legion {
       // These barriers are for signaling when indirect copies are done
       std::vector<ApReplBar>     indirection_barriers;
       unsigned                   next_indirection_bar_index;
-      // These barriers are used for signaling when future maps can be reclaimed
-      std::vector<RtReplBar>     future_map_barriers;
-      unsigned                   next_future_map_bar_index;
     protected:
       std::map<std::pair<size_t,DomainPoint>,IntraSpaceDeps> intra_space_deps;
     protected:
@@ -3066,6 +3055,7 @@ namespace Legion {
       std::map<FieldSpace,
                std::pair<ShardID,bool> > field_allocator_owner_shards;
     protected:
+      ShardID distributed_id_allocator_shard;
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
       ShardID field_space_allocator_shard;
@@ -3082,6 +3072,7 @@ namespace Legion {
       RtReplBar inline_mapping_barrier;
       RtReplBar attach_resource_barrier;
       RtLogicalBar detach_resource_barrier;
+      ApLogicalBar detach_effects_barrier;
       RtLogicalBar mapping_fence_barrier;
       RtReplBar resource_return_barrier;
       RtLogicalBar summary_fence_barrier;
@@ -3138,10 +3129,8 @@ namespace Legion {
                                             pending_fields;
       std::deque<std::pair<ValueBroadcast<LRBroadcast>*,bool> >
                                             pending_region_trees;
-    protected:
-      std::map<RtEvent,ReplFutureMapImpl*> future_maps;
-      std::map<RtEvent,std::vector<
-                std::pair<void*,size_t> > > pending_future_map_requests;
+      std::deque<std::pair<ValueBroadcast<DIDBroadcast>*,bool> >
+                                            pending_distributed_ids;
     protected:
       std::map<size_t,ShardedPhysicalTemplate*> physical_templates;
       struct PendingTemplateUpdate {

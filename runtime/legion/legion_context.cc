@@ -177,8 +177,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT,
-                                                  provenance, &size);
+      Future result(new FutureImpl(this, runtime, true/*register*/,
+            runtime->get_available_distributed_id(), provenance));
       // Set the future result
       RtEvent done;
       FutureInstance *instance = NULL;
@@ -195,7 +195,7 @@ namespace Legion {
         else
           instance = copy_to_future_inst(value, size, done);
       }
-      result.impl->set_result(instance);
+      result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
       if (done.exists() && !done.has_triggered())
         done.wait();
       return result;
@@ -209,11 +209,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT, 
-                                                  provenance, &size);
+      Future result(new FutureImpl(this, runtime, true/*register*/,
+            runtime->get_available_distributed_id(), provenance));
       FutureInstance *instance = new FutureInstance(buffer, size,
           ApEvent::NO_AP_EVENT, runtime, owned, resource.clone(), freefunc);
-      result.impl->set_result(instance);
+      result.impl->set_result(ApEvent::NO_AP_EVENT, instance);
       return result;
     }
 
@@ -225,8 +225,8 @@ namespace Legion {
       // No need to do a match here, there is just one shard
       const size_t future_size = sizeof(num_elements);
       memcpy(output, input, num_elements*future_size);
-      Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT,
-                                                  provenance, &future_size);
+      Future result(new FutureImpl(this, runtime, true/*register*/,
+            runtime->get_available_distributed_id(), provenance));
       result.impl->set_local(&num_elements, future_size);
       return result;
     }
@@ -2105,15 +2105,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalInstance instance;
-      Realm::ProfilingRequestSet no_requests;
-#ifdef LEGION_MALLOC_INSTANCES
-      uintptr_t ptr = runtime->allocate_deferred_instance(memory, 
-                              layout->bytes_used, false/*free*/); 
-      const RtEvent wait_on(Realm::RegionInstance::create_external(instance,
-                                          memory, ptr, layout, no_requests));
-      task_local_instances.push_back(std::make_pair(instance, ptr));
-#else
       MemoryManager *manager = runtime->find_memory_manager(memory);
+#ifdef LEGION_MALLOC_INSTANCES
+      const Realm::ProfilingRequestSet no_requests;
+      const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
+                                                      no_requests, instance));
+#else
       const ApEvent wait_on(manager->create_eager_instance(instance, layout));
       if (!instance.exists())
       {
@@ -2130,8 +2127,8 @@ namespace Legion {
             "flag on the command line.", get_task_name(), get_unique_id(), 
             mem_names[memory.kind()], memory.id)
       }
-      task_local_instances.insert(instance);
 #endif
+      task_local_instances.insert(instance);
       if (wait_on.exists())
       {
         bool poisoned = false;
@@ -2147,17 +2144,17 @@ namespace Legion {
     void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_MALLOC_INSTANCES
-      // TODO: We don't eagerly destroy local instances when they are malloc'ed
-#else
       std::set<PhysicalInstance>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
       task_local_instances.erase(finder);
-      MemoryManager *manager = runtime->find_memory_manager(
-          instance.get_location());
+      MemoryManager *manager = 
+        runtime->find_memory_manager(instance.get_location());
+#ifdef LEGION_MALLOC_INSTANCES
+      manager->free_legion_instance(RtEvent::NO_RT_EVENT, instance);
+#else
       manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
 #endif
     }
@@ -2399,23 +2396,6 @@ namespace Legion {
     uintptr_t TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_MALLOC_INSTANCES
-      uintptr_t ptr = 0;
-      std::vector<std::pair<PhysicalInstance,uintptr_t> > new_instances;
-#ifdef DEBUG_LEGION
-      assert(!task_local_instances.empty());
-#endif
-      new_instances.reserve(task_local_instances.size() - 1);
-      for (std::vector<std::pair<PhysicalInstance,uintptr_t> >::iterator it =
-           task_local_instances.begin(); it != task_local_instances.end(); ++it)
-        if (it->first == instance)
-          ptr = it->second;
-        else
-          new_instances.push_back(*it);
-
-      task_local_instances.swap(new_instances);
-      return ptr;
-#else
       std::set<PhysicalInstance>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
@@ -2425,7 +2405,6 @@ namespace Legion {
       task_local_instances.erase(finder);
       void *ptr = instance.pointer_untyped(0,0);
       return reinterpret_cast<uintptr_t>(ptr);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2610,13 +2589,7 @@ namespace Legion {
     void TaskContext::release_task_local_instances(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_MALLOC_INSTANCES
-      for (unsigned idx = 0; idx < task_local_instances.size(); idx++)
-      {
-        std::pair<PhysicalInstance,uintptr_t> inst = task_local_instances[idx];
-        inst.first.destroy(Processor::get_current_finish_event());
-      }
-#else
+      const RtEvent done(Processor::get_current_finish_event());
       for (std::set<PhysicalInstance>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
@@ -2624,10 +2597,12 @@ namespace Legion {
         PhysicalInstance inst = *it;
         MemoryManager *manager =
           runtime->find_memory_manager(inst.get_location());
-        manager->free_eager_instance(
-            inst, RtEvent(Processor::get_current_finish_event()));
-      }
+#ifdef LEGION_MALLOC_INSTANCES
+        manager->free_legion_instance(done, inst);
+#else
+        manager->free_eager_instance(inst, done);
 #endif
+      }
       task_local_instances.clear();
     }
 
@@ -2641,15 +2616,14 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
-      const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-        runtime->get_available_distributed_id(),
-        ApEvent::NO_AP_EVENT, provenance, &future_size);
+        runtime->get_available_distributed_id(), provenance);
+      const size_t future_size = launcher.predicate_false_result.get_size(); 
       if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
-            launcher.predicate_false_result.get_size(), false/*own*/);
+            future_size, false/*own*/);
       else
-        result->set_result(NULL);
+        result->set_result(ApEvent::NO_AP_EVENT, NULL);
       return Future(result);
     }
 
@@ -2682,7 +2656,8 @@ namespace Legion {
                 itr; itr++)
           {
             Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(copy_to_future_inst(target, canonical));
+            f.impl->set_result(ApEvent::NO_AP_EVENT, 
+                copy_to_future_inst(target, canonical));
           }
         }
         else
@@ -2691,7 +2666,7 @@ namespace Legion {
                 itr; itr++)
           {
             Future f = result->get_future(itr.p, true/*internal*/);
-            f.impl->set_result(NULL);
+            f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
           }
         }
         return FutureMap(result);
@@ -2703,7 +2678,7 @@ namespace Legion {
               itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
-          f.impl->set_result(NULL);
+          f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
         }
       }
       else
@@ -2730,15 +2705,14 @@ namespace Legion {
       if (launcher.predicate_false_future.impl != NULL)
         return launcher.predicate_false_future;
       // Otherwise check to see if we have a value
-      const size_t future_size = launcher.predicate_false_result.get_size(); 
       FutureImpl *result = new FutureImpl(this, runtime, true/*register*/, 
-        runtime->get_available_distributed_id(),
-        ApEvent::NO_AP_EVENT, provenance, &future_size);
+        runtime->get_available_distributed_id(), provenance);
+      const size_t future_size = launcher.predicate_false_result.get_size(); 
       if (future_size > 0)
         result->set_local(launcher.predicate_false_result.get_ptr(),
-            launcher.predicate_false_result.get_size(), false/*own*/);
+            future_size, false/*own*/);
       else
-        result->set_result(NULL);
+        result->set_result(ApEvent::NO_AP_EVENT, NULL);
       return Future(result);
     }
 
@@ -6445,6 +6419,7 @@ namespace Legion {
                                             true/*track parent*/,
                                             false/*top level*/,
                                             false/*implicit top level*/,
+                                            false/*must epoch*/,
                                             outputs);
 #ifdef DEBUG_LEGION
       log_task.debug("Registering new single task with unique id %lld "
@@ -6536,9 +6511,7 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          ApEvent::NO_AP_EVENT, provenance,
-          &reduction_op->sizeof_rhs);
+          runtime->get_available_distributed_id(), provenance);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6578,8 +6551,7 @@ namespace Legion {
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          ApEvent::NO_AP_EVENT, prov, &reduction_op->sizeof_rhs);
+          runtime->get_available_distributed_id(), prov);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -6621,8 +6593,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
-            runtime->get_available_distributed_id(),
-            ApEvent::NO_AP_EVENT, provenance, &future_size);
+            runtime->get_available_distributed_id(), provenance);
         future->set_local(it->second.get_ptr(), future_size);
         impl->set_future(it->first, future);
       }
@@ -7754,19 +7725,17 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       if (p == Predicate::TRUE_PRED)
       {
+        Future result(new FutureImpl(this, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), provenance));
         const bool value = true;
-        const size_t size = sizeof(value);
-        Future result = runtime->help_create_future(this, 
-            ApEvent::NO_AP_EVENT, provenance, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
+        Future result(new FutureImpl(this, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), provenance));
         const bool value = false;
-        const size_t size = sizeof(value);
-        Future result = runtime->help_create_future(this,
-            ApEvent::NO_AP_EVENT, provenance, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
@@ -11757,7 +11726,7 @@ namespace Legion {
         total_shards(shard_manager->total_shards),
         next_close_mapped_bar_index(0), next_refinement_ready_bar_index(0),
         next_refinement_mapped_bar_index(0), next_indirection_bar_index(0), 
-        next_future_map_bar_index(0), index_space_allocator_shard(0), 
+        distributed_id_allocator_shard(0), index_space_allocator_shard(0), 
         index_partition_allocator_shard(0), field_space_allocator_shard(0), 
         field_allocator_shard(0), logical_region_allocator_shard(0), 
         dynamic_id_allocator_shard(0), equivalence_set_allocator_shard(0), 
@@ -11777,7 +11746,6 @@ namespace Legion {
       refinement_ready_barriers.resize(num_barriers);
       refinement_mapped_barriers.resize(num_barriers);
       indirection_barriers.resize(num_barriers);
-      future_map_barriers.resize(num_barriers);
       // Configure our collective settings
       shard_collective_radix = runtime->legion_collective_radix;
       configure_collective_settings(total_shards, owner->shard_id,
@@ -11896,6 +11864,25 @@ namespace Legion {
         }
         delete collective.first;
         pending_region_trees.pop_front();
+      }
+      while (!pending_distributed_ids.empty())
+      {
+        std::pair<ValueBroadcast<DIDBroadcast>*,bool> &collective = 
+          pending_distributed_ids.front();
+        if (collective.second)
+        {
+          const DIDBroadcast value = collective.first->get_value(false);
+          runtime->revoke_pending_distributed_collectable(value.did);
+        }
+        else
+        {
+          // Make sure this collective is done before we delete it
+          const RtEvent done = collective.first->get_done_event();
+          if (!done.has_triggered())
+            done.wait();
+        }
+        delete collective.first;
+        pending_distributed_ids.pop_front();
       }
       if (returned_resource_ready_barrier.exists())
         returned_resource_ready_barrier.destroy_barrier();
@@ -12024,17 +12011,17 @@ namespace Legion {
         if (hasher.verify(__func__))
           break;
       }
-      ApUserEvent complete = Runtime::create_ap_user_event(NULL);
       const size_t future_size = sizeof(num_elements);
-      Future result = runtime->help_create_future(this, complete, 
-                                                  provenance, &future_size);
+      Future result(new FutureImpl(this, runtime, true/*register*/,
+            runtime->get_available_distributed_id(), provenance));
+      result.impl->set_future_result_size(future_size, runtime->address_space);
       switch (element_size)
       {
         case 1:
           {
             ConsensusMatchExchange<uint8_t> *collective = 
               new ConsensusMatchExchange<uint8_t>(this, COLLECTIVE_LOC_89,
-                                                  result, output, complete);
+                                                  result, output);
             if (collective->match_elements_async(input, num_elements))
               delete collective;
             break;
@@ -12043,7 +12030,7 @@ namespace Legion {
           {
             ConsensusMatchExchange<uint16_t> *collective = 
               new ConsensusMatchExchange<uint16_t>(this, COLLECTIVE_LOC_89,
-                                                   result, output, complete);
+                                                   result, output);
             if (collective->match_elements_async(input, num_elements))
               delete collective;
             break;
@@ -12052,7 +12039,7 @@ namespace Legion {
           {
             ConsensusMatchExchange<uint32_t> *collective = 
               new ConsensusMatchExchange<uint32_t>(this, COLLECTIVE_LOC_89,
-                                                   result, output, complete);
+                                                   result, output);
             if (collective->match_elements_async(input, num_elements))
               delete collective;
             break;
@@ -12061,7 +12048,7 @@ namespace Legion {
           {
             ConsensusMatchExchange<uint64_t> *collective = 
               new ConsensusMatchExchange<uint64_t>(this, COLLECTIVE_LOC_89,
-                                                   result, output, complete);
+                                                   result, output);
             if (collective->match_elements_async(input, num_elements))
               delete collective;
             break;
@@ -17378,6 +17365,7 @@ namespace Legion {
                                             true /*track*/,
                                             false /*top_level*/,
                                             false /*implicit_top_level*/,
+                                            false /*must epoch*/,
                                             outputs);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
@@ -17514,8 +17502,7 @@ namespace Legion {
                         get_task_name(), get_unique_id());
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(),
-          ApEvent::NO_AP_EVENT, provenance, &reduction_op->sizeof_rhs);
+          runtime->get_available_distributed_id(), provenance);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -17572,8 +17559,7 @@ namespace Legion {
       {
         const ReductionOp *reduction_op = runtime->get_reduction(redop);
         FutureImpl *result = new FutureImpl(this, runtime, true/*register*/,
-          runtime->get_available_distributed_id(), ApEvent::NO_AP_EVENT,
-          provenance, &reduction_op->sizeof_rhs);
+          runtime->get_available_distributed_id(), provenance);
         result->set_local(reduction_op->identity,
                           reduction_op->sizeof_rhs, false/*own*/);
         return Future(result);
@@ -17590,6 +17576,72 @@ namespace Legion {
       all_reduce_op->initialize_replication(this);
       add_to_dependence_queue(all_reduce_op);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::increase_pending_distributed_ids(unsigned count,
+                                                            bool double_next)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < count; idx++)
+      {
+        if (owner_shard->shard_id == distributed_id_allocator_shard)
+        {
+          const DistributedID did = runtime->get_available_distributed_id();
+          runtime->record_pending_distributed_collectable(did);
+          // Do our arrival on this generation, should be the last one
+          ValueBroadcast<DIDBroadcast> *collective = 
+            new ValueBroadcast<DIDBroadcast>(this, COLLECTIVE_LOC_2);
+          collective->broadcast(DIDBroadcast(did, double_next));
+          pending_distributed_ids.emplace_back(
+              std::pair<ValueBroadcast<DIDBroadcast>*,bool>(collective, true));
+        }
+        else
+        {
+          ValueBroadcast<DIDBroadcast> *collective = 
+            new ValueBroadcast<DIDBroadcast>(this,
+                distributed_id_allocator_shard, COLLECTIVE_LOC_2);
+          register_collective(collective);
+          pending_distributed_ids.emplace_back(
+              std::pair<ValueBroadcast<DIDBroadcast>*,bool>(collective, false));
+        }
+        distributed_id_allocator_shard++;
+        if (distributed_id_allocator_shard == total_shards)
+          distributed_id_allocator_shard = 0;
+        double_next = false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    DistributedID ReplicateContext::get_next_distributed_id(void)
+    //--------------------------------------------------------------------------
+    {
+      if (pending_distributed_ids.empty())
+        increase_pending_distributed_ids(1/*count*/, false/*double*/);
+      bool double_next = false;
+      bool double_buffer = false;
+      std::pair<ValueBroadcast<DIDBroadcast>*,bool> &pending_did =
+        pending_distributed_ids.front();
+      if (!pending_did.second)
+      {
+        const RtEvent done = pending_did.first->get_done_event();
+        if (!done.has_triggered())
+        {
+          double_next = true;
+          done.wait();
+        }
+      }
+      const DIDBroadcast value = pending_did.first->get_value(false);
+      if (pending_did.second)
+        double_buffer = value.double_buffer;
+      delete pending_did.first;
+      pending_distributed_ids.pop_front();
+      // Get new handles in flight for the next time we need them
+      // Always add a new one to replace the old one, but double the number
+      // in flight if we're not hiding the latency
+      increase_pending_distributed_ids(double_buffer ? 
+       pending_distributed_ids.size() + 1 : 1, double_next && !double_buffer);
+      return value.did;
     }
 
     //--------------------------------------------------------------------------
@@ -17628,23 +17680,33 @@ namespace Legion {
       FutureMap result;
       if (collective)
       {
-        ReplFutureMapImpl *repl_impl = new ReplFutureMapImpl(this, runtime,
-            domain_node, domain_node, runtime->get_available_distributed_id(),
-            total_children_count++, ApEvent::NO_AP_EVENT, provenance);
-        result = FutureMap(repl_impl);
-        ShardingFunction *function = NULL;
+        const DistributedID map_did = get_next_distributed_id();
+        result = shard_manager->deduplicate_future_map_creation(
+              this, domain_node, domain_node, total_children_count++,
+              map_did, ApEvent::NO_AP_EVENT, provenance);
+        ReplFutureMapImpl *map = static_cast<ReplFutureMapImpl*>(result.impl);
+        ShardingFunction *function;
         if (implicit)
         {
           // Do an exchange between the shards to compute the implicit sharding
           // No need to wait for it to be done before continuing
           ImplicitShardingFunctor *functor = new
-            ImplicitShardingFunctor(this, COLLECTIVE_LOC_101, repl_impl);
+            ImplicitShardingFunctor(this, COLLECTIVE_LOC_101, map);
           functor->compute_sharding(data);
-          function =
-            new ShardingFunction(functor, runtime->forest, shard_manager, sid);
+          function = new ShardingFunction(functor, runtime->forest, 
+              shard_manager, sid, false, true/*own functor*/);
+          if (!map->set_sharding_function(function, true/*own*/))
+          {
+            // Wait for the collective to be done before we delete it
+            functor->perform_collective_wait();
+            delete function;
+          }
         }
         else
+        {
           function = shard_manager->find_sharding_function(sid);
+          map->set_sharding_function(function, false/*own*/);
+        }
         // Check that all the points abide by the sharding function 
         for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
               data.begin(); it != data.end(); it++)
@@ -17653,9 +17715,6 @@ namespace Legion {
                 "Sharding function does not match described sharding for "
                 "future map construction in %s (UID %lld)",
                 get_task_name(), get_unique_id())
-        repl_impl->set_sharding_function(function, implicit);
-        if (++dynamic_id_allocator_shard == total_shards)
-          dynamic_id_allocator_shard = 0;
       }
       else
       {
@@ -17679,8 +17738,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
         const size_t future_size = it->second.get_size();
         FutureImpl *future = new FutureImpl(this, runtime, true/*register*/,
-            runtime->get_available_distributed_id(),
-            ApEvent::NO_AP_EVENT, provenance, &future_size);
+            runtime->get_available_distributed_id(), provenance);
         future->set_local(it->second.get_ptr(), future_size);
         result.impl->set_future(it->first, future);
       }
@@ -17728,24 +17786,32 @@ namespace Legion {
       FutureMap result;
       if (collective)
       {
-        // Make one future map for all the shards
-        ReplFutureMapImpl *repl_impl =
-          new ReplFutureMapImpl(this, creation_op, domain_node, domain_node,
-              runtime, runtime->get_available_distributed_id(),  provenance);
-        result = FutureMap(repl_impl);
-        ShardingFunction *function = NULL;
+        const DistributedID map_did = get_next_distributed_id();
+        result = shard_manager->deduplicate_future_map_creation(
+            this, creation_op, domain_node, domain_node, map_did, provenance);
+        ReplFutureMapImpl *map = static_cast<ReplFutureMapImpl*>(result.impl);
+        ShardingFunction *function;
         if (implicit)
         {
           // Do an exchange between the shards to compute the implicit sharding
           // No need to wait for it to be done before continuing
           ImplicitShardingFunctor *functor = new
-            ImplicitShardingFunctor(this, COLLECTIVE_LOC_102, repl_impl);
+            ImplicitShardingFunctor(this, COLLECTIVE_LOC_102, map);
           functor->compute_sharding(futures);
-          function =
-            new ShardingFunction(functor, runtime->forest, shard_manager, sid);
+          function = new ShardingFunction(functor, runtime->forest,
+              shard_manager, sid, false, true/*own functor*/);
+          if (!map->set_sharding_function(function, true/*own*/))
+          {
+            // Wait for the collective to be done before we delete it
+            functor->perform_collective_wait();
+            delete function;
+          }
         }
         else
+        {
           function = shard_manager->find_sharding_function(sid);
+          map->set_sharding_function(function, false/*own*/);
+        }
         // Check that all the points abide by the sharding function
         Domain domain;
         domain_node->get_launch_space_domain(domain);
@@ -17756,9 +17822,6 @@ namespace Legion {
                 "Sharding function does not match described sharding for "
                 "future map construction in %s (UID %lld)",
                 get_task_name(), get_unique_id())
-        repl_impl->set_sharding_function(function, implicit);
-        if (++dynamic_id_allocator_shard == total_shards)
-          dynamic_id_allocator_shard = 0;
       }
       else
       {
@@ -19383,17 +19446,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::handle_future_map_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ReplFutureMapImpl *impl = find_or_buffer_future_map_request(derez);
-      // If impl is NULL then the request was buffered
-      if (impl == NULL)
-        return;
-      impl->handle_future_map_request(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::handle_disjoint_complete_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -20600,87 +20652,6 @@ namespace Legion {
       if (remove_reference && shard_manager->remove_reference())
         delete shard_manager;
     }
-
-    //--------------------------------------------------------------------------
-    unsigned ReplicateContext::peek_next_future_map_barrier_index(void) const
-    //--------------------------------------------------------------------------
-    {
-      return next_future_map_bar_index;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_future_map(ReplFutureMapImpl *map)
-    //--------------------------------------------------------------------------
-    {
-      map->add_base_resource_ref(REPLICATION_REF);
-      std::vector<std::pair<void*,size_t> > to_apply;
-      {
-        AutoLock repl_lock(replication_lock);
-#ifdef DEBUG_LEGION
-        assert(future_maps.find(map->future_map_barrier) == future_maps.end());
-#endif
-        future_maps[map->future_map_barrier] = map; 
-        // Check to see if we have any pending requests to perform
-        std::map<RtEvent,std::vector<std::pair<void*,size_t> > >::iterator
-          finder = pending_future_map_requests.find(map->future_map_barrier);
-        if (finder != pending_future_map_requests.end())
-        {
-          to_apply.swap(finder->second);
-          pending_future_map_requests.erase(finder);
-        }
-      }
-      if (!to_apply.empty())
-      {
-        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
-              to_apply.begin(); it != to_apply.end(); it++)
-        {
-          Deserializer derez(it->first, it->second);
-          map->handle_future_map_request(derez);
-          free(it->first);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    ReplFutureMapImpl* ReplicateContext::find_or_buffer_future_map_request(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent future_map_event;
-      derez.deserialize(future_map_event);
-      AutoLock repl_lock(replication_lock);
-      // See if we already have the future map in which case we can just
-      // return it, otherwise we need to buffer the deserializer
-      std::map<RtEvent,ReplFutureMapImpl*>::const_iterator finder = 
-        future_maps.find(future_map_event);
-      if (finder != future_maps.end())
-        return finder->second;
-      // If we couldn't find it then we have to buffer it for the future
-      const size_t remaining_bytes = derez.get_remaining_bytes();
-      void *buffer = malloc(remaining_bytes);
-      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
-      derez.advance_pointer(remaining_bytes);
-      pending_future_map_requests[future_map_event].push_back(
-          std::pair<void*,size_t>(buffer, remaining_bytes));
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::unregister_future_map(ReplFutureMapImpl *map)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock repl_lock(replication_lock);
-        std::map<RtEvent,ReplFutureMapImpl*>::iterator finder = 
-          future_maps.find(map->future_map_barrier);
-#ifdef DEBUG_LEGION
-        assert(finder != future_maps.end());
-#endif
-        future_maps.erase(finder);
-      }
-      if (map->remove_base_resource_ref(REPLICATION_REF))
-        delete map;
-    } 
 
     //--------------------------------------------------------------------------
     size_t ReplicateContext::register_trace_template(
@@ -22806,7 +22777,9 @@ namespace Legion {
         IndividualTask *task = runtime->get_available_individual_task(); 
         InnerContext *parent = owner_task->get_context();
         Future result =
-          task->initialize_task(parent, launcher, provenance, outputs);
+          task->initialize_task(parent, launcher, provenance, 
+              false/*track*/, false/*top level*/, false/*implicit*/,
+              false/*must epoch*/, outputs);
         inline_child_task(task);
         return result;
       }
@@ -22838,7 +22811,7 @@ namespace Legion {
           launch_space = find_index_launch_space(launcher.launch_domain,
                                                  provenance);
         FutureMap result = task->initialize_task(parent, launcher, launch_space,
-                                                 provenance, outputs);
+                                           provenance, false/*track*/, outputs);
         inline_child_task(task);
         return result;
       }
@@ -22869,7 +22842,7 @@ namespace Legion {
           launch_space = find_index_launch_space(launcher.launch_domain,
                                                  provenance);
         Future result = task->initialize_task(parent, launcher, launch_space, 
-                                  provenance, redop, deterministic, outputs);
+                    provenance, redop, deterministic, false/*track*/, outputs);
         inline_child_task(task);
         return result;
       }
@@ -23262,19 +23235,17 @@ namespace Legion {
     {
       if (p == Predicate::TRUE_PRED)
       {
+        Future result(new FutureImpl(this, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), provenance));
         const bool value = true;
-        const size_t size = sizeof(value);
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT,
-                                                    provenance, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }
       else if (p == Predicate::FALSE_PRED)
       {
+        Future result(new FutureImpl(this, runtime, true/*register*/,
+              runtime->get_available_distributed_id(), provenance));
         const bool value = false;
-        const size_t size = sizeof(value);
-        Future result = runtime->help_create_future(this, ApEvent::NO_AP_EVENT,
-                                                    provenance, &size);
         result.impl->set_local(&value, sizeof(value));
         return result;
       }

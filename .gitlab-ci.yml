@@ -69,12 +69,12 @@ variables:
   CC:  "clang-14"
   CXX: "clang++-14"
   F90: "gfortran-11"
-.hpcsdk212: &hpcsdk212
-  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvc"
-  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvc++"
-  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/21.2/compilers/bin/nvfortran"
+.hpcsdk2211: &hpcsdk2211
+  CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc"
+  CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc++"
+  F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvfortran"
   # cmake gets confused and can't figure out library arch
-  EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
+  # EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 .icc212: &icc212
   CC: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icc"
   CXX: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icpc"
@@ -124,22 +124,22 @@ variables:
   PRIVILEGE_CHECKS: "1"
 
 .cxx11_normal: &cxx11_normal
-  CXXFLAGS: "-std=c++11"
+  CXXFLAGS: ""
   CXX_STANDARD: "11"
 .cxx11_hardened: &cxx11_hardened
-  CXXFLAGS: "-std=c++11 -D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
+  CXXFLAGS: "-D_FORTIFY_SOURCE=2 -D_GLIBCXX_ASSERTIONS"
   CXX_STANDARD: "11"
 .cxx14_normal: &cxx14_normal
-  CXXFLAGS: "-std=c++14"
+  CXXFLAGS: ""
   CXX_STANDARD: "14"
 .cxx17_normal: &cxx17_normal
-  CXXFLAGS: "-std=c++17"
+  CXXFLAGS: ""
   CXX_STANDARD: "17"
 .cxx20_normal: &cxx20_normal
-  CXXFLAGS: "-std=c++20"
+  CXXFLAGS: ""
   CXX_STANDARD: "20"
 .cxx11_32bit_normal: &cxx11_32bit_normal
-  CXXFLAGS: "-std=c++11 -m32"
+  CXXFLAGS: "-m32"
   LDFLAGS: "-m32 -latomic"
   MARCH: "i686"
   CXX_STANDARD: "11"
@@ -397,7 +397,9 @@ before_script:
       fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
-        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
+        # Rely on kokkos' auto-detect for the build.  This will need to be
+        # modified to include all sm-major for universal builds later on
+        #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
         #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_CUDA_DIR=${CUDA}"
         export CUDA_PATH="${CUDA}/lib64"
         #export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
@@ -489,6 +491,12 @@ before_script:
     - linux
     - compute
 
+# For tests that require AVX:
+.linux_avx: &linux_avx
+  tags:
+    - linux
+    - avx
+
 # For CUDA tests, always use a specific machine:
 .p100: &p100
   tags:
@@ -497,10 +505,8 @@ before_script:
 .p100_base: &p100_base
   IS_P100_JOB: "1"
   USE_CUDA: "1"
-  GPU_ARCH: "60"
   # cmake needs to know where to find libcuda.so
   CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
-  KOKKOS_CUDA_ARCH: "PASCAL60"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
@@ -564,7 +570,7 @@ before_script:
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
 .image_hpcsdk: &image_hpcsdk
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-hpcsdk:221201
 .image_icc: &image_icc
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-icc
 .image_msvc169: &image_msvc169
@@ -1253,14 +1259,14 @@ p100_cuda110_gcc9_cxx14_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc9, *release, *cxx14_normal, *p100_cuda110, *legion]
-p100_cuda112_gcc9_cxx14_debug_cuda_legion:
+p100_cuda112_gcc9_cxx17_debug_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *legion, *short]
-p100_cuda112_gcc9_cxx14_release_cmake_cuda_legion:
+p100_cuda112_gcc9_cxx17_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda112, *cmake, *legion, *ctest]
+    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda112, *cmake, *legion, *ctest]
 p100_cuda90_clang7_cxx11_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
@@ -1281,10 +1287,10 @@ p100_cuda112_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
     <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda112, *gasnetex_mpi, *regent]
 
 # Kokkos tests:
-clang12_cxx14_debug_kokkos_legion:
+clang12_cxx17_debug_kokkos_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx14_normal, *kokkos, *cmake, *legion]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion]
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 clang9_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_kokkos_openmp, *tests]
@@ -1322,14 +1328,14 @@ darwin_power9_clang8_cxx17_debug_legion:
     <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
 
 # HPCSDK (nvc++) tests:
-hpcsdk212_cxx11_release_legion:
-  <<: [*linux, *image_hpcsdk, *tests]
+hpcsdk2211_cxx11_release_legion:
+  <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk212, *release, *cxx11_normal, *legion]
-hpcsdk212_cxx11_debug_cmake_legion:
-  <<: [*linux, *image_hpcsdk, *tests]
+    <<: [*hpcsdk2211, *release, *cxx11_normal, *legion]
+hpcsdk2211_cxx11_debug_cmake_legion:
+  <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk212, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
+    <<: [*hpcsdk2211, *debug, *cxx11_normal, *cmake, *legion, *ctest, *short]
 
 # Intel compiler (icc/icpc) tests:
 icc212_cxx11_release_legion:

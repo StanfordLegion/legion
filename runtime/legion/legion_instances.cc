@@ -738,7 +738,8 @@ namespace Legion {
         unique_event(u_event), piece_list(pl), piece_list_size(pl_size),
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
         remaining_collection_guards(0), min_gc_priority(0), added_gc_events(0),
-        valid_references(0)
+        valid_references(0), sent_valid_references(0),
+        received_valid_references(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -1146,6 +1147,27 @@ namespace Legion {
       // Nothing to do here 
     } 
 
+    //--------------------------------------------------------------------------
+    void PhysicalManager::pack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+#ifdef DEBUG_LEGION
+      // We should always be holding a valid reference when we
+      // pack a valid reference so the state should always be valid
+      assert(gc_state == VALID_GC_STATE);
+#endif
+      sent_valid_references++;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::unpack_valid_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inst_lock);
+      received_valid_references++;
+    }
+
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------
     void PhysicalManager::add_base_valid_ref_internal(
@@ -1225,7 +1247,7 @@ namespace Legion {
         return notify_invalid();
       else
         return false;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PhysicalManager::add_valid_reference(int cnt, bool need_check)
@@ -1671,6 +1693,7 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(target);
           rez.serialize(done);
+          rez.serialize(did);
           manager->pack_gc_events(rez);
         }
         runtime->send_gc_acquired(source, rez);
@@ -1692,16 +1715,11 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent done;
       derez.deserialize(done);
-      size_t num_gc_events;
-      derez.deserialize(num_gc_events);
-      if (num_gc_events > 0)
-      {
-        DistributedID did;
-        derez.deserialize(did);
-        PhysicalManager *manager = static_cast<PhysicalManager*>(
-          runtime->find_distributed_collectable(did));
-        manager->unpack_gc_events(num_gc_events, derez);
-      }
+      DistributedID did;
+      derez.deserialize(did);
+      PhysicalManager *manager = static_cast<PhysicalManager*>(
+        runtime->find_distributed_collectable(did));
+      manager->unpack_gc_events(derez);
 #ifdef DEBUG_LEGION
 #ifndef NDEBUG
       const unsigned prev =
@@ -1728,7 +1746,6 @@ namespace Legion {
         if (!gc_events.empty())
         {
           rez.serialize<size_t>(gc_events.size());
-          rez.serialize(did);
           for (std::set<ApEvent>::const_iterator it =
                 gc_events.begin(); it != gc_events.end(); it++)
             rez.serialize(*it);
@@ -1738,23 +1755,32 @@ namespace Legion {
       }
       else
         rez.serialize<size_t>(0);
+      // Piggy back these references onto this state
+      rez.serialize(sent_valid_references);
+      rez.serialize(received_valid_references);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::unpack_gc_events(size_t num_events, 
-                                           Deserializer &derez)
+    void PhysicalManager::unpack_gc_events(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
 #ifdef DEBUG_LEGION
       assert(gc_state != COLLECTED_GC_STATE);
 #endif
+      size_t num_events;
+      derez.deserialize(num_events);
       for (unsigned idx = 0; idx < num_events; idx++)
       {
         ApEvent event;
         derez.deserialize(event);
         gc_events.insert(event);
       }
+      uint64_t remote_sent_references, remote_received_references;
+      derez.deserialize(remote_sent_references);
+      derez.deserialize(remote_received_references);
+      total_sent_references += remote_sent_references;
+      total_received_references += remote_received_references;
     }
 
     //--------------------------------------------------------------------------
@@ -1828,6 +1854,8 @@ namespace Legion {
         if (gc_state == COLLECTABLE_GC_STATE)
         {
           gc_state = PENDING_COLLECTED_GC_STATE;
+          total_sent_references = sent_valid_references;
+          total_received_references = received_valid_references;
           const size_t needed_guards = count_remote_instances();
           if (needed_guards > 0)
           {
@@ -1895,8 +1923,10 @@ namespace Legion {
               assert(collection_ready.has_triggered());
 #endif
               // Check to see if there were any collection guards we
-              // were unable to acquire on remote nodes
-              if (remaining_collection_guards.load() > 0)
+              // were unable to acquire on remote nodes or whether there
+              // are still packed valid reference outstanding
+              if ((remaining_collection_guards.load() > 0) ||
+                  (total_sent_references != total_received_references))
               {
                 // See if we're the last release, if not then we
                 // keep it in this state
@@ -2291,7 +2321,8 @@ namespace Legion {
                         const ReductionOp *op /*= NULL*/,
                         ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
       : PhysicalManager(ctx, desc, encode_instance_did(did, 
-           (k != INTERNAL_INSTANCE_KIND), (redop_id != 0), false/*collective*/),
+           (k == EXTERNAL_ATTACHED_INSTANCE_KIND), 
+           (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
           instance_domain, pl, pl_size, tree_id, u_event, register_now,
@@ -2927,7 +2958,7 @@ namespace Legion {
           instance.destroy(deferred_deletion);
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      if (!is_external_instance())
+      if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
 #endif
 #else
@@ -2974,7 +3005,7 @@ namespace Legion {
           instance.destroy();
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      if (!is_external_instance())
+      if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #endif
 #endif
@@ -4278,9 +4309,9 @@ namespace Legion {
       assert(!instance.exists()); // shouldn't exist before this
 #endif
       ApEvent ready;
-#ifndef LEGION_MALLOC_INSTANCES
       if (runtime->profiler != NULL)
         runtime->profiler->add_inst_request(requests, creator_id);
+#ifndef LEGION_MALLOC_INSTANCES
       ready = ApEvent(PhysicalInstance::create_instance(instance,
             memory_manager->memory, inst_layout, requests, precondition));
       // Wait for the profiling response
@@ -4289,24 +4320,16 @@ namespace Legion {
 #else
       if (precondition.exists() && !precondition.has_triggered())
         precondition.wait();
-      uintptr_t base_ptr = 0;
-      if (instance_footprint > 0)
+      ready = ApEvent(memory_manager->allocate_legion_instance(inst_layout, 
+                                                      requests, instance));
+      if (!instance.exists())
       {
-        base_ptr = 
-          memory_manager->allocate_legion_instance(instance_footprint);
-        if (base_ptr == 0)
-        {
-          if (unsat_kind != NULL)
-            *unsat_kind = LEGION_MEMORY_CONSTRAINT;
-          if (unsat_index != NULL)
-            *unsat_index = 0;
-          return NULL;
-        }
+        if (unsat_kind != NULL)
+          *unsat_kind = LEGION_MEMORY_CONSTRAINT;
+        if (unsat_index != NULL)
+          *unsat_index = 0;
+        return NULL;
       }
-      Realm::ExternalMemoryResource resource(base_ptr,
-          inst_layout->bytes_used, false/*read only*/);
-      ready = ApEvent(PhysicalInstance::create_external_instance(instance,
-                memory_manager->memory, inst_layout, resource, requests));
 #endif
       // If we couldn't make it then we are done
       if (!instance.exists())
@@ -4401,7 +4424,7 @@ namespace Legion {
           assert(false); // illegal specialized case
       }
 #ifdef LEGION_MALLOC_INSTANCES
-      memory_manager->record_legion_instance(result, base_ptr); 
+      memory_manager->record_legion_instance(result, instance);
 #endif
 #ifdef DEBUG_LEGION
       assert(result != NULL);

@@ -86,6 +86,9 @@ namespace Legion {
       inline void add_nested_valid_ref(DistributedID source, int cnt = 1);
       inline bool remove_base_valid_ref(ReferenceSource source, int cnt = 1);
       inline bool remove_nested_valid_ref(DistributedID source, int cnt = 1);
+    public:
+      virtual void pack_valid_ref(void) = 0;
+      virtual void unpack_valid_ref(void) = 0;
     protected:
 #ifndef DEBUG_LEGION_GC
       void add_valid_reference(int cnt);
@@ -149,6 +152,7 @@ namespace Legion {
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner); }
       AddressSpaceID get_analysis_space(const DomainPoint &point) const;
+      void destroy_reservations(ApEvent all_done);
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -156,6 +160,8 @@ namespace Legion {
     public:
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public: 
       // Entry point functions for doing physical dependence analysis
       virtual void add_initial_user(ApEvent term_event,
@@ -258,7 +264,7 @@ namespace Legion {
       const UniqueID owner_context;
       // This is the owner space for the purpose of logical analysis
       const AddressSpaceID logical_owner;
-    private:
+    protected:
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
       // top-level view for an instance needs to track this.
@@ -425,6 +431,7 @@ namespace Legion {
                                       const bool user_covers) const;
     public:
       size_t get_view_volume(void);
+      void find_all_done_events(std::set<ApEvent> &all_done) const;
     protected:
       void filter_local_users(ApEvent term_event);
       void filter_current_users(const EventFieldUsers &to_filter);
@@ -908,6 +915,8 @@ namespace Legion {
       FillView& operator=(const FillView &rhs);
     public:
       virtual void notify_local(void) { /*nothing to do*/ }
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
@@ -980,6 +989,8 @@ namespace Legion {
       virtual void notify_local(void);
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public:
       virtual void send_view(AddressSpaceID target);
     public:
@@ -1030,6 +1041,8 @@ namespace Legion {
       virtual void notify_local(void);
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
     public:
       virtual void send_view(AddressSpaceID target); 
     public:

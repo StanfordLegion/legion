@@ -761,7 +761,8 @@ namespace Legion {
                              const TaskLauncher &launcher,
                              Provenance *provenance,
                              bool track = true, bool top_level=false,
-                             bool implicit_top_level = false,
+                             bool implicit_top_level = false, 
+                             bool must_epoch_launch = false,
                              std::vector<OutputRequirement> *outputs = NULL);
       void perform_base_dependence_analysis(void);
     protected:
@@ -773,6 +774,9 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2); 
+      // Virtual method for creating the future for this task so that
+      // we can overload for control replication
+      virtual Future create_future(void);
     public:
       virtual void resolve_false(bool speculated, bool launched);
       virtual bool distribute_task(void);
@@ -1044,7 +1048,6 @@ namespace Legion {
                             std::set<RtEvent> &preconditions);
       void report_leaks_and_duplicates(std::set<RtEvent> &preconditions);
       void handle_collective_message(Deserializer &derez);
-      void handle_future_map_request(Deserializer &derez);
       void handle_disjoint_complete_request(Deserializer &derez);
       void handle_intra_space_dependence(Deserializer &derez);
       void handle_resource_update(Deserializer &derez,
@@ -1203,7 +1206,7 @@ namespace Legion {
     public:
       // Make this a virtual method so for control replication we can 
       // create a different type of future map for the task
-      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+      virtual FutureMap create_future_map(TaskContext *ctx,
                     IndexSpace launch_space, IndexSpace shard_space);
       // Also virtual for control replication override
       virtual void initialize_concurrent_analysis(bool replay);
@@ -1359,7 +1362,7 @@ namespace Legion {
                   Processor p, bool recurse, bool stealable);
       virtual void reduce_future(const DomainPoint &point,
                                  FutureInstance *instance);
-      void handle_future(const DomainPoint &point,
+      void handle_future(ApEvent complete, const DomainPoint &point,
                          FutureInstance *instance, void *metadata, 
                          size_t metasize, FutureFunctor *functor,
                          Processor future_proc, bool own_functor); 
