@@ -1108,14 +1108,18 @@ namespace Legion {
     }; 
 
     /**
-     * \class RefinementTracker
-     * The refinement tracker records all the refinements to be performed
+     * \class LogicalAnalysis 
+     * The logical analysis helps capture the state of region tree traversals
+     * for all region requirements in an operation. This includes capturing
+     * the needed refinements to be performed as well as closes that have
+     * already been performed for various projection region requirements.
+     * At the end of the analysis, it issues all the refinements to be performed
      * by an operation and then performs them after all of the region 
      * requirements for that operation are done being analyzed. That ensures
      * that we have at most one refinement change for all region requirements
      * in an operation that touch the same fields of the same region tree.
      */
-    class RefinementTracker {
+    class LogicalAnalysis {
     public:
       struct PendingRefinement {
       public:
@@ -1131,11 +1135,11 @@ namespace Legion {
         unsigned index;
       };
     public:
-      RefinementTracker(Operation *op, std::set<RtEvent> &applied_events);
-      RefinementTracker(const RefinementTracker &rhs);
-      ~RefinementTracker(void);
+      LogicalAnalysis(Operation *op, std::set<RtEvent> &applied_events);
+      LogicalAnalysis(const LogicalAnalysis &rhs) = delete;
+      ~LogicalAnalysis(void);
     public:
-      RefinementTracker& operator=(const RefinementTracker &rhs);
+      LogicalAnalysis& operator=(const LogicalAnalysis &rhs) = delete;
     public:
       RefinementOp* create_refinement(const LogicalUser &user,
           PartitionNode *partition, const FieldMask &refinement_mask,
@@ -1148,6 +1152,11 @@ namespace Legion {
       std::set<RtEvent> &applied_events;
       // Need these in order for control replication
       LegionVector<PendingRefinement> pending_refinements;
+      // Keep track of which which nodes we've done projection
+      // close operations from to make sure we don't perform
+      // duplicate closes and accidentally invalidate on of our
+      // prior projections
+      FieldMaskSet<RegionTreeNode> projection_closes;
     };
 
     /**
