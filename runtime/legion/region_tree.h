@@ -488,7 +488,7 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        const ProjectionInfo &projection_info,
                                        const RegionTreePath &path,
-                                       RefinementTracker &refinement_tracker);
+                                       LogicalAnalysis &logical_analysis);
       bool perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
                                      const RegionTreePath &path,
@@ -3822,7 +3822,7 @@ namespace Legion {
                                  FieldMask &disjoint_complete_below,
                                  FieldMask &first_touch_refinement,
                                  FieldMaskSet<RefinementOp> &refinements,
-                                 RefinementTracker &refinement_tracker,
+                                 LogicalAnalysis &logical_analysis,
                                  const bool track_disjoint_complete_below,
                                  const bool check_unversioned);
       void register_local_user(LogicalState &state,
