@@ -5023,7 +5023,8 @@ function codegen.expr_partition_by_field(cx, node)
     var [ip] = c.legion_index_partition_create_by_field(
       [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
       field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0,
-      [partition_kind(std.disjoint, node.completeness)])
+      [partition_kind(std.disjoint, node.completeness)],
+      c.legion_untyped_buffer_t {nil, 0})
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [region.value].impl, [ip])
   end
@@ -5129,7 +5130,7 @@ function codegen.expr_image(cx, node)
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id, colors,
       [partition_kind(node.disjointness, node.completeness)],
-      c.AUTO_GENERATE_ID, 0, 0)
+      c.AUTO_GENERATE_ID, 0, 0, c.legion_untyped_buffer_t {nil, 0})
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [parent.value].impl, [ip])
   end
@@ -5193,7 +5194,7 @@ function codegen.expr_preimage(cx, node)
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
       [partition_kind(node.disjointness, node.completeness)],
-      c.AUTO_GENERATE_ID, 0, 0)
+      c.AUTO_GENERATE_ID, 0, 0, c.legion_untyped_buffer_t {nil, 0})
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [region.value].impl, [ip])
   end

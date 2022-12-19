@@ -5956,11 +5956,11 @@ namespace Legion {
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -7677,13 +7677,13 @@ namespace Legion {
     { 
       perform_base_dependence_analysis(false/*permit projection*/);
       ProjectionInfo projection_info;
-      RefinementTracker refinement_tracker(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx],
-                                                     refinement_tracker);
+                                                     logical_analysis);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
@@ -7696,7 +7696,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx],
-                                                     refinement_tracker);
+                                                     logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -7710,7 +7710,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  projection_info,
                                                  gather_privilege_paths[idx],
-                                                 refinement_tracker);
+                                                 logical_analysis);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -7722,7 +7722,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
                                                  scatter_privilege_paths[idx],
-                                                 refinement_tracker);
+                                                 logical_analysis);
       }
     }
 
@@ -9985,7 +9985,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis(true/*permit projection*/);
-      RefinementTracker refinement_tracker(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this, map_applied_conditions);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         ProjectionInfo src_info(runtime, src_requirements[idx], launch_space); 
@@ -9993,7 +9993,7 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_info,
                                                      src_privilege_paths[idx],
-                                                     refinement_tracker);
+                                                     logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -10008,7 +10008,7 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_info,
                                                      dst_privilege_paths[idx],
-                                                     refinement_tracker);
+                                                     logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -10026,7 +10026,7 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
-                                                 refinement_tracker);
+                                                 logical_analysis);
         }
       }
       if (!dst_indirect_requirements.empty())
@@ -10042,7 +10042,7 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
-                                                 refinement_tracker);
+                                                 logical_analysis);
         }
       }
     }
@@ -13025,11 +13025,11 @@ namespace Legion {
       // for other kinds of operations 
       // see RegionTreeNode::register_logical_node
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -13384,11 +13384,11 @@ namespace Legion {
       // close operations necessary for the virtual close op to
       // do its job, so it needs to do nothing else
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -14213,7 +14213,7 @@ namespace Legion {
     void AdvisementOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      RefinementTracker refinement_tracker(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this, map_applied_conditions);
       for (unsigned idx = 0; idx < requirements.size(); idx++)
       {
         const RegionRequirement &req = requirements[idx];
@@ -14226,7 +14226,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, req,
                                                        projection_info,
                                                        privilege_paths[idx],
-                                                       refinement_tracker);
+                                                       logical_analysis);
           if (runtime->legion_spy_enabled)
           {
             LegionSpy::log_logical_requirement(unique_op_id, idx, 
@@ -14251,7 +14251,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, 0/*idx*/, req,
                                                        projection_info,
                                                        privilege_paths[idx],
-                                                       refinement_tracker);
+                                                       logical_analysis);
           if (runtime->legion_spy_enabled)
           {
             LegionSpy::log_logical_requirement(unique_op_id, idx, 
@@ -14581,11 +14581,11 @@ namespace Legion {
         check_acquire_privilege();
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -15480,12 +15480,12 @@ namespace Legion {
                               wait_barriers, arrive_barriers);
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       // Register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -19266,12 +19266,12 @@ namespace Legion {
       ProjectionInfo projection_info;
       if (is_index_space)
         projection_info = ProjectionInfo(runtime, requirement, launch_space); 
-      RefinementTracker refinement_tracker(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
                                                    privilege_path,
-                                                   refinement_tracker);
+                                                   logical_analysis);
       // Record this dependent partition op with the context so that it 
       // can track implicit dependences on it for later operations
       parent_ctx->update_current_implicit(this);
@@ -21319,11 +21319,11 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -21943,11 +21943,11 @@ namespace Legion {
     {
       perform_base_dependence_analysis();
       ProjectionInfo projection_info(runtime, requirement, launch_space);
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -22919,11 +22919,11 @@ namespace Legion {
       if (runtime->check_privileges)
         check_privilege();
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -23630,12 +23630,12 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         log_requirement();
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -24348,11 +24348,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ProjectionInfo projection_info;
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------
@@ -24711,12 +24711,12 @@ namespace Legion {
       requirement.projection = resources.impl->get_projection();
       if (runtime->legion_spy_enabled)
         log_requirement();
-      RefinementTracker tracker(this, map_applied_conditions);
+      LogicalAnalysis analysis(this, map_applied_conditions);
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path, tracker);
+                                                   privilege_path, analysis);
     }
 
     //--------------------------------------------------------------------------

@@ -1790,7 +1790,7 @@ namespace Legion {
                                         const RegionRequirement &req,
                                         const ProjectionInfo &projection_info,
                                         const RegionTreePath &path,
-                                        RefinementTracker &refinement_tracker)
+                                        LogicalAnalysis &logical_analysis)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1830,7 +1830,7 @@ namespace Legion {
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                      projection_info, unopened_mask, already_closed_mask, 
                      written_disjoint_complete, first_touch_refinement, 
-                     refinements, refinement_tracker,
+                     refinements, logical_analysis,
                      true/*track disjoint complete below*/, 
                      check_for_unversioned);
 #ifdef DEBUG_LEGION
@@ -15711,7 +15711,7 @@ namespace Legion {
                                        FieldMask &disjoint_complete_below,
                                        FieldMask &first_touch_refinement,
                                        FieldMaskSet<RefinementOp> &refinements,
-                                       RefinementTracker &refinement_tracker,
+                                       LogicalAnalysis &logical_analysis,
                                        const bool track_disjoint_complete_below,
                                        const bool check_unversioned)
     //--------------------------------------------------------------------------
@@ -16036,14 +16036,14 @@ namespace Legion {
             next_child->register_logical_user(ctx, user, path, trace_info,
                      proj_info, unopened_field_mask, already_closed_mask, 
                      child_disjoint_complete, first_touch_refinement,
-                     refinements, refinement_tracker,
+                     refinements, logical_analysis,
                      true/*track disjoint complete below*/, 
                      false/*check unversioned*/);
           else
             next_child->register_logical_user(ctx, user, path, trace_info,
                      proj_info, unopened_field_mask, already_closed_mask, 
                      child_disjoint_complete, first_touch_refinement,
-                     refinements, refinement_tracker,
+                     refinements, logical_analysis,
                      false/*track disjoint complete below*/, 
                      false/*check unversioned*/);
         }
@@ -16051,7 +16051,7 @@ namespace Legion {
           next_child->register_logical_user(ctx, user, path, trace_info,
              proj_info, unopened_field_mask, already_closed_mask, 
              child_disjoint_complete, first_touch_refinement,
-             refinements, refinement_tracker,
+             refinements, logical_analysis,
              track_disjoint_complete_below, false/*check unversioned*/);
         if (!refinements.empty() &&
             (!state.curr_epoch_users.empty() || 
@@ -16387,11 +16387,11 @@ namespace Legion {
                 child_disjoint_complete -= refinement_mask;
                 PartitionNode *part_child = next_child->as_partition_node();
                 // Check to see if we have already have a refinement
-                if (refinement_tracker.deduplicate(part_child, refinement_mask))
+                if (logical_analysis.deduplicate(part_child, refinement_mask))
                 {
                   // Create a refinement operation
                   RefinementOp *refinement_op = 
-                    refinement_tracker.create_refinement(user, part_child, 
+                    logical_analysis.create_refinement(user, part_child, 
                                               refinement_mask, trace_info);
                   // We can't modify the disjoint complete tree yet because
                   // we need to wait for all the region requirements to be

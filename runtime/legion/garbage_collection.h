@@ -42,6 +42,7 @@ namespace Legion {
       LEAF_CONTEXT_DC = 0x10,
       INNER_CONTEXT_DC = 0x11,
       SHARD_MANAGER_DC = 0x12,
+      CONSTRAINT_SET_DC = 0x13,
       // be careful making this last one bigger than 0x20! see instance encoding
       DIST_TYPE_LAST_DC = 0x20,  // must be last
     };

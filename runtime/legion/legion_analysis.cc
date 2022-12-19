@@ -4010,23 +4010,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    RefinementTracker::RefinementTracker(Operation *o,std::set<RtEvent> &events)
+    LogicalAnalysis::LogicalAnalysis(Operation *o,std::set<RtEvent> &events)
       : op(o), context(op->get_context()), applied_events(events)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    RefinementTracker::RefinementTracker(const RefinementTracker &rhs)
-      : op(rhs.op), context(rhs.context), applied_events(rhs.applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RefinementTracker::~RefinementTracker(void)
+    LogicalAnalysis::~LogicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
       if (!pending_refinements.empty())
@@ -4073,16 +4064,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RefinementTracker& RefinementTracker::operator=(const RefinementTracker &rs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    RefinementOp* RefinementTracker::create_refinement(const LogicalUser &user,
+    RefinementOp* LogicalAnalysis::create_refinement(const LogicalUser &user,
                      PartitionNode *partition, const FieldMask &refinement_mask,
                      const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -4108,7 +4090,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RefinementTracker::deduplicate(PartitionNode *child, FieldMask &mask)
+    bool LogicalAnalysis::deduplicate(PartitionNode *child, FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       for (LegionVector<PendingRefinement>::iterator it =
