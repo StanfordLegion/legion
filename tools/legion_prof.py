@@ -38,8 +38,10 @@ import heapq
 import time
 import itertools
 import io
+import csv, _csv
 from functools import reduce
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Union, Dict, List, Tuple, Type, Set, Optional, NoReturn, ItemsView, KeysView, ValuesView, Any
 
 from legion_util import typeassert, typecheck
@@ -180,6 +182,25 @@ request = {
     2 : 'copy',
 }
 
+class CopyKind(Enum):
+    Copy = 0
+    Gather = 1
+    Scatter = 2
+    GatherScatter = 3
+    
+    def __repr__(self) -> str:
+        return str(self.name)
+
+class ChanKind(Enum):
+    Copy = 0
+    Fill = 1
+    Gather = 2
+    Scatter = 3
+    DepPart = 4
+    
+    def __repr__(self) -> str:
+        return str(self.name)
+
 # Micro-seconds per pixel
 US_PER_PIXEL = 100
 # Pixels per level of the picture
@@ -193,38 +214,46 @@ UINT_MAX = (1 << 64) - 1
 # prof_uid counter
 prof_uid_ctr = 0
 
+# create an empty for creating instance without initiation_op
+#  will init it with Operation(-1) later
+EMPTY_OP = None
+
 def get_prof_uid() -> int:
     global prof_uid_ctr
     prof_uid_ctr += 1
     return prof_uid_ctr
 
+def by_prof_uid(element: Tuple) ->int:
+  return element[1]
+
 @typecheck
-def data_tsv_str(level: int, level_ready: Union[int, None], 
-                 ready: Union[float, None], 
+def data_tsv_str(level: int, level_ready: Optional[int], 
+                 ready: Optional[float], 
                  start: float, end: float, 
                  color: str, opacity: str, title: str,
                  initiation: Union[int, str, None], 
-                 _in: Union[str, None], 
-                 out: Union[str, None], 
-                 children: Union[str, None], 
-                 parents: Union[str, None], 
+                 _in: Optional[str], 
+                 out: Optional[str], 
+                 children: Optional[str], 
+                 parents: Optional[str], 
                  prof_uid: int,
-                 op_id: Union[int, None] = None
-    ) -> str:
+                 op_id: Optional[int],
+                 instances: Optional[str]
+    ) -> List:
     # replace None with ''
     def xstr(s: Union[None, float, int, str]) -> str:
         if s is None:
             return ""
         else:
             return str(s)
-    return xstr(level) + "\t" + xstr(level_ready) + "\t" + \
-           xstr('%.3f' % ready if ready else ready) + "\t" + \
-           xstr('%.3f' % start if start else start) + "\t" + \
-           xstr('%.3f' % end if end else end) + "\t" + \
-           xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
-           xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
-           xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\t" + \
-           xstr(op_id) + "\n"
+    return [xstr(level), xstr(level_ready),
+            xstr('%.3f' % ready if ready else ready),
+            xstr('%.3f' % start if start else start),
+            xstr('%.3f' % end if end else end),
+            xstr(color), xstr(opacity), xstr(title),
+            xstr(initiation), xstr(_in), xstr(out),
+            xstr(children), xstr(parents), xstr(prof_uid),
+            xstr(op_id), xstr(instances)]
 
 def dump_json(value: Union[Set, List]) -> str:
     return json.dumps(value, separators=(',', ':'))
@@ -288,7 +317,7 @@ def color_helper(step: int, num_steps: int) -> str:
 
 # Helper function for size
 @typecheck
-def size_pretty(size: Union[int, None]) -> str:
+def size_pretty(size: Optional[int]) -> str:
     if size is not None:
         if size >= (1024*1024*1024):
             # GBs
@@ -427,7 +456,7 @@ class HasInitiationDependencies(Dependencies):
         if isinstance(self, (MetaTask, MapperCall, Copy, Fill, DepPart, Instance)):
             unique_tuple = self.get_unique_tuple()
             if self.initiation in state.operations:
-                op = state.find_op(self.initiation)
+                op = state.find_or_create_op(self.initiation)
                 # this op exists
                 if op.proc is not None:
                     if self.initiation not in op_dependencies:
@@ -455,7 +484,7 @@ class HasInitiationDependencies(Dependencies):
         """
         # add the out direction
         if self.initiation in state.operations:
-            op = state.find_op(self.initiation)
+            op = state.find_or_create_op(self.initiation)
             if op.proc is not None: # this op exists
                 op_tuple = op.get_unique_tuple()
                 assert isinstance(self, TimeRange)
@@ -496,10 +525,10 @@ class TimeRange(ABC):
 
     @typecheck
     def __init__(self, 
-                 create: Union[float, None], 
-                 ready: Union[float, None], 
-                 start: Union[float, None],
-                 stop: Union[float, None]
+                 create: Optional[float], 
+                 ready: Optional[float], 
+                 start: Optional[float],
+                 stop: Optional[float]
     ) -> None:
         assert create is None or (create is not None and ready is not None and create <= ready)
         assert ready is None or (ready is not None and start is not None and ready <= start)
@@ -573,8 +602,8 @@ class TimeRange(ABC):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None],
-                        stop: Union[float, None]
+                        start: Optional[float],
+                        stop: Optional[float]
     ) -> bool:
         if self.trimmed:
             return not self.was_removed
@@ -706,7 +735,7 @@ class TaskKind(object):
     __slots__ = ['task_id', 'name']
 
     @typecheck
-    def __init__(self, task_id: int, name: Union[str, None]) -> None:
+    def __init__(self, task_id: int, name: Optional[str]) -> None:
         self.task_id = task_id
         self.name: Optional[str] = name
 
@@ -815,8 +844,8 @@ class Field(StatObject):
 
     @typecheck
     def __init__(self, unique_id: int, field_id: int, 
-                 size: Union[int, None],
-                 name: Union[str, None]
+                 size: Optional[int],
+                 name: Optional[str]
     ) -> None:
         StatObject.__init__(self)
         self.unique_id = unique_id
@@ -854,7 +883,7 @@ class FieldSpace(StatObject):
     __slots__ = ['fspace_id', 'name']
 
     @typecheck
-    def __init__(self, fspace_id: int, name: Union[str, None]) -> None:
+    def __init__(self, fspace_id: int, name: Optional[str]) -> None:
         StatObject.__init__(self)
         self.fspace_id = fspace_id
         self.name = name
@@ -887,7 +916,7 @@ class Partition(StatObject):
     __slots__ = ['unique_id', 'parent', 'disjoint', 'point', 'name']
 
     @typecheck
-    def __init__(self, unique_id: int, name: Union[str, None]) -> None:
+    def __init__(self, unique_id: int, name: Optional[str]) -> None:
         StatObject.__init__(self)
         self.unique_id = unique_id
         self.parent = None
@@ -928,7 +957,7 @@ class IndexSpace(StatObject):
     ]
 
     @typecheck
-    def __init__(self, is_type: Union[int, None], 
+    def __init__(self, is_type: Optional[int], 
                  unique_id: int, 
                  dim: int
     ) -> None:
@@ -1060,7 +1089,7 @@ class Variant(StatObject):
     @typecheck
     def __init__(self, 
                  variant_id: int, 
-                 name: Union[str, None], 
+                 name: Optional[str], 
                  message: bool = False, 
                  ordered_vc: bool = False
     ) -> None:
@@ -1151,15 +1180,20 @@ class HasWaiters(ABC):
             active_time += (self.stop - start)
         return active_time
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=int,
+                op_id=Optional[int],
+                instances=Optional[str])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
                  level: int, 
                  level_ready: int,
-                 op_id: Union[int, None] = None
+                 op_id: Optional[int],
+                 instances: Optional[str]
     ) -> None:
         if not isinstance(self, (TimeRange)):
             assert 0, "Type is: " +  str(type(self)) + ", is not Task or MetaTask."
@@ -1194,7 +1228,8 @@ class HasWaiters(ABC):
                                     children = children,
                                     parents = parents,
                                     prof_uid = self.prof_uid,
-                                    op_id = op_id)
+                                    op_id = op_id,
+                                    instances = instances)
                 # only write once
                 _in = ""
                 out = ""
@@ -1214,7 +1249,9 @@ class HasWaiters(ABC):
                                     children = "",
                                     parents = "",
                                     prof_uid = self.prof_uid,
-                                    op_id = op_id)
+                                    op_id = op_id,
+                                    instances = instances)
+
                 ready = data_tsv_str(level = cur_level,
                                      level_ready = l_ready,
                                      ready = wait_interval.ready,
@@ -1229,11 +1266,12 @@ class HasWaiters(ABC):
                                      children = "",
                                      parents = "",
                                      prof_uid = self.prof_uid,
-                                     op_id = op_id)
+                                     op_id = op_id,
+                                     instances = instances)
 
-                tsv_file.write(init)
-                tsv_file.write(wait)
-                tsv_file.write(ready)
+                tsv_file.writerow(init)
+                tsv_file.writerow(wait)
+                tsv_file.writerow(ready)
                 start = max(start, wait_interval.end)
             if start < self.stop:
                 end = data_tsv_str(level = cur_level,
@@ -1250,9 +1288,10 @@ class HasWaiters(ABC):
                                    children = "",
                                    parents = "",
                                    prof_uid = self.prof_uid,
-                                   op_id = op_id)
+                                   op_id = op_id,
+                                   instances = instances)
 
-                tsv_file.write(end)
+                tsv_file.writerow(end)
         else:
             if (level_ready != None):
                 l_ready = base_level + (max_levels_ready - level_ready)
@@ -1272,9 +1311,10 @@ class HasWaiters(ABC):
                                 children = children,
                                 parents = parents,
                                 prof_uid = self.prof_uid,
-                                op_id = op_id)
+                                op_id = op_id,
+                                instances = instances)
 
-            tsv_file.write(line)
+            tsv_file.writerow(line)
 
 class Base(ABC):
     __slots__ = ['prof_uid', 'level', 'level_ready']
@@ -1312,11 +1352,46 @@ class ProcOperation(Base):
         cur_level = self.proc.max_levels - self.level
         return (self.proc.node_id, self.proc.proc_in_node, self.prof_uid)
 
+class OperationInstInfo(object):
+    __slots__ = ['inst_uid', 'index', 'field_id', 'instance']
+
+    @typecheck
+    def __init__(self, 
+                 inst_uid: int, index: int, 
+                 field_id: int
+    ) -> None:
+        self.inst_uid = inst_uid
+        self.index = index # which region requirement is using the instance
+        self.field_id = field_id
+        self.instance: Optional["Instance"] = None
+
+    # add instance by instance_uid
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        flag = False
+        for key, instance in instances.items():
+            if  self.inst_uid == key:
+                self.instance = instance
+                flag = True
+                break
+        if flag == False:
+            assert 0, "Operation can not find inst:" + str(hex(self.inst_uid))
+
+    # TODO: they are not used now
+    @typecheck
+    def get_short_text(self) -> str:
+        assert self.instance is not None
+        return 'inst=%s, rr index=%s, field_id=%s' % (hex(self.instance.inst_id), self.index, self.field_id)
+
+    @typecheck
+    def __repr__(self) -> str:
+        return self.get_short_text()
+
 class Operation(ProcOperation):
     __slots__ = [
         'op_id', 'kind_num', 'kind', 'is_task', 'is_meta', 'is_multi',
         'is_proftask', 'name', 'variant', 'task_kind', 'color', 'owner',
-        'parent_id', 'provenance'
+        'parent_id', 'provenance', 'operation_inst_infos'
     ]
 
     @typecheck
@@ -1336,6 +1411,7 @@ class Operation(ProcOperation):
         self.owner = None
         self.parent_id: Optional[int] = None
         self.provenance = None
+        self.operation_inst_infos: List[OperationInstInfo] = [] # inst_uid, index_id, field_id and Instance
 
     @typecheck
     def assign_color(self, color_map: Dict[int, str]) -> None:
@@ -1368,6 +1444,26 @@ class Operation(ProcOperation):
         if isinstance(self, TimeRange):
             return TimeRange.is_trimmed(self)
         return False
+
+    @typecheck
+    def add_operation_inst_info(self, entry: OperationInstInfo) -> None:
+        self.operation_inst_infos.append(entry)
+
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        for node in self.operation_inst_infos:
+            node.link_instance(instances)
+
+    @typecheck
+    def _dump_instances(self) -> Optional[str]:
+        instances = ""
+        instances_set = set()
+        for node in self.operation_inst_infos:
+            assert node.instance is not None
+            instances_set.add((hex(node.instance.inst_id), node.instance.prof_uid))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
+        return instances
 
     @typecheck
     def __repr__(self) -> str:
@@ -1417,6 +1513,7 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         self.parent_id = op.parent_id
         if op.provenance is not None:
             self.provenance = op.provenance
+        self.operation_inst_infos = op.operation_inst_infos
 
     @typecheck
     def assign_color(self, color: Dict[int, str]) -> None:
@@ -1427,9 +1524,11 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
         self.color = self.variant.color
         self.base_op.color = self.color
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=int)
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1438,11 +1537,13 @@ class Task(HasWaiters, TimeRange, Operation, HasDependencies): #type: ignore
     ) -> None:
         # update the initiation
         self.initiation = self.parent_id
+        instances = self._dump_instances()
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
                                    level_ready,
-                                   self.op_id)
+                                   self.op_id,
+                                   instances)
 
     @typecheck
     def get_color(self) -> str:
@@ -1524,9 +1625,11 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
     def mapper_time(self) -> float:
         return 0.0
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=int)
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
@@ -1536,7 +1639,7 @@ class MetaTask(HasWaiters, TimeRange, ProcOperation, HasInitiationDependencies):
         return HasWaiters.emit_tsv(self, tsv_file, base_level, max_levels,
                                    max_levels_ready,
                                    level,
-                                   level_ready)
+                                   level_ready, None, None)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1581,14 +1684,16 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
     def mapper_time(self) -> float:
         return 0.0
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Optional[int])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         if level_ready is not None:
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -1608,8 +1713,9 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
                                 children = None,
                                 parents = None,
                                 prof_uid = self.prof_uid,
-                                op_id = self.proftask_id)
-        tsv_file.write(tsv_line)
+                                op_id = self.proftask_id,
+                                instances = None)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1661,14 +1767,16 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
         assert self.kind is not None and self.kind.color is not None
         return self.kind.color
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Optional[int])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         title = repr(self)
         _in = dump_json(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
@@ -1693,9 +1801,11 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None,
+                                instances = None)
 
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def active_time(self) -> float:
@@ -1762,14 +1872,16 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
         assert self.kind.color is not None
         return self.kind.color
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Optional[int])
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         if (level_ready is not None):
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -1788,9 +1900,11 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
                                 out = None,
                                 children = None,
                                 parents = None,
-                                prof_uid = self.prof_uid)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
 
-        tsv_file.write(tsv_line)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def active_time(self) -> float:
@@ -1844,14 +1958,16 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
     def mapper_time(self) -> float:
         return 0.0
 
-    @typecheck
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=int, level=int,
+                level_ready=Optional[int])
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         if level_ready is not None:
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -1870,8 +1986,10 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
                                 out = None,
                                 children = None,
                                 parents = None,
-                                prof_uid = self.prof_uid)
-        tsv_file.write(tsv_line)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def __repr__(self) -> str:
@@ -1897,58 +2015,166 @@ class ChanOperation(Base):
         cur_level = self.chan.max_live_copies+1 - self.level
         return (str(self.chan), self.prof_uid)
 
-class CopyInfo(object):
+class CopyInstInfo(object):
     __slots__ = [
-        'src_inst', 'dst_inst', 'fevent', 'num_fields', 'request_type', 'num_hops'
+        'src', 'dst', 'src_fid', 'dst_fid', 'src_inst_uid', 'dst_inst_uid', 'fevent', 'indirect',
+        'src_instance', 'dst_instance'
         ]
 
-    @typecheck
-    def __init__(self, 
-                 src_inst: int, dst_inst: int, 
-                 fevent: int, num_fields: int, 
-                 request_type: int, num_hops: int
+    @typeassert(src_fid=int, dst_fid=int,
+                src_inst_uid=int, dst_inst_uid=int,
+                fevent=int, indirect=bool)
+    def __init__(self, src: Optional["Memory"], 
+                 dst: Optional["Memory"],
+                 src_fid: int, dst_fid: int,
+                 src_inst_uid: int, dst_inst_uid: int, 
+                 fevent: int, indirect: bool
     ) -> None:
-        self.src_inst = src_inst
-        self.dst_inst = dst_inst
+        self.src = src
+        self.dst = dst
+        self.src_fid = src_fid
+        self.dst_fid = dst_fid
+        self.src_inst_uid = src_inst_uid
+        self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
-        self.num_fields = num_fields
-        self.request_type = request_type
-        self.num_hops = num_hops
+        self.indirect = indirect
+        # if gather dst = None, if scatter, src = None
+        self.src_instance: Optional["Instance"] = None
+        self.dst_instance: Optional["Instance"] = None
+
+    # add instance by instance_id
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        src_flag = False
+        dst_flag = False
+        for key, instance in instances.items():
+            if  self.src_inst_uid == key:
+                self.src_instance = instance
+                src_flag = True
+            if  self.dst_inst_uid == key:
+                self.dst_instance = instance
+                dst_flag = True
+            if self.src_inst_uid == 0:
+                assert self.indirect == True
+                src_flag = True
+            if  self.dst_inst_uid == 0:
+                assert self.indirect == True
+                dst_flag = True   
+            if src_flag and dst_flag:
+                break
+        if src_flag == False:
+            assert 0, "Copy can not find src_inst:" + str(hex(self.src_inst_uid))
+        if dst_flag == False:
+            assert 0, "Copy can not find dst_inst:" + str(hex(self.dst_inst_uid))
 
     @typecheck
     def get_short_text(self) -> str:
-        return 'src_inst=%s, dst_inst=%s, fields=%s, type=%s, hops=%s' % (hex(self.src_inst), hex(self.dst_inst), self.num_fields, request[self.request_type], self.num_hops)
+        if (self.src_instance is not None) and (self.dst_instance is not None):
+            return 'src_inst=%s, dst_inst=%s' % (hex(self.src_instance.inst_id), hex(self.dst_instance.inst_id))
+        elif self.src_instance is None:
+            assert self.dst_instance is not None
+            return 'Scatter: dst_indirect_inst=%s' % (hex(self.dst_instance.inst_id))
+        elif self.dst_instance is None:
+            return 'Gather: src_indirect_inst=%s' % (hex(self.src_instance.inst_id))
+        else:
+            print(self.src_inst_uid, self.dst_inst_uid)
+            assert 0
 
     @typecheck
     def __repr__(self) -> str:
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['src', 'dst', 'size', 'fevent', 'src_inst', 'dst_inst', 'num_requests', 'copy_info']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
     
     # FIXME: fix for python 3.8
-    @typeassert(initiation_op=Operation, size=int,
-                create=float, ready=float, start=float, stop=float,
-                fevent=int, num_requests=int)
-    def __init__(self, src: "Memory", dst: "Memory", 
-                 initiation_op: Operation, size: int, 
-                 create: float, ready: float, 
-                 start: float, stop: float, 
-                 fevent: int, num_requests: int
-    ) -> None:
+    @typecheck
+    def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
-        HasInitiationDependencies.__init__(self, initiation_op)
-        TimeRange.__init__(self, create, ready, start, stop)
-        self.src = src
-        self.dst = dst
-        self.size = size
+        TimeRange.__init__(self, None, None, None, None)
+        assert isinstance(EMPTY_OP, Operation)
+        HasInitiationDependencies.__init__(self, EMPTY_OP)
+        self.size = 0
+        self.num_hops = 0
+        self.request_type = 0
         self.fevent = fevent
-        self.num_requests = num_requests
-        self.copy_info: List[CopyInfo] = list()
+        self.copy_kind: Optional[CopyKind] = None
+        self.copy_inst_infos: List[CopyInstInfo] = list()
 
-    @typeassert(entry=CopyInfo)
-    def add_copy_info(self, entry: CopyInfo) -> None:
-        self.copy_info.append(entry)
+    @typecheck
+    def add_copy_info(self, initiation_op: Operation, size: int, 
+                      create: float, ready: float, 
+                      start: float, stop: float, 
+                      num_hops: int, request_type: int
+    ) -> None:
+        # sanity check
+        assert self.initiation_op == EMPTY_OP 
+        self.size = size
+        self.num_hops = num_hops
+        self.request_type = request_type
+        self.create = create
+        self.ready = ready
+        self.start = start
+        self.stop = stop
+        self.initiation_op = initiation_op
+        self.initiation = initiation_op.op_id
+
+    @typecheck
+    def add_copy_inst_info(self, copy_inst_info: CopyInstInfo
+    ) -> None:
+        self.copy_inst_infos.append(copy_inst_info)
+
+    def add_channel(self, state: "State") -> None:
+        # sanity check
+        assert self.chan is None
+        assert self.copy_kind is None
+        isindrect = False
+        for copy_inst_info in self.copy_inst_infos:
+            # this is the copy inst info for points of a indirect copy (meta copy)
+            if copy_inst_info.indirect:
+                # gather (src points)
+                if copy_inst_info.dst == None:
+                    assert copy_inst_info.src is not None
+                    self.copy_kind = CopyKind.Gather
+                # scatter (dst points)
+                elif copy_inst_info.src == None:
+                    assert copy_inst_info.dst is not None
+                    self.copy_kind = CopyKind.Scatter
+                # gather with scatter
+                else:
+                    self.copy_kind = CopyKind.GatherScatter
+                    assert 0, "unimplemented"
+                isindrect = True
+                break
+        if isindrect == False:
+            # sanity check
+            assert len(self.copy_inst_infos) >= 1
+            chan_src = self.copy_inst_infos[0].src
+            chan_dst = self.copy_inst_infos[0].dst
+            for copy_inst_info in self.copy_inst_infos:
+                assert (copy_inst_info.src == chan_src) and (copy_inst_info.dst == chan_dst)
+            self.copy_kind = CopyKind.Copy
+            channel = state.find_or_create_copy_channel(chan_src, chan_dst)
+            channel.add_copy(self)
+        else:
+            # sanity check
+            assert len(self.copy_inst_infos) >= 2
+            if self.copy_kind == CopyKind.Gather:
+                chan_dst = self.copy_inst_infos[1].dst
+                # sanity check
+                for copy_inst_info in self.copy_inst_infos[1:]:
+                    assert copy_inst_info.dst == chan_dst
+                channel = state.find_or_create_gather_channel(chan_dst)
+                channel.add_copy(self)
+            elif self.copy_kind == CopyKind.Scatter:
+                chan_src = self.copy_inst_infos[1].src
+                # sanity check
+                for copy_inst_info in self.copy_inst_infos[1:]:
+                    assert copy_inst_info.src == chan_src
+                channel = state.find_or_create_scatter_channel(chan_src)
+                channel.add_copy(self)
+            else:
+                assert 0, "unimplemented"
 
     @typecheck
     def get_color(self) -> str:
@@ -1957,16 +2183,36 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val =  'size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_info))
+        val = repr(self.copy_kind) + ': size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
         cnt = 0
-        for node in self.copy_info:
+        for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
             cnt = cnt+1
         return val
 
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        for node in self.copy_inst_infos:
+            node.link_instance(instances)
+
     @typecheck
+    def _dump_instances(self) -> str:
+        instances = ""
+        instances_set = set()
+        for node in self.copy_inst_infos:
+            if node.src_instance is not None:
+                instances_set.add((hex(node.src_instance.inst_id), node.src_instance.prof_uid))
+            if node.dst_instance is not None:
+                instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
+        return instances
+
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))
     def emit_tsv(self,
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: None,
@@ -1982,6 +2228,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         out = dump_json(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
         children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        instances = self._dump_instances()
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
@@ -1996,30 +2243,122 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
-        tsv_file.write(tsv_line)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = instances)
+        tsv_file.writerow(tsv_line)
 
-class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst']
+class FillInstInfo(object):
+    __slots__ = [
+        'dst', 'fid', 'dst_inst_uid', 'fevent', 'dst_instance'
+        ]
 
-    # FIXME: fix for python 3.8
-    @typeassert(initiation_op=Operation,
-                create=float, ready=float, start=float, stop=float)
-    def __init__(self, dst: "Memory", initiation_op: Operation, 
-                 create: float, ready: float, 
-                 start: float, stop: float
+    @typeassert(fid=int, dst_inst_uid=int, fevent=int)
+    def __init__(self, dst: "Memory", fid: int,
+                 dst_inst_uid: int, 
+                 fevent: int
     ) -> None:
-        ChanOperation.__init__(self)
-        HasInitiationDependencies.__init__(self, initiation_op)
-        TimeRange.__init__(self, create, ready, start, stop)
         self.dst = dst
+        self.fid = fid
+        self.dst_inst_uid = dst_inst_uid
+        self.fevent = fevent
+        self.dst_instance: Optional["Instance"] = None
 
-    def __repr__(self) -> str:
-        return 'Fill'
+    # add instance by instance_id
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        dst_flag = False
+        for key, instance in instances.items():
+            if  self.dst_inst_uid == key:
+                self.dst_instance = instance
+                dst_flag = True
+                break
+        if dst_flag == False:
+           assert 0, "Fill can not find dst_inst:" + str(hex(self.dst_inst_uid))
 
     @typecheck
+    def get_short_text(self) -> str:
+        assert self.dst_instance is not None
+        return 'dst_inst=%s, fid=%s' % (hex(self.dst_instance.inst_id), self.fid)
+
+    @typecheck
+    def __repr__(self) -> str:
+        return self.get_short_text()
+
+class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'fill_inst_infos']
+
+    # FIXME: fix for python 3.8
+    @typecheck
+    def __init__(self, fevent: int) -> None:
+        ChanOperation.__init__(self)
+        TimeRange.__init__(self, None, None, None, None)
+        assert isinstance(EMPTY_OP, Operation)
+        HasInitiationDependencies.__init__(self, EMPTY_OP)
+        self.size = 0
+        self.fevent = fevent
+        self.fill_inst_infos: List[FillInstInfo] = list()
+
+    @typecheck
+    def add_fill_info(self, initiation_op: Operation, size: int,
+                      create: float, ready: float, 
+                      start: float, stop: float
+    ) -> None:
+        # sanity check
+        assert self.initiation_op == EMPTY_OP 
+        self.size = size
+        self.create = create
+        self.ready = ready
+        self.start = start
+        self.stop = stop
+        self.initiation_op = initiation_op
+        self.initiation = initiation_op.op_id
+
+    @typecheck
+    def add_fill_inst_info(self, 
+                           fill_inst_info: FillInstInfo
+    ) -> None:
+        self.fill_inst_infos.append(fill_inst_info)
+
+    def add_channel(self, state: "State") -> None:
+        # sanity check
+        assert self.chan is None
+        assert len(self.fill_inst_infos) >= 1
+        chan_dst = self.fill_inst_infos[0].dst
+        for fill_inst_info in self.fill_inst_infos:
+            assert fill_inst_info.dst == chan_dst
+        channel = state.find_or_create_fill_channel(fill_inst_info.dst)
+        channel.add_copy(self)
+
+    def __repr__(self) -> str:
+        val = 'Fill: num reqs=' + str(len(self.fill_inst_infos))
+        cnt = 0
+        for node in self.fill_inst_infos:
+            val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
+            cnt = cnt+1
+        return val
+
+    @typeassert(instances=dict)
+    def link_instance(self, instances: Dict[int, "Instance"]) -> None:
+        for node in self.fill_inst_infos:
+            node.link_instance(instances)
+
+    @typecheck
+    def _dump_instances(self) -> str:
+        instances = ""
+        instances_set = set()
+        for node in self.fill_inst_infos:
+            assert node.dst_instance is not None
+            instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
+        return instances
+
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: None,
@@ -2031,10 +2370,11 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         out = dump_json(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
         children = dump_json(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
         parents = dump_json(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+        instances = self._dump_instances()
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
-                                ready = None,
+                                ready = self.ready,
                                 start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
@@ -2045,8 +2385,10 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
-        tsv_file.write(tsv_line)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = instances)
+        tsv_file.writerow(tsv_line)
 
 class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['part_op']
@@ -2066,9 +2408,11 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
         assert self.part_op in dep_part_kinds
         return dep_part_kinds[self.part_op]
 
-    @typecheck    
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))  
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: None,
@@ -2094,8 +2438,10 @@ class DepPart(ChanOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
-        tsv_file.write(tsv_line)
+                                prof_uid = self.prof_uid,
+                                op_id = None, 
+                                instances = None)
+        tsv_file.writerow(tsv_line)
 
 # Operations rendering on Memories
 # Including: Instance
@@ -2119,17 +2465,19 @@ class MemOperation(Base):
 
 class Instance(MemOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + [
-        'inst_id', 'size', 'ispace', 'fspace', 'tree_id', 'fields',
-        'align_desc', 'dim_order_desc'
+        'inst_uid', 'inst_id', 'size', 'ispace', 'fspace', 'tree_id', 'fields',
+        'align_desc', 'dim_order_desc', 'ready'
     ]
     @typecheck
-    def __init__(self, inst_id: int, initiation_op: Operation) -> None:
+    def __init__(self, inst_uid: int) -> None:
         MemOperation.__init__(self)
-        HasInitiationDependencies.__init__(self, initiation_op)
         TimeRange.__init__(self, None, None, None, None)
+        assert isinstance(EMPTY_OP, Operation)
+        HasInitiationDependencies.__init__(self, EMPTY_OP)
 
-        self.inst_id = inst_id
-        self.size = None
+        self.inst_uid = inst_uid
+        self.inst_id = 0
+        self.size = 0
         self.ispace: List[IndexSpace] = []
         self.fspace: List[FieldSpace] = []
         self.tree_id = None
@@ -2137,9 +2485,25 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         self.align_desc: Dict[FieldSpace, List[Align]] = {}
         self.dim_order_desc: List[int] = []
 
-    @typecheck
+    def add_instance_info(self, inst_id: int, 
+                          mem: "Memory", size: int,
+                          create: float, ready: float, destroy: float, 
+                          initiation_op: Operation) -> None:
+        self.inst_id = inst_id
+        self.mem = mem
+        self.size = size
+        self.create = create
+        self.ready = ready
+        self.start = ready
+        self.stop = destroy
+        self.initiation_op = initiation_op
+        self.initiation = initiation_op.op_id
+
+    @typeassert(base_level=int, max_levels=int,
+                max_levels_ready=type(None), level=int,
+                level_ready=type(None))
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: None,
@@ -2152,6 +2516,7 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
         assert self.ready is not None
         assert self.create is not None
         assert self.ready == self.start
+        assert self.initiation_op is not EMPTY_OP
         inst_name = repr(self)
 
         _in = dump_json(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
@@ -2175,8 +2540,11 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                     out = out,
                                     children = children,
                                     parents = parents,
-                                    prof_uid = self.prof_uid)
-            tsv_file.write(tsv_line)
+                                    prof_uid = self.prof_uid,
+                                    op_id = None,
+                                    instances = None)
+            tsv_file.writerow(tsv_line)
+
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 level_ready = None,
                                 ready = None,
@@ -2190,8 +2558,10 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                                 out = out,
                                 children = children,
                                 parents = parents,
-                                prof_uid = self.prof_uid)
-        tsv_file.write(tsv_line)
+                                prof_uid = self.prof_uid,
+                                op_id = None,
+                                instances = None)
+        tsv_file.writerow(tsv_line)
 
     @typecheck
     def total_time(self) -> float:
@@ -2381,8 +2751,8 @@ class Processor(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None],
-                        stop: Union[float, None]
+                        start: Optional[float],
+                        stop: Optional[float]
     ) -> None:
         trimmed_tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
         for task in self.tasks:
@@ -2471,8 +2841,8 @@ class Processor(object):
             if point.first:
                 point.thing.attach_dependencies(state, op_dependencies, transitive_map)
 
-    @typecheck
-    def emit_tsv(self, tsv_file: io.TextIOWrapper, base_level: int) -> int:
+    @typeassert(base_level=int)
+    def emit_tsv(self, tsv_file: "_csv._writer", base_level: int) -> int:
         # iterate over tasks in start/ready time order
         for point in self.time_points:
             if point.first:
@@ -2649,8 +3019,8 @@ class Memory(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None], 
-                        stop: Union[float, None]
+                        start: Optional[float], 
+                        stop: Optional[float]
     ) -> None:
         trimmed_instances = set()
         for inst in self.instances:
@@ -2661,7 +3031,7 @@ class Memory(object):
     def sort_time_range(self) -> None:
         self.max_live_instances = 0
         # we use ready to stop here for correct utilization calculation. 
-        # but we need to use start to stop for calculating levels
+        # but we need to use create to stop for calculating levels
         time_points_level = list()
         for inst in self.instances:
             self.time_points.append(TimePoint(inst.ready, inst, True, 0))
@@ -2690,9 +3060,9 @@ class Memory(object):
                 assert point.thing.level is not None
                 free_levels.add(point.thing.level)
 
-    @typecheck
+    @typeassert(base_level=int)
     def emit_tsv(self, 
-                 tsv_file: io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int
     ) -> int:
         max_levels = self.max_live_instances + 1
@@ -2771,25 +3141,29 @@ class Memory(object):
     def __gt__(self, other: "Memory") -> bool:
         return self.__cmp__(other) > 0
 
+
+
 class Channel(object):
     __slots__ = [
-        'src', 'dst', 'copies', 'time_points', 'max_live_copies', 'last_time'
+        'src', 'dst', 'channel_kind', 'copies', 'time_points', 'max_live_copies', 'last_time'
     ]
 
     @typecheck
     def __init__(self, 
-                 src: Union[Memory, None], 
-                 dst: Union[Memory, None]
+                 src: Optional[Memory], 
+                 dst: Optional[Memory],
+                 channel_kind: ChanKind
     ) -> None:
         self.src = src
         self.dst = dst
+        self.channel_kind = channel_kind
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_copies = 0
         self.last_time: Optional[float] = None
 
     @typecheck
-    def node_id(self) -> Union[int, None]:
+    def node_id(self) -> Optional[int]:
         if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
@@ -2801,7 +3175,7 @@ class Channel(object):
             return None
 
     @typecheck
-    def node_id_src(self) -> Union[int, None]:
+    def node_id_src(self) -> Optional[int]:
         if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
@@ -2812,7 +3186,7 @@ class Channel(object):
 
     # mem_idx: 8
     @typecheck
-    def mem_idx_str(self, mem: Union[Memory, None]) -> str:
+    def mem_idx_str(self, mem: Optional[Memory]) -> str:
         if mem is not None:
             if mem.mem_id == 0:
                 return "[all n]"
@@ -2826,7 +3200,7 @@ class Channel(object):
         return str((mem_id >> 40) & ((1 << 16) - 1))
 
     @typecheck
-    def mem_str(self, mem: Union[Memory, None]) -> str:
+    def mem_str(self, mem: Optional[Memory]) -> str:
         if mem and mem.mem_id == 0:
             return "[all n]"
         elif mem and mem.affinity is not None:
@@ -2836,7 +3210,7 @@ class Channel(object):
         assert False
 
     @typecheck
-    def node_id_dst(self) -> Union[int, None]:
+    def node_id_dst(self) -> Optional[int]:
         if self.dst is not None and self.dst.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
@@ -2849,14 +3223,20 @@ class Channel(object):
     def get_short_text(self) -> str:
         if self.dst is None and self.src is None:
             return "Dependent Partition Channel"
-        # fill channel
+        # fill/gather channel
         elif self.src is None:
             assert self.dst is not None
-            dst_mem = self.dst
             if self.dst.affinity is not None:
-                return self.dst.affinity.get_short_text()
+                return self.channel_kind.name + " " + self.dst.affinity.get_short_text()
             else:
-                return "Fill Channel"
+                return self.channel_kind.name + " Channel"
+        # scatter channel
+        elif self.dst is None:
+            assert self.src is not None
+            if self.src.affinity is not None:
+                return self.channel_kind.name + " " + self.src.affinity.get_short_text()
+            else:
+                return self.channel_kind.name + " Channel"
         # normal channels
         elif self.src is not None and self.dst is not None:
             return self.mem_str(self.src) + " to " + self.mem_str(self.dst)
@@ -2874,8 +3254,8 @@ class Channel(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None], 
-                        stop: Union[float, None]
+                        start: Optional[float], 
+                        stop: Optional[float]
     ) -> None:
         trimmed_copies = set()
         for copy in self.copies:
@@ -2906,9 +3286,9 @@ class Channel(object):
                 assert point.thing.level is not None
                 free_levels.add(point.thing.level)
 
-    @typecheck
+    @typeassert(base_level=int)
     def emit_tsv(self, 
-                 tsv_file:io.TextIOWrapper, 
+                 tsv_file: "_csv._writer", 
                  base_level: int) -> int:
         max_levels = self.max_live_copies + 1
         if max_levels > 1:
@@ -2965,8 +3345,8 @@ class Channel(object):
     def __repr__(self) -> str:
         if self.src is None and self.dst is None:
             return 'Dependent Partition Channel'
-        if self.src is None:
-            return 'Fill ' + self.dst.__repr__() + ' Channel'
+        if self.src is None or self.dst is None:
+            return self.channel_kind.name + ' ' + self.dst.__repr__() + ' Channel'
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
@@ -3070,14 +3450,15 @@ class State(object):
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
         'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
-        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map'
+        'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
+        'fill_map'
     ]
     def __init__(self) -> None:
         self.max_dim = 3
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
-        self.channels: Dict[Union[Tuple[Memory, Memory], Memory, None], Channel] = {}
+        self.channels: Dict[Tuple[Optional[Memory], Optional[Memory], ChanKind], Channel] = {}
         self.task_kinds: Dict[int, TaskKind] = {}
         self.variants: Dict[Tuple[int, int], Variant] = {}
         self.meta_variants: Dict[int, Variant] = {}
@@ -3092,13 +3473,14 @@ class State(object):
         self.mapper_calls: Dict[int, MapperCall] = {}
         self.runtime_call_kinds: Dict[int, RuntimeCallKind] = {}
         self.runtime_calls: Dict[int, RuntimeCall] = {}
-        self.instances: Dict[Tuple[int, int], Instance] = {}
+        self.instances: Dict[int, Instance] = {}
         self.index_spaces: Dict[int, IndexSpace] = {}
         self.partitions: Dict[int, Partition] = {}
         self.logical_regions: Dict[Tuple[int, int], LogicalRegion] = {}
         self.field_spaces: Dict[int, FieldSpace] = {}
         self.fields: Dict[Tuple[int, int], Field] = {}
         self.copy_map: Dict[int, Copy] = {}
+        self.fill_map: Dict[int, Fill] = {}
         self.has_spy_data = False
         self.spy_state: Optional[legion_spy.State] = None
         self.callbacks = {
@@ -3119,9 +3501,9 @@ class State(object):
             "GPUTaskInfo": self.log_gpu_task_info,
             "MetaInfo": self.log_meta_info,
             "CopyInfo": self.log_copy_info,
+            "CopyInstInfo": self.log_copy_inst_info,
             "FillInfo": self.log_fill_info,
-            "InstCreateInfo": self.log_inst_create,
-            "InstUsageInfo": self.log_inst_usage,
+            "FillInstInfo": self.log_fill_inst_info,
             "InstTimelineInfo": self.log_inst_timeline,
             "PartitionInfo": self.log_partition_info,
             "MapperCallInfo": self.log_mapper_call_info,
@@ -3141,58 +3523,71 @@ class State(object):
             "PhysicalInstRegionDesc": self.log_physical_inst_region_desc,
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
+            "PhysicalInstanceUsage": self.log_physical_inst_usage,
             "IndexSpaceSizeDesc": self.log_index_space_size_desc,
-            "MaxDimDesc": self.log_max_dim,
-            "CopyInstInfo": self.log_copy_inst_info
+            "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
+
+    #############################################################
+    # process logging statement
+    #############################################################
 
     # MaxDimDesc
     @typecheck
     def log_max_dim(self, max_dim: int) -> None:
         self.max_dim = max_dim
 
+    # IndexSpacePointDesc
     @typecheck
     def log_index_space_point_desc(self, unique_id: int, 
                                    dim: int, rem: List[int]
     ) -> None:
         index_space = self.create_index_space_point(unique_id, dim, rem)
 
+    # IndexSpaceRectDesc
     @typecheck
     def log_index_space_rect_desc(self, unique_id: int, 
                                   dim: int, rem: List[int]
     ) -> None:
         index_space = self.create_index_space_rect(unique_id, dim, rem)
 
+    # IndexSpaceEmptyDesc
     @typecheck
     def log_index_space_empty_desc(self, unique_id: int) -> None:
         index_space = self.create_index_space_empty(unique_id)
 
+    # IndexSpaceDesc
     @typecheck
     def log_index_space_desc(self, unique_id: int, name: str) -> None:
         index_space = self.find_index_space(unique_id)
         index_space.set_name(name)
 
+    # LogicalRegionDesc
     @typecheck
     def log_logical_region_desc(self, ispace_id: int, fspace_id: int, 
                                 tree_id: int, name: str
     ) -> None:
         logical_region = self.create_logical_region(ispace_id, fspace_id, tree_id, name)
 
+    # FieldSpaceDesc
     @typecheck
     def log_field_space_desc(self, unique_id: int, name: str) -> None:
         field_space = self.create_field_space(unique_id, name)
 
+    # FieldDesc
     @typecheck
     def log_field_desc(self, unique_id: int, field_id: int, 
                        size: int, name: str
     ) -> None:
         field = self.create_field(unique_id, field_id, size, name)
 
+    # PartDesc
     @typecheck
     def log_index_part_desc(self, unique_id: int, name: str) -> None:
         part = self.create_partition(unique_id, name)
 
+    # IndexPartitionDesc
     @typecheck
     def log_index_partition_desc(self, parent_id: int, 
                                  unique_id: int, 
@@ -3203,27 +3598,14 @@ class State(object):
         part.disjoint = disjoint
         part.point = point0
 
+    # IndexSubSpaceDesc
     @typecheck
     def log_index_subspace_desc(self, parent_id: int, unique_id: int) -> None:
         index_space = self.find_index_space(unique_id)
         index_part_parent = self.find_partition(parent_id)
         index_space.set_parent(index_part_parent)
 
-    @typecheck
-    def log_physical_inst_region_desc(self, op_id: int, inst_id: int, 
-                                      ispace_id: int, fspace_id: int, 
-                                      tree_id: int
-    ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        fspace = self.find_field_space(fspace_id)
-        inst.ispace.append(self.find_index_space(ispace_id))
-        inst.fspace.append(fspace)
-        if fspace not in inst.fields:
-            inst.fields[fspace] = []
-            inst.align_desc[fspace] = []
-        inst.tree_id = tree_id
-
+    # IndexSpaceSizeDesc
     @typecheck
     def log_index_space_size_desc(self, unique_id: int, 
                                   dense_size: int, sparse_size: int, 
@@ -3233,22 +3615,29 @@ class State(object):
         index_space = self.find_index_space(unique_id)
         index_space.set_size(dense_size, sparse_size, is_sparse)
 
+    # PhysicalInstRegionDesc
     @typecheck
-    def log_physical_inst_layout_dim_desc(self, op_id: int, inst_id: int, 
-                                          dim: int, dim_kind: int
+    def log_physical_inst_region_desc(self, inst_uid: int, 
+                                      ispace_id: int, fspace_id: int, 
+                                      tree_id: int
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        inst.dim_order_desc.insert(dim, dim_kind)
+        inst = self.find_or_create_instance(inst_uid)
+        fspace = self.find_field_space(fspace_id)
+        inst.ispace.append(self.find_index_space(ispace_id))
+        inst.fspace.append(fspace)
+        if fspace not in inst.fields:
+            inst.fields[fspace] = []
+            inst.align_desc[fspace] = []
+        inst.tree_id = tree_id
 
+    # PhysicalInstLayoutDesc
     @typecheck
-    def log_physical_inst_layout_desc(self, op_id: int, inst_id: int, 
+    def log_physical_inst_layout_desc(self, inst_uid: int, 
                                       field_id: int, fspace_id: int,
                                       has_align: Union[bool, int], 
                                       eqk: int, align_desc: int
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
+        inst = self.find_or_create_instance(inst_uid)
         field = self.find_field(fspace_id, field_id)
         fspace = self.find_field_space(fspace_id)
         if fspace not in inst.fields:
@@ -3258,6 +3647,25 @@ class State(object):
         align_elem = Align(field_id, eqk, align_desc, bool(has_align))
         inst.align_desc[fspace].append(align_elem)
 
+    # PhysicalInstDimOrderDesc
+    @typecheck
+    def log_physical_inst_layout_dim_desc(self, inst_uid: int, 
+                                          dim: int, dim_kind: int
+    ) -> None:
+        inst = self.find_or_create_instance(inst_uid)
+        inst.dim_order_desc.insert(dim, dim_kind)
+
+    # PhysicalInstanceUsage
+    @typecheck
+    def log_physical_inst_usage(self, inst_uid: int, op_id: int, 
+                                index_id: int, field_id: int
+    ) -> None:
+        op = self.find_or_create_op(op_id)
+        entry = self.create_operation_inst_info(inst_uid, index_id, field_id)
+        op.add_operation_inst_info(entry)
+        # assert instance is not None
+        # print("log inst usage", hex(inst_id), op_id, index_id, field_id)
+
     # TaskInfo
     @typecheck
     def log_task_info(self, op_id: int, task_id: int, 
@@ -3265,11 +3673,11 @@ class State(object):
                       create: float, ready: float, 
                       start: float, stop: float
     ) -> None:
-        variant = self.find_variant(task_id, variant_id)
-        task = self.find_task(op_id, variant, create, ready, start, stop)
+        variant = self.find_or_create_variant(task_id, variant_id)
+        task = self.find_or_create_task(op_id, variant, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(task)
 
     # GPUTaskInfo
@@ -3280,12 +3688,12 @@ class State(object):
                           start: float, stop: float, 
                           gpu_start: float, gpu_stop: float
     ) -> None:
-        variant = self.find_variant(task_id, variant_id)
-        task = self.find_task(op_id, variant, create, ready, gpu_start, gpu_stop)
+        variant = self.find_or_create_variant(task_id, variant_id)
+        task = self.find_or_create_task(op_id, variant, create, ready, gpu_start, gpu_stop)
 
         if gpu_stop > self.last_time:
             self.last_time = gpu_stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(task)
 
     # MetaInfo
@@ -3295,12 +3703,12 @@ class State(object):
                       create: float, ready: float, 
                       start: float, stop: float
     ) -> None:
-        op = self.find_op(op_id)
-        variant = self.find_meta_variant(lg_id)
+        op = self.find_or_create_op(op_id)
+        variant = self.find_or_create_meta_variant(lg_id)
         meta = self.create_meta(variant, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(meta)
 
     @typecheck
@@ -3311,83 +3719,80 @@ class State(object):
 
     # CopyInfo
     @typecheck
-    def log_copy_info(self, op_id: int, 
-                      src: int, dst: int, size: int,
+    def log_copy_info(self, op_id: int, size: int,
                       create: float, ready: float, 
-                      start: float, stop: float, 
-                      fevent: int, num_requests: int
+                      start: float, stop: float,
+                      num_hops: int, request_type: int,
+                      fevent: int
     ) -> None:
-        op = self.find_op(op_id)
-        src = self.find_memory(src)
-        dst = self.find_memory(dst)
-        copy = self.create_copy(src, dst, op, size, create, ready, start, stop, fevent, num_requests)
-        self.add_copy_map(fevent,copy)
+        op = self.find_or_create_op(op_id)
+        copy = self.find_or_create_copy(fevent)
+        copy.add_copy_info(op, size, create, ready, start, stop, num_hops, request_type)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_channel(src, dst)
-        channel.add_copy(copy)
 
     # CopyInstInfo
     @typecheck
-    def log_copy_inst_info(self, op_id: int, src_inst: int, dst_inst: int, 
-                           fevent: int, num_fields: int, 
-                           request_type: int, num_hops: int
+    def log_copy_inst_info(self, src: int, dst: int,
+                           src_fid: int, dst_fid: int,
+                           src_inst: int, dst_inst: int, 
+                           fevent: int, indirect: int
     ) -> None:
-        cpy = self.find_copy(fevent)
-        entry = self.create_copy_inst_info(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
-        cpy.add_copy_info(entry)
+        # src_inst and dst_inst are inst_uid
+        indirect = bool(indirect)
+        copy = self.find_or_create_copy(fevent)
+        src_mem = None
+        if src != 0:
+            src_mem = self.find_or_create_memory(src)
+        dst_mem = None
+        if dst != 0:
+            dst_mem = self.find_or_create_memory(dst)
+        copy_inst_info = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy.add_copy_inst_info(copy_inst_info)
+
+    @typecheck
+    def add_fill_map(self, fevent: int, fill: Fill) -> None:
+        key = fevent
+        if key not in self.fill_map:
+            self.fill_map[key] = fill
 
     # FillInfo
     @typecheck
-    def log_fill_info(self, op_id: int, dst: int, 
+    def log_fill_info(self, op_id: int, size: int,
                       create: float, ready: float, 
-                      start: float, stop: float
+                      start: float, stop: float,
+                      fevent: int
     ) -> None:
-        op = self.find_op(op_id)
-        dst = self.find_memory(dst)
-        fill = self.create_fill(dst, op, create, ready, start, stop)
+        op = self.find_or_create_op(op_id)
+        fill = self.find_or_create_fill(fevent)
+        fill.add_fill_info(op, size, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_channel(None, dst)
-        channel.add_copy(fill)
 
-    # InstCreateInfo
+    # FillInstInfo
     @typecheck
-    def log_inst_create(self, op_id: int, inst_id: int, 
-                        create: float
+    def log_fill_inst_info(self, dst: int, fid: int,
+                           dst_inst: int, fevent: int
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        # don't overwrite if we have already captured the (more precise)
-        #  timeline info
-        if inst.stop is None:
-            inst.start = create
-
-    # InstUsageInfo
-    @typecheck
-    def log_inst_usage(self, op_id: int, inst_id: int, 
-                       mem_id: int, size: int
-    ) -> None:
-        op = self.find_op(op_id)
-        mem = self.find_memory(mem_id)
-        inst = self.create_instance(inst_id, op)
-        inst.mem = mem
-        inst.size = size
-        mem.add_instance(inst)
+        # dst_inst are inst_uid
+        fill = self.find_or_create_fill(fevent)
+        dst_mem = self.find_or_create_memory(dst)
+        fill_inst_info = self.create_fill_inst_info(dst_mem, fid, dst_inst, fevent)
+        fill.add_fill_inst_info(fill_inst_info)
 
     # InstTimelineInfo
     @typecheck
-    def log_inst_timeline(self, op_id: int, inst_id: int, 
+    def log_inst_timeline(self, inst_uid: int, inst_id: int,
+                          mem_id: int, size: int, op_id: int,
                           create: float, ready: float, destroy: float
     ) -> None:
-        op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
-        inst.create = create
-        inst.ready = ready
-        inst.start = ready
-        inst.stop = destroy
+        op = self.find_or_create_op(op_id)
+        inst = self.find_or_create_instance(inst_uid)
+        mem = self.find_or_create_memory(mem_id)
+        inst.add_instance_info(inst_id, mem, size, create, ready, destroy, op)
         if destroy > self.last_time:
-            self.last_time = destroy 
+            self.last_time = destroy
+        mem.add_instance(inst)
 
     # PartitionInfo
     @typecheck
@@ -3395,11 +3800,11 @@ class State(object):
                            create: float, ready: float, 
                            start: float, stop: float
     ) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         deppart = self.create_deppart(part_op, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_channel(None, None)
+        channel = self.find_or_create_deppart_channel()
         channel.add_copy(deppart)
 
     # UserInfo (Not used?)
@@ -3407,7 +3812,7 @@ class State(object):
     def log_user_info(self, proc_id: int, 
                       start: float, stop: float, name: str
     ) -> None:
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         user = self.create_user_marker(name)
         user.start = start
         user.stop = stop
@@ -3420,8 +3825,8 @@ class State(object):
     def log_task_wait_info(self, op_id: int, task_id: int, variant_id: int, 
                            wait_start: float, wait_ready: float, wait_end: float
     ) -> None:
-        variant = self.find_variant(task_id, variant_id)
-        task = self.find_task(op_id, variant)
+        variant = self.find_or_create_variant(task_id, variant_id)
+        task = self.find_or_create_task(op_id, variant)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
         task.add_wait_interval(wait_start, wait_ready, wait_end)
@@ -3431,8 +3836,8 @@ class State(object):
     def log_meta_wait_info(self, op_id: int, lg_id: int, 
                            wait_start: float, wait_ready: float, wait_end: float
     ) -> None:
-        op = self.find_op(op_id)
-        variant = self.find_meta_variant(lg_id)
+        op = self.find_or_create_op(op_id)
+        variant = self.find_or_create_meta_variant(lg_id)
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
         assert op_id in variant.ops
@@ -3463,7 +3868,7 @@ class State(object):
     # OperationInstance
     @typecheck
     def log_operation(self, op_id: int, parent_id: int, kind: int, provenance: str) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         if parent_id == UINT_MAX:
             op.parent_id = None
         else:
@@ -3481,7 +3886,7 @@ class State(object):
     # MultiTask
     @typecheck
     def log_multi(self, op_id: int, task_id: int) -> None:
-        op = self.find_op(op_id)
+        op = self.find_or_create_op(op_id)
         task_kind = TaskKind(task_id, None)
         if task_id in self.task_kinds:
             task_kind = self.task_kinds[task_id]
@@ -3493,8 +3898,8 @@ class State(object):
     # SliceOwner
     @typecheck
     def log_slice_owner(self, parent_id: int, op_id: int) -> None:
-        parent = self.find_op(parent_id)
-        op = self.find_op(op_id)
+        parent = self.find_or_create_op(parent_id)
+        op = self.find_or_create_op(op_id)
         op.owner = parent
 
     # MetaDesc
@@ -3564,10 +3969,10 @@ class State(object):
         if stop > self.last_time:
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind],
-                          self.find_op(op_id), start, stop)
+                          self.find_or_create_op(op_id), start, stop)
         # update prof_uid map
         self.prof_uid_map[call.prof_uid] = call
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_mapper_call(call)
 
     # RuntimeCallDesc
@@ -3586,7 +3991,7 @@ class State(object):
         if stop > self.last_time:
             self.last_time = stop
         call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_runtime_call(call)
 
     # ProfTaskInfo
@@ -3599,65 +4004,94 @@ class State(object):
         if stop > self.last_time:
             self.last_time = stop
         proftask = ProfTask(op_id, start, start, start, stop)
-        proc = self.find_processor(proc_id)
+        proc = self.find_or_create_processor(proc_id)
         proc.add_task(proftask)
 
+    #############################################################
+    # find or create objects
+    #############################################################
+
     @typecheck
-    def find_processor(self, proc_id: int) -> Processor:
+    def find_or_create_processor(self, proc_id: int) -> Processor:
         if proc_id not in self.processors:
             self.processors[proc_id] = Processor(proc_id, None)
         return self.processors[proc_id]
 
     @typecheck
-    def find_memory(self, mem_id: int) -> Memory:
+    def find_or_create_memory(self, mem_id: int) -> Memory:
+        assert mem_id != 0
         if mem_id not in self.memories:
             # use 'No MemKind' as the default kind
-            self.memories[mem_id] = Memory(mem_id, "No MemKind", None)
+            self.memories[mem_id] = Memory(mem_id, "No MemKind", 0)
         return self.memories[mem_id]
 
+    # TODO: not used? 
     @typecheck
-    def find_mem_proc_affinity(self, mem_id: int) -> MemProcAffinity:
+    def find_or_create_mem_proc_affinity(self, mem_id: int) -> MemProcAffinity:
         if mem_id not in self.mem_proc_affinity:
             assert False
         return self.mem_proc_affinity[mem_id]
 
     @typecheck
-    def find_channel(self, 
-                     src: Union[Memory, None], 
-                     dst: Union[Memory, None]
+    def find_or_create_copy_channel(self, 
+                                    src: Memory, 
+                                    dst: Memory
     ) -> Channel:
-        if src is not None:
-            assert dst is not None
-            key = (src,dst)
-            if key not in self.channels:
-                self.channels[key] = Channel(src,dst)
-            return self.channels[key]
-        elif dst is not None:
-            # This is a fill channel
-            if dst not in self.channels:
-                self.channels[dst] = Channel(None,dst)
-            return self.channels[dst]
-        else:
-            # This is the dependent partitioning channel
-            if None not in self.channels:
-                self.channels[None] = Channel(None,None)
-            return self.channels[None]
+        key = (src, dst, ChanKind.Copy)
+        if key not in self.channels:
+            self.channels[key] = Channel(src, dst, ChanKind.Copy)
+        return self.channels[key]
 
     @typecheck
-    def find_variant(self, task_id: int, variant_id: int) -> Variant:
+    def find_or_create_fill_channel(self, 
+                                    dst: Memory
+    ) -> Channel:
+        key = (None, dst, ChanKind.Fill)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, dst, ChanKind.Fill)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_gather_channel(self,
+                                      dst: Memory,
+    ) -> Channel:
+        key = (None, dst, ChanKind.Gather)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, dst, ChanKind.Gather)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_scatter_channel(self,
+                                       src: Memory,
+    ) -> Channel:
+        key = (src, None, ChanKind.Scatter)
+        if key not in self.channels:
+            self.channels[key] = Channel(src, None, ChanKind.Scatter)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_deppart_channel(self
+    ) -> Channel:
+        key = (None, None, ChanKind.DepPart)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, None, ChanKind.DepPart)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_variant(self, task_id: int, variant_id: int) -> Variant:
         key = (task_id, variant_id)
         if key not in self.variants:
             self.variants[key] = Variant(variant_id, None)
         return self.variants[key]
 
     @typecheck
-    def find_meta_variant(self, lg_id: int) -> Variant:
+    def find_or_create_meta_variant(self, lg_id: int) -> Variant:
         if lg_id not in self.meta_variants:
             self.meta_variants[lg_id] = Variant(lg_id, None)
         return self.meta_variants[lg_id]
 
     @typecheck
-    def find_op(self, op_id: int) -> Operation:
+    def find_or_create_op(self, op_id: int) -> Operation:
         if op_id not in self.operations:
             op = Operation(op_id) 
             self.operations[op_id] = op
@@ -3666,18 +4100,11 @@ class State(object):
         return self.operations[op_id]
 
     @typecheck
-    def find_copy(self,fevent: int) -> Copy:
-        key = fevent
-        if key not in self.copy_map:
-            assert False
-        return self.copy_map[key]
-
-    @typecheck
-    def find_task(self, op_id: int, variant: Variant, 
-                  create: float =None, ready: float =None, 
-                  start: float =None, stop: float =None
+    def find_or_create_task(self, op_id: int, variant: Variant, 
+                            create: float =None, ready: float =None, 
+                            start: float =None, stop: float =None
     ) -> Task:
-        task = self.find_op(op_id)
+        task = self.find_or_create_op(op_id)
         # Upgrade this operation to a task if necessary
         if not task.is_task:
             assert create is not None
@@ -3692,6 +4119,39 @@ class State(object):
         else:
             assert task.variant == variant
         return task
+
+    @typecheck
+    def find_or_create_copy(self, fevent: int) -> Copy:
+        key = fevent
+        if key not in self.copy_map:
+            copy = Copy(fevent)
+            self.add_copy_map(fevent,copy)
+            # update prof_uid map
+            self.prof_uid_map[copy.prof_uid] = copy
+        return self.copy_map[key]
+
+    @typecheck
+    def find_or_create_fill(self, fevent: int) -> Fill:
+        key = fevent
+        if key not in self.fill_map:
+            fill = Fill(fevent)
+            self.add_fill_map(fevent,fill)
+            # update prof_uid map
+            self.prof_uid_map[fill.prof_uid] = fill
+        return self.fill_map[key]
+
+    @typecheck
+    def find_or_create_instance(self, inst_uid: int) -> Instance:
+        # instance uid is unique
+        key = inst_uid
+        if key not in self.instances:
+            inst = Instance(inst_uid)
+            self.instances[key] = inst
+            # update prof_uid map
+            self.prof_uid_map[inst.prof_uid] = inst
+        else:
+            inst = self.instances[key]
+        return inst
 
     @typecheck
     def create_index_space_point(self, unique_id: int, dim: int, 
@@ -3807,8 +4267,8 @@ class State(object):
             self.fields[key] = field
         else:
             field = self.fields[key]
-            field.size = size;
-            field.name = name;
+            field.size = size
+            field.name = name
         return field
 
     @typecheck
@@ -3835,34 +4295,28 @@ class State(object):
         return meta
 
     @typecheck
-    def create_copy(self, src: Memory, dst: Memory, 
-                    op: Operation, size: int, 
-                    create: float, ready: float, 
-                    start: float, stop: float, 
-                    fevent: int, num_requests: int
-    ) -> Copy:
-        copy = Copy(src, dst, op, size, create, ready, start, stop, fevent, num_requests)
-        # update prof_uid map
-        self.prof_uid_map[copy.prof_uid] = copy
-        return copy
+    def create_operation_inst_info(self, inst_uid: int, 
+                                   index_id: int, field_id: int
+    ) -> OperationInstInfo:
+      operation_inst_info = OperationInstInfo(inst_uid, index_id, field_id)
+      return operation_inst_info  
 
     @typecheck
-    def create_copy_inst_info(self, src_inst: int, dst_inst: int, 
-                              fevent: int, num_fields: int, 
-                              request_type: int, num_hops: int
-    ) -> CopyInfo:
-        copyinfo =  CopyInfo(src_inst, dst_inst, fevent, num_fields, request_type, num_hops)
-        return copyinfo
+    def create_copy_inst_info(self, src: Optional[Memory], 
+                              dst: Optional[Memory],
+                              src_fid: int, dst_fid: int,
+                              src_inst: int, dst_inst: int, 
+                              fevent: int, indirect: bool
+    ) -> CopyInstInfo:
+        copy_inst_info =  CopyInstInfo(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        return copy_inst_info
 
     @typecheck
-    def create_fill(self, dst: Memory, op: Operation, 
-                    create: float, ready: float, 
-                    start: float, stop: float
-    ) -> Fill:
-        fill = Fill(dst, op, create, ready, start, stop)
-        # update prof_uid map
-        self.prof_uid_map[fill.prof_uid] = fill
-        return fill
+    def create_fill_inst_info(self, dst: Memory, fid: int,
+                              dst_inst: int, fevent: int
+    ) -> FillInstInfo:
+        fill_inst_info =  FillInstInfo(dst, fid, dst_inst, fevent)
+        return fill_inst_info
 
     @typecheck
     def create_deppart(self, part_op: int, op: Operation, 
@@ -3875,31 +4329,25 @@ class State(object):
         return deppart
 
     @typecheck
-    def create_instance(self, inst_id: int, op: Operation) -> Instance:
-        # neither instance id nor op id are unique on their own
-        key = (inst_id, op.op_id)
-        if key not in self.instances:
-            inst = Instance(inst_id, op)
-            self.instances[key] = inst
-            # update prof_uid map
-            self.prof_uid_map[inst.prof_uid] = inst
-        else:
-            inst = self.instances[key]
-        return inst
-
-    @typecheck
-    def find_instance(self, inst_id: int, op_id: int) -> Union[Instance, None]:
-        key = (inst_id, op_id)
-        if key not in self.instances:
-            return None
-        return self.instances[key]
-
-    @typecheck
     def create_user_marker(self, name: str) -> UserMarker:
         user = UserMarker(name)
         # update prof_uid map
         self.prof_uid_map[user.prof_uid] = user
         return user
+
+    # called after all copies are parsed
+    #   add the channel info into Copy and then add copy into Channel
+    @typecheck
+    def add_copy_to_channel(self) -> None:
+        for copy in self.copy_map.values():
+            copy.add_channel(self)
+ 
+    # called after all fills are parsed
+    #   add the channel info into Fill and then add fill into Channel
+    @typecheck
+    def add_fill_to_channel(self) -> None:
+        for fill in self.fill_map.values():
+            fill.add_channel(self)
 
     @typecheck
     def trim_time_ranges(self, start: float, stop: float) -> None:
@@ -4090,7 +4538,7 @@ class State(object):
                 sum = 0.0
                 cnt = 0
                 bandwidth = 0.0
-                channel = self.find_channel(src, dst)
+                channel = self.find_or_create_copy_channel(src, dst)
                 for copy in channel.copies:
                     time = copy.stop - copy.start
                     sum = sum + time * 1e-6
@@ -4345,10 +4793,11 @@ class State(object):
 
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
             with open(util_tsv_filename, "w") as util_tsv_file:
-                util_tsv_file.write("time\tcount\n")
-                util_tsv_file.write("0.000\t0.00\n") # initial point
+                util_csvwriter = csv.writer(util_tsv_file, delimiter='\t', lineterminator='\n') 
+                util_csvwriter.writerow(["time", "count"])
+                util_csvwriter.writerow(["0.000", "0.00"]) # initial point
                 for util_point in utilization:
-                    util_tsv_file.write("%.3f\t%.2f\n" % util_point)
+                    util_csvwriter.writerow(["%.3f" % util_point[0], "%.2f" % util_point[1]])
 
     @typecheck
     def simplify_op(self, 
@@ -4572,7 +5021,7 @@ class State(object):
                 def convert_to_tuple(elem: Union[int, Tuple]) -> Tuple:
                     if not isinstance(elem, tuple):
                         # needs to be converted
-                        return self.find_op(elem).get_unique_tuple()
+                        return self.find_or_create_op(elem).get_unique_tuple()
                     else:
                         return elem
                 op_dependencies[op_id][_dir] = set(map(convert_to_tuple, 
@@ -4701,6 +5150,18 @@ class State(object):
                 print("Found Operation: ", operation, " with parent_id = ", operation.parent_id, ", parent NOT existed")
 
     @typecheck
+    def link_instances(self) -> None:
+        for operation in self.operations.values():
+            if len(operation.operation_inst_infos) > 0:
+                operation.link_instance(self.instances)
+
+        for copy in self.copy_map.values():
+            copy.link_instance(self.instances)
+
+        for fill in self.fill_map.values():
+            fill.link_instance(self.instances)
+    
+    @typecheck
     def emit_interactive_visualization(self, 
                                        output_dirname: str, 
                                        show_procs: bool,
@@ -4744,7 +5205,10 @@ class State(object):
         dep_json_file_name = os.path.join(output_dirname, "json", 
                                           "op_dependencies.json")
 
-        data_tsv_header = "level\tlevel_ready\tready\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\top_id\n"
+        data_tsv_header = ["level", "level_ready", "ready", "start", "end", 
+                           "color", "opacity", "title", "initiation", 
+                           "in", "out", "children", "parents", 
+                           "prof_uid", "op_id", "instances"]
 
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")
@@ -4767,11 +5231,11 @@ class State(object):
             proc_str = ""
             level = ""
             provenance = ""
-            if (operation.proc is not None):
+            if operation.proc is not None:
                 proc_str = repr(operation.proc)
                 assert operation.level is not None
                 level = str(operation.level+1)
-            if (operation.provenance is not None):
+            if operation.provenance is not None:
                 provenance = operation.provenance
             if operation.parent_id is None:
                 parent_id = ""
@@ -4796,8 +5260,9 @@ class State(object):
                     proc_name = slugify("Proc_" + str(hex(p)))
                     proc_tsv_file_name = os.path.join(tsv_dir, proc_name + ".tsv")
                     with open(proc_tsv_file_name, "w") as proc_tsv_file:
-                        proc_tsv_file.write(data_tsv_header)
-                        proc_level = proc.emit_tsv(proc_tsv_file, 0)
+                        proc_csvwriter = csv.writer(proc_tsv_file, delimiter='\t', lineterminator='\n') 
+                        proc_csvwriter.writerow(data_tsv_header)
+                        proc_level = proc.emit_tsv(proc_csvwriter, 0)
                     base_level += proc_level
                     processor_levels[proc] = {
                         'levels': proc_level-1, 
@@ -4813,8 +5278,9 @@ class State(object):
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
                     with open(chan_tsv_file_name, "w") as chan_tsv_file:
-                        chan_tsv_file.write(data_tsv_header)
-                        chan_level = chan.emit_tsv(chan_tsv_file, 0)
+                        chan_csvwriter = csv.writer(chan_tsv_file, delimiter='\t', lineterminator='\n') 
+                        chan_csvwriter.writerow(data_tsv_header)
+                        chan_level = chan.emit_tsv(chan_csvwriter, 0)
                     base_level += chan_level
                     channel_levels[chan] = {
                         'levels': chan_level-1, 
@@ -4829,9 +5295,10 @@ class State(object):
                 if len(mem.instances) > 0:
                     mem_name = slugify("Mem_" + str(hex(m)))
                     mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
-                    with open(mem_tsv_file_name, "w") as mem_tsv_file: 
-                        mem_tsv_file.write(data_tsv_header)
-                        mem_level = mem.emit_tsv(mem_tsv_file, 0)
+                    with open(mem_tsv_file_name, "w") as mem_tsv_file:
+                        mem_csvwriter = csv.writer(mem_tsv_file, delimiter='\t', lineterminator='\n')
+                        mem_csvwriter.writerow(data_tsv_header)
+                        mem_level = mem.emit_tsv(mem_csvwriter, 0)
                     base_level += mem_level
                     memory_levels[mem] = {
                         'levels': mem_level-1, 
@@ -5054,6 +5521,12 @@ def main() -> None:
         print('No matches found! Exiting...')
         return
 
+    # once all logs are parsed, let's figure out the channel for fill
+    state.add_fill_to_channel()
+
+    # once all logs are parsed, let's figure out the channel for copy
+    state.add_copy_to_channel()
+
     # See if we need to trim out any boxes before we build the profile
     if (start_trim > 0) or (stop_trim > 0):
         if start_trim > 0 and stop_trim > 0:
@@ -5074,6 +5547,9 @@ def main() -> None:
     # sort operations and check parent_id
     state.check_operation_parent_id()
 
+    # link instance with Copy/Fill/Operation
+    state.link_instances()
+
     if print_stats:
         state.print_stats(verbose)
     else:
@@ -5083,6 +5559,9 @@ def main() -> None:
             state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
+    EMPTY_OP = Operation(-1)
+    # reset prof_uid to 0
+    prof_uid_ctr = 0
     start = time.time()
     main()
     end = time.time()

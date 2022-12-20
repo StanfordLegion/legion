@@ -3535,10 +3535,7 @@ namespace Legion {
               }
             }
           }
-          if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                  idx, regions[idx],
-                                                  physical_instances[idx]);
+          log_mapping_decision(idx, regions[idx], physical_instances[idx]);
           continue;
         }
         // Skip any NO_ACCESS or empty privilege field regions
@@ -3669,10 +3666,7 @@ namespace Legion {
                           idx, get_task_name(), get_unique_id())
           virtual_mapped[idx] = true;
         }
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                idx, regions[idx],
-                                                physical_instances[idx]);
+        log_mapping_decision(idx, regions[idx], physical_instances[idx]);
         // Skip checks if the mapper promises it is safe
         if (runtime->unsafe_mapper)
           continue;
@@ -3845,10 +3839,7 @@ namespace Legion {
           needs_reservations = true;
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                                                idx, regions[idx],
-                                                instances);
+        log_mapping_decision(idx, regions[idx], instances);
       }
       if (needs_reservations)
         // We group all reservations together anyway
@@ -4538,10 +4529,7 @@ namespace Legion {
                             get_task_name(), get_unique_id())
           }
         }
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                idx, regions[idx], result,
-                                                true/*postmapping*/);
+        log_mapping_decision(idx, regions[idx], result, true/*postmapping*/);
         // TODO: Implement physical tracing for postmapped regions
         if (is_memoizing())
           assert(false);
@@ -8316,10 +8304,7 @@ namespace Legion {
                         get_task_name(), get_unique_id(),
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                *it, regions[*it],
-                                                chosen_instances);
+        log_mapping_decision(*it, regions[*it], chosen_instances);
         if (!runtime->unsafe_mapper)
         {
           std::vector<LogicalRegion> regions_to_check(1, 
