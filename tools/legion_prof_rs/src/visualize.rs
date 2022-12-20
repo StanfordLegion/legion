@@ -13,9 +13,9 @@ use rayon::prelude::*;
 
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace,
-    FillInstInfo, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID,
-    OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State,
-    TimePoint, Timestamp,
+    FieldID, FillInstInfo, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID,
+    OpID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState,
+    State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -127,16 +127,21 @@ pub struct OperationInstInfoDumpInstVec<'a>(pub &'a Vec<OperationInstInfo>, pub 
 
 impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[")?;
-        for (i, elt) in self.0.iter().enumerate() {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for elt in self.0.iter() {
             let inst = self.1.find_inst(elt.inst_uid).unwrap();
+            insts_set.insert(inst);
+        }
+        write!(f, "[")?;
+        for (i, inst) in insts_set.iter().enumerate() {
             write!(
                 f,
                 "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
                 inst.base.prof_uid.0
             )?;
-            if i < self.0.len() - 1 {
+            if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
         }
@@ -405,29 +410,37 @@ impl fmt::Display for SizePretty {
 
 #[derive(Debug)]
 pub struct CopyInstInfoDisplay<'a>(
-    pub &'a Inst, // src_inst
-    pub &'a Inst, // src_dst
-    pub u32,      // num_fields
-    pub u32,      // request_type
-    pub u32,      // num_hops
+    pub Option<&'a Inst>, // src_inst
+    pub Option<&'a Inst>, // src_dst
 );
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "src_inst=0x{:x}, dst_inst=0x{:x}, fields={}, type={}, hops={}",
-            self.0.inst_id.unwrap().0,
-            self.1.inst_id.unwrap().0,
-            self.2,
-            match self.3 {
-                0 => "fill",
-                1 => "reduc",
-                2 => "copy",
-                _ => unreachable!(),
-            },
-            self.4
-        )
+        match (self.0, self.1) {
+            (Some(src_inst), Some(dst_inst)) => {
+                write!(
+                    f,
+                    "src_inst=0x{:x}, dst_inst=0x{:x}",
+                    src_inst.inst_id.unwrap().0,
+                    dst_inst.inst_id.unwrap().0
+                )
+            }
+            (None, Some(dst_inst)) => {
+                write!(
+                    f,
+                    "Scatter: dst_indirect_inst=0x{:x}",
+                    dst_inst.inst_id.unwrap().0
+                )
+            }
+            (Some(src_inst), None) => {
+                write!(
+                    f,
+                    "Gather: src_indirect_inst=0x{:x}",
+                    src_inst.inst_id.unwrap().0
+                )
+            }
+            (None, None) => unreachable!(),
+        }
     }
 }
 
@@ -437,19 +450,13 @@ pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
 impl fmt::Display for CopyInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            let src_inst = self.1.find_inst(elt.src_inst_uid);
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
             write!(
                 f,
                 "$req[{}]: {}",
                 i,
-                CopyInstInfoDisplay(
-                    src_inst,
-                    dst_inst,
-                    elt.num_fields,
-                    elt.request_type,
-                    elt.num_hops
-                )
+                CopyInstInfoDisplay(src_inst, dst_inst)
             )?;
         }
         Ok(())
@@ -461,19 +468,25 @@ pub struct CopyInstInfoDumpInstVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State)
 
 impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for elt in self.0.iter() {
+            if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+                insts_set.insert(src_inst);
+            }
+            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                insts_set.insert(dst_inst);
+            }
+        }
         write!(f, "[")?;
-        for (i, elt) in self.0.iter().enumerate() {
-            let src_inst = self.1.find_inst(elt.src_inst_uid).unwrap();
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+        for (i, inst) in insts_set.iter().enumerate() {
             write!(
                 f,
-                "[\"0x{:x}\",{}],[\"0x{:x}\",{}]",
-                src_inst.inst_id.unwrap().0,
-                src_inst.base.prof_uid.0,
-                dst_inst.inst_id.unwrap().0,
-                dst_inst.base.prof_uid.0
+                "[\"0x{:x}\",{}]",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
             )?;
-            if i < self.0.len() - 1 {
+            if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
         }
@@ -483,18 +496,15 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
 }
 
 #[derive(Debug)]
-pub struct FillInstInfoDisplay<'a>(
-    pub &'a Inst,
-    pub u32, // num_fields
-);
+pub struct FillInstInfoDisplay<'a>(pub &'a Inst, pub FieldID);
 
 impl fmt::Display for FillInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "dst_inst=0x{:x}, fields={}",
+            "dst_inst=0x{:x}, fid={}",
             self.0.inst_id.unwrap().0,
-            self.1
+            self.1 .0
         )
     }
 }
@@ -506,12 +516,7 @@ impl fmt::Display for FillInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
             let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
-            write!(
-                f,
-                "$req[{}]: {}",
-                i,
-                FillInstInfoDisplay(inst, elt.num_fields)
-            )?;
+            write!(f, "$req[{}]: {}", i, FillInstInfoDisplay(inst, elt.fid))?;
         }
         Ok(())
     }
@@ -522,16 +527,21 @@ pub struct FillInstInfoDumpInstVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State)
 
 impl fmt::Display for FillInstInfoDumpInstVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for elt in self.0.iter() {
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            insts_set.insert(dst_inst);
+        }
         write!(f, "[")?;
-        for (i, elt) in self.0.iter().enumerate() {
-            let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+        for (i, inst) in insts_set.iter().enumerate() {
             write!(
                 f,
                 "[\"0x{:x}\",{}]",
                 inst.inst_id.unwrap().0,
                 inst.base.prof_uid.0
             )?;
-            if i < self.0.len() - 1 {
+            if i < insts_set.len() - 1 {
                 write!(f, ",")?;
             }
         }
@@ -636,13 +646,18 @@ impl Chan {
                 let nreqs = copy.copy_inst_infos.len();
                 if nreqs > 0 {
                     format!(
-                        "Copy: size={}, num reqs={}{}",
-                        SizePretty(copy.size),
+                        "{}: size={}, num reqs={}{}",
+                        copy.copy_kind.unwrap(),
+                        SizePretty(copy.size.unwrap()),
                         nreqs,
                         CopyInstInfoVec(&copy.copy_inst_infos, &state)
                     )
                 } else {
-                    format!("Copy: size={}, num reqs={}", SizePretty(copy.size), nreqs)
+                    format!(
+                        "Copy: size={}, num reqs={}",
+                        SizePretty(copy.size.unwrap()),
+                        nreqs
+                    )
                 }
             }
             ChanEntryRef::Fill(_, fill) => {
@@ -660,15 +675,15 @@ impl Chan {
             ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
         };
         let ready_timestamp = match point.entry {
-            ChanEntry::Copy(_, _) => time_range.ready,
-            ChanEntry::Fill(_, _) => None,
+            ChanEntry::Copy(_) => time_range.ready,
+            ChanEntry::Fill(_) => time_range.ready,
             ChanEntry::DepPart(_, _) => None,
         };
 
-        let initiation = match point.entry {
-            ChanEntry::Copy(op_id, _) => op_id,
-            ChanEntry::Fill(op_id, _) => op_id,
-            ChanEntry::DepPart(op_id, _) => op_id,
+        let initiation = match entry {
+            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
+            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
+            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
         };
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
@@ -682,7 +697,7 @@ impl Chan {
             ChanEntryRef::Fill(_, fill) => {
                 format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, &state))
             }
-            ChanEntryRef::DepPart(_, deppart) => format!(""),
+            ChanEntryRef::DepPart(_, _deppart) => format!(""),
         };
 
         f.serialize(DataRecord {
@@ -714,34 +729,66 @@ impl Chan {
                 .get(&mem_id)
                 .map_or(MemKind::NoMemKind, |mem| mem.kind)
         };
-        let slug = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
-                "({}_Memory_0x{:x},_{}_Memory_0x{:x})",
+        let slug = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_kind,
+        ) {
+            (Some(src), Some(dst), channel_kind) => format!(
+                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_{})",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
-                &dst
+                &dst,
+                channel_kind
             ),
-            (None, Some(dst)) => format!("{}_Memory_0x{:x}", mem_kind(dst), dst),
-            (None, None) => format!("None"),
+            (None, Some(dst), channel_kind) => format!(
+                "(None,_{}_Memory_0x{:x},_{})",
+                mem_kind(dst),
+                dst,
+                channel_kind
+            ),
+            (Some(src), None, channel_kind) => format!(
+                "({}_Memory_0x{:x},_None,_{})",
+                mem_kind(src),
+                src,
+                channel_kind
+            ),
+            (None, None, channel_kind) => format!("(None,_None,_{})", channel_kind),
             _ => unreachable!(),
         };
 
-        let long_name = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
+        let long_name = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_kind,
+        ) {
+            (Some(src), Some(dst), _) => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
                 &dst
             ),
-            (None, Some(dst)) => format!("Fill {} Memory 0x{:x} Channel", mem_kind(dst), dst),
-            (None, None) => format!("Dependent Partition Channel"),
+            (None, Some(dst), channel_kind) => {
+                format!(
+                    "{} {} Memory 0x{:x} Channel",
+                    channel_kind,
+                    mem_kind(dst),
+                    dst
+                )
+            }
+            (Some(src), None, _) => format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src),
+            (None, None, _) => format!("Dependent Partition Channel"),
             _ => unreachable!(),
         };
 
-        let short_name = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
+        let short_name = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_kind,
+        ) {
+            (Some(src), Some(dst), _) => format!(
                 "{} to {}",
                 MemShort(
                     mem_kind(src),
@@ -756,16 +803,28 @@ impl Chan {
                     state
                 )
             ),
-            (None, Some(dst)) => format!(
-                "{}",
+            (None, Some(dst), channel_kind) => {
+                format!(
+                    "{} {}",
+                    channel_kind,
+                    MemShort(
+                        mem_kind(dst),
+                        state.mems.get(&dst),
+                        state.mem_proc_affinity.get(&dst),
+                        state
+                    )
+                )
+            }
+            (Some(src), None, _) => format!(
+                "Scatter {}",
                 MemShort(
-                    mem_kind(dst),
-                    state.mems.get(&dst),
-                    state.mem_proc_affinity.get(&dst),
+                    mem_kind(src),
+                    state.mems.get(&src),
+                    state.mem_proc_affinity.get(&src),
                     state
                 )
             ),
-            (None, None) => format!("Dependent Partition Channel"),
+            (None, None, _) => format!("Dependent Partition Channel"),
             _ => unreachable!(),
         };
 

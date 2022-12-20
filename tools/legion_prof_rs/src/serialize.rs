@@ -112,10 +112,10 @@ pub enum Record {
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
-    CopyInfo { op_id: OpID, src: MemID, dst: MemID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, num_requests: u32 },
-    CopyInstInfo { src_inst: InstUID, dst_inst: InstUID, fevent: EventID, num_fields: u32, request_type: u32, num_hops: u32 },
-    FillInfo { op_id: OpID, dst: MemID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, num_requests: u32 },
-    FillInstInfo { dst_inst: InstUID, fevent: EventID, num_fields: u32 },
+    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, num_hops: u32, request_type: u32, fevent: EventID },
+    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, indirect: bool },
+    FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID },
+    FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
     InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID },
@@ -744,83 +744,85 @@ fn parse_meta_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 }
 fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
+    let (input, size) = le_u64(input)?;
+    let (input, create) = parse_timestamp(input)?;
+    let (input, ready) = parse_timestamp(input)?;
+    let (input, start) = parse_timestamp(input)?;
+    let (input, stop) = parse_timestamp(input)?;
+    let (input, num_hops) = le_u32(input)?;
+    let (input, request_type) = le_u32(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    Ok((
+        input,
+        Record::CopyInfo {
+            op_id,
+            size,
+            create,
+            ready,
+            start,
+            stop,
+            num_hops,
+            request_type,
+            fevent,
+        },
+    ))
+}
+fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, src) = parse_mem_id(input)?;
     let (input, dst) = parse_mem_id(input)?;
+    let (input, src_fid) = parse_field_id(input)?;
+    let (input, dst_fid) = parse_field_id(input)?;
+    let (input, src_inst) = parse_inst_uid(input)?;
+    let (input, dst_inst) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
+    let (input, indirect) = parse_bool(input)?;
+    Ok((
+        input,
+        Record::CopyInstInfo {
+            src,
+            dst,
+            src_fid,
+            dst_fid,
+            src_inst,
+            dst_inst,
+            fevent,
+            indirect,
+        },
+    ))
+}
+fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, op_id) = parse_op_id(input)?;
     let (input, size) = le_u64(input)?;
     let (input, create) = parse_timestamp(input)?;
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, num_requests) = le_u32(input)?;
     Ok((
         input,
-        Record::CopyInfo {
+        Record::FillInfo {
             op_id,
-            src,
-            dst,
             size,
             create,
             ready,
             start,
             stop,
             fevent,
-            num_requests,
-        },
-    ))
-}
-fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, src_inst) = parse_inst_uid(input)?;
-    let (input, dst_inst) = parse_inst_uid(input)?;
-    let (input, fevent) = parse_event_id(input)?;
-    let (input, num_fields) = le_u32(input)?;
-    let (input, request_type) = le_u32(input)?;
-    let (input, num_hops) = le_u32(input)?;
-    Ok((
-        input,
-        Record::CopyInstInfo {
-            src_inst,
-            dst_inst,
-            fevent,
-            num_fields,
-            request_type,
-            num_hops,
-        },
-    ))
-}
-fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, dst) = parse_mem_id(input)?;
-    let (input, create) = parse_timestamp(input)?;
-    let (input, ready) = parse_timestamp(input)?;
-    let (input, start) = parse_timestamp(input)?;
-    let (input, stop) = parse_timestamp(input)?;
-    let (input, fevent) = parse_event_id(input)?;
-    let (input, num_requests) = le_u32(input)?;
-    Ok((
-        input,
-        Record::FillInfo {
-            op_id,
-            dst,
-            create,
-            ready,
-            start,
-            stop,
-            fevent,
-            num_requests,
         },
     ))
 }
 fn parse_fill_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, dst) = parse_mem_id(input)?;
+    let (input, fid) = parse_field_id(input)?;
     let (input, dst_inst) = parse_inst_uid(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, num_fields) = le_u32(input)?;
     Ok((
         input,
         Record::FillInstInfo {
+            dst,
+            fid,
             dst_inst,
             fevent,
-            num_fields,
         },
     ))
 }

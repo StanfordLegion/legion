@@ -41,6 +41,7 @@ import io
 import csv, _csv
 from functools import reduce
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Union, Dict, List, Tuple, Type, Set, Optional, NoReturn, ItemsView, KeysView, ValuesView, Any
 
 from legion_util import typeassert, typecheck
@@ -181,6 +182,25 @@ request = {
     2 : 'copy',
 }
 
+class CopyKind(Enum):
+    Copy = 0
+    Gather = 1
+    Scatter = 2
+    GatherScatter = 3
+    
+    def __repr__(self) -> str:
+        return str(self.name)
+
+class ChanKind(Enum):
+    Copy = 0
+    Fill = 1
+    Gather = 2
+    Scatter = 3
+    DepPart = 4
+    
+    def __repr__(self) -> str:
+        return str(self.name)
+
 # Micro-seconds per pixel
 US_PER_PIXEL = 100
 # Pixels per level of the picture
@@ -203,19 +223,22 @@ def get_prof_uid() -> int:
     prof_uid_ctr += 1
     return prof_uid_ctr
 
+def by_prof_uid(element: Tuple) ->int:
+  return element[1]
+
 @typecheck
-def data_tsv_str(level: int, level_ready: Union[int, None], 
-                 ready: Union[float, None], 
+def data_tsv_str(level: int, level_ready: Optional[int], 
+                 ready: Optional[float], 
                  start: float, end: float, 
                  color: str, opacity: str, title: str,
                  initiation: Union[int, str, None], 
-                 _in: Union[str, None], 
-                 out: Union[str, None], 
-                 children: Union[str, None], 
-                 parents: Union[str, None], 
+                 _in: Optional[str], 
+                 out: Optional[str], 
+                 children: Optional[str], 
+                 parents: Optional[str], 
                  prof_uid: int,
-                 op_id: Union[int, None],
-                 instances: Union[str, None]
+                 op_id: Optional[int],
+                 instances: Optional[str]
     ) -> List:
     # replace None with ''
     def xstr(s: Union[None, float, int, str]) -> str:
@@ -294,7 +317,7 @@ def color_helper(step: int, num_steps: int) -> str:
 
 # Helper function for size
 @typecheck
-def size_pretty(size: Union[int, None]) -> str:
+def size_pretty(size: Optional[int]) -> str:
     if size is not None:
         if size >= (1024*1024*1024):
             # GBs
@@ -502,10 +525,10 @@ class TimeRange(ABC):
 
     @typecheck
     def __init__(self, 
-                 create: Union[float, None], 
-                 ready: Union[float, None], 
-                 start: Union[float, None],
-                 stop: Union[float, None]
+                 create: Optional[float], 
+                 ready: Optional[float], 
+                 start: Optional[float],
+                 stop: Optional[float]
     ) -> None:
         assert create is None or (create is not None and ready is not None and create <= ready)
         assert ready is None or (ready is not None and start is not None and ready <= start)
@@ -579,8 +602,8 @@ class TimeRange(ABC):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None],
-                        stop: Union[float, None]
+                        start: Optional[float],
+                        stop: Optional[float]
     ) -> bool:
         if self.trimmed:
             return not self.was_removed
@@ -712,7 +735,7 @@ class TaskKind(object):
     __slots__ = ['task_id', 'name']
 
     @typecheck
-    def __init__(self, task_id: int, name: Union[str, None]) -> None:
+    def __init__(self, task_id: int, name: Optional[str]) -> None:
         self.task_id = task_id
         self.name: Optional[str] = name
 
@@ -821,8 +844,8 @@ class Field(StatObject):
 
     @typecheck
     def __init__(self, unique_id: int, field_id: int, 
-                 size: Union[int, None],
-                 name: Union[str, None]
+                 size: Optional[int],
+                 name: Optional[str]
     ) -> None:
         StatObject.__init__(self)
         self.unique_id = unique_id
@@ -860,7 +883,7 @@ class FieldSpace(StatObject):
     __slots__ = ['fspace_id', 'name']
 
     @typecheck
-    def __init__(self, fspace_id: int, name: Union[str, None]) -> None:
+    def __init__(self, fspace_id: int, name: Optional[str]) -> None:
         StatObject.__init__(self)
         self.fspace_id = fspace_id
         self.name = name
@@ -893,7 +916,7 @@ class Partition(StatObject):
     __slots__ = ['unique_id', 'parent', 'disjoint', 'point', 'name']
 
     @typecheck
-    def __init__(self, unique_id: int, name: Union[str, None]) -> None:
+    def __init__(self, unique_id: int, name: Optional[str]) -> None:
         StatObject.__init__(self)
         self.unique_id = unique_id
         self.parent = None
@@ -934,7 +957,7 @@ class IndexSpace(StatObject):
     ]
 
     @typecheck
-    def __init__(self, is_type: Union[int, None], 
+    def __init__(self, is_type: Optional[int], 
                  unique_id: int, 
                  dim: int
     ) -> None:
@@ -1066,7 +1089,7 @@ class Variant(StatObject):
     @typecheck
     def __init__(self, 
                  variant_id: int, 
-                 name: Union[str, None], 
+                 name: Optional[str], 
                  message: bool = False, 
                  ordered_vc: bool = False
     ) -> None:
@@ -1160,8 +1183,8 @@ class HasWaiters(ABC):
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
                 level_ready=int,
-                op_id=Union[int, None],
-                instances=Union[str, None])
+                op_id=Optional[int],
+                instances=Optional[str])
     def emit_tsv(self, 
                  tsv_file: "_csv._writer", 
                  base_level: int, 
@@ -1169,8 +1192,8 @@ class HasWaiters(ABC):
                  max_levels_ready: int,
                  level: int, 
                  level_ready: int,
-                 op_id: Union[int, None],
-                 instances: Union[str, None]
+                 op_id: Optional[int],
+                 instances: Optional[str]
     ) -> None:
         if not isinstance(self, (TimeRange)):
             assert 0, "Type is: " +  str(type(self)) + ", is not Task or MetaTask."
@@ -1432,13 +1455,14 @@ class Operation(ProcOperation):
             node.link_instance(instances)
 
     @typecheck
-    def _dump_instances(self) -> Union[str, None]:
+    def _dump_instances(self) -> Optional[str]:
         instances = ""
         instances_set = set()
         for node in self.operation_inst_infos:
             assert node.instance is not None
             instances_set.add((hex(node.instance.inst_id), node.instance.prof_uid))
-        instances = dump_json(list(instances_set))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
         return instances
 
     @typecheck
@@ -1662,14 +1686,14 @@ class ProfTask(ProcOperation, TimeRange, HasNoDependencies):
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
-                level_ready=Union[int,None])
+                level_ready=Optional[int])
     def emit_tsv(self, 
                  tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         if level_ready is not None:
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -1745,14 +1769,14 @@ class MapperCall(ProcOperation, TimeRange, HasInitiationDependencies):
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
-                level_ready=Union[int,None])
+                level_ready=Optional[int])
     def emit_tsv(self, 
                  tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         title = repr(self)
         _in = dump_json(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
@@ -1850,14 +1874,14 @@ class RuntimeCall(ProcOperation, TimeRange, HasNoDependencies):
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
-                level_ready=Union[int,None])
+                level_ready=Optional[int])
     def emit_tsv(self, 
                  tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int,
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         if (level_ready is not None):
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -1936,14 +1960,14 @@ class UserMarker(ProcOperation, TimeRange, HasNoDependencies):
 
     @typeassert(base_level=int, max_levels=int,
                 max_levels_ready=int, level=int,
-                level_ready=Union[int,None])
+                level_ready=Optional[int])
     def emit_tsv(self,
                  tsv_file: "_csv._writer", 
                  base_level: int, 
                  max_levels: int, 
                  max_levels_ready: int,
                  level: int, 
-                 level_ready: Union[int, None]
+                 level_ready: Optional[int]
     ) -> None:
         if level_ready is not None:
             l_ready = base_level + (max_levels_ready - level_ready)
@@ -2000,8 +2024,8 @@ class CopyInstInfo(object):
     @typeassert(src_fid=int, dst_fid=int,
                 src_inst_uid=int, dst_inst_uid=int,
                 fevent=int, indirect=bool)
-    def __init__(self, src: Union["Memory", None], 
-                 dst: Union["Memory", None],
+    def __init__(self, src: Optional["Memory"], 
+                 dst: Optional["Memory"],
                  src_fid: int, dst_fid: int,
                  src_inst_uid: int, dst_inst_uid: int, 
                  fevent: int, indirect: bool
@@ -2061,7 +2085,7 @@ class CopyInstInfo(object):
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_type', 'is_inchannel', 'copy_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
     
     # FIXME: fix for python 3.8
     @typecheck
@@ -2074,8 +2098,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         self.num_hops = 0
         self.request_type = 0
         self.fevent = fevent
-        self.copy_type = 0 # 0 is normal, 1 is gather, 2 is scatter, 3 is gather with scatter
-        self.is_inchannel = False
+        self.copy_kind: Optional[CopyKind] = None
         self.copy_inst_infos: List[CopyInstInfo] = list()
 
     @typecheck
@@ -2084,6 +2107,8 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                       start: float, stop: float, 
                       num_hops: int, request_type: int
     ) -> None:
+        # sanity check
+        assert self.initiation_op == EMPTY_OP 
         self.size = size
         self.num_hops = num_hops
         self.request_type = request_type
@@ -2095,8 +2120,61 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         self.initiation = initiation_op.op_id
 
     @typecheck
-    def add_copy_inst_info(self, entry: CopyInstInfo) -> None:
-        self.copy_inst_infos.append(entry)
+    def add_copy_inst_info(self, copy_inst_info: CopyInstInfo
+    ) -> None:
+        self.copy_inst_infos.append(copy_inst_info)
+
+    def add_channel(self, state: "State") -> None:
+        # sanity check
+        assert self.chan is None
+        assert self.copy_kind is None
+        isindrect = False
+        for copy_inst_info in self.copy_inst_infos:
+            # this is the copy inst info for points of a indirect copy (meta copy)
+            if copy_inst_info.indirect:
+                # gather (src points)
+                if copy_inst_info.dst == None:
+                    assert copy_inst_info.src is not None
+                    self.copy_kind = CopyKind.Gather
+                # scatter (dst points)
+                elif copy_inst_info.src == None:
+                    assert copy_inst_info.dst is not None
+                    self.copy_kind = CopyKind.Scatter
+                # gather with scatter
+                else:
+                    self.copy_kind = CopyKind.GatherScatter
+                    assert 0, "unimplemented"
+                isindrect = True
+                break
+        if isindrect == False:
+            # sanity check
+            assert len(self.copy_inst_infos) >= 1
+            chan_src = self.copy_inst_infos[0].src
+            chan_dst = self.copy_inst_infos[0].dst
+            for copy_inst_info in self.copy_inst_infos:
+                assert (copy_inst_info.src == chan_src) and (copy_inst_info.dst == chan_dst)
+            self.copy_kind = CopyKind.Copy
+            channel = state.find_or_create_copy_channel(chan_src, chan_dst)
+            channel.add_copy(self)
+        else:
+            # sanity check
+            assert len(self.copy_inst_infos) >= 2
+            if self.copy_kind == CopyKind.Gather:
+                chan_dst = self.copy_inst_infos[1].dst
+                # sanity check
+                for copy_inst_info in self.copy_inst_infos[1:]:
+                    assert copy_inst_info.dst == chan_dst
+                channel = state.find_or_create_gather_channel(chan_dst)
+                channel.add_copy(self)
+            elif self.copy_kind == CopyKind.Scatter:
+                chan_src = self.copy_inst_infos[1].src
+                # sanity check
+                for copy_inst_info in self.copy_inst_infos[1:]:
+                    assert copy_inst_info.src == chan_src
+                channel = state.find_or_create_scatter_channel(chan_src)
+                channel.add_copy(self)
+            else:
+                assert 0, "unimplemented"
 
     @typecheck
     def get_color(self) -> str:
@@ -2104,19 +2182,8 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         return self.initiation_op.get_color()
 
     @typecheck
-    def __copy_type_to_str(self) -> str:
-        if self.copy_type == 0:
-            return "Copy:"
-        elif self.copy_type == 1:
-            return "Gather:"
-        elif self.copy_type == 2:
-            return "Scatter:"
-        else:
-            assert 0
-
-    @typecheck
     def __repr__(self) -> str:
-        val = self.__copy_type_to_str() + ' size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ' type=' + str(self.copy_type)
+        val = repr(self.copy_kind) + ': size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
         cnt = 0
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -2137,7 +2204,8 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
                 instances_set.add((hex(node.src_instance.inst_id), node.src_instance.prof_uid))
             if node.dst_instance is not None:
                 instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
-        instances = dump_json(list(instances_set))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
         return instances
 
     @typeassert(base_level=int, max_levels=int,
@@ -2218,7 +2286,7 @@ class FillInstInfo(object):
         return self.get_short_text()
 
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['dst', 'size', 'fevent', 'is_inchannel', 'fill_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'fill_inst_infos']
 
     # FIXME: fix for python 3.8
     @typecheck
@@ -2227,17 +2295,17 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         TimeRange.__init__(self, None, None, None, None)
         assert isinstance(EMPTY_OP, Operation)
         HasInitiationDependencies.__init__(self, EMPTY_OP)
-        self.dst: Optional["Memory"] = None
         self.size = 0
         self.fevent = fevent
-        self.is_inchannel = False
         self.fill_inst_infos: List[FillInstInfo] = list()
 
     @typecheck
     def add_fill_info(self, initiation_op: Operation, size: int,
                       create: float, ready: float, 
-                      start: float, stop: float,
+                      start: float, stop: float
     ) -> None:
+        # sanity check
+        assert self.initiation_op == EMPTY_OP 
         self.size = size
         self.create = create
         self.ready = ready
@@ -2247,11 +2315,20 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         self.initiation = initiation_op.op_id
 
     @typecheck
-    def add_fill_inst_info(self, entry: FillInstInfo) -> None:
-        self.fill_inst_infos.append(entry)
+    def add_fill_inst_info(self, 
+                           fill_inst_info: FillInstInfo
+    ) -> None:
+        self.fill_inst_infos.append(fill_inst_info)
 
-    def add_mem(self, dst: "Memory") -> None:
-        self.dst = dst
+    def add_channel(self, state: "State") -> None:
+        # sanity check
+        assert self.chan is None
+        assert len(self.fill_inst_infos) >= 1
+        chan_dst = self.fill_inst_infos[0].dst
+        for fill_inst_info in self.fill_inst_infos:
+            assert fill_inst_info.dst == chan_dst
+        channel = state.find_or_create_fill_channel(fill_inst_info.dst)
+        channel.add_copy(self)
 
     def __repr__(self) -> str:
         val = 'Fill: num reqs=' + str(len(self.fill_inst_infos))
@@ -2273,7 +2350,8 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         for node in self.fill_inst_infos:
             assert node.dst_instance is not None
             instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
-        instances = dump_json(list(instances_set))
+        instances_list = sorted(instances_set, key=by_prof_uid)
+        instances = dump_json(instances_list)
         return instances
 
     @typeassert(base_level=int, max_levels=int,
@@ -2673,8 +2751,8 @@ class Processor(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None],
-                        stop: Union[float, None]
+                        start: Optional[float],
+                        stop: Optional[float]
     ) -> None:
         trimmed_tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
         for task in self.tasks:
@@ -2941,8 +3019,8 @@ class Memory(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None], 
-                        stop: Union[float, None]
+                        start: Optional[float], 
+                        stop: Optional[float]
     ) -> None:
         trimmed_instances = set()
         for inst in self.instances:
@@ -2953,7 +3031,7 @@ class Memory(object):
     def sort_time_range(self) -> None:
         self.max_live_instances = 0
         # we use ready to stop here for correct utilization calculation. 
-        # but we need to use start to stop for calculating levels
+        # but we need to use create to stop for calculating levels
         time_points_level = list()
         for inst in self.instances:
             self.time_points.append(TimePoint(inst.ready, inst, True, 0))
@@ -3063,27 +3141,29 @@ class Memory(object):
     def __gt__(self, other: "Memory") -> bool:
         return self.__cmp__(other) > 0
 
+
+
 class Channel(object):
     __slots__ = [
-        'src', 'dst', 'channel_type', 'copies', 'time_points', 'max_live_copies', 'last_time'
+        'src', 'dst', 'channel_kind', 'copies', 'time_points', 'max_live_copies', 'last_time'
     ]
 
     @typecheck
     def __init__(self, 
-                 src: Union[Memory, None], 
-                 dst: Union[Memory, None],
-                 channel_type: str
+                 src: Optional[Memory], 
+                 dst: Optional[Memory],
+                 channel_kind: ChanKind
     ) -> None:
         self.src = src
         self.dst = dst
-        self.channel_type = channel_type
+        self.channel_kind = channel_kind
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_copies = 0
         self.last_time: Optional[float] = None
 
     @typecheck
-    def node_id(self) -> Union[int, None]:
+    def node_id(self) -> Optional[int]:
         if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
@@ -3095,7 +3175,7 @@ class Channel(object):
             return None
 
     @typecheck
-    def node_id_src(self) -> Union[int, None]:
+    def node_id_src(self) -> Optional[int]:
         if self.src is not None and self.src.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
@@ -3106,7 +3186,7 @@ class Channel(object):
 
     # mem_idx: 8
     @typecheck
-    def mem_idx_str(self, mem: Union[Memory, None]) -> str:
+    def mem_idx_str(self, mem: Optional[Memory]) -> str:
         if mem is not None:
             if mem.mem_id == 0:
                 return "[all n]"
@@ -3120,7 +3200,7 @@ class Channel(object):
         return str((mem_id >> 40) & ((1 << 16) - 1))
 
     @typecheck
-    def mem_str(self, mem: Union[Memory, None]) -> str:
+    def mem_str(self, mem: Optional[Memory]) -> str:
         if mem and mem.mem_id == 0:
             return "[all n]"
         elif mem and mem.affinity is not None:
@@ -3130,7 +3210,7 @@ class Channel(object):
         assert False
 
     @typecheck
-    def node_id_dst(self) -> Union[int, None]:
+    def node_id_dst(self) -> Optional[int]:
         if self.dst is not None and self.dst.mem_id != 0:
             # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):32, mem_idx: 8
             # owner_node = mem_id[55:40]
@@ -3147,16 +3227,16 @@ class Channel(object):
         elif self.src is None:
             assert self.dst is not None
             if self.dst.affinity is not None:
-                return self.channel_type + " " + self.dst.affinity.get_short_text()
+                return self.channel_kind.name + " " + self.dst.affinity.get_short_text()
             else:
-                return self.channel_type + " Channel"
+                return self.channel_kind.name + " Channel"
         # scatter channel
         elif self.dst is None:
             assert self.src is not None
             if self.src.affinity is not None:
-                return self.channel_type + " " + self.src.affinity.get_short_text()
+                return self.channel_kind.name + " " + self.src.affinity.get_short_text()
             else:
-                return self.channel_type + " Channel"
+                return self.channel_kind.name + " Channel"
         # normal channels
         elif self.src is not None and self.dst is not None:
             return self.mem_str(self.src) + " to " + self.mem_str(self.dst)
@@ -3174,8 +3254,8 @@ class Channel(object):
 
     @typecheck
     def trim_time_range(self, 
-                        start: Union[float, None], 
-                        stop: Union[float, None]
+                        start: Optional[float], 
+                        stop: Optional[float]
     ) -> None:
         trimmed_copies = set()
         for copy in self.copies:
@@ -3266,7 +3346,7 @@ class Channel(object):
         if self.src is None and self.dst is None:
             return 'Dependent Partition Channel'
         if self.src is None or self.dst is None:
-            return self.channel_type + ' ' + self.dst.__repr__() + ' Channel'
+            return self.channel_kind.name + ' ' + self.dst.__repr__() + ' Channel'
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
@@ -3378,7 +3458,7 @@ class State(object):
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
-        self.channels: Dict[Tuple[Union[Memory, None], Union[Memory, None], str], Channel] = {}
+        self.channels: Dict[Tuple[Optional[Memory], Optional[Memory], ChanKind], Channel] = {}
         self.task_kinds: Dict[int, TaskKind] = {}
         self.variants: Dict[Tuple[int, int], Variant] = {}
         self.meta_variants: Dict[int, Variant] = {}
@@ -3661,89 +3741,14 @@ class State(object):
         # src_inst and dst_inst are inst_uid
         indirect = bool(indirect)
         copy = self.find_or_create_copy(fevent)
-        if copy.copy_type != 0:
-            # even if indirect is False, it is still a indirect copy
-            self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
-            assert copy.is_inchannel == True
-        else:
-          if indirect == False:
-              self.__log_copy_inst_info_normal(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, copy)
-          else:
-              # this is the first time we see this copy
-              self.__log_copy_inst_info_indirect(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect, copy)
-              # we are not able to push the indirect copy into a channel
-              assert copy.is_inchannel == False
-            
-
-    def __log_copy_inst_info_normal(self, src: int, dst: int,
-                                    src_fid: int, dst_fid: int,
-                                    src_inst: int, dst_inst: int, 
-                                    fevent: int, copy: Copy
-    ) -> None:
-        assert(src_inst != 0) and (dst_inst != 0)
-        src_mem = self.find_or_create_memory(src)
-        dst_mem = self.find_or_create_memory(dst)
-        entry = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, False)
-        copy.add_copy_inst_info(entry)
-        if copy.is_inchannel == False:
-            copy.copy_type = 0
-            channel = self.find_or_create_channel(src_mem, dst_mem, "Copy")
-            channel.add_copy(copy)
-            copy.is_inchannel = True
-        else:
-            # this is not the first time we see this copy
-            assert len(copy.copy_inst_infos) > 1
-            assert (copy.copy_inst_infos[0].src == src_mem) and (copy.copy_inst_infos[0].dst == dst_mem)
-
-    def __log_copy_inst_info_indirect(self, src: int, dst: int,
-                                      src_fid: int, dst_fid: int,
-                                      src_inst: int, dst_inst: int, 
-                                      fevent: int, indirect: bool, copy: Copy
-    ) -> None:
-        if indirect:
-            if dst == 0:
-                # gather
-                copy.copy_type = 1
-                src_mem = self.find_or_create_memory(src)
-                dst_mem = None
-            elif src == 0:
-                # scatter
-                copy.copy_type = 2
-                src_mem = None
-                dst_mem = self.find_or_create_memory(dst)
-            else:
-                # gather with scatter
-                print(hex(src), hex(dst), hex(fevent), indirect)
-                copy.copy_type = 3
-                assert 0
-        else:
-            # indirect = false for indirect copy
+        src_mem = None
+        if src != 0:
             src_mem = self.find_or_create_memory(src)
+        dst_mem = None
+        if dst != 0:
             dst_mem = self.find_or_create_memory(dst)
-        entry = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
-        copy.add_copy_inst_info(entry)
-
-        # we will create a channel here
-        if indirect == False:
-            assert copy.copy_type != 0
-            if copy.is_inchannel == False:
-                if copy.copy_type == 1:
-                    # gather
-                    channel = self.find_or_create_channel(None, dst_mem, "Gather")
-                elif copy.copy_type == 2:
-                    # scatter
-                    channel = self.find_or_create_channel(src_mem, None, "Scatter")
-                else:
-                    assert 0
-                channel.add_copy(copy)
-                copy.is_inchannel = True
-            else:
-                # we have at least two CopyInstInfo, the first one is the indirect.
-                assert len(copy.copy_inst_infos) >= 2
-                if copy.copy_type == 1:
-                    assert copy.copy_inst_infos[1].dst == dst_mem
-                elif copy.copy_type == 2:
-                    assert copy.copy_inst_infos[1].src == src_mem
+        copy_inst_info = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy.add_copy_inst_info(copy_inst_info)
 
     @typecheck
     def add_fill_map(self, fevent: int, fill: Fill) -> None:
@@ -3772,15 +3777,8 @@ class State(object):
         # dst_inst are inst_uid
         fill = self.find_or_create_fill(fevent)
         dst_mem = self.find_or_create_memory(dst)
-        entry = self.create_fill_inst_info(dst_mem, fid, dst_inst, fevent)
-        fill.add_fill_inst_info(entry)
-        if fill.is_inchannel == False:
-            fill.add_mem(dst_mem)
-            channel = self.find_or_create_channel(None, dst_mem, "Fill")
-            channel.add_copy(fill)
-            fill.is_inchannel = True
-        else:
-            assert fill.dst == dst_mem
+        fill_inst_info = self.create_fill_inst_info(dst_mem, fid, dst_inst, fevent)
+        fill.add_fill_inst_info(fill_inst_info)
 
     # InstTimelineInfo
     @typecheck
@@ -3806,7 +3804,7 @@ class State(object):
         deppart = self.create_deppart(part_op, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        channel = self.find_or_create_channel(None, None, "DepPart")
+        channel = self.find_or_create_deppart_channel()
         channel.add_copy(deppart)
 
     # UserInfo (Not used?)
@@ -4035,26 +4033,48 @@ class State(object):
         return self.mem_proc_affinity[mem_id]
 
     @typecheck
-    def find_or_create_channel(self, 
-                               src: Union[Memory, None], 
-                               dst: Union[Memory, None],
-                               channel_type: str
+    def find_or_create_copy_channel(self, 
+                                    src: Memory, 
+                                    dst: Memory
     ) -> Channel:
-        # src, dst is not None: normal copy
-        # dst is None: scatter
-        # src is None: gather/fill
-        # src,dst are None: deppart
-        if src is not None and dst is not None:
-            assert channel_type == "Copy"
-        elif src is None and dst is not None:
-            assert (channel_type == "Fill") or (channel_type == "Gather")
-        elif src is not None and dst is None:
-            assert channel_type == "Scatter"
-        else:
-            assert channel_type == "DepPart"
-        key = (src, dst, channel_type)
+        key = (src, dst, ChanKind.Copy)
         if key not in self.channels:
-            self.channels[key] = Channel(src, dst, channel_type)
+            self.channels[key] = Channel(src, dst, ChanKind.Copy)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_fill_channel(self, 
+                                    dst: Memory
+    ) -> Channel:
+        key = (None, dst, ChanKind.Fill)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, dst, ChanKind.Fill)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_gather_channel(self,
+                                      dst: Memory,
+    ) -> Channel:
+        key = (None, dst, ChanKind.Gather)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, dst, ChanKind.Gather)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_scatter_channel(self,
+                                       src: Memory,
+    ) -> Channel:
+        key = (src, None, ChanKind.Scatter)
+        if key not in self.channels:
+            self.channels[key] = Channel(src, None, ChanKind.Scatter)
+        return self.channels[key]
+
+    @typecheck
+    def find_or_create_deppart_channel(self
+    ) -> Channel:
+        key = (None, None, ChanKind.DepPart)
+        if key not in self.channels:
+            self.channels[key] = Channel(None, None, ChanKind.DepPart)
         return self.channels[key]
 
     @typecheck
@@ -4282,8 +4302,8 @@ class State(object):
       return operation_inst_info  
 
     @typecheck
-    def create_copy_inst_info(self, src: Union[Memory, None], 
-                              dst: Union[Memory, None],
+    def create_copy_inst_info(self, src: Optional[Memory], 
+                              dst: Optional[Memory],
                               src_fid: int, dst_fid: int,
                               src_inst: int, dst_inst: int, 
                               fevent: int, indirect: bool
@@ -4314,6 +4334,20 @@ class State(object):
         # update prof_uid map
         self.prof_uid_map[user.prof_uid] = user
         return user
+
+    # called after all copies are parsed
+    #   add the channel info into Copy and then add copy into Channel
+    @typecheck
+    def add_copy_to_channel(self) -> None:
+        for copy in self.copy_map.values():
+            copy.add_channel(self)
+ 
+    # called after all fills are parsed
+    #   add the channel info into Fill and then add fill into Channel
+    @typecheck
+    def add_fill_to_channel(self) -> None:
+        for fill in self.fill_map.values():
+            fill.add_channel(self)
 
     @typecheck
     def trim_time_ranges(self, start: float, stop: float) -> None:
@@ -4504,7 +4538,7 @@ class State(object):
                 sum = 0.0
                 cnt = 0
                 bandwidth = 0.0
-                channel = self.find_or_create_channel(src, dst, "Copy")
+                channel = self.find_or_create_copy_channel(src, dst)
                 for copy in channel.copies:
                     time = copy.stop - copy.start
                     sum = sum + time * 1e-6
@@ -5486,6 +5520,12 @@ def main() -> None:
     if not has_matches:
         print('No matches found! Exiting...')
         return
+
+    # once all logs are parsed, let's figure out the channel for fill
+    state.add_fill_to_channel()
+
+    # once all logs are parsed, let's figure out the channel for copy
+    state.add_copy_to_channel()
 
     # See if we need to trim out any boxes before we build the profile
     if (start_trim > 0) or (stop_trim > 0):
