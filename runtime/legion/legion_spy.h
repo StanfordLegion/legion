@@ -1505,6 +1505,13 @@ namespace Legion {
 			one.id, two.id);
       }
 
+      static inline void log_reservation_acquire(Reservation r, 
+                                                 LgEvent pre, LgEvent post)
+      {
+        log_spy.print("Reservation " IDFMT " " IDFMT " " IDFMT,
+                      r.id, pre.id, post.id);
+      }
+
       static inline void log_ap_user_event(ApUserEvent event)
       {
         log_spy.print("Ap User Event " IDFMT " %llu", 

@@ -283,12 +283,12 @@ bool test_cuda_arrays(Rect<N,T> extent, Memory src_mem,
       }
 
       float act = acc[pir.p];
-      if(fabsf(exp - act) < 1e-3) {
+      if(fabsf(exp - act) < 1e-3 * exp) {
         // all good
       } else {
         // mismatch
         if(errors++ < 10)
-          log_app.error() << "mismatch at " << pir.p << ": exp=" << exp << " act=" << act;
+          log_app.error() << "mismatch at " << pir.p << ": exp=" << exp << " act=" << act << " err=" << fabsf(exp - act);
       }
 
       f += 1.0f;

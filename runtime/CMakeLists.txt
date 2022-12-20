@@ -172,6 +172,13 @@ if(REALM_USE_MPI)
   )
 endif()
 
+if(REALM_USE_NVTX)
+  list(APPEND REALM_SRC
+    realm/nvtx.h
+    realm/nvtx.cc
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
@@ -610,6 +617,11 @@ if(Legion_USE_OpenMP)
   endif()
 endif()
 
+if(REALM_USE_NVTX)
+  target_include_directories(RealmRuntime PRIVATE ${NVTX_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ${NVTX_LIBRARIES})
+endif()
+
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
 
 target_include_directories(RealmRuntime
@@ -774,8 +786,9 @@ if(LEGION_CUDA_SRC)
     endif ()
   else ()
       # If the user specified a specific gencode to use, use that
+      string(REPLACE "," ";" Legion_CUDA_ARCH "${Legion_CUDA_ARCH}")
       list(SORT Legion_CUDA_ARCH)
-      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
+      set(CUDA_GENCODE "${Legion_CUDA_ARCH}")
       # Add all the specified architectures we support
       string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
       list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)

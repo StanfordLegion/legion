@@ -6032,7 +6032,7 @@ namespace Legion {
               *this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -6169,7 +6169,7 @@ namespace Legion {
               *this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       AffineBounds::Tester<N,T> bounds;
     public:
@@ -6266,7 +6266,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -6390,7 +6390,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       AffineBounds::Tester<1,T> bounds;
     public:
@@ -6509,7 +6509,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -6670,7 +6670,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       AffineBounds::Tester<N,T> bounds;
     public:
@@ -6777,7 +6777,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -6925,7 +6925,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       AffineBounds::Tester<1,T> bounds;
     public:
@@ -7038,7 +7038,7 @@ namespace Legion {
               *this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -7186,7 +7186,7 @@ namespace Legion {
               LEGION_WRITE_DISCARD>(*this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       AffineBounds::Tester<N,T> bounds;
     public:
@@ -7287,7 +7287,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -7422,7 +7422,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       AffineBounds::Tester<1,T> bounds;
     public:
@@ -7530,7 +7530,7 @@ namespace Legion {
               *this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -7666,7 +7666,7 @@ namespace Legion {
               LEGION_WRITE_DISCARD>(*this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       AffineBounds::Tester<N,T> bounds;
     public:
@@ -7762,7 +7762,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -7885,7 +7885,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       AffineBounds::Tester<1,T> bounds;
     public:
@@ -8272,7 +8272,7 @@ namespace Legion {
               *this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<typename REDOP::RHS,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<typename REDOP::RHS,N,T> accessor;
     public:
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
@@ -8408,7 +8408,7 @@ namespace Legion {
               *this, Point<1,T>(index));
       }
     public:
-      Realm::MultiAffineAccessor<typename REDOP::RHS,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<typename REDOP::RHS,N,T> accessor;
       FieldID field;
       AffineBounds::Tester<N,T> bounds;
     public:
@@ -8512,7 +8512,7 @@ namespace Legion {
             typename REDOP::RHS,1,T>(*this, p);
         }
     public:
-      Realm::MultiAffineAccessor<typename REDOP::RHS,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<typename REDOP::RHS,1,T> accessor;
     public:
       typedef typename REDOP::RHS value_type;
       typedef typename REDOP::RHS& reference;
@@ -8634,7 +8634,7 @@ namespace Legion {
             typename REDOP::RHS,1,T>(*this, p);
         }
     public:
-      Realm::MultiAffineAccessor<typename REDOP::RHS,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<typename REDOP::RHS,1,T> accessor;
       FieldID field;
       AffineBounds::Tester<1,T> bounds;
     public:
@@ -12565,7 +12565,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -12886,7 +12886,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -13186,7 +13186,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<N,T> region_bounds[MR];
@@ -13471,7 +13471,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
       FieldID field;
       PrivilegeMode region_privileges[MR];
       AffineBounds::Tester<1,T> region_bounds[MR];
@@ -13688,7 +13688,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -13887,7 +13887,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -14424,7 +14424,7 @@ namespace Legion {
                   FT,N,T,2,LEGION_READ_WRITE>(*this, Point<1,T>(index));
         }
     public:
-      Realm::MultiAffineAccessor<FT,N,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,N,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -14500,7 +14500,7 @@ namespace Legion {
           return accessor[p];
         }
     public:
-      Realm::MultiAffineAccessor<FT,1,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,1,T> accessor;
     public:
       typedef FT value_type;
       typedef FT& reference;
@@ -14705,7 +14705,7 @@ namespace Legion {
         }
     private:
       PieceIteratorT<DIM,T> piece_iterator;
-      Realm::MultiAffineAccessor<FT,DIM,T> accessor;
+      mutable Realm::MultiAffineAccessor<FT,DIM,T> accessor;
       Span<FT,LEGION_READ_WRITE> current;
       Point<DIM,T> partial_step_point;
       int dim_order[DIM];
@@ -15247,7 +15247,7 @@ namespace Legion {
       }
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d",
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d\n",
                 kind);
         assert(false);
       }
@@ -15712,7 +15712,7 @@ namespace Legion {
       }
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d",
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d\n",
                 kind);
         assert(false);
       }

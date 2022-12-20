@@ -42,6 +42,23 @@ String.prototype.hashCode = function() {
   return Math.abs(hash);
 }
 
+function getProvenanceString(d) {
+  var provenance = "";
+  if (d.op_id != -1) {
+      provenance = state.operations[d.op_id].provenance;
+  }
+  if ((provenance == "") && (d.initiation != undefined) && (d.initiation != "")) {
+      provenance = state.operations[d.initiation].provenance;
+  }
+  return provenance;
+}
+
+function operationMatchesRegex(regex, d) {
+  return regex.exec(d.title) != null ||
+         regex.exec(d.initiation) != null ||
+         regex.exec(getProvenanceString(d)) != null;
+}
+
 function parseURLParameters() {
   var match,
   pl     = /\+/g,  // Regex for replacing addition symbol with a space
@@ -381,25 +398,6 @@ function get_time_str(time_val, convert)
     return time_val.toString() + " us";
 }
 
-function get_provenance(data)
-{
-  var provenance = "";
-  var initiation_provenance = "";
-  if (data.op_id != -1) {
-    provenance = state.operations[data.op_id].provenance;
-  }
-  if ((data.initiation != undefined) && (data.initiation != "")) {
-    initiation_provenance = state.operations[data.initiation].provenance;
-  }
-  if (provenance != "") {
-    return provenance;
-  } else if (initiation_provenance != "") {
-    return initiation_provenance;
-  } else {
-    return "";
-  }
-}
-
 function getMouseOver() {
   var paneWidth = $("#timeline").width();
   var left = paneWidth / 3;
@@ -425,27 +423,28 @@ function getMouseOver() {
     var delay = d.start - d.ready;
     total = parseFloat(total.toFixed(3))
     delay = parseFloat(delay.toFixed(3))
-    
-    // Insert texts in reverse order
-    var provenance = get_provenance(d);
-    if (provenance != "") {
-        // provenance strings are in this form:
-        // "(human readable string)$(key1),(value1)|(key2),(value2)|..."
-        var tokens = provenance.split("\$");
 
-        // If the provenance string doesn't match the format,
-        // we render it verbatim.
-        if (tokens.length != 2) descTexts.push("Provenance: " + provenance);
-        else {
-            var to_parse = tokens[1];
-            var pairs = to_parse.split("|");
-            pairs.forEach(pair => {
-                var tokens = pair.split(",");
-                descTexts.push(tokens[0] + ": " + tokens[1]);
-            });
-        }
-        // Add a line break to separate provenance info from the rest
-        descTexts.push(" ");
+    var provenance = getProvenanceString(d);
+
+    // Insert texts in reverse order
+    if (provenance != "") {
+      // provenance strings are in this form:
+      // "(human readable string)$(key1),(value1)|(key2),(value2)|..."
+      var tokens = provenance.split("\$");
+
+      // If the provenance string doesn't match the format,
+      // we render it verbatim.
+      if (tokens.length != 2) descTexts.push("Provenance: " + provenance);
+      else {
+          var to_parse = tokens[1];
+          var pairs = to_parse.split("|");
+          pairs.forEach(pair => {
+              var tokens = pair.split(",");
+              descTexts.push(tokens[0] + ": " + tokens[1]);
+          });
+      }
+      // Add a line break to separate provenance info from the rest
+      descTexts.push(" ");
     }
 
     // Add instances
@@ -1412,26 +1411,21 @@ function drawTimeline() {
     .style("fill", function(d) {
       var color = d.color;
       d.is_highlighted = false;
-      if (state.searchEnabled) {
-        var provenance = get_provenance(d);
-        if (searchRegex[currentPos].exec(d.title) != null ||
-            searchRegex[currentPos].exec(d.initiation) != null ||
-            searchRegex[currentPos].exec(provenance) != null) {
-          color = "#ff0000";
-	  d.is_highlighted = true;
-        }
+      if (state.searchEnabled && operationMatchesRegex(searchRegex[currentPos], d)) {
+        color = "#ff0000";
+        d.is_highlighted = true;
       }
       if (state.searchInstEnabled) {
-	for (let i = 0; i < searchInstRegexLength; i++) {
+        for (let i = 0; i < searchInstRegexLength; i++) {
           if (searchInstRegex[i].exec(d.prof_uid) != null) {
             color = "#ff0000";
-	    d.is_highlighted = true;
+            d.is_highlighted = true;
             break;
           }
         }
-	if (clickBoxProf_uid == d.prof_uid) {
+        if (clickBoxProf_uid == d.prof_uid) {
           d.is_highlighted = true;
-	}
+        }
       }
       return color;
     })
@@ -1455,16 +1449,6 @@ function drawTimeline() {
     .attr("height", state.thickness)
     .style("opacity", function(d) {
       var opacity = d.opacity;
-//       if (state.searchEnabled) {
-//         var provenance = get_provenance(d);
-//         if (searchRegex[currentPos].exec(d.title) != null || 
-//             searchRegex[currentPos].exec(d.initiation) != null ||
-//             searchRegex[currentPos].exec(provenance) != null) {
-//           opacity = d.opacity;	
-//         } else {
-//           opacity = 0.05;
-//         }
-//       }
       if (state.searchEnabled || state.searchInstEnabled) {
         if (d.is_highlighted == false) {
           opacity = 0.05;
