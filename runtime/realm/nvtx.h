@@ -33,7 +33,7 @@ namespace Realm {
       , blue{blue_}
       , alpha{alpha_}
     {}
-    constexpr uint32_t to_uint(void)
+    constexpr uint32_t to_uint(void) const
     {
       return uint32_t{alpha} << 24 | uint32_t{red} << 16 | uint32_t{green} << 8 |
              uint32_t{blue};
