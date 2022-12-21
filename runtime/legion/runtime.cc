@@ -9794,14 +9794,14 @@ namespace Legion {
       // Create an individual manager with a null instance
       DistributedID did = runtime->get_available_distributed_id();
 
-      ApEvent ready_event = producer_event;
-      if (runtime->legion_spy_enabled)
+      LgEvent unique_event;
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
         // When Legion Spy is enabled, we want the ready event to be unique.
         // So we create a fresh event and trigger it with the producer event
-        ApUserEvent unique_event = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, unique_event, producer_event);
-        ready_event = unique_event;
+        RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
       }
 
       IndividualManager *manager =
@@ -9817,7 +9817,7 @@ namespace Legion {
                               layout,
                               0/*redop id*/, true/*register now*/,
                               -1U/*instance_footprint*/,
-                              ready_event,
+                              producer_event, unique_event,
                               PhysicalManager::UNBOUND_INSTANCE_KIND,
                               NULL/*op*/,
                               producer_event);
@@ -10340,19 +10340,20 @@ namespace Legion {
               &base, sizeof(base), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
+          LgEvent unique_event;
+          if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
+          {
+            RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            unique_event = unique;
+          }
           if (runtime->profiler != NULL)
-            runtime->profiler->add_inst_request(requests, creator_uid);
+            runtime->profiler->add_inst_request(requests, 
+                                                creator_uid, unique_event);
           use_event = RtEvent(PhysicalInstance::create_instance(instance,
                     memory, ilg->clone(), requests, alloc_precondition));
           if (allocator.succeeded())
           {
-            if (runtime->profiler != NULL)
-            {
-              unsigned long long creation_time = 
-                Realm::Clock::current_time_in_nanoseconds();
-              runtime->profiler->record_instance_creation(instance,
-                                memory, creator_uid, creation_time);
-            }
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
             assert(remaining_capacity >= size);
@@ -14205,8 +14206,8 @@ namespace Legion {
         ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(target.spawn(descriptor_id, 
-                    &ctx, sizeof(ctx), requests, pre, priority));
+        return Runtime::ignorefaults(ApEvent(target.spawn(descriptor_id, 
+                    &ctx, sizeof(ctx), requests, pre, priority)));
       }
       else
       {
@@ -14402,8 +14403,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id,FieldSpace h,
                                      Runtime *rt, bool inter, DistributedID did)
-      : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
-          rt->get_available_distributed_id(), false/*register*/),
+      : LayoutConstraintSet(), DistributedCollectable(rt,
+          LEGION_DISTRIBUTED_HELP_ENCODE((did > 0) ? did : 
+            rt->get_available_distributed_id(), CONSTRAINT_SET_DC),
+          false/*register*/),
         layout_id(lay_id), handle(h), internal(inter), constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
@@ -14415,10 +14418,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(LayoutConstraintID lay_id, Runtime *rt,
-      const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
+                                     const LayoutConstraintRegistrar &registrar,
+                                     bool inter, DistributedID did,
+                                     CollectiveMapping *collective_mapping)
       : LayoutConstraintSet(registrar.layout_constraints), 
-        DistributedCollectable(rt, (did > 0) ? did : 
-            rt->get_available_distributed_id(), false/*register with runtime*/), 
+        DistributedCollectable(rt, LEGION_DISTRIBUTED_HELP_ENCODE((did > 0) 
+              ? did : rt->get_available_distributed_id(), CONSTRAINT_SET_DC),
+            false/*register with runtime*/, collective_mapping),
         layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -14440,7 +14446,8 @@ namespace Legion {
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
-          rt->get_available_distributed_id(), false/*register with runtime*/), 
+          LEGION_DISTRIBUTED_HELP_ENCODE(rt->get_available_distributed_id(), 
+            CONSTRAINT_SET_DC), false/*register with runtime*/),
         layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -14515,8 +14522,7 @@ namespace Legion {
     void LayoutConstraints::notify_local(void)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        runtime->unregister_layout(layout_id);
+      runtime->unregister_layout(layout_id);
     }
 
     //--------------------------------------------------------------------------
@@ -17043,6 +17049,13 @@ namespace Legion {
         &pending_constraints = get_pending_constraint_table();
       if (!pending_constraints.empty())
       {
+        // Create a collective mapping for all the nodes
+        std::vector<AddressSpaceID> all_spaces(total_address_spaces);
+        for (unsigned idx = 0; idx < all_spaces.size(); idx++)
+          all_spaces[idx] = idx;
+        CollectiveMapping *mapping = 
+          new CollectiveMapping(all_spaces, legion_collective_radix);
+        mapping->add_reference();
         // Update the next available constraint
         while (pending_constraints.find(unique_constraint_id) !=
                 pending_constraints.end())
@@ -17088,11 +17101,13 @@ namespace Legion {
             if (did != expected_did)
               assert(false);
           }
-          register_layout(it->second, it->first, expected_did);
+          register_layout(it->second, it->first, expected_did, mapping);
         }
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
+        if (mapping->remove_reference())
+          delete mapping;
       }
     }
 
@@ -17480,7 +17495,6 @@ namespace Legion {
       // the mappers as they may want to look at the rank table
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
-      initialize_mappers(); 
       // Pull in any static registrations that were done
       register_static_variants();
       register_static_constraints();
@@ -17488,6 +17502,8 @@ namespace Legion {
       register_static_sharding_functors();
       // Initialize our virtual manager and our mappers
       initialize_virtual_manager();
+      // Initialize the mappers
+      initialize_mappers(); 
       // Finally perform the registration callback methods
       std::vector<RegistrationCallback> &registration_callbacks
         = get_pending_registration_callbacks();
@@ -28995,26 +29011,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraintID Runtime::register_layout(
                                 const LayoutConstraintRegistrar &registrar,
-                                LayoutConstraintID layout_id, DistributedID did)
+                                LayoutConstraintID layout_id, DistributedID did,
+                                CollectiveMapping *collective_mapping)
     //--------------------------------------------------------------------------
     {
       if (layout_id == LEGION_AUTO_GENERATE_ID)
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
-      if (register_layout(constraints))
-      {
-        // These constraints are available on all the nodes so if we own
-        // them then record that we have remote instances for everything else
-        if ((did > 0) && constraints->is_owner())
-        {
-          for (AddressSpaceID space = 0; space < total_address_spaces; space++)
-            if (space != address_space)
-              constraints->update_remote_instances(space);
-        }
-      }
-      else
+        new LayoutConstraints(layout_id, this, registrar,
+            false/*internal*/, did, collective_mapping);
+      if (!register_layout(constraints))
         // If someone else already registered this ID then we delete our object
         delete constraints;
       return layout_id;

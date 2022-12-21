@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::cmp::{max, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::convert::TryFrom;
@@ -404,7 +405,7 @@ impl Proc {
     }
 }
 
-pub type MemEntry = (InstID, OpID);
+pub type MemEntry = InstUID; // this is the unique id (inst_uid) of Inst
 
 pub type MemPoint = TimePoint<MemEntry, ()>;
 
@@ -428,7 +429,7 @@ pub struct Mem {
     pub mem_id: MemID,
     pub kind: MemKind,
     pub capacity: u64,
-    pub insts: BTreeMap<(InstID, OpID), Inst>,
+    pub insts: BTreeMap<InstUID, Inst>,
     pub time_points: Vec<MemPoint>,
     pub max_live_insts: u32,
 }
@@ -538,15 +539,15 @@ impl MemProcAffinity {
 
 #[derive(Debug, Copy, Clone)]
 pub enum ChanEntry {
-    Copy(OpID, usize),
-    Fill(OpID, usize),
+    Copy(EventID),
+    Fill(EventID),
     DepPart(OpID, usize),
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum ChanEntryRef<'a> {
-    Copy((OpID, usize), &'a Copy),
-    Fill((OpID, usize), &'a Fill),
+    Copy(EventID, &'a Copy),
+    Fill(EventID, &'a Fill),
     DepPart((OpID, usize), &'a DepPart),
 }
 
@@ -569,8 +570,8 @@ impl<'a> ChanEntryRef<'a> {
 
 #[derive(Debug)]
 pub enum ChanEntryRefMut<'a> {
-    Copy((OpID, usize), &'a mut Copy),
-    Fill((OpID, usize), &'a mut Fill),
+    Copy(EventID, &'a mut Copy),
+    Fill(EventID, &'a mut Fill),
     DepPart((OpID, usize), &'a mut DepPart),
 }
 
@@ -593,10 +594,27 @@ impl<'a> ChanEntryRefMut<'a> {
 
 pub type ChanPoint = TimePoint<ChanEntry, ()>;
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
+#[repr(u32)]
+pub enum ChanKind {
+    Copy = 0,
+    Fill = 1,
+    Gather = 2,
+    Scatter = 3,
+    DepPart = 4,
+}
+
+impl fmt::Display for ChanKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChanID {
     pub src: Option<MemID>,
     pub dst: Option<MemID>,
+    pub channel_kind: ChanKind,
 }
 
 impl ChanID {
@@ -604,18 +622,35 @@ impl ChanID {
         ChanID {
             src: Some(src),
             dst: Some(dst),
+            channel_kind: ChanKind::Copy,
         }
     }
     fn new_fill(dst: MemID) -> Self {
         ChanID {
             src: None,
             dst: Some(dst),
+            channel_kind: ChanKind::Fill,
+        }
+    }
+    fn new_gather(dst: MemID) -> Self {
+        ChanID {
+            src: None,
+            dst: Some(dst),
+            channel_kind: ChanKind::Gather,
+        }
+    }
+    fn new_scatter(dst: MemID) -> Self {
+        ChanID {
+            src: None,
+            dst: Some(dst),
+            channel_kind: ChanKind::Scatter,
         }
     }
     fn new_deppart() -> Self {
         ChanID {
             src: None,
             dst: None,
+            channel_kind: ChanKind::DepPart,
         }
     }
 
@@ -631,8 +666,8 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub chan_id: ChanID,
-    pub copies: BTreeMap<OpID, Vec<Copy>>,
-    pub fills: BTreeMap<OpID, Vec<Fill>>,
+    pub copies: BTreeMap<EventID, Copy>,
+    pub fills: BTreeMap<EventID, Fill>,
     pub depparts: BTreeMap<OpID, Vec<DepPart>>,
     pub time_points: Vec<ChanPoint>,
     pub max_levels: u32,
@@ -655,12 +690,8 @@ impl Chan {
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        for copies in self.copies.values_mut() {
-            copies.retain_mut(|t| !t.trim_time_range(start, stop));
-        }
-        for fills in self.fills.values_mut() {
-            fills.retain_mut(|t| !t.trim_time_range(start, stop));
-        }
+        self.copies.retain(|_, c| !c.trim_time_range(start, stop));
+        self.fills.retain(|_, f| !f.trim_time_range(start, stop));
         for depparts in self.depparts.values_mut() {
             depparts.retain_mut(|t| !t.trim_time_range(start, stop));
         }
@@ -676,19 +707,15 @@ impl Chan {
 
         let mut points = Vec::new();
 
-        for (op_id, copies) in &self.copies {
-            for (idx, copy) in copies.iter().enumerate() {
-                let time = &copy.time_range;
-                let entry = ChanEntry::Copy(*op_id, idx);
-                add(&time, entry, &mut points);
-            }
+        for (fevent, copy) in &self.copies {
+            let time = &copy.time_range;
+            let entry = ChanEntry::Copy(*fevent);
+            add(&time, entry, &mut points);
         }
-        for (op_id, fills) in &self.fills {
-            for (idx, fill) in fills.iter().enumerate() {
-                let time = &fill.time_range;
-                let entry = ChanEntry::Fill(*op_id, idx);
-                add(&time, entry, &mut points);
-            }
+        for (fevent, fill) in &self.fills {
+            let time = &fill.time_range;
+            let entry = ChanEntry::Fill(*fevent);
+            add(&time, entry, &mut points);
         }
         for (op_id, depparts) in &self.depparts {
             for (idx, deppart) in depparts.iter().enumerate() {
@@ -722,13 +749,13 @@ impl Chan {
 
     pub fn entry(&self, entry: ChanEntry) -> ChanEntryRef {
         match entry {
-            ChanEntry::Copy(op_id, idx) => {
-                let copy = &self.copies.get(&op_id).unwrap()[idx];
-                ChanEntryRef::Copy((op_id, idx), copy)
+            ChanEntry::Copy(fevent) => {
+                let copy = &self.copies.get(&fevent).unwrap();
+                ChanEntryRef::Copy(fevent, copy)
             }
-            ChanEntry::Fill(op_id, idx) => {
-                let fill = &self.fills.get(&op_id).unwrap()[idx];
-                ChanEntryRef::Fill((op_id, idx), fill)
+            ChanEntry::Fill(fevent) => {
+                let fill = &self.fills.get(&fevent).unwrap();
+                ChanEntryRef::Fill(fevent, fill)
             }
             ChanEntry::DepPart(op_id, idx) => {
                 let deppart = &self.depparts.get(&op_id).unwrap()[idx];
@@ -739,13 +766,11 @@ impl Chan {
 
     pub fn entry_mut(&mut self, entry: ChanEntry) -> ChanEntryRefMut {
         match entry {
-            ChanEntry::Copy(op_id, idx) => {
-                let copy = &mut self.copies.get_mut(&op_id).unwrap()[idx];
-                ChanEntryRefMut::Copy((op_id, idx), copy)
+            ChanEntry::Copy(fevent) => {
+                ChanEntryRefMut::Copy(fevent, self.copies.get_mut(&fevent).unwrap())
             }
-            ChanEntry::Fill(op_id, idx) => {
-                let fill = &mut self.fills.get_mut(&op_id).unwrap()[idx];
-                ChanEntryRefMut::Fill((op_id, idx), fill)
+            ChanEntry::Fill(fevent) => {
+                ChanEntryRefMut::Fill(fevent, self.fills.get_mut(&fevent).unwrap())
             }
             ChanEntry::DepPart(op_id, idx) => {
                 let deppart = &mut self.depparts.get_mut(&op_id).unwrap()[idx];
@@ -1039,7 +1064,9 @@ pub struct Dim(pub u32);
 #[derive(Debug)]
 pub struct Inst {
     pub base: Base,
-    pub inst_id: InstID,
+    pub inst_uid: InstUID,
+    pub inst_id: Option<InstID>,
+    pub op_id: Option<OpID>,
     mem_id: Option<MemID>,
     pub size: Option<u64>,
     pub time_range: TimeRange,
@@ -1052,10 +1079,12 @@ pub struct Inst {
 }
 
 impl Inst {
-    fn new(base: Base, inst_id: InstID) -> Self {
+    fn new(base: Base, inst_uid: InstUID) -> Self {
         Inst {
             base,
-            inst_id,
+            inst_uid,
+            inst_id: None,
+            op_id: None,
             mem_id: None,
             size: None,
             time_range: TimeRange::new_empty(),
@@ -1067,6 +1096,14 @@ impl Inst {
             dim_order: BTreeMap::new(),
         }
     }
+    fn set_inst_id(&mut self, inst_id: InstID) -> &mut Self {
+        self.inst_id = Some(inst_id);
+        self
+    }
+    fn set_op_id(&mut self, op_id: OpID) -> &mut Self {
+        self.op_id = Some(op_id);
+        self
+    }
     fn set_mem(&mut self, mem_id: MemID) -> &mut Self {
         self.mem_id = Some(mem_id);
         self
@@ -1077,13 +1114,6 @@ impl Inst {
     }
     fn set_start_stop(&mut self, start: Timestamp, ready: Timestamp, stop: Timestamp) -> &mut Self {
         self.time_range = TimeRange::new_full(start, ready, ready, stop);
-        self
-    }
-    fn set_start(&mut self, start: Timestamp) -> &mut Self {
-        // don't overwrite if we have already captured the (more precise) timeline info
-        if self.time_range.stop.is_none() {
-            self.time_range.start = Some(start);
-        }
         self
     }
     fn add_ispace(&mut self, ispace_id: ISpaceID) -> &mut Self {
@@ -1131,6 +1161,26 @@ impl Inst {
         self.time_range.trim_time_range(start, stop)
     }
 }
+
+impl Ord for Inst {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.base.prof_uid.cmp(&other.base.prof_uid)
+    }
+}
+
+impl PartialOrd for Inst {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Inst {
+    fn eq(&self, other: &Self) -> bool {
+        self.base.prof_uid == other.base.prof_uid
+    }
+}
+
+impl Eq for Inst {}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct Color(pub u32);
@@ -1453,12 +1503,29 @@ impl OpKind {
 }
 
 #[derive(Debug)]
+pub struct OperationInstInfo {
+    pub inst_uid: InstUID,
+    index: u32,
+    field_id: FieldID,
+}
+
+impl OperationInstInfo {
+    fn new(inst_uid: InstUID, index: u32, field_id: FieldID) -> Self {
+        OperationInstInfo {
+            inst_uid: inst_uid,
+            index: index,
+            field_id: field_id,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Operation {
     pub base: Base,
     pub parent_id: Option<OpID>,
     pub kind: Option<OpKindID>,
     pub provenance: Option<String>,
-    // owner: Option<OpID>,
+    pub operation_inst_infos: Vec<OperationInstInfo>,
 }
 
 impl Operation {
@@ -1468,7 +1535,7 @@ impl Operation {
             parent_id: None,
             kind: None,
             provenance: None,
-            // owner: None,
+            operation_inst_infos: Vec::new(),
         }
     }
     fn set_parent_id(&mut self, parent_id: OpID) -> &mut Self {
@@ -1493,73 +1560,161 @@ impl Operation {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventID(pub u64);
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InstUID(pub u64);
+
 impl From<spy::serialize::EventID> for EventID {
     fn from(e: spy::serialize::EventID) -> Self {
         EventID(e.0 .0)
     }
 }
 
-#[derive(Debug)]
-pub struct CopyInfo {
-    src_inst: InstID,
-    dst_inst: InstID,
-    _fevent: EventID,
-    num_fields: u32,
-    request_type: u32,
-    num_hops: u32,
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
+#[repr(u32)]
+pub enum CopyKind {
+    Copy = 0,
+    Gather = 1,
+    Scatter = 2,
+    GatherScatter = 3,
 }
 
-impl fmt::Display for CopyInfo {
+impl fmt::Display for CopyKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "src_inst=0x{:x}, dst_inst=0x{:x}, fields={}, type={}, hops={}",
-            self.src_inst.0,
-            self.dst_inst.0,
-            self.num_fields,
-            match self.request_type {
-                0 => "fill",
-                1 => "reduc",
-                2 => "copy",
-                _ => unreachable!(),
-            },
-            self.num_hops
-        )
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct CopyInstInfo {
+    _src: Option<MemID>,
+    _dst: Option<MemID>,
+    pub src_fid: FieldID,
+    pub dst_fid: FieldID,
+    pub src_inst_uid: InstUID,
+    pub dst_inst_uid: InstUID,
+    _fevent: EventID,
+    pub indirect: bool,
+}
+
+impl CopyInstInfo {
+    fn new(
+        src: Option<MemID>,
+        dst: Option<MemID>,
+        src_fid: FieldID,
+        dst_fid: FieldID,
+        src_inst_uid: InstUID,
+        dst_inst_uid: InstUID,
+        fevent: EventID,
+        indirect: bool,
+    ) -> Self {
+        CopyInstInfo {
+            _src: src,
+            _dst: dst,
+            src_fid: src_fid,
+            dst_fid: dst_fid,
+            src_inst_uid: src_inst_uid,
+            dst_inst_uid: dst_inst_uid,
+            _fevent: fevent,
+            indirect: indirect,
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    _src: MemID,
-    _dst: MemID,
-    pub size: u64,
-    time_range: TimeRange,
     _fevent: EventID,
-    _num_requests: u32,
-    pub copy_info: Vec<CopyInfo>,
+    time_range: TimeRange,
+    chan_id: Option<ChanID>,
+    pub op_id: Option<OpID>,
+    pub size: Option<u64>,
+    pub num_hops: Option<u32>,
+    pub request_type: Option<u32>,
+    pub copy_kind: Option<CopyKind>,
+    pub copy_inst_infos: Vec<CopyInstInfo>,
 }
 
 impl Copy {
-    fn new(
-        base: Base,
-        src: MemID,
-        dst: MemID,
-        size: u64,
-        time_range: TimeRange,
-        fevent: EventID,
-        num_requests: u32,
-        copy_info: Vec<CopyInfo>,
-    ) -> Self {
+    fn new(base: Base, fevent: EventID) -> Self {
         Copy {
             base,
-            _src: src,
-            _dst: dst,
-            size,
-            time_range,
             _fevent: fevent,
-            _num_requests: num_requests,
-            copy_info,
+            time_range: TimeRange::new_empty(),
+            chan_id: None,
+            op_id: None,
+            size: None,
+            num_hops: None,
+            request_type: None,
+            copy_kind: None,
+            copy_inst_infos: Vec::new(),
+        }
+    }
+    fn add_copy_info(
+        &mut self,
+        time_range: TimeRange,
+        op_id: OpID,
+        size: u64,
+        num_hops: u32,
+        request_type: u32,
+    ) {
+        // sanity check
+        assert_eq!(self.op_id, None);
+        self.time_range = time_range;
+        self.op_id = Some(op_id);
+        self.size = Some(size);
+        self.num_hops = Some(num_hops);
+        self.request_type = Some(request_type);
+    }
+    fn add_copy_inst_info(&mut self, copy_inst_info: CopyInstInfo) {
+        self.copy_inst_infos.push(copy_inst_info);
+    }
+    fn add_channel(&mut self) {
+        // sanity check
+        assert_eq!(self.chan_id, None);
+        assert_eq!(self.copy_kind, None);
+        let mut isindrect = false;
+        for copy_inst_info in &self.copy_inst_infos {
+            // this is the copy inst info for points of a indirect copy (meta copy)
+            if copy_inst_info.indirect {
+                self.copy_kind = match (copy_inst_info._src, copy_inst_info._dst) {
+                    (_, None) => Some(CopyKind::Gather),     // gather (src points)
+                    (None, _) => Some(CopyKind::Scatter),    // scatter (dst points)
+                    (_, _) => Some(CopyKind::GatherScatter), // gather with scatter
+                };
+                isindrect = true;
+                break;
+            }
+        }
+        if isindrect == false {
+            // sanity check
+            assert!(self.copy_inst_infos.len() >= 1);
+            let chan_src = self.copy_inst_infos[0]._src.unwrap();
+            let chan_dst = self.copy_inst_infos[0]._dst.unwrap();
+            for copy_inst_info in &self.copy_inst_infos {
+                assert!(copy_inst_info._src.unwrap() == chan_src);
+                assert!(copy_inst_info._dst.unwrap() == chan_dst);
+            }
+            self.copy_kind = Some(CopyKind::Copy);
+            let chan_id = ChanID::new_copy(chan_src, chan_dst);
+            self.chan_id = Some(chan_id);
+        } else {
+            // sanity check
+            assert!(self.copy_inst_infos.len() >= 2);
+            match self.copy_kind.unwrap() {
+                CopyKind::Gather => {
+                    // gather
+                    let chan_dst = self.copy_inst_infos[1]._dst.unwrap();
+                    let chan_id = ChanID::new_gather(chan_dst);
+                    self.chan_id = Some(chan_id);
+                }
+                CopyKind::Scatter => {
+                    // scatter
+                    let chan_src = self.copy_inst_infos[1]._src.unwrap();
+                    let chan_id = ChanID::new_scatter(chan_src);
+                    self.chan_id = Some(chan_id);
+                }
+                _ => unreachable!(),
+            };
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
@@ -1567,20 +1722,68 @@ impl Copy {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct FillInstInfo {
+    _dst: MemID,
+    pub fid: FieldID,
+    pub dst_inst_uid: InstUID,
+    _fevent: EventID,
+}
+
+impl FillInstInfo {
+    fn new(dst: MemID, fid: FieldID, dst_inst_uid: InstUID, fevent: EventID) -> Self {
+        FillInstInfo {
+            _dst: dst,
+            fid: fid,
+            dst_inst_uid: dst_inst_uid,
+            _fevent: fevent,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    _dst: MemID,
+    _fevent: EventID,
     time_range: TimeRange,
+    chan_id: Option<ChanID>,
+    pub op_id: Option<OpID>,
+    pub size: Option<u64>,
+    pub fill_inst_infos: Vec<FillInstInfo>,
 }
 
 impl Fill {
-    fn new(base: Base, dst: MemID, time_range: TimeRange) -> Self {
+    fn new(base: Base, fevent: EventID) -> Self {
         Fill {
             base,
-            _dst: dst,
-            time_range,
+            _fevent: fevent,
+            time_range: TimeRange::new_empty(),
+            chan_id: None,
+            op_id: None,
+            size: None,
+            fill_inst_infos: Vec::new(),
         }
+    }
+    fn add_fill_info(&mut self, time_range: TimeRange, op_id: OpID, size: u64) {
+        // sanity check
+        assert_eq!(self.op_id, None);
+        self.time_range = time_range;
+        self.op_id = Some(op_id);
+        self.size = Some(size);
+    }
+    fn add_fill_inst_info(&mut self, fill_inst_info: FillInstInfo) {
+        self.fill_inst_infos.push(fill_inst_info);
+    }
+    fn add_channel(&mut self) {
+        // sanity check
+        assert_eq!(self.chan_id, None);
+        assert!(self.fill_inst_infos.len() >= 1);
+        let chan_dst = self.fill_inst_infos[0]._dst;
+        for fill_inst_info in &self.fill_inst_infos {
+            assert!(fill_inst_info._dst == chan_dst);
+        }
+        let chan_id = ChanID::new_fill(chan_dst);
+        self.chan_id = Some(chan_id);
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
         self.time_range.trim_time_range(start, stop)
@@ -1592,14 +1795,16 @@ pub struct DepPart {
     base: Base,
     pub part_op: DepPartKind,
     time_range: TimeRange,
+    pub op_id: OpID,
 }
 
 impl DepPart {
-    fn new(base: Base, part_op: DepPartKind, time_range: TimeRange) -> Self {
+    fn new(base: Base, part_op: DepPartKind, time_range: TimeRange, op_id: OpID) -> Self {
         DepPart {
             base,
             part_op,
             time_range,
+            op_id,
         }
     }
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
@@ -1731,12 +1936,11 @@ pub struct State {
     pub last_time: Timestamp,
     pub mapper_call_kinds: BTreeMap<MapperCallKindID, MapperCallKind>,
     pub runtime_call_kinds: BTreeMap<RuntimeCallKindID, RuntimeCallKind>,
-    pub insts: BTreeMap<(InstID, OpID), MemID>,
+    pub insts: BTreeMap<InstUID, MemID>,
     pub index_spaces: BTreeMap<ISpaceID, ISpace>,
     pub index_partitions: BTreeMap<IPartID, IPart>,
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
-    copy_map: BTreeMap<EventID, (ChanID, OpID, usize)>,
     pub has_prof_data: bool,
 }
 
@@ -1750,6 +1954,10 @@ impl State {
 
     pub fn find_op(&self, op_id: OpID) -> Option<&Operation> {
         self.operations.get(&op_id)
+    }
+
+    fn find_op_mut(&mut self, op_id: OpID) -> Option<&mut Operation> {
+        self.operations.get_mut(&op_id)
     }
 
     fn create_task(
@@ -1877,54 +2085,26 @@ impl State {
         )
     }
 
-    fn create_copy(
-        &mut self,
-        op_id: OpID,
-        src: MemID,
-        dst: MemID,
-        size: u64,
-        time_range: TimeRange,
+    fn create_copy<'a>(
+        &'a mut self,
         fevent: EventID,
-        num_requests: u32,
-    ) {
-        self.create_op(op_id);
-        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-
-        let chan_id = ChanID::new_copy(src, dst);
-        let chan = self.find_chan_mut(chan_id);
-
-        let copies = chan.copies.entry(op_id).or_insert_with(|| Vec::new());
-
-        let copy_id = copies.len();
-        copies.push(Copy::new(
-            base,
-            src,
-            dst,
-            size,
-            time_range,
-            fevent,
-            num_requests,
-            Vec::new(),
-        ));
-
-        self.copy_map
+        copies: &'a mut BTreeMap<EventID, Copy>,
+    ) -> &'a mut Copy {
+        let alloc = &mut self.prof_uid_allocator;
+        copies
             .entry(fevent)
-            .or_insert_with(|| (chan_id, op_id, copy_id));
+            .or_insert_with(|| Copy::new(Base::new(alloc), fevent))
     }
 
-    fn find_copy_mut(&mut self, fevent: EventID) -> Option<&mut Copy> {
-        let (chan_id, op_id, copy_idx) = *self.copy_map.get(&fevent)?;
-        Some(&mut self.find_chan_mut(chan_id).copies.get_mut(&op_id).unwrap()[copy_idx])
-    }
-
-    fn create_fill(&mut self, op_id: OpID, dst: MemID, time_range: TimeRange) {
-        self.create_op(op_id);
-        let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
-        let chan = self.find_fill_chan_mut(dst);
-        chan.fills
-            .entry(op_id)
-            .or_insert_with(|| Vec::new())
-            .push(Fill::new(base, dst, time_range));
+    fn create_fill<'a>(
+        &'a mut self,
+        fevent: EventID,
+        fills: &'a mut BTreeMap<EventID, Fill>,
+    ) -> &'a mut Fill {
+        let alloc = &mut self.prof_uid_allocator;
+        fills
+            .entry(fevent)
+            .or_insert_with(|| Fill::new(Base::new(alloc), fevent))
     }
 
     fn create_deppart(&mut self, op_id: OpID, part_op: DepPartKind, time_range: TimeRange) {
@@ -1934,17 +2114,10 @@ impl State {
         chan.depparts
             .entry(op_id)
             .or_insert_with(|| Vec::new())
-            .push(DepPart::new(base, part_op, time_range));
+            .push(DepPart::new(base, part_op, time_range, op_id));
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
-        self.chans
-            .entry(chan_id)
-            .or_insert_with(|| Chan::new(chan_id))
-    }
-
-    fn find_fill_chan_mut(&mut self, dst: MemID) -> &mut Chan {
-        let chan_id = ChanID::new_fill(dst);
         self.chans
             .entry(chan_id)
             .or_insert_with(|| Chan::new(chan_id))
@@ -1959,15 +2132,19 @@ impl State {
 
     fn create_inst<'a>(
         &'a mut self,
-        inst_id: InstID,
-        op_id: OpID,
-        insts: &'a mut BTreeMap<(InstID, OpID), Inst>,
+        inst_uid: InstUID,
+        insts: &'a mut BTreeMap<InstUID, Inst>,
     ) -> &'a mut Inst {
-        self.create_op(op_id);
         let alloc = &mut self.prof_uid_allocator;
         insts
-            .entry((inst_id, op_id))
-            .or_insert_with(|| Inst::new(Base::new(alloc), inst_id))
+            .entry(inst_uid)
+            .or_insert_with(|| Inst::new(Base::new(alloc), inst_uid))
+    }
+
+    pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
+        let mem_id = self.insts.get(&inst_uid)?;
+        let mem = self.mems.get(&mem_id)?;
+        mem.insts.get(&inst_uid)
     }
 
     fn find_index_space_mut(&mut self, ispace_id: ISpaceID) -> &mut ISpace {
@@ -1998,13 +2175,36 @@ impl State {
         // logs. Therefore we defer this process until all records
         // have been processed.
         let mut insts = BTreeMap::new();
+        let mut copies = BTreeMap::new();
+        let mut fills = BTreeMap::new();
         for record in records {
-            process_record(record, self, &mut insts);
+            process_record(record, self, &mut insts, &mut copies, &mut fills);
         }
+        // put inst into memories
         for (key, inst) in insts {
             if let Some(mem_id) = inst.mem_id {
                 let mem = self.mems.get_mut(&mem_id).unwrap();
                 mem.insts.insert(key, inst);
+            } else {
+                unreachable!();
+            }
+        }
+        // put fills into channels
+        for (key, mut fill) in fills {
+            fill.add_channel();
+            if let Some(chan_id) = fill.chan_id {
+                let chan = self.find_chan_mut(chan_id);
+                chan.fills.insert(key, fill);
+            } else {
+                unreachable!();
+            }
+        }
+        // put copies into channels
+        for (key, mut copy) in copies {
+            copy.add_channel();
+            if let Some(chan_id) = copy.chan_id {
+                let chan = self.find_chan_mut(chan_id);
+                chan.copies.insert(key, copy);
             } else {
                 unreachable!();
             }
@@ -2521,7 +2721,13 @@ impl SpyState {
     }
 }
 
-fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(InstID, OpID), Inst>) {
+fn process_record(
+    record: &Record,
+    state: &mut State,
+    insts: &mut BTreeMap<InstUID, Inst>,
+    copies: &mut BTreeMap<EventID, Copy>,
+    fills: &mut BTreeMap<EventID, Fill>,
+) {
     match record {
         Record::MapperCallDesc { kind, name } => {
             state
@@ -2680,8 +2886,7 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 .or_insert_with(|| Region::new(*ispace_id, fspace_id, *tree_id, name));
         }
         Record::PhysicalInstRegionDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             ispace_id,
             fspace_id,
             tree_id,
@@ -2689,14 +2894,13 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_ispace(*ispace_id)
                 .add_fspace(fspace_id)
                 .set_tree(*tree_id);
         }
         Record::PhysicalInstLayoutDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             field_id,
             fspace_id,
             has_align,
@@ -2706,13 +2910,12 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
             let fspace_id = FSpaceID(*fspace_id as u64);
             state.find_field_space_mut(fspace_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_field(fspace_id, *field_id)
                 .add_align_desc(fspace_id, *field_id, *eqk, *align_desc, *has_align);
         }
         Record::PhysicalInstDimOrderDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             dim,
             dim_kind,
         } => {
@@ -2722,8 +2925,22 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
                 Err(_) => unreachable!("bad dim kind"),
             };
             state
-                .create_inst(*inst_id, *op_id, insts)
+                .create_inst(*inst_uid, insts)
                 .add_dim_order(dim, dim_kind);
+        }
+        Record::PhysicalInstanceUsage {
+            inst_uid,
+            op_id,
+            index_id,
+            field_id,
+        } => {
+            state.create_op(*op_id);
+            let operation_inst_info = OperationInstInfo::new(*inst_uid, *index_id, *field_id);
+            state
+                .find_op_mut(*op_id)
+                .unwrap()
+                .operation_inst_infos
+                .push(operation_inst_info);
         }
         Record::TaskKind {
             task_id,
@@ -2849,97 +3066,89 @@ fn process_record(record: &Record, state: &mut State, insts: &mut BTreeMap<(Inst
         }
         Record::CopyInfo {
             op_id,
-            src,
-            dst,
             size,
             create,
             ready,
             start,
             stop,
+            num_hops,
+            request_type,
             fevent,
-            num_requests,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_copy(
-                *op_id,
-                *src,
-                *dst,
-                *size,
-                time_range,
-                *fevent,
-                *num_requests,
-            );
+            state.create_op(*op_id);
+            let copy = state.create_copy(*fevent, copies);
+            copy.add_copy_info(time_range, *op_id, *size, *num_hops, *request_type);
             state.update_last_time(*stop);
         }
         Record::CopyInstInfo {
+            src,
+            dst,
+            src_fid,
+            dst_fid,
             src_inst,
             dst_inst,
             fevent,
-            num_fields,
-            request_type,
-            num_hops,
-            ..
+            indirect,
         } => {
-            let copy_info = CopyInfo {
-                src_inst: *src_inst,
-                dst_inst: *dst_inst,
-                _fevent: *fevent,
-                num_fields: *num_fields,
-                request_type: *request_type,
-                num_hops: *num_hops,
-            };
-            state
-                .find_copy_mut(*fevent)
-                .unwrap()
-                .copy_info
-                .push(copy_info);
+            let copy = state.create_copy(*fevent, copies);
+            let mut src_mem = None;
+            if *src != MemID(0) {
+                src_mem = Some(*src);
+            }
+            let mut dst_mem = None;
+            if *dst != MemID(0) {
+                dst_mem = Some(*dst);
+            }
+            let copy_inst_info = CopyInstInfo::new(
+                src_mem, dst_mem, *src_fid, *dst_fid, *src_inst, *dst_inst, *fevent, *indirect,
+            );
+            copy.add_copy_inst_info(copy_inst_info);
         }
         Record::FillInfo {
             op_id,
-            dst,
+            size,
             create,
             ready,
             start,
             stop,
+            fevent,
         } => {
             let time_range = TimeRange::new_full(*create, *ready, *start, *stop);
-            state.create_fill(*op_id, *dst, time_range);
+            state.create_op(*op_id);
+            let fill = state.create_fill(*fevent, fills);
+            fill.add_fill_info(time_range, *op_id, *size);
             state.update_last_time(*stop);
         }
-        Record::InstCreateInfo {
-            op_id,
-            inst_id,
-            create,
+        Record::FillInstInfo {
+            dst,
+            fid,
+            dst_inst,
+            fevent,
         } => {
-            state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_start(*create);
+            let fill_inst_info = FillInstInfo::new(*dst, *fid, *dst_inst, *fevent);
+            let fill = state.create_fill(*fevent, fills);
+            fill.add_fill_inst_info(fill_inst_info);
         }
-        Record::InstUsageInfo {
-            op_id,
+        Record::InstTimelineInfo {
+            inst_uid,
             inst_id,
             mem_id,
             size,
-        } => {
-            state
-                .insts
-                .entry((*inst_id, *op_id))
-                .or_insert_with(|| *mem_id);
-            state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_mem(*mem_id)
-                .set_size(*size);
-        }
-        Record::InstTimelineInfo {
             op_id,
-            inst_id,
             create,
             ready,
             destroy,
         } => {
+            state.create_op(*op_id);
+            state.insts.entry(*inst_uid).or_insert_with(|| *mem_id);
             state
-                .create_inst(*inst_id, *op_id, insts)
-                .set_start_stop(*create, *ready, *destroy);
+                .create_inst(*inst_uid, insts)
+                .set_inst_id(*inst_id)
+                .set_op_id(*op_id)
+                .set_start_stop(*create, *ready, *destroy)
+                .set_mem(*mem_id)
+                .set_size(*size);
             state.update_last_time(*destroy);
         }
         Record::PartitionInfo {

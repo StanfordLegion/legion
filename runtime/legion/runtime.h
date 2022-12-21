@@ -2123,7 +2123,8 @@ namespace Legion {
                         Runtime *runtime, bool inter, DistributedID did = 0);
       LayoutConstraints(LayoutConstraintID layout_id, Runtime *runtime, 
                         const LayoutConstraintRegistrar &registrar, 
-                        bool inter, DistributedID did = 0);
+                        bool inter, DistributedID did = 0,
+                        CollectiveMapping *collective_mapping = NULL);
       LayoutConstraints(LayoutConstraintID layout_id,
                         Runtime *runtime, const LayoutConstraintSet &cons,
                         FieldSpace handle, bool inter);
@@ -4477,7 +4478,8 @@ namespace Legion {
     public:
       LayoutConstraintID register_layout(
           const LayoutConstraintRegistrar &registrar, 
-          LayoutConstraintID id, DistributedID did = 0);
+          LayoutConstraintID id, DistributedID did = 0,
+          CollectiveMapping *collective_mapping = NULL);
       LayoutConstraints* register_layout(FieldSpace handle,
                const LayoutConstraintSet &cons, bool internal);
       bool register_layout(LayoutConstraints *new_constraints);
@@ -4664,7 +4666,7 @@ namespace Legion {
       static inline void trigger_event(PredEvent to_trigger);
       static inline void poison_event(PredEvent to_poison);
     public:
-      static inline ApEvent ignorefaults(Realm::Event e);
+      static inline ApEvent ignorefaults(ApEvent e);
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
                                           const std::set<ApEvent> &events);
@@ -5193,7 +5195,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::ignorefaults(Realm::Event e)
+    /*static*/ inline ApEvent Runtime::ignorefaults(ApEvent e)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::ignorefaults(e));
@@ -5208,7 +5210,7 @@ namespace Legion {
       LegionSpy::log_event_dependence(ApEvent(e), result);
 #endif
 #endif
-      return ApEvent(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
