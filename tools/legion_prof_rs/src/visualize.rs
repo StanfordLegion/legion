@@ -1065,10 +1065,12 @@ impl fmt::Display for InstPretty<'_> {
                 write!(f, "$")?;
             }
         }
+        if inst.dim_order.len() > 0 {
+            write!(f, "$Layout Order: {} ", DimOrderPretty(inst))?;
+        }
         write!(
             f,
-            "$Layout Order: {} $Inst: 0x{:x} $Size: {}",
-            DimOrderPretty(inst),
+            "$Inst: 0x{:x} $Size: {}",
             inst.inst_id.unwrap().0,
             SizePretty(inst.size.unwrap())
         )?;

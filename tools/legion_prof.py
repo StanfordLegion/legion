@@ -2665,8 +2665,9 @@ class Instance(MemOperation, TimeRange, HasInitiationDependencies):
                 else:
                     if soa == True:
                         output_str = output_str + "[Struct-of-arrays (SOA)]"
+            output_str = output_str + " "
 
-        output_str = output_str + " $Inst: {} $Size: {}"
+        output_str = output_str + "$Inst: {} $Size: {}"
         return output_str.format(str(hex(self.inst_id)),size_pr)
 
 class TimePoint(object):
