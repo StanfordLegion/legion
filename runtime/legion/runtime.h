@@ -4766,7 +4766,7 @@ namespace Legion {
       static inline PredEvent merge_events(const TraceInfo *info,
                                            PredEvent e1, PredEvent e2);
     public:
-      static inline ApEvent ignorefaults(Realm::Event e);
+      static inline ApEvent ignorefaults(ApEvent e);
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
                                           const std::set<ApEvent> &events);
@@ -5386,7 +5386,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::ignorefaults(Realm::Event e)
+    /*static*/ inline ApEvent Runtime::ignorefaults(ApEvent e)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::ignorefaults(e));
@@ -5401,7 +5401,7 @@ namespace Legion {
       LegionSpy::log_event_dependence(ApEvent(e), result);
 #endif
 #endif
-      return ApEvent(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------

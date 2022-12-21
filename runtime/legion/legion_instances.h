@@ -270,7 +270,7 @@ namespace Legion {
         DeferPhysicalManagerArgs(DistributedID d,
             Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
             const PendingRemoteExpression &pending, FieldSpace h, 
-            RegionTreeID tid, LayoutConstraintID l, ApEvent use,
+            RegionTreeID tid, LayoutConstraintID l, ApEvent use, LgEvent unique,
             InstanceKind kind, ReductionOpID redop, const void *piece_list,
             size_t piece_list_size, GarbageCollectionState state);
       public:
@@ -284,6 +284,7 @@ namespace Legion {
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
         const ApEvent use_event;
+        const LgEvent unique_event;
         const InstanceKind kind;
         const ReductionOpID redop;
         const void *const piece_list;
@@ -338,8 +339,8 @@ namespace Legion {
                       FieldSpaceNode *node, RegionTreeID tree_id,
                       LayoutDescription *desc, ReductionOpID redop, 
                       bool register_now, size_t footprint,
-                      ApEvent use_event, InstanceKind kind,
-                      const ReductionOp *op = NULL,
+                      ApEvent use_event, LgEvent unique_event,
+                      InstanceKind kind, const ReductionOp *op = NULL,
                       CollectiveMapping *collective_mapping = NULL,
                       ApEvent producer_event = ApEvent::NO_AP_EVENT);
       PhysicalManager(const PhysicalManager &rhs) = delete;
@@ -468,7 +469,7 @@ namespace Legion {
           size_t inst_footprint, IndexSpaceExpression *inst_domain,
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
-          LayoutConstraints *constraints, ApEvent use_event,
+          LayoutConstraints *constraints, ApEvent use_event, LgEvent unique,
           InstanceKind kind, ReductionOpID redop, GarbageCollectionState state);
     public: 
       static ApEvent fetch_metadata(PhysicalInstance inst, ApEvent use_event);
@@ -611,7 +612,7 @@ namespace Legion {
         DeferIndividualManagerArgs(DistributedID d, AddressSpaceID own, 
             Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
             const PendingRemoteExpression &pending, FieldSpace h, 
-            RegionTreeID tid, LayoutConstraintID l, ApEvent use,
+            RegionTreeID tid, LayoutConstraintID l, ApEvent use, LgEvent unique,
             InstanceKind kind, ReductionOpID redop, const void *piece_list,
             size_t piece_list_size, GarbageCollectionState state);
       public:
@@ -626,6 +627,7 @@ namespace Legion {
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
         const ApEvent use_event;
+        const LgEvent unique_event;
         const InstanceKind kind;
         const ReductionOpID redop;
         const void *const piece_list;
@@ -655,8 +657,8 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApEvent use_event, InstanceKind kind,
-                        const ReductionOp *op = NULL,
+                        ApEvent use_event, LgEvent unique_event,
+                        InstanceKind kind, const ReductionOp *op = NULL,
                         CollectiveMapping *collective_mapping = NULL,
                         ApEvent producer_event = ApEvent::NO_AP_EVENT);
       IndividualManager(const IndividualManager &rhs) = delete;
@@ -743,7 +745,6 @@ namespace Legion {
       
     public:
       virtual void send_manager(AddressSpaceID target);
-      
       static void handle_collective_user_registration(Runtime *runtime,
                                                       Deserializer &derez);
     public:

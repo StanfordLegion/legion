@@ -738,6 +738,11 @@ namespace Legion {
           const std::vector<InstanceView*>          &sources,
           std::vector<unsigned>                     &ranking,
           std::map<unsigned,PhysicalManager*>       &collective_insts) const;
+      void log_mapping_decision(unsigned index, const RegionRequirement &req,
+                                const InstanceSet &targets,
+                                bool postmapping = false) const;
+      void log_virtual_mapping(unsigned index, 
+                               const RegionRequirement &req) const;
 #ifdef DEBUG_LEGION
     protected:
       virtual void dump_physical_state(RegionRequirement *req, unsigned idx,
@@ -4321,6 +4326,7 @@ namespace Legion {
                                     const PointerConstraint &pointer,
                                     const std::vector<FieldID> &set,
                                     const std::vector<size_t> &sizes,
+                                    const Realm::ProfilingRequestSet &requests,
                                     PhysicalInstance &instance) const;
     public:
       ExternalResource resource;

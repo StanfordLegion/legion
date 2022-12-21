@@ -7918,7 +7918,7 @@ namespace Legion {
           default:
             break;
         }
-      // Setup the distributed ID broadcast and send out the value
+        // Setup the distributed ID broadcast and send out the value
         did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx,owner_shard,COLLECTIVE_LOC_78);
         // Can only do the broadcast if we know we can make the ID safely
@@ -7927,7 +7927,7 @@ namespace Legion {
         if (did_broadcast->is_origin() &&
             ((resource != LEGION_EXTERNAL_INSTANCE) || contains_individual))
           did_broadcast->broadcast(runtime->get_available_distributed_id());
-        single_broadcast = new ValueBroadcast<InstanceEventPair>(
+        single_broadcast = new ValueBroadcast<InstanceEvents>(
                                 ctx, owner_shard, COLLECTIVE_LOC_75);
       }
     }
@@ -8097,12 +8097,24 @@ namespace Legion {
       ApEvent ready_event;
       LayoutConstraintSet constraints;
       PhysicalInstance instance = PhysicalInstance::NO_INST;
+      
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      LgEvent unique_event;
+      Realm::ProfilingRequestSet requests;
+      if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
+          (collective_instances || single_broadcast->is_origin()))
+      {
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_inst_request(requests, this, unique_event);
+      }
       if (is_first_local_shard || 
           (collective_instances && !deduplicate_across_shards))
       {
@@ -8122,9 +8134,10 @@ namespace Legion {
               if (collective_instances || single_broadcast->is_origin())
               {
                 instance = node->row_source->create_file_instance(file_name,
-                            field_ids, field_sizes, file_mode, ready_event);
+                    requests, field_ids, field_sizes, file_mode, ready_event);
                 if (!collective_instances)
-                  single_broadcast->broadcast({instance, ready_event});
+                  single_broadcast->broadcast(
+                      {instance, ready_event, unique_event});
               }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);
@@ -8150,16 +8163,17 @@ namespace Legion {
                 field_ids[idx] = it->first;
                 field_files[idx] = it->second;
               }
-              // Now ask the low-level runtime to create the instance
+              // Now ask Realm to create the instance
               if (collective_instances || single_broadcast->is_origin())
               {
                 instance = node->row_source->create_hdf5_instance(file_name,
-                                      field_ids, field_sizes, field_files,
-                                      layout_constraint_set.ordering_constraint,
-                                      (file_mode == LEGION_FILE_READ_ONLY),
-                                      ready_event);
+                              requests, field_ids, field_sizes, field_files,
+                              layout_constraint_set.ordering_constraint,
+                              (file_mode == LEGION_FILE_READ_ONLY),
+                              ready_event);
                 if (!collective_instances)
-                  single_broadcast->broadcast({instance, ready_event});
+                  single_broadcast->broadcast(
+                      {instance, ready_event, unique_event});
               }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
@@ -8182,9 +8196,10 @@ namespace Legion {
               if (collective_instances || single_broadcast->is_origin())
               {
                 ready_event = create_realm_instance(node->row_source, pointer,
-                                            field_set, field_sizes, instance);
+                                  field_set, field_sizes, requests, instance);
                 if (!collective_instances)
-                  single_broadcast->broadcast({instance, ready_event});
+                  single_broadcast->broadcast(
+                      {instance, ready_event, unique_event});
               }
               constraints = layout_constraint_set;
               constraints.specialized_constraint = 
@@ -8199,28 +8214,10 @@ namespace Legion {
       if ((single_broadcast != NULL) && !single_broadcast->is_origin())
       {
         // If we're making a single instance get the name
-        const InstanceEventPair result = single_broadcast->get_value();
-        instance = result.first;
-        ready_event = result.second;
-      }
-      if (runtime->legion_spy_enabled)
-      {
-        // We always need a unique ready event for Legion Spy
-        if (!ready_event.exists())
-        {
-          ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename_ready);
-          ready_event = rename_ready;
-        }
-        for (std::set<FieldID>::const_iterator it = 
-              requirement.privilege_fields.begin(); it !=
-              requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, 
-                                          *it, ready_event);
-#ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        get_completion_event());
-#endif
+        const InstanceEvents result = single_broadcast->get_value();
+        instance = result.instance;
+        ready_event = result.ready_event;
+        unique_event = result.unique_event;
       }
       ShardManager *shard_manager = repl_ctx->shard_manager;
       // Now we need to make the instance to span the shards
@@ -8233,8 +8230,8 @@ namespace Legion {
             PhysicalManager *manager =
               node->column_source->create_external_manager(instance,
                   ready_event, footprint, constraints, field_set, 
-                  field_sizes, external_mask, mask_index_map, node,
-                  serdez, runtime->get_available_distributed_id()); 
+                  field_sizes, external_mask, mask_index_map, unique_event,
+                  node, serdez, runtime->get_available_distributed_id());
             shard_manager->exchange_shard_local_op_data(context_index, 
                                             exchange_index++, manager);
             return manager;
@@ -8248,7 +8245,7 @@ namespace Legion {
           // Each shard is just going to make its own physical manager
           return node->column_source->create_external_manager(instance,
               ready_event, footprint, constraints, field_set, field_sizes,
-              external_mask, mask_index_map, node, serdez, 
+              external_mask, mask_index_map, unique_event, node, serdez, 
               runtime->get_available_distributed_id());
         }
       }
@@ -8280,6 +8277,7 @@ namespace Legion {
               rez.serialize(node->column_source->handle);
               rez.serialize(instance);
               rez.serialize(ready_event);
+              rez.serialize(unique_event);
               rez.serialize(footprint);
               constraints.serialize(rez);
               rez.serialize(external_mask);
@@ -8317,7 +8315,8 @@ namespace Legion {
           PhysicalManager *manager =
             node->column_source->create_external_manager(instance, ready_event,
             footprint, constraints, field_set, field_sizes, external_mask,
-            mask_index_map, node, serdez, manager_did.load(), mapping);
+            mask_index_map, unique_event, node, serdez, 
+            manager_did.load(), mapping);
           // If we're the owner address space, record that we have 
           // instances on all other address spaces in the control
           // replicated parent task's collective mapping

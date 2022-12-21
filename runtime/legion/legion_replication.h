@@ -2439,11 +2439,12 @@ namespace Legion {
       ValueBroadcast<DistributedID> *did_broadcast;
       // Need this because std::pair<PhysicalInstance,ApEvent> is not
       // trivially copyable for reasons passing understanding
-      struct InstanceEventPair {
-        PhysicalInstance first;
-        ApEvent second;
+      struct InstanceEvents {
+        PhysicalInstance instance;
+        ApEvent ready_event;
+        LgEvent unique_event;
       };
-      ValueBroadcast<InstanceEventPair> *single_broadcast;
+      ValueBroadcast<InstanceEvents> *single_broadcast;
     };
 
     /**

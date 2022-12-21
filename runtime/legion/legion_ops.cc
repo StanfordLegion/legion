@@ -1456,6 +1456,58 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Operation::log_mapping_decision(unsigned index, 
+                                         const RegionRequirement &req,
+                                         const InstanceSet &targets,
+                                         bool postmapping /*=false*/) const
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime->legion_spy_enabled && (runtime->profiler == NULL))
+        return;
+      FieldSpaceNode *node = (req.handle_type != LEGION_PARTITION_PROJECTION) ?
+        runtime->forest->get_node(req.region.get_field_space()) : 
+        runtime->forest->get_node(req.partition.get_field_space());
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &inst = targets[idx];
+        const FieldMask &valid_mask = inst.get_valid_fields();
+        std::vector<FieldID> valid_fields;
+        node->get_field_set(valid_mask, parent_ctx, valid_fields);
+        PhysicalManager *manager = inst.get_physical_manager();
+        if (runtime->legion_spy_enabled)
+        {
+          for (std::vector<FieldID>::const_iterator it =
+                valid_fields.begin(); it != valid_fields.end(); it++)
+          {
+            if (postmapping)
+              LegionSpy::log_post_mapping_decision(unique_op_id, index, *it,
+                                                   manager->get_unique_event());
+            else
+              LegionSpy::log_mapping_decision(unique_op_id, index, *it,
+                                              manager->get_unique_event());
+          }
+        }
+        if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
+          runtime->profiler->record_physical_instance_use(
+              manager->get_unique_event(), unique_op_id, index, valid_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::log_virtual_mapping(unsigned index,
+                                        const RegionRequirement &req) const
+    //--------------------------------------------------------------------------
+    {
+      if (!runtime->legion_spy_enabled)
+        return;
+      for (std::set<FieldID>::const_iterator it =
+            req.privilege_fields.begin(); it != 
+            req.privilege_fields.end(); it++)
+        LegionSpy::log_mapping_decision(unique_op_id, index, *it,
+                                        ApEvent::NO_AP_EVENT/*inst event*/);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void Operation::handle_deferred_release(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -6039,16 +6091,12 @@ namespace Legion {
         dump_physical_state(&requirement, 0);
       } 
 #endif
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              mapped_instances);
+      log_mapping_decision(0/*idx*/, requirement, mapped_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
 #endif
-      }
       record_completion_effect(termination_event);
       if (!atomic_locks.empty() || !arrive_barriers.empty())
       {
@@ -8010,10 +8058,7 @@ namespace Legion {
                                       output.src_instances[idx],
                                       output.src_source_instances[idx],
                                       src_sources, src_targets, is_reduce_req);
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                                idx, src_requirements[idx],
-                                                src_targets);
+        log_mapping_decision(idx, src_requirements[idx], src_targets);
         const size_t dst_idx = src_requirements.size() + idx;
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -8025,9 +8070,7 @@ namespace Legion {
                                     output.dst_instances[idx], 
                                     output.dst_source_instances[idx],
                                     dst_sources, dst_targets);
-        if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-              dst_idx, dst_requirements[idx], dst_targets);
+        log_mapping_decision(dst_idx, dst_requirements[idx], dst_targets);
         // Do any exchanges needed for collective cooperation
         const bool src_indirect = (idx < src_indirect_requirements.size());
         const bool dst_indirect = (idx < dst_indirect_requirements.size());
@@ -8177,9 +8220,8 @@ namespace Legion {
 #endif
                                        false/*check collective*/,
                                        record_valid);
-          if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                gather_idx, src_indirect_requirements[idx], gather_targets);
+          log_mapping_decision(gather_idx, src_indirect_requirements[idx],
+                               gather_targets);
         }
         if (idx < dst_indirect_requirements.size())
         { 
@@ -8216,9 +8258,8 @@ namespace Legion {
 #endif
                                       false/*check collective*/,
                                       record_valid);
-          if (runtime->legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                scatter_idx, dst_indirect_requirements[idx], scatter_targets);
+          log_mapping_decision(scatter_idx, dst_indirect_requirements[idx],
+                               scatter_targets);
         }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
@@ -13073,10 +13114,7 @@ namespace Legion {
                                               false/*check initialized*/);
       Runtime::trigger_event(&trace_info, close_event, instances_ready);
       record_completion_effect(close_event);
-      if (runtime->legion_spy_enabled)
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                                              0/*idx*/, requirement,
-                                              target_instances);
+      log_mapping_decision(0/*idx*/, requirement, target_instances);
       // No need to apply our mapping because we are done!
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -13336,11 +13374,7 @@ namespace Legion {
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_id(),
                                            parent_idx);
-        for (std::set<FieldID>::const_iterator it = 
-              requirement.privilege_fields.begin(); it !=
-              requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, *it,
-                                          ApEvent::NO_AP_EVENT/*inst event*/);
+        log_virtual_mapping(0/*idx*/, requirement);
       }
     }
     
@@ -14677,16 +14711,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              restricted_instances);
+      log_mapping_decision(0/*idx*/, requirement, restricted_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
                                         acquire_post);
 #endif
-      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -15579,16 +15609,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              restricted_instances);
+      log_mapping_decision(0/*idx*/, requirement, restricted_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, release_complete,
                                         release_post);
 #endif
-      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -19413,10 +19439,7 @@ namespace Legion {
       std::vector<PhysicalManager*> source_instances;
       const bool record_valid = 
         invoke_mapper(mapped_instances, source_instances);
-      if (runtime->legion_spy_enabled)
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx, 
-                                              0/*idx*/, requirement,
-                                              mapped_instances);
+      log_mapping_decision(0/*idx*/, requirement, mapped_instances);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
@@ -22965,6 +22988,7 @@ namespace Legion {
                                                          trace_info,
                                                          map_applied_conditions,
                                                          restricted);
+      log_mapping_decision(0/*idx*/, requirement, external_instances);
       Runtime::trigger_event(&trace_info, attach_post, attach_event);
       record_completion_effect(attach_post);
 #ifdef LEGION_SPY
@@ -23019,6 +23043,16 @@ namespace Legion {
       ApEvent ready_event;
       LayoutConstraintSet constraints;
       PhysicalInstance result = PhysicalInstance::NO_INST;
+      LgEvent unique_event;
+      Realm::ProfilingRequestSet requests;
+      if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
+      {
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_inst_request(requests, this, unique_event);
+      }
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -23031,7 +23065,7 @@ namespace Legion {
 	      field_ids[idx] = *it;
             }
             result = node->row_source->create_file_instance(file_name,
-                            field_ids, sizes, file_mode, ready_event);
+                    requests, field_ids, sizes, file_mode, ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);           
             constraints.field_constraint = 
@@ -23057,7 +23091,7 @@ namespace Legion {
               field_files[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->row_source->create_hdf5_instance(file_name,
+            result = node->row_source->create_hdf5_instance(file_name, requests,
                                       field_ids, sizes, field_files,
                                       layout_constraint_set.ordering_constraint,
                                       (file_mode == LEGION_FILE_READ_ONLY),
@@ -23081,7 +23115,7 @@ namespace Legion {
             assert(pointer.is_valid);
 #endif
             ready_event = create_realm_instance(node->row_source, pointer,
-                                                field_set, sizes, result);
+                                      field_set, sizes, requests, result);
             constraints = layout_constraint_set;
             constraints.specialized_constraint =
               SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
@@ -23093,21 +23127,6 @@ namespace Legion {
           }
         default:
           assert(false);
-      }
-      if (runtime->legion_spy_enabled)
-      {
-        // We always need a unique ready event for Legion Spy
-        if (!ready_event.exists())
-        {
-          ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename_ready);
-          ready_event = rename_ready;
-        }
-        for (std::set<FieldID>::const_iterator it = 
-              requirement.privilege_fields.begin(); it !=
-              requirement.privilege_fields.end(); it++)
-          LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, 
-                                          *it, ready_event);
       }
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make it
@@ -23124,6 +23143,7 @@ namespace Legion {
           rez.serialize(node->column_source->handle);
           rez.serialize(result);
           rez.serialize(ready_event);
+          rez.serialize(unique_event);
           rez.serialize(footprint);
           constraints.serialize(rez);
           rez.serialize(external_mask);
@@ -23153,16 +23173,18 @@ namespace Legion {
       }
       else // Local so we can just do this call here
         return node->column_source->create_external_manager(result, ready_event,
-            footprint, constraints, field_set, sizes, external_mask,
-            mask_index_map,node,serdez,runtime->get_available_distributed_id());
+            footprint, constraints, field_set, sizes, external_mask, 
+            mask_index_map, unique_event, node, serdez,
+            runtime->get_available_distributed_id());
     }
 
     //--------------------------------------------------------------------------
     ApEvent AttachOp::create_realm_instance(IndexSpaceNode *node,
-                                            const PointerConstraint &pointer,
-                                            const std::vector<FieldID> &set,
-                                            const std::vector<size_t> &sizes,
-                                            PhysicalInstance &instance) const
+                                    const PointerConstraint &pointer,
+                                    const std::vector<FieldID> &set,
+                                    const std::vector<size_t> &sizes,
+                                    const Realm::ProfilingRequestSet &requests,
+                                    PhysicalInstance &instance) const
     //--------------------------------------------------------------------------
     {
       Realm::InstanceLayoutGeneric *ilg = node->create_layout(
@@ -23192,8 +23214,6 @@ namespace Legion {
             parent_ctx->get_unique_id(), mem_names[memory.kind()],
             memory.id);
       }
-      // No profiling for these kinds of instances currently
-      Realm::ProfilingRequestSet requests;
       return ApEvent(PhysicalInstance::create_external_instance(instance, 
                                               memory, ilg, res, requests));
     }
@@ -24443,14 +24463,11 @@ namespace Legion {
                                          filter_precondition, flush);
       Runtime::trigger_event(&trace_info, detach_post, detach_event);
       record_completion_effect(detach_post);
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,0/*idx*/,
-                                              requirement, references);
+      log_mapping_decision(0/*idx*/, requirement, references);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, detach_event,detach_post);
 #endif
-      }
       if (!map_applied_conditions.empty())
         complete_mapping(finalize_complete_mapping(
               Runtime::merge_events(map_applied_conditions)));

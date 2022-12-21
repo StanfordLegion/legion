@@ -9644,14 +9644,14 @@ namespace Legion {
       // Create an individual manager with a null instance
       DistributedID did = runtime->get_available_distributed_id();
 
-      ApEvent ready_event = producer_event;
-      if (runtime->legion_spy_enabled)
+      LgEvent unique_event;
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
         // When Legion Spy is enabled, we want the ready event to be unique.
         // So we create a fresh event and trigger it with the producer event
-        ApUserEvent unique_event = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, unique_event, producer_event);
-        ready_event = unique_event;
+        RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
       }
 
       PhysicalManager *manager =
@@ -9666,7 +9666,7 @@ namespace Legion {
                             layout,
                             0/*redop id*/, true/*register now*/,
                             -1U/*instance_footprint*/,
-                            ready_event,
+                            producer_event, unique_event,
                             PhysicalManager::UNBOUND_INSTANCE_KIND,
                             NULL/*op*/,
                             NULL/*collective mapping*/,
@@ -10178,19 +10178,20 @@ namespace Legion {
               &base, sizeof(base), LG_RESOURCE_PRIORITY);
           req.add_measurement<
             Realm::ProfilingMeasurements::InstanceAllocResult>();
+          LgEvent unique_event;
+          if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
+          {
+            RtUserEvent unique = Runtime::create_rt_user_event();
+            Runtime::trigger_event(unique);
+            unique_event = unique;
+          }
           if (runtime->profiler != NULL)
-            runtime->profiler->add_inst_request(requests, creator_uid);
+            runtime->profiler->add_inst_request(requests, 
+                                                creator_uid, unique_event);
           use_event = RtEvent(PhysicalInstance::create_instance(instance,
                     memory, ilg->clone(), requests, alloc_precondition));
           if (allocator.succeeded())
           {
-            if (runtime->profiler != NULL)
-            {
-              unsigned long long creation_time = 
-                Realm::Clock::current_time_in_nanoseconds();
-              runtime->profiler->record_instance_creation(instance,
-                                memory, creator_uid, creation_time);
-            }
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
             assert(remaining_capacity >= size);
@@ -14242,8 +14243,8 @@ namespace Legion {
         ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(target.spawn(descriptor_id, 
-                    &ctx, sizeof(ctx), requests, pre, priority));
+        return Runtime::ignorefaults(ApEvent(target.spawn(descriptor_id, 
+                    &ctx, sizeof(ctx), requests, pre, priority)));
       }
       else
       {

@@ -58,8 +58,9 @@ namespace Legion {
     public:
       // In the same order as the fields for the actual copy
       std::vector<PhysicalInstance> instances;
-#ifdef LEGION_SPY
+      // Only valid if profiling is enabled
       std::vector<LgEvent> instance_events;
+#ifdef LEGION_SPY
       IndexSpace index_space;
 #endif
       Domain domain;
@@ -695,11 +696,6 @@ namespace Legion {
                                std::map<PhysicalManager*,unsigned> *acquired,
                                std::vector<PhysicalManager*> &unacquired,
                                const bool do_acquire_checks);
-      void log_mapping_decision(const UniqueID unique_id, TaskContext *context,
-                                const unsigned index, 
-                                const RegionRequirement &req,
-                                const InstanceSet &targets,
-                                bool postmapping = false);
     public: // helper method for the above two methods
       void perform_missing_acquires(
                                std::map<PhysicalManager*,unsigned> &acquired,
@@ -1099,7 +1095,10 @@ namespace Legion {
     public:
       CopyAcrossUnstructured(Runtime *rt, const bool preimages,
                              const std::map<Reservation,bool> &rsrvs)
-        : CopyAcrossExecutor(rt, preimages, rsrvs) { }
+        : CopyAcrossExecutor(rt, preimages, rsrvs),
+          src_indirect_field(0), dst_indirect_field(0),
+          src_indirect_instance(PhysicalInstance::NO_INST),
+          dst_indirect_instance(PhysicalInstance::NO_INST) { }
       virtual ~CopyAcrossUnstructured(void) { }
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
@@ -1137,6 +1136,7 @@ namespace Legion {
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
                                     const bool exclusive_redop);
+      void log_across_profiling(LgEvent copy_post, int preimage = -1) const;
     public:
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
@@ -1154,6 +1154,7 @@ namespace Legion {
       PhysicalInstance src_indirect_instance, dst_indirect_instance;
       LgEvent src_indirect_instance_event, dst_indirect_instance_event;
       TypeTag src_indirect_type, dst_indirect_type;
+      std::vector<unsigned> nonempty_indexes;
     public:
       RtEvent prev_done;
       ApEvent last_copy;
@@ -2302,11 +2303,13 @@ namespace Legion {
       virtual size_t get_coordinate_size(bool range) const = 0;
     public:
       virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
 				   const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    legion_file_mode_t file_mode,
                                    ApEvent &ready_event) = 0;
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
@@ -2587,11 +2590,13 @@ namespace Legion {
       virtual size_t get_coordinate_size(bool range) const;
     public:
       virtual PhysicalInstance create_file_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    legion_file_mode_t file_mode, 
                                    ApEvent &ready_event);
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
+                                   const Realm::ProfilingRequestSet &requests,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
@@ -3607,7 +3612,7 @@ namespace Legion {
             LayoutConstraintSet &constraints, 
             const std::vector<FieldID> &field_set,
             const std::vector<size_t> &field_sizes, const FieldMask &file_mask,
-            const std::vector<unsigned> &mask_index_map,
+            const std::vector<unsigned> &mask_index_map, LgEvent unique_event,
             RegionNode *node, const std::vector<CustomSerdezID> &serdez,
             DistributedID did, CollectiveMapping *collective_mapping = NULL);
       static void handle_external_create_request(Deserializer &derez,
