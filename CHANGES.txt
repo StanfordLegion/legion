@@ -3,16 +3,20 @@ attempt is made to keep this list accurate for the master branch.
 
 Version 22.12.0 (???? ??, ????)
   * Regent
-     - Support for nested predication of `if` and `while` statements
-	* Realm
-		 - Support priorities for Copy operations
-		 - Support building with multiple network backends enabled, and use
-		    -ll:networks (gasnetex/gasnet1/mpi/none) to pick which one to use
-				during runtime
-		 - Separate CUDA runtime from Realm by removing all references to CUDA
-		    runtime and relying only on driver API, which fixes an issue when 
-				mixing static and dynamic cudart across an application and improves 
-				Realm’s compatibility across driver versions 
+    - Support for nested predication of `if` and `while` statements
+  * Realm
+    - Support priorities for Copy operations
+    - Support building with multiple network backends enabled, and use
+       -ll:networks (gasnetex/gasnet1/mpi/none) to pick which one to use
+       during runtime
+    - Separate CUDA runtime from Realm by removing all references to CUDA
+       runtime and relying only on driver API, which fixes an issue when 
+       mixing static and dynamic cudart across an application and improves 
+       Realm’s compatibility across driver versions
+  * Tools
+    - Legion Prof support visualization of Channel of indirect copy, and
+       Instances being used by different operations including Task, Copy
+       and Fill
 
 Version 22.09.0 (September 30, 2022)
   * Python

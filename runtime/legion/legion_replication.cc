@@ -6552,16 +6552,12 @@ namespace Legion {
       }
       else if (!mapped_instances.empty())
         map_complete_event = mapped_instances[0].get_ready_event();
-      if (runtime->legion_spy_enabled)
-      {
-        runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                                              0/*idx*/, requirement,
-                                              mapped_instances);
+      log_mapping_decision(0/*idx*/, requirement, mapped_instances);
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, map_complete_event,
                                         termination_event);
 #endif
-      }
       // See if we have any reservations to take as part of this map
       if (!atomic_locks.empty() || !arrive_barriers.empty())
       {
@@ -7146,15 +7142,12 @@ namespace Legion {
         RtEvent detached_event = manager->detach_external_instance();
         if (detached_event.exists())
           map_applied_conditions.insert(detached_event);
-        if (runtime->legion_spy_enabled)
-        {
-          runtime->forest->log_mapping_decision(unique_op_id, parent_ctx,
-                                      0/*idx*/, requirement, references);
+        log_mapping_decision(0/*idx*/, requirement, references);
 #ifdef LEGION_SPY
+        if (runtime->legion_spy_enabled)
           LegionSpy::log_operation_events(unique_op_id, detach_event,
                                           completion_event);
 #endif
-        }
       }
 #ifdef LEGION_SPY
       else if (runtime->legion_spy_enabled)

@@ -890,9 +890,6 @@ namespace Legion {
     void TaskContext::log_created_requirements(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<MappingInstance> instances(1, 
-            Mapping::PhysicalInstance::get_virtual_instance());
-      const UniqueID unique_op_id = get_unique_id();
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -900,14 +897,7 @@ namespace Legion {
         // Skip it if there are no privilege fields
         if (it->second.privilege_fields.empty())
           continue;
-        InstanceSet instance_set;
-        std::vector<PhysicalManager*> unacquired;  
-        RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-        runtime->forest->physical_convert_mapping(owner_task, 
-            it->second, instances, instance_set, bad_tree, 
-            missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-        runtime->forest->log_mapping_decision(unique_op_id, this,
-            it->first, it->second, instance_set);
+        owner_task->log_virtual_mapping(it->first, it->second);
       }
     } 
 
@@ -1278,16 +1268,7 @@ namespace Legion {
           {
             LegionSpy::log_requirement_fields(get_unique_id(),
                                               it->first, overlapping_fields);
-            std::vector<MappingInstance> instances(1, 
-                          Mapping::PhysicalInstance::get_virtual_instance());
-            InstanceSet instance_set;
-            std::vector<PhysicalManager*> unacquired;  
-            RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-            runtime->forest->physical_convert_mapping(owner_task, 
-                req, instances, instance_set, bad_tree, 
-                missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-            runtime->forest->log_mapping_decision(get_unique_id(), this,
-                it->first, req, instance_set);
+            owner_task->log_virtual_mapping(it->first, req);
           }
         }
       }
@@ -1322,7 +1303,6 @@ namespace Legion {
         // We need some extra logging for legion spy
         std::vector<MappingInstance> instances(1, 
               Mapping::PhysicalInstance::get_virtual_instance());
-        const UniqueID unique_op_id = get_unique_id();
         AutoLock priv_lock(privilege_lock);
         for (std::map<unsigned,RegionRequirement>::iterator it = 
               created_requirements.begin(); it != 
@@ -1341,14 +1321,7 @@ namespace Legion {
             if (!it->second.privilege_fields.empty())
             {
               // Do extra logging for legion spy
-              InstanceSet instance_set;
-              std::vector<PhysicalManager*> unacquired;  
-              RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-              runtime->forest->physical_convert_mapping(owner_task, 
-                  it->second, instances, instance_set, bad_tree, 
-                  missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-              runtime->forest->log_mapping_decision(unique_op_id, this,
-                  it->first, it->second, instance_set);
+              owner_task->log_virtual_mapping(it->first, it->second);
               // Then do the result of the normal operations
               delete_reqs.resize(delete_reqs.size()+1);
               RegionRequirement &req = delete_reqs.back();

@@ -734,6 +734,11 @@ namespace Legion {
           const std::deque<MappingInstance>         &output,
           const InstanceSet                         &sources,
           std::vector<unsigned>                     &ranking) const;
+      void log_mapping_decision(unsigned index, const RegionRequirement &req,
+                                const InstanceSet &targets,
+                                bool postmapping = false) const;
+      void log_virtual_mapping(unsigned index, 
+                               const RegionRequirement &req) const;
 #ifdef DEBUG_LEGION
     protected:
       virtual void dump_physical_state(RegionRequirement *req, unsigned idx,
@@ -3853,6 +3858,7 @@ namespace Legion {
                                        const std::vector<size_t> &field_sizes,
                                              LayoutConstraintSet &cons,
                                              ApEvent &ready_event,
+                                             LgEvent &unique_event,
                                              size_t &instance_footprint);
     protected:
       void activate_attach_op(void);

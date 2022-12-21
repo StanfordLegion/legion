@@ -179,8 +179,7 @@ namespace Legion {
 
       ss << "PhysicalInstRegionDesc {"
          << "id:" << PHYSICAL_INST_REGION_ID                      << delim
-	 << "op_id:UniqueID:"              << sizeof(UniqueID)    << delim
-	 << "inst_id:InstID:"              << sizeof(InstID)      << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent)     << delim
 	 << "ispace_id:IDType:"            << sizeof(IDType)      << delim
 	 << "fspace_id:unsigned:"          << sizeof(unsigned)    << delim
 	 << "tree_id:unsigned:"            << sizeof(unsigned)
@@ -188,8 +187,7 @@ namespace Legion {
 
       ss << "PhysicalInstLayoutDesc {"
          << "id:" << PHYSICAL_INST_LAYOUT_ID                  << delim
-         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
-         << "inst_id:InstID:"           << sizeof(InstID)     << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "field_id:unsigned:"        << sizeof(unsigned)   << delim
          << "fspace_id:unsigned:"       << sizeof(unsigned)   << delim
          << "has_align:bool:"           << sizeof(bool)       << delim
@@ -199,10 +197,17 @@ namespace Legion {
 
       ss << "PhysicalInstDimOrderDesc {"
          << "id:" << PHYSICAL_INST_LAYOUT_DIM_ID              << delim
-         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
-         << "inst_id:InstID:"           << sizeof(InstID)     << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
          << "dim:unsigned:"             << sizeof(unsigned)   << delim
          << "dim_kind:unsigned:"        << sizeof(unsigned)
+         << "}" << std::endl;
+
+      ss << "PhysicalInstanceUsage {"
+         << "id:" << PHYSICAL_INST_USAGE_ID                   << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
+         << "op_id:UniqueID:"           << sizeof(UniqueID)   << delim
+         << "index_id:unsigned:"        << sizeof(unsigned)   << delim
+         << "field_id:unsigned:"        << sizeof(unsigned)
          << "}" << std::endl;
 
       ss << "TaskKind {" 
@@ -313,15 +318,14 @@ namespace Legion {
       ss << "CopyInfo {"
          << "id:" << COPY_INFO_ID                                    << delim
          << "op_id:UniqueID:"          << sizeof(UniqueID)           << delim
-         << "src:MemID:"               << sizeof(MemID)              << delim
-         << "dst:MemID:"               << sizeof(MemID)              << delim
          << "size:unsigned long long:" << sizeof(unsigned long long) << delim
          << "create:timestamp_t:"      << sizeof(timestamp_t)        << delim
          << "ready:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "start:timestamp_t:"       << sizeof(timestamp_t)        << delim
          << "stop:timestamp_t:"        << sizeof(timestamp_t)        << delim
-         << "fevent:unsigned long long:" << sizeof(LgEvent) << delim
-         << "num_requests:unsigned:" << sizeof(unsigned)
+         << "num_hops:unsigned:"       << sizeof(unsigned)           << delim
+         << "request_type:unsigned:"   << sizeof(unsigned)           << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
 #ifdef LEGION_PROF_PROVENANCE
          << delim
          << "provenance:"              << sizeof(LgEvent)
@@ -330,52 +334,46 @@ namespace Legion {
 
       ss << "CopyInstInfo {"
          << "id:" << COPY_INST_INFO_ID                           << delim
-         << "op_id:UniqueID:"          << sizeof(UniqueID)       << delim
-         << "src_inst:InstID:"         << sizeof(InstID)         << delim
-         << "dst_inst:InstID:"         << sizeof(InstID)         << delim
+         << "src:MemID:"                 << sizeof(MemID)        << delim
+         << "dst:MemID:"                 << sizeof(MemID)        << delim
+         << "src_fid:unsigned:"          << sizeof(FieldID)      << delim
+         << "dst_fid:unsigned:"          << sizeof(FieldID)      << delim
+         << "src_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
+         << "dst_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
          << "fevent:unsigned long long:" << sizeof(LgEvent)      << delim
-         << "num_fields:unsigned:"       << sizeof(unsigned)     << delim
-         << "request_type:unsigned:"     << sizeof(unsigned)     << delim
-         << "num_hops:unsigned:"         << sizeof(unsigned)
+         << "indirect:bool:"             << sizeof(bool)
          << "}" << std::endl;
 
       ss << "FillInfo {"
          << "id:" << FILL_INFO_ID                        << delim
          << "op_id:UniqueID:"     << sizeof(UniqueID)    << delim
-         << "dst:MemID:"          << sizeof(MemID)       << delim
+         << "size:unsigned long long:" << sizeof(unsigned long long) << delim
          << "create:timestamp_t:" << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "start:timestamp_t:"  << sizeof(timestamp_t) << delim
-         << "stop:timestamp_t:"   << sizeof(timestamp_t)
+         << "stop:timestamp_t:"   << sizeof(timestamp_t) << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
 #ifdef LEGION_PROF_PROVENANCE
          << delim
          << "provenance:"         << sizeof(LgEvent)
 #endif
          << "}" << std::endl;
 
-      ss << "InstCreateInfo {"
-         << "id:" << INST_CREATE_INFO_ID                 << delim
-         << "op_id:UniqueID:"     << sizeof(UniqueID)    << delim
-         << "inst_id:InstID:"     << sizeof(InstID)      << delim
-         << "create:timestamp_t:" << sizeof(timestamp_t)
-#ifdef LEGION_PROF_PROVENANCE
-         << delim
-         << "provenance:"         << sizeof(LgEvent)
-#endif
-         << "}" << std::endl;
-
-      ss << "InstUsageInfo {"
-         << "id:" << INST_USAGE_INFO_ID                    << delim
-         << "op_id:UniqueID:"          << sizeof(UniqueID) << delim
-         << "inst_id:InstID:"          << sizeof(InstID)   << delim
-         << "mem_id:MemID:"            << sizeof(MemID)    << delim
-         << "size:unsigned long long:" << sizeof(unsigned long long)
+      ss << "FillInstInfo {"
+         << "id:" << FILL_INST_INFO_ID                           << delim
+         << "dst:MemID:"                    << sizeof(MemID)     << delim
+         << "fid:unsigned:"                 << sizeof(FieldID)   << delim
+         << "dst_inst:unsigned long long:"  << sizeof(LgEvent)   << delim
+         << "fevent:unsigned long long:" << sizeof(LgEvent)
          << "}" << std::endl;
 
       ss << "InstTimelineInfo {"
          << "id:" << INST_TIMELINE_INFO_ID                << delim
-         << "op_id:UniqueID:"      << sizeof(UniqueID)    << delim
-         << "inst_id:InstID:"      << sizeof(InstID)      << delim
+         << "inst_uid:unsigned long long:" << sizeof(LgEvent) << delim
+         << "inst_id:InstID:"          << sizeof(InstID)   << delim
+         << "mem_id:MemID:"            << sizeof(MemID)    << delim
+         << "size:unsigned long long:" << sizeof(unsigned long long) << delim
+         << "op_id:UniqueID:"       << sizeof(UniqueID) << delim
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "destroy:timestamp_t:" << sizeof(timestamp_t)
@@ -635,8 +633,8 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_REGION_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_rdesc.op_id), sizeof(UniqueID));
-      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_uid.id), 
+                sizeof(phy_instance_rdesc.inst_uid.id));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.ispace_id), sizeof(IDType));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.fspace_id), sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_rdesc.tree_id), sizeof(unsigned));
@@ -650,15 +648,14 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_LAYOUT_DIM_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.op_id),
-                sizeof(UniqueID));
-      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.inst_id),
-                sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.inst_uid.id),
+                sizeof(phy_instance_dim_order_rdesc.inst_uid.id));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.dim),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_dim_order_rdesc.k),
                 sizeof(unsigned));
     }
+
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
                 const LegionProfInstance::PhysicalInstLayoutDesc 
@@ -667,8 +664,8 @@ namespace Legion {
     {
       int ID = PHYSICAL_INST_LAYOUT_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.op_id),sizeof(UniqueID));
-      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_id),sizeof(InstID));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_uid.id),
+                sizeof(phy_instance_layout_rdesc.inst_uid.id));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.field_id),
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.fspace_id),
@@ -679,6 +676,19 @@ namespace Legion {
                 sizeof(unsigned));
       lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.alignment),
                 sizeof(unsigned));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                         const LegionProfInstance::PhysicalInstanceUsage &usage)
+    //--------------------------------------------------------------------------
+    {
+      int ID = PHYSICAL_INST_USAGE_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(usage.inst_uid.id), sizeof(usage.inst_uid.id));
+      lp_fwrite(f, (char*)&(usage.op_id), sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(usage.index), sizeof(unsigned));
+      lp_fwrite(f, (char*)&(usage.field), sizeof(unsigned));
     }
 
     //--------------------------------------------------------------------------
@@ -886,35 +896,36 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
 
       lp_fwrite(f, (char*)&(copy_info.op_id),  sizeof(copy_info.op_id));
-      lp_fwrite(f, (char*)&(copy_info.src),    sizeof(copy_info.src));
-      lp_fwrite(f, (char*)&(copy_info.dst),    sizeof(copy_info.dst));
       lp_fwrite(f, (char*)&(copy_info.size),   sizeof(copy_info.size));
       lp_fwrite(f, (char*)&(copy_info.create), sizeof(copy_info.create));
       lp_fwrite(f, (char*)&(copy_info.ready),  sizeof(copy_info.ready));
       lp_fwrite(f, (char*)&(copy_info.start),  sizeof(copy_info.start));
       lp_fwrite(f, (char*)&(copy_info.stop),   sizeof(copy_info.stop));
+      lp_fwrite(f, (char*)&(copy_info.num_hops), sizeof(copy_info.num_hops));
+      lp_fwrite(f, (char*)&(copy_info.request_type), sizeof(copy_info.request_type));
       lp_fwrite(f, (char*)&(copy_info.fevent),sizeof(copy_info.fevent.id));
-      lp_fwrite(f, (char*)&(copy_info.num_requests),   sizeof(copy_info.num_requests));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(copy_info.provenance),sizeof(copy_info.provenance));
 #endif
     }
 
-        //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                                  const LegionProfInstance::CopyInstInfo &copy_inst,
-                                  const LegionProfInstance::CopyInfo& copy_info)
+                              const LegionProfInstance::CopyInstInfo &copy_inst)
     //--------------------------------------------------------------------------
     {
       int ID = COPY_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(copy_info.op_id),     sizeof(copy_info.op_id));
-      lp_fwrite(f, (char*)&(copy_inst.src_inst_id),sizeof(copy_inst.src_inst_id));
-      lp_fwrite(f, (char*)&(copy_inst.dst_inst_id),sizeof(copy_inst.dst_inst_id));
-      lp_fwrite(f, (char*)&(copy_info.fevent),sizeof(copy_info.fevent.id));
-      lp_fwrite(f, (char*)&(copy_inst.num_fields),sizeof(copy_inst.num_fields));
-      lp_fwrite(f, (char*)&(copy_inst.request_type),sizeof(copy_inst.request_type));
-      lp_fwrite(f, (char*)&(copy_inst.num_hops),sizeof(copy_inst.num_hops));
+      lp_fwrite(f, (char*)&(copy_inst.src), sizeof(copy_inst.src));
+      lp_fwrite(f, (char*)&(copy_inst.dst), sizeof(copy_inst.dst));
+      lp_fwrite(f, (char*)&(copy_inst.src_fid), sizeof(copy_inst.src_fid));
+      lp_fwrite(f, (char*)&(copy_inst.dst_fid), sizeof(copy_inst.dst_fid));
+      lp_fwrite(f, (char*)&(copy_inst.src_inst_uid.id),
+          sizeof(copy_inst.src_inst_uid.id));
+      lp_fwrite(f, (char*)&(copy_inst.dst_inst_uid.id),
+          sizeof(copy_inst.dst_inst_uid.id));
+      lp_fwrite(f, (char*)&(copy_inst.fevent),sizeof(copy_inst.fevent.id));
+      lp_fwrite(f, (char*)&(copy_inst.indirect), sizeof(copy_inst.indirect));
     }
 
     //--------------------------------------------------------------------------
@@ -924,13 +935,13 @@ namespace Legion {
     {
       int ID = FILL_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-
       lp_fwrite(f, (char*)&(fill_info.op_id),  sizeof(fill_info.op_id));
-      lp_fwrite(f, (char*)&(fill_info.dst),    sizeof(fill_info.dst));
+      lp_fwrite(f, (char*)&(fill_info.size),   sizeof(fill_info.size));
       lp_fwrite(f, (char*)&(fill_info.create), sizeof(fill_info.create));
       lp_fwrite(f, (char*)&(fill_info.ready),  sizeof(fill_info.ready));
       lp_fwrite(f, (char*)&(fill_info.start),  sizeof(fill_info.start));
       lp_fwrite(f, (char*)&(fill_info.stop),   sizeof(fill_info.stop));
+      lp_fwrite(f, (char*)&(fill_info.fevent), sizeof(fill_info.fevent.id));
 #ifdef LEGION_PROF_PROVENANCE
       lp_fwrite(f, (char*)&(fill_info.provenance),sizeof(fill_info.provenance));
 #endif
@@ -938,38 +949,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
-                     const LegionProfInstance::InstCreateInfo& inst_create_info)
+                              const LegionProfInstance::FillInstInfo &fill_inst)
     //--------------------------------------------------------------------------
     {
-      int ID = INST_CREATE_INFO_ID;
+      int ID = FILL_INST_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(inst_create_info.op_id),   
-                sizeof(inst_create_info.op_id));
-      lp_fwrite(f, (char*)&(inst_create_info.inst_id), 
-                sizeof(inst_create_info.inst_id));
-      lp_fwrite(f, (char*)&(inst_create_info.create),  
-                sizeof(inst_create_info.create));
-#ifdef LEGION_PROF_PROVENANCE
-      lp_fwrite(f, (char*)&(inst_create_info.provenance),
-                sizeof(inst_create_info.provenance));
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfBinarySerializer::serialize(
-                       const LegionProfInstance::InstUsageInfo& inst_usage_info)
-    //--------------------------------------------------------------------------
-    {
-      int ID = INST_USAGE_INFO_ID;
-      lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(inst_usage_info.op_id),   
-                sizeof(inst_usage_info.op_id));
-      lp_fwrite(f, (char*)&(inst_usage_info.inst_id), 
-                sizeof(inst_usage_info.inst_id));
-      lp_fwrite(f, (char*)&(inst_usage_info.mem_id),  
-                sizeof(inst_usage_info.mem_id));
-      lp_fwrite(f, (char*)&(inst_usage_info.size),    
-                sizeof(inst_usage_info.size));
+      lp_fwrite(f, (char*)&(fill_inst.dst), sizeof(fill_inst.dst));
+      lp_fwrite(f, (char*)&(fill_inst.fid),    sizeof(fill_inst.fid));
+      lp_fwrite(f, (char*)&(fill_inst.dst_inst_uid.id),
+          sizeof(fill_inst.dst_inst_uid.id));
+      lp_fwrite(f, (char*)&(fill_inst.fevent),sizeof(fill_inst.fevent.id));
     }
 
     //--------------------------------------------------------------------------
@@ -979,10 +968,16 @@ namespace Legion {
     {
       int ID = INST_TIMELINE_INFO_ID;
       lp_fwrite(f, (char*)&ID, sizeof(ID));
-      lp_fwrite(f, (char*)&(inst_timeline_info.op_id),   
-                sizeof(inst_timeline_info.op_id));
-      lp_fwrite(f, (char*)&(inst_timeline_info.inst_id), 
+      lp_fwrite(f, (char*)&(inst_timeline_info.inst_uid.id),
+                sizeof(inst_timeline_info.inst_uid.id));
+      lp_fwrite(f, (char*)&(inst_timeline_info.inst_id),
                 sizeof(inst_timeline_info.inst_id));
+      lp_fwrite(f, (char*)&(inst_timeline_info.mem_id),  
+                sizeof(inst_timeline_info.mem_id));
+      lp_fwrite(f, (char*)&(inst_timeline_info.size),    
+                sizeof(inst_timeline_info.size));
+      lp_fwrite(f, (char*)&(inst_timeline_info.op_id),
+                sizeof(inst_timeline_info.op_id));
       lp_fwrite(f, (char*)&(inst_timeline_info.create),  
                 sizeof(inst_timeline_info.create));
       lp_fwrite(f, (char*)&(inst_timeline_info.ready),  
@@ -1453,9 +1448,8 @@ namespace Legion {
            const LegionProfInstance::PhysicalInstRegionDesc &phy_instance_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Region Desc " "%llu "  IDFMT " %llu %u %u",
-		     phy_instance_rdesc.op_id,
-		     phy_instance_rdesc.inst_id,
+      log_prof.print("Physical Inst Region Desc "  IDFMT " %llu %u %u",
+                     phy_instance_rdesc.inst_uid.id,
 		     phy_instance_rdesc.ispace_id,
 		     phy_instance_rdesc.fspace_id,
 		     phy_instance_rdesc.tree_id);
@@ -1467,9 +1461,8 @@ namespace Legion {
            &phy_instance_dim_order_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Dim Order Desc " "%llu " IDFMT " %u %u",
-                     phy_instance_dim_order_rdesc.op_id,
-                     phy_instance_dim_order_rdesc.inst_id,
+      log_prof.print("Physical Inst Dim Order Desc " IDFMT " %u %u",
+                     phy_instance_dim_order_rdesc.inst_uid.id,
                      phy_instance_dim_order_rdesc.dim,
                      phy_instance_dim_order_rdesc.k
                      );
@@ -1496,16 +1489,24 @@ namespace Legion {
               &phy_instance_layout_rdesc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u %u %u %u "
+      log_prof.print("Physical Inst Layout Desc " IDFMT " %u %u %u %u "
                      "%u",
-                     phy_instance_layout_rdesc.op_id,
-                     phy_instance_layout_rdesc.inst_id,
+                     phy_instance_layout_rdesc.inst_uid.id,
                      phy_instance_layout_rdesc.field_id,
                      phy_instance_layout_rdesc.fspace_id,
                      phy_instance_layout_rdesc.has_align,
                      phy_instance_layout_rdesc.eqk,
                      phy_instance_layout_rdesc.alignment
                      );
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                         const LegionProfInstance::PhysicalInstanceUsage &usage)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Physical Inst Usage " IDFMT " %llu %u %u",
+                      usage.inst_uid.id, usage.op_id, usage.index, usage.field);
     }
 
     //--------------------------------------------------------------------------
@@ -1699,34 +1700,30 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
-                     " %llu %llu %llu %llu " IDFMT " " IDFMT " %u",
-                     copy_info.op_id, copy_info.src,
-                     copy_info.dst, copy_info.size, copy_info.create,
+      log_prof.print("Prof Copy Info %llu %luu %llu %llu %llu %llu %u %u " IDFMT " " 
+                     IDFMT, copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.fevent.id,
-                     copy_info.provenance.id,
-                     copy_info.num_requests);
+                     copy_info.num_hops, copy_info.request_type,
+                     copy_info.fevent.id, copy_info.provenance.id);
 #else
-      log_prof.print("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
-                     " %llu %llu %llu %llu " IDFMT " %u", copy_info.op_id,
-                     copy_info.src,
-                     copy_info.dst, copy_info.size, copy_info.create,
+      log_prof.print("Prof Copy Info %llu %llu %llu %llu %llu %llu %u %u " IDFMT,
+                     copy_info.op_id, copy_info.size, copy_info.create,
                      copy_info.ready, copy_info.start, copy_info.stop,
-                     copy_info.fevent.id,
-                     copy_info.num_requests);
+                     copy_info.num_hops, copy_info.request_type,
+                     copy_info.fevent.id);
 #endif
     }
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                          const LegionProfInstance::CopyInstInfo& copy_inst,
-                          const LegionProfInstance::CopyInfo& copy_info)
+                              const LegionProfInstance::CopyInstInfo& copy_inst)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Copy Inst Info %llu " IDFMT " " IDFMT " " IDFMT " %u %u %u",
-                     copy_info.op_id, copy_inst.src_inst_id, copy_inst.dst_inst_id,
-                     copy_info.fevent.id, copy_inst.num_fields, copy_inst.request_type, copy_inst.num_hops);
+      log_prof.print("Prof Copy Inst Info " IDFMT " " IDFMT " %d %d " IDFMT " " 
+                     IDFMT " " IDFMT " %u", copy_inst.src, copy_inst.dst,
+                     copy_inst.src_fid, copy_inst.dst_fid,
+                     copy_inst.src_inst_uid.id, copy_inst.dst_inst_uid.id,
+                     copy_inst.fevent.id, copy_inst.indirect ? 1 : 0); 
     }
 
     //--------------------------------------------------------------------------
@@ -1735,40 +1732,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Fill Info %llu " IDFMT " %llu %llu %llu %llu " IDFMT,
-        fill_info.op_id, fill_info.dst, fill_info.create, fill_info.ready, 
-        fill_info.start, fill_info.stop, fill_info.provenance.id);
+      log_prof.print("Prof Fill Info %llu %llu %llu %llu %llu %llu " IDFMT " "
+          IDFMT, fill_info.op_id, fill_info.size, fill_info.create, 
+          fill_info.ready, fill_info.start, fill_info.stop,
+          fill_info.fevent.id, fill_info.provenance.id);
 #else
-      log_prof.print("Prof Fill Info %llu " IDFMT 
-         " %llu %llu %llu %llu", fill_info.op_id, fill_info.dst, 
-         fill_info.create, fill_info.ready, fill_info.start, fill_info.stop);
+      log_prof.print("Prof Fill Info %llu %llu %llu %llu %llu %llu " IDFMT, 
+          fill_info.op_id, fill_info.size, fill_info.create, fill_info.ready,
+          fill_info.start, fill_info.stop, fill_info.fevent.id);
 #endif
     }
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
-                     const LegionProfInstance::InstCreateInfo& inst_create_info)
+                              const LegionProfInstance::FillInstInfo& fill_inst)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_PROF_PROVENANCE
-      log_prof.print("Prof Inst Create %llu " IDFMT " %llu " IDFMT "", 
-                     inst_create_info.op_id, inst_create_info.inst_id, 
-                     inst_create_info.create, inst_create_info.provenance.id);
-#else
-      log_prof.print("Prof Inst Create %llu " IDFMT " %llu", 
-                     inst_create_info.op_id, inst_create_info.inst_id, 
-                     inst_create_info.create);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfASCIISerializer::serialize(
-                       const LegionProfInstance::InstUsageInfo& inst_usage_info)
-    //--------------------------------------------------------------------------
-    {
-      log_prof.print("Prof Inst Usage %llu " IDFMT " " IDFMT " %llu",
-                     inst_usage_info.op_id, inst_usage_info.inst_id, 
-                     inst_usage_info.mem_id, inst_usage_info.size);
+      log_prof.print("Prof Fill Inst Info " IDFMT " %d " IDFMT " " IDFMT,
+                      fill_inst.dst, fill_inst.fid, fill_inst.dst_inst_uid.id,
+                      fill_inst.fevent.id);
     }
 
     //--------------------------------------------------------------------------
@@ -1776,10 +1758,12 @@ namespace Legion {
                  const LegionProfInstance::InstTimelineInfo& inst_timeline_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu %llu",
-         inst_timeline_info.op_id, inst_timeline_info.inst_id,
-         inst_timeline_info.create, inst_timeline_info.ready,
-         inst_timeline_info.destroy);
+      log_prof.print("Prof Inst Timeline " IDFMT " " IDFMT " " IDFMT 
+                     " %llu %llu %llu %llu %llu",
+         inst_timeline_info.inst_uid.id, inst_timeline_info.inst_id,
+         inst_timeline_info.mem_id, inst_timeline_info.size,
+         inst_timeline_info.op_id, inst_timeline_info.create,
+         inst_timeline_info.ready, inst_timeline_info.destroy);
     }
 
     //--------------------------------------------------------------------------

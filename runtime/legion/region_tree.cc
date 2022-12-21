@@ -50,9 +50,8 @@ namespace Legion {
       std::vector<unsigned> field_indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, field_indexes);
       instances.resize(field_indexes.size());
-#ifdef LEGION_SPY
-      instance_events.resize(field_indexes.size());
-#endif
+      if (forest->runtime->num_profiling_nodes > 0)
+        instance_events.resize(field_indexes.size());
       // For each of the fields in the region requirement
       // (importantly in the order they will be copied)
       // find the corresponding instance and store them 
@@ -70,9 +69,8 @@ namespace Legion {
             continue;
           PhysicalManager *manager = ref.get_physical_manager();
           instances[fidx] = manager->get_instance(key);
-#ifdef LEGION_SPY
-          instance_events[fidx] = manager->get_unique_event();
-#endif
+          if (!instance_events.empty())
+            instance_events[fidx] = manager->get_unique_event();
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -3650,41 +3648,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::log_mapping_decision(const UniqueID uid, 
-                                                TaskContext *context,
-                                                const unsigned index,
-                                                const RegionRequirement &req,
-                                                const InstanceSet &targets,
-                                                bool postmapping)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(runtime->legion_spy_enabled); 
-#endif
-      FieldSpaceNode *node = (req.handle_type != LEGION_PARTITION_PROJECTION) ?
-        get_node(req.region.get_field_space()) : 
-        get_node(req.partition.get_field_space());
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
-        const InstanceRef &inst = targets[idx];
-        const FieldMask &valid_mask = inst.get_valid_fields();
-        InstanceManager *manager = inst.get_manager();
-        std::vector<FieldID> valid_fields;
-        node->get_field_set(valid_mask, context, valid_fields);
-        for (std::vector<FieldID>::const_iterator it = valid_fields.begin();
-              it != valid_fields.end(); it++)
-        {
-          if (postmapping)
-            LegionSpy::log_post_mapping_decision(uid, index, *it,
-                                                 manager->get_unique_event());
-          else
-            LegionSpy::log_mapping_decision(uid, index, *it,
-                                            manager->get_unique_event());
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::perform_missing_acquires(
                                 std::map<PhysicalManager*,unsigned> &acquired,
                                 const std::vector<PhysicalManager*> &unacquired)
@@ -6985,6 +6948,109 @@ namespace Legion {
         if (dst_req.redop != 0)
           dst_fields[idx].set_redop(dst_req.redop, 
                     false/*fold*/, exclusive_redop);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossUnstructured::log_across_profiling(LgEvent copy_post,
+                                                      int preimage) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(runtime->profiler != NULL);
+      assert(src_fields.size() == dst_fields.size());
+#endif
+      if (0 <= preimage)
+      {
+#ifdef DEBUG_LEGION
+        assert(((unsigned)preimage) < nonempty_indexes.size());
+        assert(src_indirections.empty() != dst_indirections.empty());
+#endif
+        runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
+        const unsigned index = nonempty_indexes[preimage];
+        if (src_indirections.empty())
+        {
+          // Scatter
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+            runtime->profiler->record_copy_instances(src_fields[idx].field_id,
+                dst_fields[idx].field_id, src_fields[idx].inst,
+                dst_indirections[index].instances[idx], src_unique_events[idx],
+                dst_indirections[index].instance_events[idx], copy_post);
+        }
+        else
+        {
+          // Gather
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+            runtime->profiler->record_copy_instances(
+                src_fields[idx].field_id, dst_fields[idx].field_id,
+                src_indirections[index].instances[idx], dst_fields[idx].inst,
+                src_indirections[index].instance_events[idx], 
+                dst_unique_events[idx], copy_post);
+        }
+      }
+      else if (src_indirections.empty())
+      {
+        if (dst_indirections.empty())
+        {
+          // Normal across
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+            runtime->profiler->record_copy_instances(
+                src_fields[idx].field_id, dst_fields[idx].field_id,
+                src_fields[idx].inst, dst_fields[idx].inst,
+                src_unique_events[idx], dst_unique_events[idx], copy_post);
+        }
+        else
+        {
+          // Scatter
+          runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+            for (std::vector<IndirectRecord>::const_iterator it =
+                  dst_indirections.begin(); it != dst_indirections.end(); it++)
+              runtime->profiler->record_copy_instances(
+                  src_fields[idx].field_id, dst_fields[idx].field_id,
+                  src_fields[idx].inst, it->instances[idx],
+                  src_unique_events[idx], it->instance_events[idx], copy_post);
+        }
+      }
+      else
+      {
+        if (dst_indirections.empty())
+        {
+          // Gather
+          runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+            for (std::vector<IndirectRecord>::const_iterator it =
+                  src_indirections.begin(); it != src_indirections.end(); it++)
+              runtime->profiler->record_copy_instances(
+                  src_fields[idx].field_id, dst_fields[idx].field_id,
+                  it->instances[idx], dst_fields[idx].inst,
+                  it->instance_events[idx], dst_unique_events[idx], copy_post);
+        }
+        else
+        {
+          // Full indirection
+          runtime->profiler->record_indirect_instances(src_indirect_field,
+           dst_indirect_field, src_indirect_instance, dst_indirect_instance,
+           src_indirect_instance_event, dst_indirect_instance_event, copy_post);
+          for (unsigned idx = 0; idx < src_fields.size(); idx++)
+            for (std::vector<IndirectRecord>::const_iterator src_it =
+                  src_indirections.begin(); src_it !=
+                  src_indirections.end(); src_it++)
+              for (std::vector<IndirectRecord>::const_iterator dst_it =
+                    dst_indirections.begin(); dst_it !=
+                    dst_indirections.end(); dst_it++)
+                runtime->profiler->record_copy_instances(
+                    src_fields[idx].field_id, dst_fields[idx].field_id,
+                    src_it->instances[idx], dst_it->instances[idx],
+                    src_it->instance_events[idx], 
+                    dst_it->instance_events[idx], copy_post);
+        }
       }
     }
 
@@ -14405,11 +14471,12 @@ namespace Legion {
                            mask_index_map, serdez, external_mask);
       // Now make the instance, this should always succeed
       ApEvent ready_event;
+      LgEvent unique_event;
       size_t instance_footprint;
       LayoutConstraintSet constraints;
       PhysicalInstance inst = 
-        attach_op->create_instance(node->row_source, field_set, field_sizes, 
-                                   constraints, ready_event,instance_footprint);
+        attach_op->create_instance(node->row_source, field_set, field_sizes,
+            constraints, ready_event, unique_event, instance_footprint);
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make
       if (inst.address_space() != context->runtime->address_space)
@@ -14422,6 +14489,7 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize(inst);
           rez.serialize(ready_event);
+          rez.serialize(unique_event);
           rez.serialize(instance_footprint);
           constraints.serialize(rez);
           rez.serialize(external_mask);
@@ -14453,7 +14521,7 @@ namespace Legion {
         return InstanceRef(create_external_manager(inst, ready_event, 
                             instance_footprint, constraints, field_set, 
                             field_sizes,  external_mask, mask_index_map, 
-                            node, serdez), external_mask);
+                            unique_event, node, serdez), external_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -14469,6 +14537,8 @@ namespace Legion {
       derez.deserialize(inst);
       ApEvent ready_event;
       derez.deserialize(ready_event);
+      LgEvent unique_event;
+      derez.deserialize(unique_event);
       size_t footprint;
       derez.deserialize(footprint);
       LayoutConstraintSet constraints;
@@ -14498,7 +14568,7 @@ namespace Legion {
 
       PhysicalManager *manager = fs->create_external_manager(inst, ready_event,
           footprint, constraints, field_set, field_sizes, file_mask,
-          mask_index_map, region_node, serdez);
+          mask_index_map, unique_event, region_node, serdez);
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14532,7 +14602,7 @@ namespace Legion {
             const std::vector<FieldID> &field_set,
             const std::vector<size_t> &field_sizes, 
             const FieldMask &external_mask,
-            const std::vector<unsigned> &mask_index_map,
+            const std::vector<unsigned> &mask_index_map, LgEvent unique_event,
             RegionNode *node, const std::vector<CustomSerdezID> &serdez)
     //--------------------------------------------------------------------------
     {
@@ -14568,7 +14638,8 @@ namespace Legion {
                                          node->handle.get_tree_id(),
                                          layout, 0/*redop*/, 
                                          true/*register now*/,
-                                         instance_footprint, ready_event,
+                                         instance_footprint, 
+                                         ready_event, unique_event,
                               PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
