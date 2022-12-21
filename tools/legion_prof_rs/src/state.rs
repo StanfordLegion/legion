@@ -330,11 +330,9 @@ impl Proc {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
             let ready = time.ready;
-            if stop - start > TASK_GRANULARITY_THRESHOLD {
-                if let Some(ready) = ready {
-                    all_points.push(ProcPoint::new(ready, prof_uid, true, start.0));
-                    all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
-                }
+            if stop - start > TASK_GRANULARITY_THRESHOLD && ready.is_some() {
+                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
+                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             } else {
                 all_points.push(ProcPoint::new(start, prof_uid, true, 0));
                 all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
