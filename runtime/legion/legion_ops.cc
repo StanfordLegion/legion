@@ -1473,7 +1473,10 @@ namespace Legion {
         const FieldMask &valid_mask = inst.get_valid_fields();
         std::vector<FieldID> valid_fields;
         node->get_field_set(valid_mask, parent_ctx, valid_fields);
-        PhysicalManager *manager = inst.get_physical_manager();
+        InstanceManager *manager = inst.get_manager();
+        const LgEvent inst_event = 
+            manager->is_virtual_manager() ? LgEvent::NO_LG_EVENT :
+            manager->as_physical_manager()->get_unique_event();
         if (runtime->legion_spy_enabled)
         {
           for (std::vector<FieldID>::const_iterator it =
@@ -1481,15 +1484,15 @@ namespace Legion {
           {
             if (postmapping)
               LegionSpy::log_post_mapping_decision(unique_op_id, index, *it,
-                                                   manager->get_unique_event());
+                                                   inst_event);
             else
               LegionSpy::log_mapping_decision(unique_op_id, index, *it,
-                                              manager->get_unique_event());
+                                              inst_event);
           }
         }
         if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
-          runtime->profiler->record_physical_instance_use(
-              manager->get_unique_event(), unique_op_id, index, valid_fields);
+          runtime->profiler->record_physical_instance_use(inst_event,
+                                      unique_op_id, index, valid_fields);
       }
     }
 
