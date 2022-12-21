@@ -23131,6 +23131,13 @@ namespace Legion {
         default:
           assert(false);
       }
+      if (runtime->profiler != NULL)
+      {
+        runtime->profiler->record_physical_instance_region(unique_event,
+                                                           requirement.region);
+        runtime->profiler->record_physical_instance_layout(unique_event,
+            requirement.region.field_space, constraints);
+      }
       // Check to see if this instance is local or whether we need
       // to send this request to a remote node to make it
       // Only external instances can be non-local, file instances

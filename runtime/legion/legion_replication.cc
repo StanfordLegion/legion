@@ -8097,17 +8097,22 @@ namespace Legion {
       ApEvent ready_event;
       LayoutConstraintSet constraints;
       PhysicalInstance instance = PhysicalInstance::NO_INST;
-      
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
+      // Only some of the shards are going to actually be creating the 
+      // instances in this case, this flag will say whether the local shard
+      // will be one of the ones performing an instance creation
+      const bool making_instance = (collective_instances &&
+         (is_first_local_shard || !deduplicate_across_shards)) ||
+        ((single_broadcast != NULL) && single_broadcast->is_origin());
       LgEvent unique_event;
       Realm::ProfilingRequestSet requests;
       if (((runtime->profiler != NULL) || runtime->legion_spy_enabled) &&
-          (collective_instances || single_broadcast->is_origin()))
+          making_instance)
       {
         const RtUserEvent unique = Runtime::create_rt_user_event();
         Runtime::trigger_event(unique);
@@ -8218,6 +8223,13 @@ namespace Legion {
         instance = result.instance;
         ready_event = result.ready_event;
         unique_event = result.unique_event;
+      }
+      else if ((runtime->profiler != NULL) && making_instance)
+      {
+        runtime->profiler->record_physical_instance_region(unique_event,
+                                                           requirement.region);
+        runtime->profiler->record_physical_instance_layout(unique_event,
+            requirement.region.field_space, constraints);
       }
       ShardManager *shard_manager = repl_ctx->shard_manager;
       // Now we need to make the instance to span the shards
