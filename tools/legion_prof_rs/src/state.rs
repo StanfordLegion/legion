@@ -186,7 +186,7 @@ where
             time,
             entry,
             first,
-            secondary_sort_key: secondary_sort_key,
+            secondary_sort_key,
         }
     }
     pub fn time_key(&self) -> (u64, u8, Secondary) {
@@ -268,7 +268,7 @@ impl Proc {
             ProcEntryKind::MetaTask(variant_id) => {
                 self.meta_tasks
                     .entry((initiation_op.unwrap(), variant_id))
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(base.prof_uid);
             }
             // If we don't need to look up later... don't bother building the index
@@ -291,7 +291,7 @@ impl Proc {
 
     pub fn find_last_meta(&self, op_id: OpID, variant_id: VariantID) -> Option<&ProcEntry> {
         let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
-        self.entries.get(&prof_uid)
+        self.entries.get(prof_uid)
     }
 
     pub fn find_last_meta_mut(
@@ -300,7 +300,7 @@ impl Proc {
         variant_id: VariantID,
     ) -> Option<&mut ProcEntry> {
         let prof_uid = self.meta_tasks.get(&(op_id, variant_id))?.last()?;
-        self.entries.get_mut(&prof_uid)
+        self.entries.get_mut(prof_uid)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -330,9 +330,11 @@ impl Proc {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
             let ready = time.ready;
-            if stop - start > TASK_GRANULARITY_THRESHOLD && !ready.is_none() {
-                all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
-                all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+            if stop - start > TASK_GRANULARITY_THRESHOLD {
+                if let Some(ready) = ready {
+                    all_points.push(ProcPoint::new(ready, prof_uid, true, start.0));
+                    all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
+                }
             } else {
                 all_points.push(ProcPoint::new(start, prof_uid, true, 0));
                 all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
@@ -357,12 +359,12 @@ impl Proc {
 
         for (uid, entry) in &self.entries {
             let time = &entry.time_range;
-            add(&time, *uid, &mut all_points, &mut points, &mut util_points);
+            add(time, *uid, &mut all_points, &mut points, &mut util_points);
             add_waiters(&entry.waiters, *uid, &mut util_points);
         }
 
-        points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
-        util_points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        points.sort_by_key(|a| a.time_key());
+        util_points.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
@@ -381,7 +383,7 @@ impl Proc {
             }
         }
 
-        all_points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        all_points.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels_ready = BinaryHeap::<Reverse<u32>>::new();
@@ -484,9 +486,8 @@ impl Mem {
                 (),
             ));
         }
-        self.time_points
-            .sort_by(|a, b| a.time_key().cmp(&b.time_key()));
-        time_points_level.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        self.time_points.sort_by_key(|a| a.time_key());
+        time_points_level.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
@@ -710,22 +711,22 @@ impl Chan {
         for (fevent, copy) in &self.copies {
             let time = &copy.time_range;
             let entry = ChanEntry::Copy(*fevent);
-            add(&time, entry, &mut points);
+            add(time, entry, &mut points);
         }
         for (fevent, fill) in &self.fills {
             let time = &fill.time_range;
             let entry = ChanEntry::Fill(*fevent);
-            add(&time, entry, &mut points);
+            add(time, entry, &mut points);
         }
         for (op_id, depparts) in &self.depparts {
             for (idx, deppart) in depparts.iter().enumerate() {
                 let time = &deppart.time_range;
                 let entry = ChanEntry::DepPart(*op_id, idx);
-                add(&time, entry, &mut points);
+                add(time, entry, &mut points);
             }
         }
 
-        points.sort_by(|a, b| a.time_key().cmp(&b.time_key()));
+        points.sort_by_key(|a| a.time_key());
 
         // Hack: This is a max heap so reverse the values as they go in.
         let mut free_levels = BinaryHeap::<Reverse<u32>>::new();
@@ -829,15 +830,15 @@ impl ISpace {
     // sparse instance. In this case the bounds will NOT be
     // accurate. But we don't use bounds in such cases anyway since we
     // refer to the dense/sparse sizes.
-    fn set_point(&mut self, dim: u32, values: &Vec<u64>) -> &mut Self {
+    fn set_point(&mut self, dim: u32, values: &[u64]) -> &mut Self {
         let new_bounds = Bounds::Point {
-            point: values.clone(),
+            point: values.to_owned(),
             dim,
         };
         self.bounds = new_bounds;
         self
     }
-    fn set_rect(&mut self, dim: u32, values: &Vec<u64>, max_dim: i32) -> &mut Self {
+    fn set_rect(&mut self, dim: u32, values: &[u64], max_dim: i32) -> &mut Self {
         let new_bounds = Bounds::Rect {
             lo: values[0..(dim as usize)].to_owned(),
             hi: values[(max_dim as usize)..(max_dim as usize) + (dim as usize)].to_owned(),
@@ -1122,16 +1123,14 @@ impl Inst {
     }
     fn add_fspace(&mut self, fspace_id: FSpaceID) -> &mut Self {
         self.fspace_ids.push(fspace_id);
-        self.fields.entry(fspace_id).or_insert_with(|| Vec::new());
-        self.align_desc
-            .entry(fspace_id)
-            .or_insert_with(|| Vec::new());
+        self.fields.entry(fspace_id).or_insert_with(Vec::new);
+        self.align_desc.entry(fspace_id).or_insert_with(Vec::new);
         self
     }
     fn add_field(&mut self, fspace_id: FSpaceID, field_id: FieldID) -> &mut Self {
         self.fields
             .entry(fspace_id)
-            .or_insert_with(|| Vec::new())
+            .or_insert_with(Vec::new)
             .push(field_id);
         self
     }
@@ -1145,7 +1144,7 @@ impl Inst {
     ) -> &mut Self {
         self.align_desc
             .entry(fspace_id)
-            .or_insert_with(|| Vec::new())
+            .or_insert_with(Vec::new)
             .push(Align::new(field_id, eqk, align_desc, has_align));
         self
     }
@@ -1281,9 +1280,8 @@ impl Variant {
         }
     }
     fn set_task(&mut self, task_id: TaskID) -> &mut Self {
-        match self.task_id {
-            Some(id) => assert_eq!(id, task_id),
-            None => {} // ok
+        if let Some(id) = self.task_id {
+            assert_eq!(id, task_id);
         }
         self.task_id = Some(task_id);
         self
@@ -1505,16 +1503,16 @@ impl OpKind {
 #[derive(Debug)]
 pub struct OperationInstInfo {
     pub inst_uid: InstUID,
-    index: u32,
-    field_id: FieldID,
+    _index: u32,
+    _field_id: FieldID,
 }
 
 impl OperationInstInfo {
     fn new(inst_uid: InstUID, index: u32, field_id: FieldID) -> Self {
         OperationInstInfo {
-            inst_uid: inst_uid,
-            index: index,
-            field_id: field_id,
+            inst_uid,
+            _index: index,
+            _field_id: field_id,
         }
     }
 }
@@ -1610,12 +1608,12 @@ impl CopyInstInfo {
         CopyInstInfo {
             _src: src,
             _dst: dst,
-            src_fid: src_fid,
-            dst_fid: dst_fid,
-            src_inst_uid: src_inst_uid,
-            dst_inst_uid: dst_inst_uid,
+            src_fid,
+            dst_fid,
+            src_inst_uid,
+            dst_inst_uid,
             _fevent: fevent,
-            indirect: indirect,
+            indirect,
         }
     }
 }
@@ -1628,8 +1626,8 @@ pub struct Copy {
     chan_id: Option<ChanID>,
     pub op_id: Option<OpID>,
     pub size: Option<u64>,
-    pub num_hops: Option<u32>,
-    pub request_type: Option<u32>,
+    num_hops: Option<u32>,
+    request_type: Option<u32>,
     pub copy_kind: Option<CopyKind>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
@@ -1685,9 +1683,9 @@ impl Copy {
                 break;
             }
         }
-        if isindrect == false {
+        if !isindrect {
             // sanity check
-            assert!(self.copy_inst_infos.len() >= 1);
+            assert!(!self.copy_inst_infos.is_empty());
             let chan_src = self.copy_inst_infos[0]._src.unwrap();
             let chan_dst = self.copy_inst_infos[0]._dst.unwrap();
             for copy_inst_info in &self.copy_inst_infos {
@@ -1734,8 +1732,8 @@ impl FillInstInfo {
     fn new(dst: MemID, fid: FieldID, dst_inst_uid: InstUID, fevent: EventID) -> Self {
         FillInstInfo {
             _dst: dst,
-            fid: fid,
-            dst_inst_uid: dst_inst_uid,
+            fid,
+            dst_inst_uid,
             _fevent: fevent,
         }
     }
@@ -1777,7 +1775,7 @@ impl Fill {
     fn add_channel(&mut self) {
         // sanity check
         assert_eq!(self.chan_id, None);
-        assert!(self.fill_inst_infos.len() >= 1);
+        assert!(!self.fill_inst_infos.is_empty());
         let chan_dst = self.fill_inst_infos[0]._dst;
         for fill_inst_info in &self.fill_inst_infos {
             assert!(fill_inst_info._dst == chan_dst);
@@ -1897,7 +1895,7 @@ impl LFSR {
         for t in &self.taps {
             xor += (self.register >> (self.bits - t)) & 1;
         }
-        xor = xor & 1;
+        xor &= 1;
         self.register = ((self.register >> 1) | (xor << (self.bits - 1))) & ((1 << self.bits) - 1);
         self.register
     }
@@ -2113,7 +2111,7 @@ impl State {
         let chan = self.find_deppart_chan_mut();
         chan.depparts
             .entry(op_id)
-            .or_insert_with(|| Vec::new())
+            .or_insert_with(Vec::new)
             .push(DepPart::new(base, part_op, time_range, op_id));
     }
 
@@ -2143,7 +2141,7 @@ impl State {
 
     pub fn find_inst(&self, inst_uid: InstUID) -> Option<&Inst> {
         let mem_id = self.insts.get(&inst_uid)?;
-        let mem = self.mems.get(&mem_id)?;
+        let mem = self.mems.get(mem_id)?;
         mem.insts.get(&inst_uid)
     }
 
@@ -2232,7 +2230,7 @@ impl State {
         if start.is_none() && stop.is_none() {
             return;
         }
-        let start = start.unwrap_or(0.into());
+        let start = start.unwrap_or_else(|| 0.into());
         let stop = stop.unwrap_or(self.last_time);
 
         assert!(start <= stop);
@@ -2254,14 +2252,14 @@ impl State {
 
     pub fn check_message_latencies(&self, threshold: f64 /* us */, warn_percentage: f64) {
         assert!(threshold >= 0.0);
-        assert!(warn_percentage >= 0.0 && warn_percentage < 100.0);
+        assert!((0.0..100.0).contains(&warn_percentage));
 
         let mut total_messages = 0;
         let mut bad_messages = 0;
         let mut longest_latency = Timestamp::from_us(0);
         for proc in self.procs.values() {
             for ((_, variant_id), meta_tasks) in &proc.meta_tasks {
-                let variant = self.meta_variants.get(&variant_id).unwrap();
+                let variant = self.meta_variants.get(variant_id).unwrap();
                 if !variant.message || variant.ordered_vc {
                     continue;
                 }
@@ -2371,12 +2369,12 @@ impl SpyState {
         assert!(pre != post);
         self.spy_events
             .entry(post)
-            .or_insert_with(|| SpyEvent::new())
+            .or_insert_with(SpyEvent::new)
             .preconditions
             .insert(pre);
         self.spy_events
             .entry(pre)
-            .or_insert_with(|| SpyEvent::new())
+            .or_insert_with(SpyEvent::new)
             .postconditions
             .insert(post);
     }
@@ -2385,11 +2383,11 @@ impl SpyState {
         assert!(self.spy_ops.insert(op, SpyOp::new(pre, post)).is_none());
         self.spy_op_by_precondition
             .entry(pre)
-            .or_insert_with(|| BTreeSet::new())
+            .or_insert_with(BTreeSet::new)
             .insert(op);
         self.spy_op_by_postcondition
             .entry(post)
-            .or_insert_with(|| BTreeSet::new())
+            .or_insert_with(BTreeSet::new)
             .insert(op);
     }
 
@@ -2399,7 +2397,7 @@ impl SpyState {
         }
         self.spy_op_children
             .entry(parent)
-            .or_insert_with(|| BTreeSet::new())
+            .or_insert_with(BTreeSet::new)
             .insert(child);
     }
 
@@ -2571,7 +2569,7 @@ impl SpyState {
             for node in &deps.in_ {
                 // Ok to unwrap here as we're walking in toposort
                 // order to make sure this has been precomputed
-                let node_reachable = reachable.get(&node).unwrap();
+                let node_reachable = reachable.get(node).unwrap();
                 root_reachable.extend(node_reachable.iter());
             }
 
@@ -2649,30 +2647,27 @@ impl SpyState {
         // Process tasks first
         for op_id in state.tasks.keys() {
             let prof_uid = state.op_prof_uid.get(op_id).unwrap();
-            let mut deps = self
+            let deps = self
                 .spy_op_deps
                 .entry(*prof_uid)
-                .or_insert_with(|| Dependencies::new());
-            let op = self
-                .spy_ops
-                .get(&op_id)
-                .expect("missing dependecies for op");
+                .or_insert_with(Dependencies::new);
+            let op = self.spy_ops.get(op_id).expect("missing dependecies for op");
             Self::compute_op_preconditions(
-                &op,
-                &mut deps,
+                op,
+                deps,
                 &state.op_prof_uid,
                 &self.spy_op_by_postcondition,
                 &self.spy_events,
             );
             Self::compute_op_postconditions(
-                &op,
-                &mut deps,
+                op,
+                deps,
                 &state.op_prof_uid,
                 &self.spy_op_by_precondition,
                 &self.spy_events,
             );
-            Self::compute_op_parent(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_parent);
-            Self::compute_op_children(*op_id, &mut deps, &state.op_prof_uid, &self.spy_op_children);
+            Self::compute_op_parent(*op_id, deps, &state.op_prof_uid, &self.spy_op_parent);
+            Self::compute_op_children(*op_id, deps, &state.op_prof_uid, &self.spy_op_children);
         }
 
         // Now add the implicit dependencies on meta tasks/mapper calls/etc.
@@ -2693,7 +2688,7 @@ impl SpyState {
                         let task_deps = self
                             .spy_op_deps
                             .entry(task_uid)
-                            .or_insert_with(|| Dependencies::new());
+                            .or_insert_with(Dependencies::new);
                         if before {
                             task_deps.in_.insert(*uid);
                         } else {
@@ -2703,7 +2698,7 @@ impl SpyState {
                         let entry_deps = self
                             .spy_op_deps
                             .entry(*uid)
-                            .or_insert_with(|| Dependencies::new());
+                            .or_insert_with(Dependencies::new);
                         if before {
                             entry_deps.out.insert(task_uid);
                         } else {
