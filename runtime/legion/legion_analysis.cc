@@ -18426,9 +18426,12 @@ namespace Legion {
           assert(!(mask - disjoint_complete));
 #endif
 #endif
-        disjoint_complete -= mask;
-        if (!disjoint_complete)
-          remove_node_disjoint_complete_ref();
+        if (!!disjoint_complete)
+        {
+          disjoint_complete -= mask;
+          if (!disjoint_complete)
+            remove_node_disjoint_complete_ref();
+        }
       }
       FieldMask children_overlap;
       if (!disjoint_complete_children.empty())
