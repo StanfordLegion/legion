@@ -24228,6 +24228,9 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_collective_rendezvous(unique_op_id, 
+                        requirement_index, analysis_index);
       return owner->convert_collective_views(requirement_index, analysis_index,
           region, targets, physical_ctx, analysis_mapping, first_local,
           target_views, collective_arrivals);
@@ -25073,6 +25076,9 @@ namespace Legion {
                        std::map<InstanceView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_collective_rendezvous(unique_op_id, 
+                        requirement_index, analysis_index);
       return owner->convert_collective_views(requirement_index, analysis_index,
           region, targets, physical_ctx, analysis_mapping, first_local,
           target_views, collective_arrivals);

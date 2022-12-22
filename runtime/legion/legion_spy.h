@@ -1510,6 +1510,13 @@ namespace Legion {
                       unique_id, previous.id);
       }
 
+      static inline void log_collective_rendezvous(UniqueID unique_id,
+                  unsigned requirement_index, unsigned analysis_index)
+      {
+        log_spy.print("Collective Rendezvous %llu %u %u", unique_id, 
+                                  requirement_index, analysis_index);
+      }
+
       // The calls above this ifdef record the basic information about
       // the execution of an application. It is sufficient to show how
       // an application executed, but is insufficient to actually 

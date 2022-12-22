@@ -5713,6 +5713,95 @@ class EquivalenceSet(object):
                     req.is_read_only(), 0 if req.is_read_only() else redop, versions)
         return True
 
+class CollectiveRendezvous(object):
+    def __init__(self, owner):
+        self.owner = owner
+        self.matches = list()
+        self.points = set()
+
+    def record(self, idx, region, op):
+        self.points.add(op)
+        while len(self.matches) <= idx:
+            self.matches.append(dict())
+        if region not in self.matches[idx]:
+            self.matches[idx][region] = list()
+        self.matches[idx][region].append(op)
+
+    def verify(self):
+        # First check to see if any requirements have any potential collective behavior
+        total_points = len(self.points)
+        matched_reqs = list()
+        collective_reqs = list()
+        for idx in range(len(self.matches)):
+            diff_regions = len(self.matches[idx])
+            assert diff_regions <= total_points
+            # See if the user requested a collective check
+            requested = False
+            for ops in itervalues(self.matches[idx]):
+                for op in ops:
+                    if op.collective_rendezvous is not None and \
+                            idx in op.collective_rendezvous:
+                        requested = True
+                        break
+                if requested:
+                    break
+            if diff_regions == total_points:
+                # Check to make sure the user didn't ask for any collective behavior
+                if requested:
+                    printf('WARNING: A collective rendezvous was requested for '+
+                            'region requirement '+str(idx)+' of '+str(self.owner)+
+                            ' but no point operations shared the same logical region.'+
+                            ' This could lead to unnecessary runtime overhead.')
+            elif requested:
+                matched_reqs.append(idx)
+            else:
+                collective_reqs.append(idx)
+        if matched_reqs:
+            for idx in matched_reqs:
+                # Count the number of points that matched with another
+                total_matches = 0
+                for ops in itervalues(self.matches[idx]):
+                    if len(ops) > 1:
+                        total_matches += len(ops)
+                assert total_matches <= total_points
+                efficiency = "{:.2f}".format(100 * total_matches / total_points)
+                print('Matched '+str(total_matches)+' points of '+str(self.owner)+
+                        ' out of '+str(total_points)+' for region requirement '+
+                        str(idx)+' (Efficiency: '+efficiency+'%)')
+                for region,ops in iteritems(self.matches[idx]):
+                    pointstr = ''
+                    first = True
+                    for op in ops:
+                        if first:
+                            first = False
+                        else:
+                            pointstr += ', '
+                        pointstr += str(op.index_point)
+                    print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
+        if collective_reqs:
+            for idx in collective_reqs:
+                # Count the number of points that matched with another
+                total_matches = 0
+                for ops in itervalues(self.matches[idx]):
+                    if len(ops) > 1:
+                        total_matches += len(ops)
+                assert total_matches <= total_points
+                efficiency = "{:.2f}".format(100 * total_matches / total_points)
+                print('WARNING: Missed collective rendezvous optimization for region '+
+                        'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                        str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                        'use the same logical region as another point.')
+                for region,ops in iteritems(self.matches[idx]):
+                    pointstr = ''
+                    first = True
+                    for op in ops:
+                        if first:
+                            first = False
+                        else:
+                            pointstr += ', '
+                        pointstr += str(op.index_point)
+                    print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
+
 
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
@@ -5884,7 +5973,8 @@ class Operation(object):
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node',
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
-                 'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance']
+                 'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance',
+                 'collective_rendezvous']
                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5960,6 +6050,8 @@ class Operation(object):
         self.restricted = False
         # Provenance string from the application
         self.provenance = None
+        # Any collective rendezvous that we need to perform
+        self.collective_rendezvous = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -6350,6 +6442,12 @@ class Operation(object):
             self.intra_space_dependences = set()
         self.intra_space_dependences.add(dep)
 
+    def add_collective_rendezvous(self, req_index, analysis_index):
+        if self.collective_rendezvous is None:
+            self.collective_rendezvous = set()
+        # Ignore the analysis index for now
+        self.collective_rendezvous.add(req_index)
+
     def merge(self, other):
         if self.kind == NO_OP_KIND:
             self.kind = other.kind
@@ -6424,6 +6522,11 @@ class Operation(object):
         assert not other.points
         other.merged = True
         self.replayed = self.replayed or other.replayed
+        # All the collective rendezvous should occur on the same point
+        if self.collective_rendezvous is None:
+            self.collective_rendezvous = other.collective_rendezvous
+        else:
+            assert other.collective_rendezvous is None
 
     def record_current_version(self, point, field, tree, version_number):
         if not self.version_numbers:
@@ -8102,6 +8205,26 @@ class Operation(object):
                     return False
         return self.check_for_spurious_realm_ops(perform_checks)
 
+    def match_collective_regions(self, rendezvous):
+        if self.is_index_op():
+            if self.points is not None:
+                if self.kind == INDEX_TASK_KIND:
+                    for point in itervalues(self.points):
+                        point.op.match_collective_regions(rendezvous)
+                else:
+                    for point in itervalues(self.points):
+                        point.match_collective_regions(rendezvous)
+        elif self.reqs:
+            for idx,req in iteritems(self.reqs):
+                rendezvous.record(idx, req.logical_node, self)
+
+    def perform_op_collective_checks(self):
+        if self.task is not None:
+            self.task.perform_task_collective_checks()
+        elif self.points is not None and self.kind == INDEX_TASK_KIND:
+            for point in itervalues(self.points):
+                point.perform_task_collective_checks()
+
     def print_op_mapping_decisions(self, depth):
         if self.internal_ops:
             assert not self.is_close()
@@ -8964,6 +9087,73 @@ class Task(object):
             inst.reset_verification_users(depth)
         self.op.state.reset_verification_state(depth)
         return success
+
+    def perform_task_collective_checks(self):
+        if not self.operations:
+            if not self.replicants:
+                return
+            assert self.replicants.control_replicated
+        if self.replicants:
+            # Control-replicated path
+            # Should only have non-leaf control replicated replicants
+            assert self.replicants.control_replicated
+            num_ops = -1
+            for shard in itervalues(self.replicants.shards):
+                shard_ops = 0
+                for op in shard.operations:
+                    if not op.fully_logged:
+                        break
+                    else:
+                        shard_ops += 1
+                if num_ops == -1:
+                    num_ops = shard_ops
+                elif num_ops != shard_ops:
+                    print(('Warning: shard %s has %s operations which is '+
+                            'different than %s operations in other shards. '+
+                            'This is likely the result of a crash in a run.') %
+                            (str(shard.shard),str(shard_ops),str(num_ops)))
+                    if self.state.assert_on_warning:
+                        assert False
+                    num_ops = min(shard_ops,num_ops)
+            # Perform all the operations in order across the shards
+            for idx in range(num_ops):
+                # Perform the verification first
+                rendezvous = None
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None:
+                        continue
+                    if op.is_index_op():
+                        if rendezvous is None:
+                            rendezvous = CollectiveRendezvous(op)
+                        op.match_collective_regions(rendezvous)
+                if rendezvous is not None:
+                    rendezvous.verify()
+                # Then traverse down the task tree
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None and op.owner_shard != op.context.shard:
+                        continue
+                    op.perform_op_collective_checks()
+        else:
+            # Normal path
+            for op in self.operations:
+                if op.inlined:
+                    continue
+                if not op.fully_logged and perform_checks:
+                    print(('Warning: skipping collective checks of %s '+
+                            'because it was not fully logged...') % str(op))
+                    if op.state.assert_on_warning:
+                        assert False
+                    continue
+                if op.is_index_op():
+                    rendezvous = CollectiveRendezvous(op)
+                    op.match_collective_regions(rendezvous)
+                    rendezvous.verify()
+                # Then traverse down the task tree
+                op.perform_op_collective_checks()
 
     def print_task_mapping_decisions(self):
         if self.replicants is not None:
@@ -11459,6 +11649,8 @@ task_premapping_pat     = re.compile(
 tunable_pat             = re.compile(
     prefix+"Task Tunable (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<bytes>[0-9]+) "
            "(?P<value>[0-9a-f]+)")
+collective_rendezvous_pat = re.compile(
+    prefix+"Collective Rendezvous (?P<uid>[0-9]+) (?P<reqidx>[0-9]+) (?P<anaidx>[0-9]+)")
 # Physical event and operation patterns
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
@@ -12236,6 +12428,11 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_predicate_result(False)
+        return True
+    m = collective_rendezvous_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.add_collective_rendezvous(int(m.group('reqidx')),int(m.group('anaidx')))
         return True
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
@@ -13875,6 +14072,9 @@ def main(temp_dir):
         '--zoom', dest='zoom_graphs', action='store_true',
         help='enable generation of "zoom" graphs for all emitted graphs')
     parser.add_argument(
+        '--collective', dest='collective_checks', action='store_true',
+        help='check for collective rendezvous opportunities and report missed optimizations')
+    parser.add_argument(
         '-b', '--bad_graph', dest='bad_graph_on_error', action='store_true',
         help='dump bad dataflow graph on failure')
     parser.add_argument(
@@ -13908,6 +14108,7 @@ def main(temp_dir):
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
     zoom_graphs = args.zoom_graphs
+    collective_checks = args.collective_checks
     bad_graph_on_error = args.bad_graph_on_error
     eq_graph_on_error = args.eq_graph_on_error
 
@@ -14034,6 +14235,11 @@ def main(temp_dir):
         state.print_mapping_decisions()
     if print_trees:
         state.print_trees()
+    if collective_checks:
+        print("Checking collective rendezvous...")
+        assert state.top_level_uid is not None
+        top_task = state.get_task(state.top_level_uid)
+        top_task.perform_task_collective_checks()
 
     print('Legion Spy analysis complete.  Exiting...')
     if keep_temp_files:
