@@ -42,7 +42,8 @@ do
                                                           c.DISJOINT_KIND,
                                                           c.AUTO_GENERATE_ID,
                                                           0,
-                                                          0)
+                                                          0,
+                                                          c.legion_untyped_buffer_t {nil, 0})
 
   var raw_part = c.legion_logical_partition_create(__runtime(), __raw(mat), ip)
 

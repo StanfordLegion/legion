@@ -1446,7 +1446,7 @@ class Ipartition(object):
             region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), color, 0, 0, disjoint.value)
+            color_space.raw_value(), color, 0, 0, disjoint.value, [ffi.cast("void*", 0), 0])
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod
@@ -1466,7 +1466,7 @@ class Ipartition(object):
             ispace.raw_value(), projection.raw_value(),
             parent.parent.raw_value() if parent.parent is not None else parent.raw_value(),
             parent.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color, 0, 0)
+            color_space.raw_value(), part_kind.value, color, 0, 0, [ffi.cast("void*", 0), 0])
         return Ipartition(handle, parent.ispace, color_space)
 
     @staticmethod
@@ -1485,7 +1485,7 @@ class Ipartition(object):
             projection.raw_value(), region.raw_value(),
             region.parent.raw_value() if region.parent is not None else region.raw_value(),
             region.fspace.field_ids[field],
-            color_space.raw_value(), part_kind.value, color, 0, 0)
+            color_space.raw_value(), part_kind.value, color, 0, 0, [ffi.cast("void*", 0), 0])
         return Ipartition(handle, region.ispace, color_space)
 
     @staticmethod

@@ -2317,7 +2317,7 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop_id, 
                         bool register_now, size_t footprint,
-                        ApEvent u_event, InstanceKind k,
+                        ApEvent u_event, LgEvent unique, InstanceKind k,
                         const ReductionOp *op /*= NULL*/,
                         ApEvent p_event /*= ApEvent::NO_AP_EVENT*/)
       : PhysicalManager(ctx, desc, encode_instance_did(did, 
@@ -2325,7 +2325,7 @@ namespace Legion {
            (redop_id != 0), false/*collective*/),
           owner_space, footprint, redop_id, (op != NULL) ? op : 
            (redop_id == 0) ? NULL : ctx->runtime->get_reduction(redop_id), node,
-          instance_domain, pl, pl_size, tree_id, u_event, register_now,
+          instance_domain, pl, pl_size, tree_id, unique, register_now,
           (k == UNBOUND_INSTANCE_KIND)), memory_manager(memory), instance(inst),
         use_event(Runtime::create_ap_user_event(NULL)),
         instance_ready((k == UNBOUND_INSTANCE_KIND) ? 
@@ -2699,8 +2699,9 @@ namespace Legion {
           rez.serialize(piece_list, piece_list_size);
         rez.serialize(field_space_node->handle);
         rez.serialize(tree_id);
+        rez.serialize(unique_event);
         if (kind != UNBOUND_INSTANCE_KIND)
-          rez.serialize(unique_event);
+          rez.serialize<ApEvent>(use_event);
         else
           rez.serialize(producer_event);
         layout->pack_layout_description(rez, target);
@@ -2746,8 +2747,10 @@ namespace Legion {
       FieldSpaceNode *space_node = runtime->forest->get_node(handle, &fs_ready);
       RegionTreeID tree_id;
       derez.deserialize(tree_id);
-      ApEvent unique_event;
+      LgEvent unique_event;
       derez.deserialize(unique_event);
+      ApEvent use_event;
+      derez.deserialize(use_event);
       LayoutConstraintID layout_id;
       derez.deserialize(layout_id);
       RtEvent layout_ready;
@@ -2769,8 +2772,8 @@ namespace Legion {
         {
           // We need to defer this instance creation
           DeferIndividualManagerArgs args(did, owner_space, mem, inst,
-              inst_footprint, inst_domain, pending, 
-              handle, tree_id, layout_id, unique_event, kind,
+              inst_footprint, inst_domain, pending, handle, tree_id, 
+              layout_id, use_event, unique_event, kind,
               redop, piece_list, piece_list_size, gc_state);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
@@ -2788,8 +2791,8 @@ namespace Legion {
       // If we fall through here we can create the manager now
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
                             inst_domain, piece_list, piece_list_size, 
-                            space_node, tree_id, constraints, unique_event, 
-                            kind, redop, gc_state);
+                            space_node, tree_id, constraints, use_event,
+                            unique_event, kind, redop, gc_state);
     }
 
     //--------------------------------------------------------------------------
@@ -2797,13 +2800,14 @@ namespace Legion {
             DistributedID d, AddressSpaceID own, Memory m, PhysicalInstance i, 
             size_t f, IndexSpaceExpression *lx, 
             const PendingRemoteExpression &p, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, ApEvent u, InstanceKind k, ReductionOpID r,
-            const void *pl, size_t pl_size, GarbageCollectionState gc)
+            LayoutConstraintID l, ApEvent use, LgEvent unique, InstanceKind k,
+            ReductionOpID r, const void *pl, size_t pl_size, 
+            GarbageCollectionState gc)
       : LgTaskArgs<DeferIndividualManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), pending(p),
             local_expr(lx), handle(h), tree_id(tid), layout_id(l), 
-            use_event(u), kind(k), redop(r), piece_list(pl),
-            piece_list_size(pl_size), state(gc)
+            use_event(use), unique_event(unique), kind(k), redop(r),
+            piece_list(pl), piece_list_size(pl_size), state(gc)
     //--------------------------------------------------------------------------
     {
       if (local_expr != NULL)
@@ -2836,7 +2840,8 @@ namespace Legion {
       create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
           dargs->inst, dargs->footprint, inst_domain, dargs->piece_list,
           dargs->piece_list_size, space_node, dargs->tree_id, constraints, 
-          dargs->use_event, dargs->kind, dargs->redop, dargs->state);
+          dargs->use_event, dargs->unique_event, dargs->kind,
+          dargs->redop, dargs->state);
       // Remove the local expression reference if necessary
       if ((dargs->local_expr != NULL) &&
           dargs->local_expr->remove_base_expression_reference(META_TASK_REF))
@@ -2860,8 +2865,8 @@ namespace Legion {
           PhysicalInstance inst, size_t inst_footprint, 
           IndexSpaceExpression *inst_domain, const void *piece_list,
           size_t piece_list_size, FieldSpaceNode *space_node, 
-          RegionTreeID tree_id, LayoutConstraints *constraints, 
-          ApEvent use_event, InstanceKind kind, ReductionOpID redop,
+          RegionTreeID tree_id, LayoutConstraints *constraints, ApEvent use,
+          LgEvent unique, InstanceKind kind, ReductionOpID redop,
           GarbageCollectionState state)
     //--------------------------------------------------------------------------
     {
@@ -2875,17 +2880,17 @@ namespace Legion {
       IndividualManager *man = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         man = new(location) IndividualManager(runtime->forest, did, owner_space,
-                                              memory, inst, inst_domain, 
-                                              piece_list, piece_list_size, 
-                                              space_node, tree_id, layout, 
-                                              redop, false/*reg now*/, 
-                                              inst_footprint, use_event, 
+                                              memory, inst, inst_domain,
+                                              piece_list, piece_list_size,
+                                              space_node, tree_id, layout,
+                                              redop, false/*reg now*/,
+                                              inst_footprint, use, unique,
                                               kind, op);
       else
-        man = new IndividualManager(runtime->forest, did, owner_space, memory, 
+        man = new IndividualManager(runtime->forest, did, owner_space, memory,
                               inst, inst_domain, piece_list, piece_list_size,
-                              space_node, tree_id, layout, redop, 
-                              false/*reg now*/, inst_footprint, use_event, 
+                              space_node, tree_id, layout, redop,
+                              false/*reg now*/, inst_footprint, use, unique,
                               kind, op);
       man->initialize_remote_gc_state(state);
       // Hold-off doing the registration until construction is complete
@@ -4308,9 +4313,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!instance.exists()); // shouldn't exist before this
 #endif
+      LgEvent unique_event;
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
+      {
+        RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
       ApEvent ready;
       if (runtime->profiler != NULL)
-        runtime->profiler->add_inst_request(requests, creator_id);
+        runtime->profiler->add_inst_request(requests, creator_id, unique_event);
 #ifndef LEGION_MALLOC_INSTANCES
       ready = ApEvent(PhysicalInstance::create_instance(instance,
             memory_manager->memory, inst_layout, requests, precondition));
@@ -4339,14 +4351,6 @@ namespace Legion {
         if (unsat_index != NULL)
           *unsat_index = 0;
         return NULL;
-      }
-      // For Legion Spy we need a unique ready event if it doesn't already
-      // exist so we can uniquely identify the instance
-      if (!ready.exists() && runtime->legion_spy_enabled)
-      {
-        ApUserEvent rename_ready = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename_ready);
-        ready = rename_ready;
       }
       // If we successfully made the instance then Realm 
       // took over ownership of the layout
@@ -4398,7 +4402,8 @@ namespace Legion {
                                            field_space_node, tree_id,
                                            layout, 0/*redop id*/,
                                            true/*register now*/, 
-                                           instance_footprint, ready,
+                                           instance_footprint,
+                                           ready, unique_event,
                                        PhysicalManager::INTERNAL_INSTANCE_KIND);
             // manager takes ownership of the piece list
             piece_list = NULL;
@@ -4408,12 +4413,13 @@ namespace Legion {
         case LEGION_COMPACT_REDUCTION_SPECIALIZE:
           {
             result = new IndividualManager(forest, did, local_space,
-                                           memory_manager, instance, 
+                                           memory_manager, instance,
                                            instance_domain, piece_list,
                                            piece_list_size, field_space_node,
                                            tree_id, layout, redop_id,
                                            true/*register now*/,
-                                           instance_footprint, ready,
+                                           instance_footprint,
+                                           ready, unique_event,
                                         PhysicalManager::INTERNAL_INSTANCE_KIND,
                                            reduction_op);
             // manager takes ownership of the piece list
@@ -4434,13 +4440,10 @@ namespace Legion {
         // Log the logical regions and fields that make up this instance
         for (std::vector<LogicalRegion>::const_iterator it =
               regions.begin(); it != regions.end(); it++)
-          runtime->profiler->record_physical_instance_region(creator_id, 
-                                                      instance.id, *it);
-        runtime->profiler->record_physical_instance_layout(
-                                                     creator_id,
-                                                     instance.id,
+          runtime->profiler->record_physical_instance_region(unique_event, *it);
+        runtime->profiler->record_physical_instance_layout(unique_event,
                                                      layout->owner->handle,
-                                                     layout->constraints);
+                                                     *layout->constraints);
       }
       return result;
     }
@@ -4581,13 +4584,6 @@ namespace Legion {
         instance = PhysicalInstance::NO_INST;
         if (runtime->profiler != NULL)
           runtime->profiler->handle_failed_instance_allocation();
-      }
-      else if (runtime->profiler != NULL)
-      {
-        unsigned long long creation_time = 
-          Realm::Clock::current_time_in_nanoseconds();
-        runtime->profiler->record_instance_creation(instance,
-            memory_manager->memory, creator_id, creation_time);
       }
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
