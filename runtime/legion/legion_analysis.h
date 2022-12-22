@@ -3490,6 +3490,8 @@ namespace Legion {
                                        const AddressSpaceID source,
                                        std::set<RtEvent> &ready);
     protected:
+      void add_node_disjoint_complete_ref(void) const;
+      void remove_node_disjoint_complete_ref(void) const;
       void record_equivalence_sets(VersionInfo *version_info,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *expr,

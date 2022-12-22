@@ -19603,15 +19603,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::add_node_disjoint_complete_ref(void) const
+    //--------------------------------------------------------------------------
+    {
+      node->get_row_source()->add_base_valid_ref(DISJOINT_COMPLETE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::remove_node_disjoint_complete_ref(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool delete_node =
+#endif
+#endif
+      node->get_row_source()->remove_base_valid_ref(DISJOINT_COMPLETE_REF);
+#ifdef DEBUG_LEGION
+      assert(!delete_node); // should never be directly deleting our node
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::initialize_versioning_analysis(EquivalenceSet *set,
                                                         const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       // No need for the lock here since we know this is initialization
 #ifdef DEBUG_LEGION
+      assert(!!mask);
       assert(node == set->region_node);
       assert(disjoint_complete * mask);
 #endif
+      if (!disjoint_complete)
+        add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
       if (equivalence_sets.insert(set, mask))
       {
@@ -19628,12 +19653,15 @@ namespace Legion {
     {
       // No need for the lock here since we know this is initialization
 #ifdef DEBUG_LEGION
+      assert(!!mask);
       assert(disjoint_complete * sets.get_valid_mask());
 #endif
       // We'll pretend like we're the root of the equivalence set tree
       // here even though we don't actually own these sets, we're just
       // marking it so that any analyses stop here. The logical analysis
       // will ensure that we are never refined
+      if (!disjoint_complete)
+        add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             sets.begin(); it != sets.end(); it++)
@@ -19953,6 +19981,7 @@ namespace Legion {
     {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
+      assert(!!mask);
       assert(set->region_node == node);
       // There should not be any other equivalence sets for these fields
       // This is a valid assertion in general, but not with control replication
@@ -19988,6 +20017,8 @@ namespace Legion {
       parent_mask = mask;
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
+      else
+        add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
     }
 
@@ -19997,9 +20028,12 @@ namespace Legion {
     {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
+      assert(!!mask);
       assert(node->is_region());
       assert(node->as_region_node()->row_source->is_empty());
 #endif
+      if (!disjoint_complete)
+        add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
     }
 
@@ -20032,6 +20066,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!!mask);
       assert(!node->is_region());
 #endif
       AutoLock m_lock(manager_lock);
@@ -20049,6 +20084,8 @@ namespace Legion {
       parent_mask = mask;
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
+      else
+        add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
     }
 
@@ -20058,6 +20095,9 @@ namespace Legion {
                                               FieldMask &parent_mask) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!!mask);
+#endif
       AutoLock m_lock(manager_lock);
       if (child != NULL)
       {
@@ -20069,6 +20109,8 @@ namespace Legion {
       parent_mask = mask;
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
+      else
+        add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
     }
 
@@ -20103,7 +20145,12 @@ namespace Legion {
           assert(!(mask - disjoint_complete));
 #endif
 #endif
-        disjoint_complete -= mask;
+        if (!!disjoint_complete)
+        {
+          disjoint_complete -= mask;
+          if (!disjoint_complete)
+            remove_node_disjoint_complete_ref();
+        }
       }
       FieldMask children_overlap;
       if (!disjoint_complete_children.empty())
@@ -20355,6 +20402,10 @@ namespace Legion {
             filter_refinement_subscriptions(untrack_mask, subscribers);
         src.equivalence_sets.clear();
       }
+      // The disjoint complete node ref can propagate here but we need
+      // to deduplicate if we already have a reference
+      if (!!disjoint_complete && !!src.disjoint_complete)
+        src.remove_node_disjoint_complete_ref();
       disjoint_complete |= src.disjoint_complete;
       src.disjoint_complete.clear();
       if (!src.disjoint_complete_children.empty())
@@ -20387,6 +20438,11 @@ namespace Legion {
       assert(equivalence_sets.empty());
       assert(disjoint_complete_children.empty());
 #endif
+      // The disjoint complete node ref can propagate here but we need
+      // to deduplicate if we already have a reference since it's about
+      // to be overwritten by the reference from the src
+      if (!!disjoint_complete)
+        remove_node_disjoint_complete_ref();
       disjoint_complete = src.disjoint_complete;
       src.disjoint_complete.clear();
       if (!src.equivalence_sets.empty())
@@ -20514,6 +20570,8 @@ namespace Legion {
       }
       else
         rez.serialize<size_t>(0);
+      if (!!disjoint_complete)
+        node->get_row_source()->pack_valid_ref();
       rez.serialize(disjoint_complete);
       rez.serialize<size_t>(disjoint_complete_children.size());
       for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
@@ -20532,6 +20590,8 @@ namespace Legion {
       }
       if (invalidate)
       {
+        if (!!disjoint_complete)
+          remove_node_disjoint_complete_ref();
         disjoint_complete.clear();
         disjoint_complete_children.clear();
         equivalence_sets.clear();
@@ -20566,6 +20626,11 @@ namespace Legion {
           ready_events.insert(ready_event);
       }
       derez.deserialize(disjoint_complete);
+      if (!!disjoint_complete)
+      {
+        add_node_disjoint_complete_ref();
+        node->get_row_source()->unpack_valid_ref();
+      }
       size_t num_children;
       derez.deserialize(num_children);
       for (unsigned idx = 0; idx < num_children; idx++)
