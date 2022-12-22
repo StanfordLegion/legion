@@ -16459,7 +16459,7 @@ namespace Legion {
             analysis.filter_views.end(); fit++)
       {
         const FieldMask overlap = fit->second & filter_mask;
-        if (!!overlap)
+        if (!overlap)
           continue;
         filter_valid_instance(fit->first, expr, expr_covers, overlap);
         // Handle any aliasing with collective views
