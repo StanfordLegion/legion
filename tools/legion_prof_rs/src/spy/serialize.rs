@@ -443,6 +443,8 @@ pub enum Record {
     ReplShard { repl: u32, sid: u32, uid: UniqueID },
     #[serde(rename = "Owner Shard")]
     OwnerShard { uid: UniqueID, sid: u32 },
+    #[serde(rename = "Collective Rendezvous")]
+    CollectiveRendezvous { uid: UniqueID, req: u32, index: u32 },
 }
 
 #[cfg(test)]
