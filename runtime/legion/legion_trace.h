@@ -88,23 +88,16 @@ namespace Legion {
     public:
       virtual bool handles_region_tree(RegionTreeID tid) const = 0;
       virtual bool initialize_op_tracing(Operation *op,
-                     const std::vector<StaticDependence> *dependences,
-                     const LogicalTraceInfo *trace_info) = 0;
+                     const std::vector<StaticDependence> *dependences) = 0;
       virtual void register_operation(Operation *op, GenerationID gen) = 0; 
-      virtual void record_dependence(Operation *target, GenerationID target_gen,
+      virtual bool record_dependence(Operation *target, GenerationID target_gen,
                                 Operation *source, GenerationID source_gen) = 0;
-      virtual void record_region_dependence(
+      virtual bool record_region_dependence(
                                     Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask) = 0;
-      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask) = 0;
-      virtual void record_aliased_children(unsigned req_index, unsigned depth,
-                                           const FieldMask &aliased_mask) = 0;
       virtual void end_trace_capture(void) = 0;
     public:
       // Called by task execution thread
@@ -115,7 +108,6 @@ namespace Legion {
       PhysicalTrace* get_physical_trace(void) { return physical_trace; }
       void register_physical_only(Operation *op);
     public:
-      void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
     public:
       void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
@@ -147,10 +139,6 @@ namespace Legion {
       Provenance *end_provenance;
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations; 
-      // We also need a data structure to record when there are
-      // aliased but non-interfering region requirements. This should
-      // be pretty sparse so we'll make it a map
-      std::map<unsigned,LegionVector<AliasChildren> > aliased_children;
       std::atomic<TracingState> state;
       // Pointer to a physical trace
       PhysicalTrace *physical_trace;
@@ -189,23 +177,16 @@ namespace Legion {
     public:
       virtual bool handles_region_tree(RegionTreeID tid) const;
       virtual bool initialize_op_tracing(Operation *op,
-                              const std::vector<StaticDependence> *dependences,
-                              const LogicalTraceInfo *trace_info);
+                              const std::vector<StaticDependence> *dependences);
       virtual void register_operation(Operation *op, GenerationID gen); 
-      virtual void record_dependence(Operation *target,GenerationID target_gen,
+      virtual bool record_dependence(Operation *target,GenerationID target_gen,
                                      Operation *source,GenerationID source_gen);
-      virtual void record_region_dependence(
+      virtual bool record_region_dependence(
                                     Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask);
-      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask);
-      virtual void record_aliased_children(unsigned req_index, unsigned depth,
-                                           const FieldMask &aliased_mask);
       virtual void end_trace_capture(void);
 #ifdef LEGION_SPY
     public:
@@ -251,25 +232,18 @@ namespace Legion {
       virtual bool is_static_trace(void) const { return false; }
     public:
       virtual bool initialize_op_tracing(Operation *op,
-                          const std::vector<StaticDependence> *dependences,
-                          const LogicalTraceInfo *trace_info);
+                          const std::vector<StaticDependence> *dependences);
       virtual bool handles_region_tree(RegionTreeID tid) const;
       // Called by analysis thread
       virtual void register_operation(Operation *op, GenerationID gen);
-      virtual void record_dependence(Operation *target,GenerationID target_gen,
+      virtual bool record_dependence(Operation *target,GenerationID target_gen,
                                      Operation *source,GenerationID source_gen);
-      virtual void record_region_dependence(
+      virtual bool record_region_dependence(
                                     Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
                                     const FieldMask &dependent_mask);
-      virtual void record_no_dependence(Operation *target, GenerationID target_gen,
-                                    Operation *source, GenerationID source_gen,
-                                    unsigned target_idx, unsigned source_idx,
-                                    const FieldMask &dependent_mask);
-      virtual void record_aliased_children(unsigned req_index, unsigned depth,
-                                           const FieldMask &aliased_mask);
       // Called by analysis thread
       virtual void end_trace_capture(void);
 #ifdef LEGION_SPY

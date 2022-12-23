@@ -445,8 +445,7 @@ namespace Legion {
                                    LogicalPartition start_node);
       void set_tracking_parent(size_t index);
       void set_trace(LegionTrace *trace,
-                     const std::vector<StaticDependence> *dependences,
-                     const LogicalTraceInfo *trace_info = NULL);
+                     const std::vector<StaticDependence> *dependences);
       void set_trace_local_id(size_t id);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
     public:
@@ -675,13 +674,6 @@ namespace Legion {
                               GenerationID target_gen, unsigned target_idx,
                               DependenceType dtype, bool validates,
                               const FieldMask &dependent_mask);
-      // This function should only be called when we are tracing.
-      // We record other possible interferences with prior operations
-      // that are only not-interfering for privileges in case we make
-      // an internal operation that we did not have before.
-      void register_no_dependence(unsigned idx, Operation *target,
-                              GenerationID target_gen, unsigned target_idx,
-                              const FieldMask &dependent_mask);
       // This method is invoked by one of the two above to perform
       // the registration.  Returns true if we have not yet commited
       // and should therefore be notified once the dependent operation
@@ -702,13 +694,6 @@ namespace Legion {
       // additional dependences can be registered.
       bool add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
-    public:
-      // Some extra support for tracking dependences that we've 
-      // registered as part of our logical traversal
-      void record_logical_dependence(const LogicalUser &user);
-      inline LegionList<LogicalUser,LOGICAL_REC_ALLOC>&
-          get_logical_records(void) { return logical_records; }
-      void clear_logical_records(void);
     public:
       // Notify when a region from a dependent task has 
       // been verified (flows up edges)
@@ -832,8 +817,6 @@ namespace Legion {
       size_t trace_local_id;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
-      // A set list or recorded dependences during logical traversal
-      LegionList<LogicalUser,LOGICAL_REC_ALLOC> logical_records;
       // Dependence trackers for detecting when it is safe to map and commit
       // We allocate and free these every time to ensure that their memory
       // is always cleaned up after each operation
@@ -1889,8 +1872,7 @@ namespace Legion {
       InternalOp(Runtime *rt);
       virtual ~InternalOp(void);
     public:
-      void initialize_internal(Operation *creator, int creator_req_idx,
-                               const LogicalTraceInfo &trace_info);
+      void initialize_internal(Operation *creator, int creator_req_idx);
       void activate_internal(void);
       void deactivate_internal(void);
     public:
@@ -1965,8 +1947,7 @@ namespace Legion {
       // These is for internal close ops
       void initialize_close(Operation *creator, unsigned idx,
                             unsigned parent_req_index,
-                            const RegionRequirement &req,
-                            const LogicalTraceInfo &trace_info);
+                            const RegionRequirement &req);
       void perform_logging(void);
     public:
       virtual void activate(void) = 0;
@@ -1997,8 +1978,7 @@ namespace Legion {
       MergeCloseOp& operator=(const MergeCloseOp &rhs);
     public:
       void initialize(InnerContext *ctx, const RegionRequirement &req,
-                      const LogicalTraceInfo &trace_info, int close_idx,
-                      const FieldMask &close_mask, Operation *create_op);
+          int close_idx, const FieldMask &close_mask, Operation *create_op);
       // Make this virtual so we can override for ReplMergeCloseOp
       virtual void record_refinements(const FieldMask &refinement_mask, 
                                       const bool overwrite);
@@ -2146,8 +2126,8 @@ namespace Legion {
       RefinementOp& operator=(const RefinementOp &rhs);
     public:
       void initialize(Operation *creator, unsigned idx, 
-                      const LogicalTraceInfo &trace_info,
-                      RegionNode *to_refine, const FieldMask &mask);
+                      RegionNode *to_refine, const FieldMask &mask,
+                      LogicalRegion privilege_root);
       void record_refinement(RegionTreeNode *node, const FieldMask &mask,
                              RefProjectionSummary *summary = NULL);
       void record_refinements(FieldMaskSet<RegionTreeNode> &nodes);

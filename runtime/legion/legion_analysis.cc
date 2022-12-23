@@ -37,36 +37,42 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalUser::LogicalUser(void)
-      : GenericUser(), op(NULL), idx(0), gen(0), timeout(TIMEOUT)
-#ifdef LEGION_SPY
-        , uid(0)
-#endif
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                             const FieldMask &m)
-      : GenericUser(u, m), op(o), idx(id), 
-        gen(o->get_generation()), timeout(TIMEOUT)
+                             const ProjectionInfo &proj_info)
+      : Collectable(), usage(u), op(o), idx(id), gen(o->get_generation()),
+        shard_proj((proj_info.is_sharding() && proj_info.is_projecting()) ?
+            new ProjectionSummary(proj_info) : NULL), timeout(TIMEOUT)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
     //--------------------------------------------------------------------------
     {
+      if (op != NULL)
+        op->add_mapping_reference(gen);
     }
 
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, GenerationID g, unsigned id, 
-                             const RegionUsage &u, const FieldMask &m)
-      : GenericUser(u, m), op(o), idx(id), gen(g), timeout(TIMEOUT)
+                             const RegionUsage &u)
+      : Collectable(), usage(u), op(o), idx(id), gen(g), shard_proj(NULL),
+        timeout(TIMEOUT)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
     //--------------------------------------------------------------------------
     {
+      if (op != NULL)
+        op->add_mapping_reference(gen);
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalUser::~LogicalUser(void)
+    //--------------------------------------------------------------------------
+    {
+      if (op != NULL)
+        op->remove_mapping_reference(gen);
+      if (shard_proj != NULL)
+        delete shard_proj;
     }
 
     //--------------------------------------------------------------------------
@@ -1850,6 +1856,192 @@ namespace Legion {
       return projection->is_complete(node, user.op, user.idx, projection_space);
     }
 
+    //--------------------------------------------------------------------------
+    bool ProjectionInfo::can_elide_close_operation_symbolic(
+                                      RegionTreeNode *node, LogicalState &state,
+                                      const ProjectionSummary *previous) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // should be in a projection mode
+      assert(is_projecting() && is_sharding());
+#endif
+      // In order for us to prove that it safe to elide symbolically then 
+      // we need to know that both projections are using projection id 0
+      // which is one that we know how to interpret symbolically
+      if ((projection->projection_id != 0) || 
+          (previous->projection->projection_id != 0))
+        return false;
+      if (node->is_region())
+      {
+        // Both projections have all their points using the same logical
+        // They only way to the close is if both projections have a single
+        // point and the single point for each one maps to the same shard
+        if (projection_space->get_volume() != 1)
+          return false;
+        if (previous->domain->get_volume() != 1)
+          return false;
+        Domain prev_domain, next_domain;
+        previous->domain->get_launch_space_domain(prev_domain);
+        projection_space->get_launch_space_domain(next_domain);
+#ifdef DEBUG_LEGION
+        assert(prev_domain.lo() == prev_domain.hi());
+        assert(next_domain.lo() == next_domain.hi());
+#endif
+        Domain prev_sharding, next_sharding;
+        if (previous->domain != previous->sharding_domain)
+          previous->sharding_domain->get_launch_space_domain(prev_sharding);
+        else
+          prev_sharding = prev_domain;
+        if (sharding_space != projection_space)
+          sharding_space->get_launch_space_domain(next_sharding);
+        else
+          next_sharding = next_domain;
+        const ShardID prev_shard =
+          previous->sharding->find_owner(prev_domain.lo(), prev_sharding);
+        const ShardID next_shard =
+          sharding_function->find_owner(next_domain.lo(), next_sharding);
+        return (prev_shard == next_shard);
+      }
+      else if (node->as_partition_node()->row_source->is_disjoint(false/*app*/))
+      {
+        // This is a disjoint partition, therefore the only way for points
+        // to alias is if they are literally the same point since there is
+        // a one-to-one mapping between points and subregions.
+        // The first thing to check is if the sharding functions are the
+        // same, if they are then we know that all the points that are
+        // the same in each projection will map to the same shard and
+        // therefore no fence will be required
+        if (sharding_function == previous->sharding)
+          return true;
+        // Next check for any overlapping points between the launch
+        // spaces, if there aren't any overlapping points then clearly
+        // there will be no points that will alias with each other
+        IndexSpaceExpression *overlap = node->context->intersect_index_spaces(
+                                          projection_space, previous->domain);
+        if (overlap->is_empty())
+          return true;
+        // Before doing the expensive test, see if we memoized this result
+        bool result = true;
+        ProjectionSummary summary(*this);
+        if (state.find_symbolic_elide_close_result(*previous, summary, result))
+          return result;
+        // See if all the overlapping points shard the same way
+        ApEvent ready;
+        const Domain overlap_domain = overlap->get_domain(ready, true/*tight*/);
+#ifdef DEBUG_LEGION
+        assert(!ready.exists());
+#endif
+        Domain shard_domain_prev, shard_domain_next;
+        sharding_space->get_launch_space_domain(shard_domain_next);
+        previous->sharding_domain->get_launch_space_domain(shard_domain_prev);
+        for (Domain::DomainPointIterator itr(overlap_domain); itr; itr++)
+        {
+          const ShardID prev = 
+            previous->sharding->find_owner(*itr, shard_domain_prev);
+          const ShardID next =
+            sharding_function->find_owner(*itr, shard_domain_next);
+          // If any points map to different shards that is game over
+          if (prev == next)
+            continue;
+          result = false;
+          break;
+        }
+        // Save the result with the state
+        state.record_symbolic_elide_close_result(*previous, summary, result);
+        // All the overlapping points map to the same shard so we're done
+        return result;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionInfo::expensive_elide_test(RegionTreeNode *node,
+                                              LogicalUser &user,
+       const FieldMaskSet<LogicalUser> &prev_users, FieldMask &close_mask) const
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_LEGION
+      assert(!close_mask);
+      assert(is_sharding());
+      assert(is_projecting());
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(user.op->get_context()); 
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(user.op->get_context());
+#endif
+      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
+      // First build the projection tree for the new projection and then 
+      // exchange it with all the other shards that are participating in
+      // this logical analysis
+      ProjectionTree *next = 
+        projection->construct_projection_tree(user.op, user.idx, local_shard,
+            node, projection_space, sharding_function, sharding_space);
+      ElideCloseExchange exchange(next, repl_ctx, 
+       repl_ctx->get_next_collective_index(COLLECTIVE_LOC_90, true/*logical*/));
+      exchange.perform_collective_async();
+      // While we're waiting for the exchange, build the projection trees
+      // for all of our local previous projections
+      // Sort the previous users into their field sets, then build a 
+      // projection tree for each one of the field sets
+      LegionList<FieldSet<LogicalUser*> > field_users;
+      prev_users.compute_field_sets(FieldMask(), field_users);
+      FieldMaskSet<ProjectionTree> projection_trees;
+      IndexTreeNode *root_source = node->get_row_source();
+      for (LegionList<FieldSet<LogicalUser*> >::const_iterator fit =
+            field_users.begin(); fit != field_users.end(); fit++)
+      {
+        ProjectionTree *prev = new ProjectionTree(root_source);
+        std::map<IndexTreeNode*,ProjectionTree*> node_map;
+        node_map[root_source] = prev; 
+        for (std::set<LogicalUser*>::const_iterator it =
+              fit->elements.begin(); it != fit->elements.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it)->shard_proj != NULL);
+#endif
+          ProjectionSummary *summary = (*it)->shard_proj;
+          (*it)->shard_proj->projection->construct_projection_tree(user.op,
+              user.idx, local_shard, node, summary->domain, summary->sharding,
+              summary->sharding_domain, node_map);
+        }
+        projection_trees.insert(prev, fit->set_mask);
+      }
+      MaskExchange<true/*union*/> close_mask_exchange(close_mask, repl_ctx,
+       repl_ctx->get_next_collective_index(COLLECTIVE_LOC_93, true/*logical*/));
+      // Get the result and check the invariants for all the new projection
+      // points in the index space launch
+      // We need to prove one of two things for every point
+      // 1. It is disjoint from all our local projections, if that is
+      // the case then it can't interfere with any local points. Note that
+      // our analysis for disjointness is sound, but not precise since we
+      // only do this analysis symbolically based on knowledge of the region
+      // tree and not by testing all the regions for intersection. Therefore
+      // we might still infer dependences where they don't need to be, but
+      // that's ok because this is logical analysis. We're mainly just trying
+      // to catch the cases here where we points use the same regions but
+      // are found with different projection and sharding functions.
+      // 2. If it is potentially interfering then it must come from the
+      // same shard to ensure that mapping dependences are abided.
+      exchange.perform_collective_wait(); 
+      for (FieldMaskSet<ProjectionTree>::const_iterator it =
+            projection_trees.begin(); it != projection_trees.end(); it++)
+        if (next->interferes(it->first, local_shard))
+          close_mask |= it->second;
+      // Exchange the field mask between the shards
+      close_mask_exchange.perform_collective_async();
+      // Clean-up the projection trees while we're waiting for the
+      // exchange to happen
+      for (FieldMaskSet<ProjectionTree>::const_iterator it =
+            projection_trees.begin(); it != projection_trees.end(); it++)
+        delete it->first;
+      delete next;
+      close_mask_exchange.perform_collective_wait();
+      return !close_mask;
+    }
+
     /////////////////////////////////////////////////////////////
     // PathTraverser 
     /////////////////////////////////////////////////////////////
@@ -2229,7 +2421,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalState::LogicalState(RegionTreeNode *node, ContextID ctx)
-      : owner(node), elide_close_results(NULL)
+      : owner(node), symbolic_elide_close_results(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -2266,12 +2458,11 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
-      assert(!reduction_fields);
       assert(!disjoint_complete_tree);
       assert(disjoint_complete_accesses.empty());
       assert(disjoint_complete_child_counts.empty());
       assert(disjoint_complete_projections.empty());
-      assert(elide_close_results == NULL);
+      assert(symbolic_elide_close_results == NULL);
 #endif
     }
 
@@ -2281,20 +2472,18 @@ namespace Legion {
     {
       if (!curr_epoch_users.empty())
       {
-        for (LegionList<LogicalUser,CURR_LOGICAL_ALLOC>::const_iterator it =
+        for (FieldMaskSet<LogicalUser>::const_iterator it =
               curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
-        {
-          it->op->remove_mapping_reference(it->gen); 
-        }
+          if (it->first->remove_reference())
+            delete it->first;
         curr_epoch_users.clear();
       }
       if (!prev_epoch_users.empty())
       {
-        for (LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::const_iterator it =
+        for (FieldMaskSet<LogicalUser>::const_iterator it =
               prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
-        {
-          it->op->remove_mapping_reference(it->gen); 
-        }
+          if (it->first->remove_reference())
+            delete it->first;
         prev_epoch_users.clear();
       }
     }
@@ -2305,8 +2494,6 @@ namespace Legion {
     {
       field_states.clear();
       clear_logical_users(); 
-      reduction_fields.clear();
-      outstanding_reductions.clear();
       disjoint_complete_tree.clear();
       if (!disjoint_complete_children.empty())
       {
@@ -2328,10 +2515,10 @@ namespace Legion {
             delete it->first;
         disjoint_complete_projections.clear();
       }
-      if (elide_close_results != NULL)
+      if (symbolic_elide_close_results != NULL)
       {
-        delete elide_close_results;
-        elide_close_results = NULL;
+        delete symbolic_elide_close_results;
+        symbolic_elide_close_results = NULL;
       }
     } 
 
@@ -2346,24 +2533,6 @@ namespace Legion {
           it = field_states.erase(it);
         else
           it++;
-      }
-      reduction_fields -= deleted_mask;
-      if (!outstanding_reductions.empty())
-      {
-        std::vector<ReductionOpID> to_delete;
-        for (LegionMap<ReductionOpID,FieldMask>::iterator it = 
-              outstanding_reductions.begin(); it != 
-              outstanding_reductions.end(); it++)
-        {
-          it->second -= deleted_mask;
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        for (std::vector<ReductionOpID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-        {
-          outstanding_reductions.erase(*it);
-        }
       }
     }
 
@@ -2393,28 +2562,16 @@ namespace Legion {
           field_states.push_back(*fit);
       }
       src.field_states.clear();
-      curr_epoch_users.splice(curr_epoch_users.end(), src.curr_epoch_users);
-      prev_epoch_users.splice(prev_epoch_users.end(), src.prev_epoch_users);
-      if (!!src.reduction_fields)
-      {
-        reduction_fields |= src.reduction_fields;
-        src.reduction_fields.clear();
-      }
-      if (!src.outstanding_reductions.empty())
-      {
-        for (LegionMap<ReductionOpID,FieldMask>::const_iterator it =
-              src.outstanding_reductions.begin(); it != 
-              src.outstanding_reductions.end(); it++)
-        {
-          LegionMap<ReductionOpID,FieldMask>::iterator finder =
-            outstanding_reductions.find(it->first);
-          if (finder == outstanding_reductions.end())
-            outstanding_reductions.insert(*it);
-          else
-            finder->second |= it->second;
-        }
-        src.outstanding_reductions.clear();
-      }
+      for (FieldMaskSet<LogicalUser>::const_iterator it =
+            src.curr_epoch_users.begin(); it != 
+            src.curr_epoch_users.end(); it++)
+        if (curr_epoch_users.insert(it->first, it->second))
+          it->first->add_reference();
+      for (FieldMaskSet<LogicalUser>::const_iterator it =
+            src.prev_epoch_users.begin(); it != 
+            src.prev_epoch_users.end(); it++)
+        if (prev_epoch_users.insert(it->first, it->second))
+          it->first->add_reference();
       if (!!src.disjoint_complete_tree)
       {
         disjoint_complete_tree |= src.disjoint_complete_tree;
@@ -2479,12 +2636,6 @@ namespace Legion {
       field_states.swap(src.field_states);
       curr_epoch_users.swap(src.curr_epoch_users);
       prev_epoch_users.swap(src.prev_epoch_users);
-      if (!!src.reduction_fields)
-      {
-        reduction_fields = src.reduction_fields;
-        src.reduction_fields.clear();
-      }
-      outstanding_reductions.swap(src.outstanding_reductions);
       if (!!src.disjoint_complete_tree)
       {
         disjoint_complete_tree = src.disjoint_complete_tree;
@@ -2509,73 +2660,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalState::ElideCloseResult::ElideCloseResult(
-        const std::set<ProjectionSummary> &proj, bool res)
-      : projections(proj), result(res)
+    bool LogicalState::find_symbolic_elide_close_result(
+                                                  const ProjectionSummary &prev,
+                                                  const ProjectionSummary &next,
+                                                  bool &result) const
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalState::ElideCloseResult::matches(
-                     const std::set<ProjectionSummary> &other_projections) const
-    //--------------------------------------------------------------------------
-    {
-      if (projections.size() != other_projections.size())
+#ifdef DEBUG_LEGION
+      assert(prev != next);
+#endif
+      if (symbolic_elide_close_results == NULL)
         return false;
-      std::set<ProjectionSummary>::const_iterator it1 = projections.begin();
-      std::set<ProjectionSummary>::const_iterator it2 = 
-        other_projections.begin();
-      while (it1 != projections.end())
+      if (prev < next)
       {
-        if (it1 != it2)
-          return false;
-        it1++; it2++;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalState::find_elide_close_result(const ProjectionInfo &info,
-             const std::set<ProjectionSummary> &projections, bool &result) const
-    //--------------------------------------------------------------------------
-    {
-      if (elide_close_results == NULL)
-        return false;
-      ProjectionSummary key(info);
-      std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
-        finder = elide_close_results->find(key);
-      if (finder == elide_close_results->end())
-        return false;
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        if (it->matches(projections))
+        for (std::list<SymbolicCacheEntry>::iterator it =
+              symbolic_elide_close_results->begin(); it !=
+              symbolic_elide_close_results->end(); it++)
         {
-          result = it->result;
-          return true;
+          if (it->matches(prev, next))
+          {
+            result = it->result;
+            // Splice it to the front of the list
+            symbolic_elide_close_results->splice(
+                symbolic_elide_close_results->begin(),
+                *symbolic_elide_close_results, it);
+            return true;
+          }
+        }
+      }
+      else
+      {
+        for (std::list<SymbolicCacheEntry>::iterator it =
+              symbolic_elide_close_results->begin(); it !=
+              symbolic_elide_close_results->end(); it++)
+        {
+          if (it->matches(next, prev))
+          {
+            result = it->result;
+            // Splice it to the front of the list
+            symbolic_elide_close_results->splice(
+                symbolic_elide_close_results->begin(),
+                *symbolic_elide_close_results, it);
+            return true;
+          }
         }
       }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::record_elide_close_result(const ProjectionInfo &info,
-                    const std::set<ProjectionSummary> &projections, bool result)
+    void LogicalState::record_symbolic_elide_close_result(
+      const ProjectionSummary &prev, const ProjectionSummary &next, bool result)
     //--------------------------------------------------------------------------
     {
-      ProjectionSummary key(info);
-      if (elide_close_results == NULL)
-        elide_close_results =
-          new std::map<ProjectionSummary,std::vector<ElideCloseResult> >();
-      std::vector<ElideCloseResult> &close_results = 
-        (*elide_close_results)[key];
-      // See if someone else saved the result in between to avoid duplicates
-      for (std::vector<ElideCloseResult>::const_iterator it = 
-            close_results.begin(); it != close_results.end(); it++)
-        if (it->matches(projections))
-          return;
-      close_results.push_back(ElideCloseResult(projections, result));
+      // The maximum size for the cache here
+      constexpr size_t SYMBOLIC_CACHE_SIZE = 32;
+      if (symbolic_elide_close_results == NULL)
+        symbolic_elide_close_results = new std::list<SymbolicCacheEntry>();
+      else if (symbolic_elide_close_results->size() == SYMBOLIC_CACHE_SIZE)
+        symbolic_elide_close_results->pop_back();
+      if (prev < next)
+        symbolic_elide_close_results->emplace_front(
+            SymbolicCacheEntry(prev, next, result));
+      else
+        symbolic_elide_close_results->emplace_front(
+            SymbolicCacheEntry(next, prev, result));
     }
 
     /////////////////////////////////////////////////////////////
@@ -2836,55 +2985,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
+    FieldState::FieldState(OpenState state, const FieldMask &m,
                            RegionTreeNode *child)
-      : redop(0)
+      : open_state(state), redop(0)
     //--------------------------------------------------------------------------
     {
-      if (IS_READ_ONLY(user.usage))
-        open_state = OPEN_READ_ONLY;
-      else if (IS_WRITE(user.usage))
-        open_state = OPEN_READ_WRITE;
-      else if (IS_REDUCE(user.usage))
-      {
-        open_state = OPEN_SINGLE_REDUCE;
-        redop = user.usage.redop;
-      }
       if (open_children.insert(child, m))
         child->add_base_gc_ref(FIELD_STATE_REF);
     }
 
     //--------------------------------------------------------------------------
-    FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
-                           ProjectionFunction *proj, IndexSpaceNode *proj_space,
-                           ShardingFunction *fn, IndexSpaceNode *shard_space,
-                           RegionTreeNode *node)
+    FieldState::FieldState(const RegionUsage &usage, const FieldMask &m, 
+                           RegionTreeNode *child)
       : redop(0)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(proj != NULL);
-#endif
-      open_children.relax_valid_mask(m);
       if (IS_READ_ONLY(usage))
-      {
-        open_state = OPEN_READ_ONLY_PROJ;
-        if (fn != NULL)
-          shard_projections.insert(ProjectionSummary(proj_space, proj, fn,
-                                                     shard_space));
-      }
+        open_state = OPEN_READ_ONLY;
+      else if (IS_WRITE(usage))
+        open_state = OPEN_READ_WRITE;
       else if (IS_REDUCE(usage))
       {
-        open_state = OPEN_REDUCE_PROJ;
+        open_state = OPEN_SINGLE_REDUCE;
         redop = usage.redop;
       }
-      else
-      {
-        open_state = OPEN_READ_WRITE_PROJ;
-        if (fn != NULL)
-          shard_projections.insert(ProjectionSummary(proj_space, proj, fn,
-                                                     shard_space));
-      }
+      if (open_children.insert(child, m))
+        child->add_base_gc_ref(FIELD_STATE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -2894,7 +3020,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(rhs.open_children.empty());
-      assert(rhs.shard_projections.empty());
 #endif
     }
 
@@ -2905,7 +3030,6 @@ namespace Legion {
       open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
-      shard_projections.swap(rhs.shard_projections);
     }
 
     //--------------------------------------------------------------------------
@@ -2925,8 +3049,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(open_children.empty());
       assert(rhs.open_children.empty());
-      assert(shard_projections.empty());
-      assert(rhs.shard_projections.empty());
 #endif
       open_state = rhs.open_state;
       redop = rhs.redop;
@@ -2940,7 +3062,6 @@ namespace Legion {
       open_children.swap(rhs.open_children);
       open_state = rhs.open_state;
       redop = rhs.redop;
-      shard_projections.swap(rhs.shard_projections);
       return *this;
     }
 
@@ -2950,18 +3071,6 @@ namespace Legion {
     {
       if (redop != rhs.redop)
         return false;
-      if (is_projection_state())
-      {
-        if (!rhs.is_projection_state())
-          return false;
-        // Both projection spaces, check to see if they have the same
-        // set of projections
-        if (!projections_match(rhs))
-          return false;
-        // if we make it past here they are all the same
-      }
-      else if (rhs.is_projection_state())
-        return false;
       // Now check the privilege states
       if (redop == 0)
         return (open_state == rhs.open_state);
@@ -2969,36 +3078,14 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert((open_state == OPEN_SINGLE_REDUCE) ||
-               (open_state == OPEN_MULTI_REDUCE) ||
-               (open_state == OPEN_REDUCE_PROJ));
+               (open_state == OPEN_MULTI_REDUCE));
         assert((rhs.open_state == OPEN_SINGLE_REDUCE) ||
-               (rhs.open_state == OPEN_MULTI_REDUCE) ||
-               (rhs.open_state == OPEN_REDUCE_PROJ));
+               (rhs.open_state == OPEN_MULTI_REDUCE));
 #endif
         // Only support merging reduction fields with exactly the
         // same mask which should be single fields for reductions
         return (valid_fields() == rhs.valid_fields());
       }
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::projections_match(const FieldState &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (shard_projections.size() != rhs.shard_projections.size())
-        return false;
-      std::set<ProjectionSummary>::const_iterator it1 =
-        shard_projections.begin();
-      std::set<ProjectionSummary>::const_iterator it2 =
-        rhs.shard_projections.begin();
-      // zip the projections so we can compare them
-      while (it1 != shard_projections.end())
-      {
-        if ((*it1) != (*it2))
-          return false;
-        it1++; it2++;
-      }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -3018,7 +3105,6 @@ namespace Legion {
         open_children.relax_valid_mask(rhs.open_children.get_valid_mask());
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
-      assert(projections_match(rhs));
 #endif
       if (redop > 0)
       {
@@ -3041,52 +3127,40 @@ namespace Legion {
             open_state = OPEN_MULTI_REDUCE;
         }
       }
-      // no need to merge projections, we know they are the same
     }
 
     //--------------------------------------------------------------------------
     bool FieldState::filter(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      if (is_projection_state())
+      std::vector<RegionTreeNode*> to_delete;
+      for (FieldMaskSet<RegionTreeNode>::iterator it = 
+            open_children.begin(); it != open_children.end(); it++)
       {
-#ifdef DEBUG_LEGION
-        assert(open_children.empty());
-#endif
-        open_children.filter_valid_mask(mask);
-        return !open_children.get_valid_mask();
+        it.filter(mask);
+        if (!it->second)
+          to_delete.push_back(it->first);
+      }
+      if (to_delete.size() < open_children.size())
+      {
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          open_children.erase(*it);
+          if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
+            delete (*it);
+        }
       }
       else
       {
-        std::vector<RegionTreeNode*> to_delete;
-        for (FieldMaskSet<RegionTreeNode>::iterator it = 
-              open_children.begin(); it != open_children.end(); it++)
-        {
-          it.filter(mask);
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        if (to_delete.size() < open_children.size())
-        {
-          for (std::vector<RegionTreeNode*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            open_children.erase(*it);
-            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
-              delete (*it);
-          }
-        }
-        else
-        {
-          open_children.clear();
-          for (std::vector<RegionTreeNode*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
-              delete (*it);
-        }
-        open_children.tighten_valid_mask();
-        return open_children.empty();
+        open_children.clear();
+        for (std::vector<RegionTreeNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          if ((*it)->remove_base_gc_ref(FIELD_STATE_REF))
+            delete (*it);
       }
+      open_children.tighten_valid_mask();
+      return open_children.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -3110,291 +3184,6 @@ namespace Legion {
       open_children.erase(finder);
       if (child->remove_base_gc_ref(FIELD_STATE_REF))
         delete child;
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::can_elide_close_operation(LogicalState &state,
-                        Operation *op, unsigned index,
-                        const ProjectionInfo &info, RegionTreeNode *node) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // should be in a projection mode
-      assert(is_projection_state());
-      assert(!shard_projections.empty() == info.is_sharding());
-#endif
-      // This function is super important! It decides whether this new
-      // projection info can be added to the current projection epoch, if
-      // it can't then we will need a close operation to be inserted
-      // Technically we only need to do this analysis to insert close operations
-      // if we're control replicated because close operations are the only way
-      // to enforce dependences between points in different shards. Without
-      // control replication, each index space operations guarantees that all
-      // its points are mapped before it is mapped so we get an implicit fence
-      // and there is no need for an explicit close operation.
-      if (!info.is_sharding())
-        return true;
-      // First we try to prove that it is safe to elide this close operation
-      // symbolically. What we've got is a list of all the writing projections
-      // being done from this region. The crucial invariant is that if two 
-      // points in any of these projections overlap, then they must be on the 
-      // same shard (if they weren't then a fence would have been required).
-      bool singular = false;
-      bool shallow_disjoint = false;
-      if (info.projection->projection_id == 0)
-      {
-        // Special cases for the identity projection function we understand
-        if (!node->is_region())
-        {
-          PartitionNode *part = node->as_partition_node();
-          shallow_disjoint = part->row_source->is_disjoint(false/*from app*/);
-        }
-        else
-          singular = true;
-      }
-      bool elide = true;
-      ProjectionFunction *non_functional = info.projection;
-      bool all_functional = info.projection->is_functional;
-      for (std::set<ProjectionSummary>::const_iterator it =
-            shard_projections.begin(); it != shard_projections.end(); it++)
-      {
-        // If we're singular do a quick test to see if we can elide because
-        // we are testing singular projections
-        if (singular)
-        {
-          if (elide_singular_same_shard(*it, info))
-            continue;
-          else
-            return false;
-        }
-        if (shallow_disjoint && (it->projection->projection_id != 0))
-          shallow_disjoint = false;
-        if (all_functional && !it->projection->is_functional)
-        {
-          all_functional = false;
-          non_functional = it->projection;
-        }
-        if (elide && (it->projection == info.projection) &&
-            // invertible is not safe to elide unless we know its the
-            // identity projection function 
-            (!it->projection->is_invertible ||
-             (it->projection->projection_id == 0)) &&
-            (it->sharding == info.sharding_function) &&
-            (it->sharding_domain == info.sharding_space) &&
-            ((it->domain == info.projection_space) ||
-             it->domain->dominates(info.projection_space)))
-          continue;
-        elide = false;
-        // Need to keep going to check shallow disjoint but if we've
-        // already disproven that then we're done
-        if (!shallow_disjoint && !all_functional)
-          break;
-      }
-      if (!elide && shallow_disjoint)
-      {
-        // If we know that this a shallow-disjoint projection 
-        // (e.g. projection 0) from a (disjoint because we're writing) 
-        // partition then we know the only way for these points to alias on 
-        // regions is if they are litterally the same point in the index
-        // space. Therefore independent index spaces can be non-overlapping
-        // and if they do overlap, then all we just need to check to see if
-        // the overlapping points shard to the same shards.
-        elide = true;
-        Domain launch_domain;
-        info.projection_space->get_launch_space_domain(launch_domain);
-        const size_t launch_volume = info.projection_space->get_volume();
-        for (std::set<ProjectionSummary>::const_iterator it =
-              shard_projections.begin(); it != shard_projections.end(); it++)
-        {
-          // See if all the points shard to the same shards
-          if ((it->sharding == info.sharding_function) &&
-              (it->sharding_domain == info.sharding_space))
-            continue;
-          // Test all the overlapping points to see if their shards are the same
-          Domain shard_domain_prev, shard_domain_next;
-          it->sharding_domain->get_launch_space_domain(shard_domain_prev);
-          info.sharding_space->get_launch_space_domain(shard_domain_next);
-          // Iterte over whichever one has fewer points
-          if (it->domain->get_volume() < launch_volume)
-          {
-            Domain prev_domain;
-            it->domain->get_launch_space_domain(prev_domain);
-            for (Domain::DomainPointIterator itr(prev_domain); itr; itr++)
-            {
-              // Check for overlap
-              if (!info.projection_space->contains_point(*itr))
-                continue;
-              const ShardID prev = 
-                it->sharding->find_owner(*itr, shard_domain_prev);
-              const ShardID next =
-                info.sharding_function->find_owner(*itr, shard_domain_next);
-              if (prev == next)
-                continue;
-              elide = false;
-              break;
-            }
-          }
-          else
-          {
-            for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
-            {
-              // Check for overlap
-              if (!it->domain->contains_point(*itr))
-                continue;
-              const ShardID prev = 
-                it->sharding->find_owner(*itr, shard_domain_prev);
-              const ShardID next =
-                info.sharding_function->find_owner(*itr, shard_domain_next);
-              if (prev == next)
-                continue;
-              elide = false;
-              break;
-            }
-          }
-          if (!elide)
-            break;
-        }
-      }
-      if (!elide)
-      {
-        // If we get here, then it is time to try the really expensive
-        // elision test which will test all the points from each previous
-        // projection against all the points for the next projection to see
-        // if any overlapping regions map to the same shard. This requires
-        // an expensive exchange of a symbolic representation of all the 
-        // different projection trees between all the shards
-        if (all_functional)
-        {
-          if (!state.find_elide_close_result(info, shard_projections, elide))
-          {
-            elide = expensive_elide_test(op, index, info, node);
-            // Now memoize the results for later
-            state.record_elide_close_result(info, shard_projections, elide);
-          }
-        }
-        else
-          REPORT_LEGION_WARNING(LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION,
-            "We strongly encourage all projection functors to be functional, "
-            "however, projection function %d is not and therefore an "
-            "expensive analysis cannot be memoized leading to additional "
-            "synchronization in the logical dependence analysis stage of the "
-            "pipeline. Please consider making it functional for more precise "
-            "analysis and overall better performance.",
-            non_functional->projection_id)
-      }
-      return elide;
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldState::record_projection_summary(const ProjectionInfo &info,
-                                               RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(info.is_sharding());
-#endif
-      shard_projections.insert(ProjectionSummary(info));
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::elide_singular_same_shard(
-                const ProjectionSummary &prev, const ProjectionInfo &next) const
-    //--------------------------------------------------------------------------
-    {
-      // Do a quick check for the special case where they are both
-      // single point projections from this region and we can actually 
-      // evaluate the sharding functions directly to see if the two points
-      // are on the same shard and can elide the close operation
-      if (prev.projection->projection_id != 0)
-        return false;
-#ifdef DEBUG_LEGION
-      // Should have the same projeciton function if we're here
-      assert(next.projection->projection_id == 0);
-#endif
-      if (prev.domain->get_volume() != 1)
-        return false;
-      if (next.projection_space->get_volume() != 1)
-        return false;
-      Domain prev_domain, next_domain;
-      prev.domain->get_launch_space_domain(prev_domain);
-      next.projection_space->get_launch_space_domain(next_domain);
-#ifdef DEBUG_LEGION
-      assert(prev_domain.lo() == prev_domain.hi());
-      assert(next_domain.lo() == next_domain.hi());
-#endif
-      Domain prev_sharding, next_sharding;
-      if (prev.domain != prev.sharding_domain)
-        prev.sharding_domain->get_launch_space_domain(prev_sharding);
-      else
-        prev_sharding = prev_domain;
-      if (next.sharding_space != next.projection_space)
-        next.sharding_space->get_launch_space_domain(next_sharding);
-      else
-        next_sharding = next_domain;
-      const ShardID prev_shard =
-        prev.sharding->find_owner(prev_domain.lo(), prev_sharding);
-      const ShardID next_shard =
-        next.sharding_function->find_owner(next_domain.lo(), next_sharding);
-      return (prev_shard == next_shard);
-    }
-
-    //--------------------------------------------------------------------------
-    bool FieldState::expensive_elide_test(Operation *op, unsigned index,
-                         const ProjectionInfo &info, RegionTreeNode *node) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(info.is_sharding());
-      assert(info.is_projecting());
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(op->get_context()); 
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(op->get_context());
-#endif
-      const ShardID local_shard = repl_ctx->owner_shard->shard_id;
-      // First build the projection tree for the new projection and then 
-      // exchange it with all the other shards that are participating in
-      // this logical analysis
-      ProjectionTree *next = 
-        info.projection->construct_projection_tree(op, index, local_shard, node,
-            info.projection_space, info.sharding_function, info.sharding_space);
-      ElideCloseExchange exchange(repl_ctx, COLLECTIVE_LOC_90, next);
-      exchange.perform_collective_async();
-      // While we're waiting for the exchange, build the projection tree
-      // for all of our local previous projections
-      IndexTreeNode *root_source = node->get_row_source();
-      ProjectionTree *prev = new ProjectionTree(root_source);
-      std::map<IndexTreeNode*,ProjectionTree*> node_map;
-      node_map[root_source] = prev;
-      for (std::set<ProjectionSummary>::const_iterator it = 
-            shard_projections.begin(); it != shard_projections.end(); it++)
-        it->projection->construct_projection_tree(op, index, local_shard,
-            node, it->domain, it->sharding, it->sharding_domain, node_map);
-      // Get the result and check the invariants for all the new projection
-      // points in the index space launch
-      // We need to prove one of two things for every point
-      // 1. It is disjoint from all our local projections, if that is
-      // the case then it can't interfere with any local points. Note that
-      // our analysis for disjointness is sound, but not precise since we
-      // only do this analysis symbolically based on knowledge of the region
-      // tree and not by testing all the regions for intersection. Therefore
-      // we might still infer dependences where they don't need to be, but
-      // that's ok because this is logical analysis. We're mainly just trying
-      // to catch the cases here where we points use the same regions but
-      // are found with different projection and sharding functions.
-      // 2. If it is potentially interfering then it must come from the
-      // same shard to ensure that mapping dependences are abided.
-      exchange.perform_collective_wait(); 
-      const bool elide = next->interferes(prev, local_shard);
-      // Perform an all-reduce to see if all the shards agree on the answer
-      AllReduceCollective<ProdReduction<bool> > all_elide(repl_ctx,
-       repl_ctx->get_next_collective_index(COLLECTIVE_LOC_93, true/*logical*/));
-      all_elide.async_all_reduce(elide);
-      delete prev;
-      delete next;
-      return all_elide.get_result();
     }
 
     //--------------------------------------------------------------------------
@@ -3433,24 +3222,6 @@ namespace Legion {
           {
             logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
                         redop, open_children.size());
-            break;
-          }
-        case OPEN_READ_ONLY_PROJ:
-          {
-            logger->log("Field State: OPEN READ-ONLY PROJECTION %zd",
-                        shard_projections.size());
-            break;
-          }
-        case OPEN_READ_WRITE_PROJ:
-          {
-            logger->log("Field State: OPEN READ WRITE PROJECTION %zd",
-                        shard_projections.size());
-            break;
-          }
-        case OPEN_REDUCE_PROJ:
-          {
-            logger->log("Field State: OPEN REDUCE PROJECTION %zd Mode %d",
-                        shard_projections.size(), redop);
             break;
           }
         default:
@@ -3506,24 +3277,6 @@ namespace Legion {
           {
             logger->log("Field State: OPEN MULTI REDUCE Mode %d (%ld)", 
                         redop, open_children.size());
-            break;
-          }
-        case OPEN_READ_ONLY_PROJ:
-          {
-            logger->log("Field State: OPEN READ-ONLY PROJECTION %zd",
-                        shard_projections.size()); 
-            break;
-          }
-        case OPEN_READ_WRITE_PROJ:
-          {
-            logger->log("Field State: OPEN READ WRITE PROJECTION %zd",
-                        shard_projections.size());
-            break;
-          }
-        case OPEN_REDUCE_PROJ:
-          {
-            logger->log("Field State: OPEN REDUCE PROJECTION %zd Mode %d",
-                        shard_projections.size());
             break;
           }
         default:
@@ -3629,6 +3382,7 @@ namespace Legion {
       logger->up();
     }
 
+#if 0
     /////////////////////////////////////////////////////////////
     // Logical Closer 
     /////////////////////////////////////////////////////////////
@@ -3808,6 +3562,7 @@ namespace Legion {
         RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE,0/*redop*/),close_mask);
       users.push_back(close_user);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // KDNode
@@ -3824,6 +3579,49 @@ namespace Legion {
     LogicalAnalysis::~LogicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
+      if (!pending_closes.empty())
+      {
+        // Need to issue these close operations in order in case we are
+        // control replicated and therefore all the shards need to see 
+        // the closes in the same order for things to work correctly
+        for (std::map<LogicalRegion,
+              std::map<RegionTreeNode*,PendingClose*> >::const_iterator
+              pit = pending_closes.begin(); pit != pending_closes.end(); pit++)
+        {
+          // Put closes in order by their region/partition handles
+          // whichi we know are the same across all the shards
+          std::map<LogicalRegion,PendingClose*> ordered_region_closes;
+          std::map<LogicalPartition,PendingClose*> ordered_partition_closes;
+          for (std::map<RegionTreeNode*,PendingClose*>::const_iterator it =
+                pit->second.begin(); it != pit->second.end(); it++)
+          {
+            if (it->first->is_region())
+            {
+              RegionNode *region = it->first->as_region_node();
+              ordered_region_closes[region->handle] = it->second;
+            }
+            else
+            {
+              PartitionNode *partition = it->first->as_partition_node();
+              ordered_partition_closes[partition->handle] = it->second;
+            }
+          }
+          for (std::map<LogicalRegion,PendingClose*>::const_iterator it =
+                ordered_region_closes.begin(); it !=
+                ordered_region_closes.end(); it++)
+          {
+            issue_close_operation(pit->first, it->second);
+            delete it->second;
+          }
+          for (std::map<LogicalPartition,PendingClose*>::const_iterator it =
+                ordered_partition_closes.begin(); it !=
+                ordered_partition_closes.end(); it++)
+          {
+            issue_close_operation(pit->first, it->second);
+            delete it->second;
+          }
+        }
+      }
       if (!pending_refinements.empty())
       {
         const RegionTreeContext ctx = context->get_context();
@@ -3870,7 +3668,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RefinementOp* LogicalAnalysis::create_refinement(const LogicalUser &user,
                      PartitionNode *partition, const FieldMask &refinement_mask,
-                     const LogicalTraceInfo &trace_info)
+                     LogicalRegion privilege_root)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3878,11 +3676,12 @@ namespace Legion {
 #endif
       RegionNode *root = partition->parent;
 #ifdef DEBUG_LEGION_COLLECTIVES
-      RefinementOp *refinement_op = context->get_refinement_op(user, root);
+      RefinementOp *refinement_op = context->get_refinement_op(op, root);
 #else
       RefinementOp *refinement_op = context->get_refinement_op();
 #endif
-      refinement_op->initialize(op, user.idx, trace_info, root,refinement_mask);
+      refinement_op->initialize(op, user.idx, root,
+                                refinement_mask, privilege_root);
       pending_refinements.emplace_back(
         PendingRefinement(refinement_op, partition, refinement_mask, user.idx));
       // Start the dependence analysis for this refinement now
@@ -3922,6 +3721,211 @@ namespace Legion {
           return false;
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalAnalysis::record_close_dependence(LogicalRegion privilege_root,
+                   RegionTreeNode *path_node, LogicalUser *user, FieldMask mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Should never be recording dependences on ourself
+      assert((user->op != op) || (user->gen != op->get_generation()));
+#endif
+      std::map<RegionTreeNode*,PendingClose*> &closes = 
+        pending_closes[privilege_root];
+      // See if we already have a close that covers these fields
+      std::map<RegionTreeNode*,PendingClose*>::iterator finder =
+        closes.find(path_node);
+      if (finder != closes.end())
+      {
+        // Special case, we're the only close so we can safely add to
+        // this pending close operation
+        if (closes.size() == 1)
+        {
+          if (finder->second->preconditions.insert(user, mask))
+            user->add_reference();
+          return;
+        }
+        else
+        {
+          const FieldMask overlap = 
+            mask & finder->second->preconditions.get_valid_mask();
+          if (!!overlap)
+          {
+            if (finder->second->preconditions.insert(user, overlap))
+              user->add_reference();
+            mask -= overlap;
+            if (!mask)
+              return;
+          }
+        }
+      }
+      // Otherwise we need to traverse the other close operations to see
+      // if we need to merge any close operations
+      FieldMaskSet<PendingClose> to_merge;
+      for (std::map<RegionTreeNode*,PendingClose*>::const_iterator it =
+            closes.begin(); it != closes.end(); it++)
+      {
+        if (it->first == path_node)
+          continue;
+        // See if we share any fields
+        const FieldMask overlap = 
+          it->second->preconditions.get_valid_mask() & mask;
+        if (!overlap)
+          continue;
+        // If there are shared fields, we need to check to see if one
+        // of the nodes dominates the other and make sure we have just
+        // one close operation for them in that case
+        const unsigned prev_depth = it->first->get_depth();
+        const unsigned next_depth = path_node->get_depth();
+        if (prev_depth < next_depth)
+        {
+          RegionTreeNode *next = path_node;
+          while (prev_depth < next->get_depth())
+            next = next->get_parent();
+          if (it->first == next)
+          {
+            // This previous closing node dominates this path node
+            // so we can just record this operation here
+            if (it->second->preconditions.insert(user, overlap))
+              user->add_reference();
+            mask -= overlap;
+            if (!mask)
+              return;
+          }
+        }
+        else if (next_depth < prev_depth)
+        {
+          RegionTreeNode *prev = it->first;
+          while (next_depth < prev->get_depth())
+            prev = prev->get_parent();
+          if (prev == path_node)
+          {
+            // This new path node dominates the previous so we need to 
+            // split out the users here 
+            to_merge.insert(it->second, overlap);
+          }
+        }
+        // Else depth is the same and we already know that they
+        // are not the same node so neither can be dominating
+      }
+      if (!!mask)
+      {
+        // If we still have remaining fields then start a new pending
+        // close operation at this path node
+        if (finder != closes.end())
+        {
+          // If we already had close for this node we can still use it
+          if (finder->second->preconditions.insert(user, mask))
+            user->add_reference();
+        }
+        else
+        {
+          PendingClose *pending = new PendingClose(path_node, user->idx);
+          if (pending->preconditions.insert(user, mask))
+            user->add_reference();
+          finder = closes.insert(std::make_pair(path_node, pending)).first;
+        }
+        if (!to_merge.empty())
+        {
+          // Merge all the subsumed ones into our new close operation
+          for (FieldMaskSet<PendingClose>::const_iterator pit =
+                to_merge.begin(); pit != to_merge.end(); pit++)
+          {
+            if (pit->second == pit->first->preconditions.get_valid_mask())
+            {
+              // All the users are migrating over to the new close
+              // References flow over unless there are duplicates
+              for (FieldMaskSet<LogicalUser>::const_iterator it =
+                    pit->first->preconditions.begin(); it !=
+                    pit->first->preconditions.end(); it++)
+                if (!finder->second->preconditions.insert(it->first,it->second))
+                  it->first->remove_reference();
+              // Prune it out of the data structure
+              closes.erase(pit->first->node);
+              delete pit->first;
+            }
+            else
+            {
+              // Filter over the users that need to move
+              std::vector<LogicalUser*> to_delete;
+              for (FieldMaskSet<LogicalUser>::iterator it =
+                    pit->first->preconditions.begin(); it !=
+                    pit->first->preconditions.end(); it++)
+              {
+                const FieldMask overlap = pit->second & it->second;
+                if (!overlap)
+                  continue;
+                if (finder->second->preconditions.insert(it->first, overlap))
+                  it->first->add_reference();
+                it.filter(overlap);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              for (std::vector<LogicalUser*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+              {
+                pit->first->preconditions.erase(*it);
+                if ((*it)->remove_reference())
+                  delete (*it);
+              }
+              pit->first->preconditions.tighten_valid_mask();
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalAnalysis::issue_close_operation(LogicalRegion parent,
+                                                PendingClose *pending)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *node = pending->node;
+      // Construct a reigon requirement for this operation
+      // All privileges are based on the parent logical region
+      RegionRequirement req;
+      if (node->is_region())
+        req = RegionRequirement(node->as_region_node()->handle,
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+      else
+        req = RegionRequirement(node->as_partition_node()->handle, 0,
+            LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+#ifdef DEBUG_LEGION_COLLECTIVES
+      MergeCloseOp *close_op = context->get_merge_close_op(op, node);
+#else
+      MergeCloseOp *close_op = context->get_merge_close_op();
+#endif
+      const FieldMask &mask = pending->preconditions.get_valid_mask();
+      node->column_source->get_field_set(mask, context,
+                                         req.privilege_fields);
+      close_op->initialize(context, req, pending->req_idx, mask, op);
+      // Mark that we are starting our dependence analysis
+      close_op->begin_dependence_analysis();
+      // Do any other work for the dependence analysis
+      close_op->trigger_dependence_analysis();
+      // Record all the dependences on the previous users
+      for (FieldMaskSet<LogicalUser>::const_iterator it =
+            pending->preconditions.begin(); it != 
+            pending->preconditions.end(); it++)
+      {
+        const LogicalUser &prev = *it->first;
+        close_op->register_region_dependence(0/*index*/, prev.op,
+            prev.gen, prev.idx, LEGION_TRUE_DEPENDENCE, 
+            false/*validates*/, it->second);
+        if (it->first->remove_reference())
+          delete it->first;
+      }
+      // Record a user for this close operation in the region tree 
+      LogicalUser *close_user = new LogicalUser(close_op,
+          close_op->get_generation(), 0/*region req index*/,
+          RegionUsage(req));
+      LogicalState &state = node->get_logical_state(context->get_context_id());
+      // This will take ownership of the close user
+      node->register_local_user(state, *close_user, mask);
+      // Mark that we are done, this puts the close op in the pipeline!
+      close_op->end_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -19001,23 +19005,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreePath::record_aliased_children(unsigned depth,
-                                                 const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(min_depth <= depth);
-      assert(depth <= max_depth);
-#endif
-      LegionMap<unsigned,FieldMask>::iterator finder = 
-        interfering_children.find(depth);
-      if (finder == interfering_children.end())
-        interfering_children[depth] = mask;
-      else
-        finder->second |= mask;
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreePath::clear(void)
     //--------------------------------------------------------------------------
     {
@@ -19046,19 +19033,6 @@ namespace Legion {
       return path[depth];
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    const FieldMask* RegionTreePath::get_aliased_children(unsigned depth) const
-    //--------------------------------------------------------------------------
-    {
-      if (interfering_children.empty())
-        return NULL;
-      LegionMap<unsigned,FieldMask>::const_iterator finder = 
-        interfering_children.find(depth);
-      if (finder == interfering_children.end())
-        return NULL;
-      return &(finder->second);
-    }
 
     /////////////////////////////////////////////////////////////
     // InstanceRef 

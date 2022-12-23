@@ -63,36 +63,27 @@ namespace Legion {
     };
 
     /**
-     * \struct GenericUser
-     * A base struct for tracking the user of a logical region
-     */
-    struct GenericUser {
-    public:
-      GenericUser(void) { }
-      GenericUser(const RegionUsage &u, const FieldMask &m)
-        : usage(u), field_mask(m) { }
-    public:
-      RegionUsage usage;
-      FieldMask field_mask;
-    };
-
-    /**
      * \struct LogicalUser
      * A class for representing logical users of a logical 
      * region including the necessary information to
      * register mapping dependences on the user.
      */
-    struct LogicalUser : public GenericUser {
+    struct LogicalUser : public Collectable {
     public:
-      LogicalUser(void);
-      LogicalUser(Operation *o, unsigned id, 
-                  const RegionUsage &u, const FieldMask &m);
+      LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
+                  const ProjectionInfo &proj_info);
       LogicalUser(Operation *o, GenerationID gen, unsigned id,
-                  const RegionUsage &u, const FieldMask &m);
+                  const RegionUsage &u);
+      LogicalUser(const LogicalUser &rhs) = delete;
+      ~LogicalUser(void);
     public:
-      Operation *op;
-      unsigned idx;
-      GenerationID gen;
+      LogicalUser& operator=(const LogicalUser &rhs) = delete;
+    public:
+      const RegionUsage usage;
+      Operation *const op;
+      const unsigned idx;
+      const GenerationID gen;
+      ProjectionSummary *const shard_proj;
       // This field addresses a problem regarding when
       // to prune tasks out of logical region tree data
       // structures.  If no later task ever performs a
@@ -752,6 +743,11 @@ namespace Legion {
       inline bool is_sharding(void) const { return (sharding_function != NULL); }
       bool is_complete_projection(RegionTreeNode *node,
                                   const LogicalUser &user) const;
+      bool can_elide_close_operation_symbolic(RegionTreeNode *node,
+            LogicalState &state, const ProjectionSummary *previous) const;
+      bool expensive_elide_test(RegionTreeNode *node, LogicalUser &user, 
+                                const FieldMaskSet<LogicalUser> &prev_users,
+                                FieldMask &close_mask) const;
     public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
@@ -853,47 +849,25 @@ namespace Legion {
     struct FieldState {
     public:
       FieldState(void);
-      FieldState(const GenericUser &u, const FieldMask &m, 
+      FieldState(OpenState state, const FieldMask &m,
                  RegionTreeNode *child);
-      FieldState(const RegionUsage &u, const FieldMask &m,
-                 ProjectionFunction *proj, IndexSpaceNode *proj_space, 
-                 ShardingFunction *sharding_function, 
-                 IndexSpaceNode *sharding_space,
-                 RegionTreeNode *node);
+      FieldState(const RegionUsage &usage, const FieldMask &m, 
+                 RegionTreeNode *child);
       FieldState(const FieldState &rhs);
       FieldState(FieldState &&rhs) noexcept;
       FieldState& operator=(const FieldState &rhs);
       FieldState& operator=(FieldState &&rhs) noexcept;
       ~FieldState(void);
     public:
-      inline bool is_projection_state(void) const 
-        { return (open_state >= OPEN_READ_ONLY_PROJ); } 
       inline const FieldMask& valid_fields(void) const 
         { return open_children.get_valid_mask(); }
     public:
       bool overlaps(const FieldState &rhs) const;
-      bool projections_match(const FieldState &rhs) const;
       void merge(FieldState &rhs, RegionTreeNode *node);
       bool filter(const FieldMask &mask);
       void add_child(RegionTreeNode *child,
                      const FieldMask &mask);
       void remove_child(RegionTreeNode *child);
-    public:
-      bool can_elide_close_operation(LogicalState &state,
-                                     Operation *op, unsigned index,
-                                     const ProjectionInfo &info,
-                                     RegionTreeNode *node) const;
-      void record_projection_summary(const ProjectionInfo &info,
-                                     RegionTreeNode *node,
-                                     bool reduction) const;
-      void record_projection_summary(const ProjectionInfo &info,
-                                     RegionTreeNode *node);
-    protected:
-      bool elide_singular_same_shard(const ProjectionSummary &prev,
-                                     const ProjectionInfo &info) const;
-      bool expensive_elide_test(Operation *op, unsigned index,
-                                const ProjectionInfo &info,
-                                RegionTreeNode *node) const;
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask,
@@ -905,11 +879,6 @@ namespace Legion {
       FieldMaskSet<RegionTreeNode> open_children;
       OpenState open_state;
       ReductionOpID redop;
-      // For control replication we need to keep track of the
-      // projections being done here to see if any of them are
-      // going to interfere with each other and need a merge 
-      // close fence to be inserted
-      std::set<ProjectionSummary> shard_projections;
     };
 
     /**
@@ -949,18 +918,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
     public:
-      class ElideCloseResult {
-      public:
-        ElideCloseResult(void) : result(false) { }
-        ElideCloseResult(
-            const std::set<ProjectionSummary> &projections, bool result);
-      public:
-        bool matches(const std::set<ProjectionSummary> &projections) const;
-      public:
-        std::set<ProjectionSummary> projections;
-        bool result;
-      };
-    public:
       LogicalState(RegionTreeNode *owner, ContextID ctx);
       LogicalState(const LogicalState &state);
       ~LogicalState(void);
@@ -974,21 +931,17 @@ namespace Legion {
       void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
       void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
     public:
-      bool find_elide_close_result(const ProjectionInfo &info, 
-            const std::set<ProjectionSummary> &projections, bool &result) const;
-      void record_elide_close_result(const ProjectionInfo &info,
-                  const std::set<ProjectionSummary> &projections, bool result);
+      bool find_symbolic_elide_close_result(const ProjectionSummary &prev, 
+                            const ProjectionSummary &next, bool &result) const;
+      void record_symbolic_elide_close_result(const ProjectionSummary &prev,
+                            const ProjectionSummary &next, bool result);
     public:
       RegionTreeNode *const owner;
     public:
       LegionList<FieldState,
                  LOGICAL_FIELD_STATE_ALLOC> field_states;
-      LegionList<LogicalUser,CURR_LOGICAL_ALLOC> curr_epoch_users;
-      LegionList<LogicalUser,PREV_LOGICAL_ALLOC> prev_epoch_users;
-    public:
-      // Keep track of which fields we've done a reduction to here
-      FieldMask reduction_fields;
-      LegionMap<ReductionOpID,FieldMask> outstanding_reductions;
+      FieldMaskSet<LogicalUser> curr_epoch_users;
+      FieldMaskSet<LogicalUser> prev_epoch_users;
     public:
       // Track whether this node is part of the disjoint-complete tree
       FieldMask disjoint_complete_tree;
@@ -1023,14 +976,31 @@ namespace Legion {
       // how to project from a given node in the region tree
       FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
     public:
+      struct SymbolicCacheEntry {
+      public:
+        SymbolicCacheEntry(const ProjectionSummary o,
+                           const ProjectionSummary t, bool r)
+          : one(o), two(t), result(r) { }
+      public:
+        inline bool matches(const ProjectionSummary &prev, 
+                            const ProjectionSummary &next) const
+        {
+          if (one != prev) return false;
+          if (two != next) return false;
+          return true;
+        }
+      public:
+        ProjectionSummary one, two;
+        bool result;
+      };
       // This helps to memoize expensive close operation elisions tests 
       // within this context in a determinstic way for control replication
-      std::map<ProjectionSummary,
-               std::vector<ElideCloseResult> > *elide_close_results;
+      std::list<SymbolicCacheEntry> *symbolic_elide_close_results;
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;
 
+#if 0
     /**
      * \class LogicalCloser
      * This structure helps keep track of the state
@@ -1106,6 +1076,7 @@ namespace Legion {
       // Cache the generation IDs so we can kick off ops before adding users
       GenerationID merge_close_gen;
     }; 
+#endif
 
     /**
      * \class LogicalAnalysis 
@@ -1121,6 +1092,15 @@ namespace Legion {
      */
     class LogicalAnalysis {
     public:
+      struct PendingClose : public LegionHeapify<PendingClose> {
+      public:
+        PendingClose(RegionTreeNode *n, unsigned idx)
+          : node(n), req_idx(idx) { }
+      public:
+        FieldMaskSet<LogicalUser> preconditions;
+        RegionTreeNode *const node;
+        const unsigned req_idx;
+      };
       struct PendingRefinement {
       public:
         PendingRefinement(void)
@@ -1143,8 +1123,14 @@ namespace Legion {
     public:
       RefinementOp* create_refinement(const LogicalUser &user,
           PartitionNode *partition, const FieldMask &refinement_mask,
-          const LogicalTraceInfo &trace_info);
+          LogicalRegion privilege_root);
       bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
+    public:
+      void record_close_dependence(LogicalRegion privilege,
+                                   RegionTreeNode *path_node,
+                                   LogicalUser *user, FieldMask mask);
+    protected:
+      void issue_close_operation(LogicalRegion parent, PendingClose *pending);
     public:
       Operation *const op;
       InnerContext *const context;
@@ -1152,11 +1138,10 @@ namespace Legion {
       std::set<RtEvent> &applied_events;
       // Need these in order for control replication
       LegionVector<PendingRefinement> pending_refinements;
-      // Keep track of which which nodes we've done projection
-      // close operations from to make sure we don't perform
-      // duplicate closes and accidentally invalidate on of our
-      // prior projections
-      FieldMaskSet<RegionTreeNode> projection_closes;
+    protected:
+      // Index first by the parent region where privileges come from
+      std::map<LogicalRegion,
+              std::map<RegionTreeNode*,PendingClose*> > pending_closes;
     };
 
     /**
@@ -3140,7 +3125,6 @@ namespace Legion {
     public:
       void initialize(unsigned min_depth, unsigned max_depth);
       void register_child(unsigned depth, const LegionColor color);
-      void record_aliased_children(unsigned depth, const FieldMask &mask);
       void clear();
     public:
 #ifdef DEBUG_LEGION 
@@ -3156,11 +3140,8 @@ namespace Legion {
         { return ((max_depth-min_depth)+1); }
       inline unsigned get_min_depth(void) const { return min_depth; }
       inline unsigned get_max_depth(void) const { return max_depth; }
-    public:
-      const FieldMask* get_aliased_children(unsigned depth) const;
     protected:
       std::vector<LegionColor> path;
-      LegionMap<unsigned/*depth*/,FieldMask> interfering_children;
       unsigned min_depth;
       unsigned max_depth;
     };

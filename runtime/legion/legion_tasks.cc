@@ -1545,8 +1545,7 @@ namespace Legion {
         std::vector<RegionTreePath> privilege_paths(logical_regions.size());
         for (unsigned idx = 0; idx < logical_regions.size(); idx++)
           initialize_privilege_path(privilege_paths[idx], logical_regions[idx]);
-        perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
-                                          privilege_paths);
+        perform_intra_task_alias_analysis();
       }
 #endif
     } 
@@ -1561,20 +1560,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::perform_intra_task_alias_analysis(bool is_tracing,
-               LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths)
+    void TaskOp::perform_intra_task_alias_analysis(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INTRA_TASK_ALIASING_CALL);
-#ifdef DEBUG_LEGION
-      assert(get_region_count() == privilege_paths.size());
-#endif
-      // Quick out if we've already traced this
-      if (!is_tracing && (trace != NULL))
-      {
-        trace->replay_aliased_children(privilege_paths);
-        return;
-      }
       std::map<RegionTreeID,std::vector<unsigned> > tree_indexes;
       // Find the indexes of requirements with the same tree
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
@@ -1641,19 +1630,6 @@ namespace Legion {
                 (dtype == LEGION_ANTI_DEPENDENCE) ||
                 (concurrent_task && IS_ATOMIC(usage1) && (usage1 == usage2)))
               report_interfering_requirements(indexes[j], indexes[i]);
-            // Special case, if the parents are not the same,
-            // then we don't have to do anything cause their
-            // path will not overlap
-            if (logical_regions[indexes[i]].parent != 
-                logical_regions[indexes[j]].parent)
-              continue;
-            // Record it in the earlier path as the latter path doesn't matter
-            privilege_paths[indexes[j]].record_aliased_children(
-                                    common_ancestor->depth, overlap);
-            // If we have a trace, record the aliased requirements
-            if (trace != NULL)
-              trace->record_aliased_children(indexes[j], 
-                                             common_ancestor->depth, overlap);
           }
         }
       }
@@ -5880,7 +5856,6 @@ namespace Legion {
       sent_remotely = false;
       top_level_task = false;
       implicit_top_level_task = false;
-      need_intra_task_alias_analysis = true;
     }
 
     //--------------------------------------------------------------------------
@@ -5974,7 +5949,6 @@ namespace Legion {
               parent_ctx->get_unique_id(), get_trace()->get_trace_id())
       }
       remote_owner_uid = ctx->get_unique_id();
-      need_intra_task_alias_analysis = !launcher.independent_requirements;
       if (launcher.predicate != Predicate::TRUE_PRED &&
           !launcher.elide_future_return)
       {
@@ -6040,6 +6014,10 @@ namespace Legion {
           LegionSpy::log_phase_barrier_wait(unique_op_id, e);
         }
       }
+#ifdef DEBUG_LEGION
+      if (!launcher.independent_requirements)
+        perform_intra_task_alias_analysis();
+#endif
       return result;
     }
 
@@ -6133,15 +6111,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < logical_regions.size(); idx++)
         initialize_privilege_path(privilege_paths[idx], logical_regions[idx]);
       update_no_access_regions();
-      // If we have a trace, it is unsound to do this until the dependence
-      // analysis stage when all the operations are serialized in order
-      if (need_intra_task_alias_analysis)
-      {
-        LegionTrace *local_trace = get_trace();
-        if (local_trace == NULL)
-          perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
-                                            privilege_paths);
-      }
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < logical_regions.size(); idx++)
@@ -6175,14 +6144,6 @@ namespace Legion {
       if (runtime->check_privileges && 
           !is_top_level_task() && !local_function)
         perform_privilege_checks();
-      // If we have a trace we do our alias analysis now
-      if (need_intra_task_alias_analysis && !local_function)
-      {
-        LegionTrace *local_trace = get_trace();
-        if (local_trace != NULL)
-          perform_intra_task_alias_analysis(is_tracing(), local_trace,
-                                            privilege_paths);
-      }
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
@@ -8501,7 +8462,6 @@ namespace Legion {
       mapped_points = 0;
       complete_points = 0;
       committed_points = 0;
-      need_intra_task_alias_analysis = true;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
@@ -8831,7 +8791,6 @@ namespace Legion {
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
       sharding_space = launcher.sharding_space;
-      need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id, provenance);
       if (outputs != NULL)
@@ -8964,7 +8923,6 @@ namespace Legion {
         index_domain = launcher.launch_domain;
       internal_space = launch_space->handle;
       sharding_space = launcher.sharding_space;
-      need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
       deterministic_redop = deterministic;
@@ -9098,14 +9056,6 @@ namespace Legion {
                           "being ignored", mapper->get_mapper_name(),
                           get_task_name(), get_unique_id());
         }
-      }
-      if (need_intra_task_alias_analysis)
-      {
-        // If we don't have a trace, we do our alias analysis now
-        LegionTrace *local_trace = get_trace();
-        if (local_trace == NULL)
-          perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
-                                            privilege_paths);
       }
       if (runtime->legion_spy_enabled)
       { 
@@ -9267,14 +9217,6 @@ namespace Legion {
 #endif 
       if (runtime->check_privileges)
         perform_privilege_checks();
-      if (need_intra_task_alias_analysis)
-      {
-        // If we have a trace we do our alias analysis now
-        LegionTrace *local_trace = get_trace();
-        if (local_trace != NULL)
-          perform_intra_task_alias_analysis(is_tracing(), local_trace,
-                                            privilege_paths);
-      }
       // To be correct with the new scheduler we also have to 
       // register mapping dependences on futures
       for (std::vector<Future>::const_iterator it = futures.begin();
@@ -10685,9 +10627,7 @@ namespace Legion {
     {
       // Need to run this if we haven't run it yet in order to populate
       // the interfering_requirements data structure
-      if (!need_intra_task_alias_analysis)
-        perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
-                                          privilege_paths);
+      perform_intra_task_alias_analysis();
       std::set<std::pair<unsigned,unsigned> > local_interfering = 
         interfering_requirements;
       // Handle any region requirements that interfere with itself

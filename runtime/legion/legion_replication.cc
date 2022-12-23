@@ -110,7 +110,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CloseCheckReduction::CloseCheckValue::CloseCheckValue(void)
-      : operation_index(0), region_requirement_index(0),
+      : operation_index(0),
         barrier(RtBarrier::NO_RT_BARRIER), region(LogicalRegion::NO_REGION), 
         partition(LogicalPartition::NO_PART), is_region(true), read_only(false)
     //--------------------------------------------------------------------------
@@ -118,10 +118,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CloseCheckReduction::CloseCheckValue::CloseCheckValue(
-        const LogicalUser &user, RtBarrier bar, RegionTreeNode *node, bool read)
-      : operation_index(user.op->get_ctx_index()), 
-        region_requirement_index(user.idx), barrier(bar),
+    CloseCheckReduction::CloseCheckValue::CloseCheckValue(Operation *op,
+                          RtBarrier bar, RegionTreeNode *node, bool read)
+      : operation_index(op->get_ctx_index()), barrier(bar),
         is_region(node->is_region()), read_only(read)
     //--------------------------------------------------------------------------
     {
@@ -137,8 +136,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (operation_index != rhs.operation_index)
-        return false;
-      if (region_requirement_index != rhs.region_requirement_index)
         return false;
       if (barrier != rhs.barrier)
         return false;

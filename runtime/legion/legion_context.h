@@ -562,16 +562,6 @@ namespace Legion {
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
-#ifdef DEBUG_LEGION_COLLECTIVES
-      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node) = 0;
-      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
-                                              RegionTreeNode *node) = 0;
-#else
-      virtual MergeCloseOp* get_merge_close_op(void) = 0;
-      virtual RefinementOp* get_refinement_op(void) = 0;
-#endif
-    public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_top_context(InnerContext *previous = NULL) = 0;
     public:
@@ -1647,9 +1637,9 @@ namespace Legion {
       virtual void decrement_frame(void);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(Operation *op,
                                                RegionTreeNode *node);
-      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+      virtual RefinementOp* get_refinement_op(Operation *op,
                                                RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
@@ -2816,9 +2806,9 @@ namespace Legion {
                                                    DynamicCollective dc);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(Operation *op,
                                                RegionTreeNode *node);
-      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
+      virtual RefinementOp* get_refinement_op(Operation *op,
                                               RegionTreeNode *node);
 #else
       virtual MergeCloseOp* get_merge_close_op(void);
@@ -3735,16 +3725,6 @@ namespace Legion {
       virtual void decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
-    public:
-#ifdef DEBUG_LEGION_COLLECTIVES
-      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node);
-      virtual RefinementOp* get_refinement_op(const LogicalUser &user,
-                                              RegionTreeNode *node);
-#else
-      virtual MergeCloseOp* get_merge_close_op(void);
-      virtual RefinementOp* get_refinement_op(void);
-#endif
     public:
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:

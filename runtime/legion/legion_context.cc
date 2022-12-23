@@ -9485,7 +9485,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
-    RefinementOp* InnerContext::get_refinement_op(const LogicalUser &user,
+    RefinementOp* InnerContext::get_refinement_op(Operation *op,
                                                   RegionTreeNode *node)
 #else
     RefinementOp* InnerContext::get_refinement_op(void)
@@ -9912,7 +9912,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* InnerContext::get_merge_close_op(const LogicalUser &user,
+    MergeCloseOp* InnerContext::get_merge_close_op(Operation *op,
                                                    RegionTreeNode *node)
 #else
     MergeCloseOp* InnerContext::get_merge_close_op(void)
@@ -19333,7 +19333,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* ReplicateContext::get_merge_close_op(const LogicalUser &user,
+    MergeCloseOp* ReplicateContext::get_merge_close_op(Operation *op,
                                                        RegionTreeNode *node)
 #else
     MergeCloseOp* ReplicateContext::get_merge_close_op(void)
@@ -19344,7 +19344,7 @@ namespace Legion {
       // Get the mapped barrier for the close operation
       const RtBarrier mapped_bar = get_next_close_mapped_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
-      CloseCheckReduction::RHS barrier(user, mapped_bar, 
+      CloseCheckReduction::RHS barrier(op, mapped_bar, 
                                        node, false/*read only*/);
       const RtBarrier close_check_bar = close_check_barrier.next(this,
           CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY,
@@ -19364,7 +19364,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
 #ifdef DEBUG_LEGION_COLLECTIVES
-    RefinementOp* ReplicateContext::get_refinement_op(const LogicalUser &user,
+    RefinementOp* ReplicateContext::get_refinement_op(Operation *op,
                                                       RegionTreeNode *node)
 #else
     RefinementOp* ReplicateContext::get_refinement_op(void)
@@ -19375,7 +19375,7 @@ namespace Legion {
       // Get the mapped barrier for the refinement operation
       RtBarrier mapped_bar = get_next_refinement_mapped_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
-      CloseCheckReduction::RHS barrier(user, mapped_bar,
+      CloseCheckReduction::RHS barrier(op, mapped_bar,
                                        node, false/*read only*/);
       const RtBarrier refinement_check_bar = refinement_check_barrier.next(this,
           CloseCheckReduction::REDOP, &CloseCheckReduction::IDENTITY, 
@@ -23461,32 +23461,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* LeafContext::get_merge_close_op(const LogicalUser &user,
-                                                  RegionTreeNode *node)
-#else
-    MergeCloseOp* LeafContext::get_merge_close_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    RefinementOp* LeafContext::get_refinement_op(const LogicalUser &user,
-                                                 RegionTreeNode *node)
-#else
-    RefinementOp* LeafContext::get_refinement_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
     }
 
     //--------------------------------------------------------------------------

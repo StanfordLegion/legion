@@ -241,8 +241,7 @@ namespace Legion {
       bool prepare_steal(void);
     public:
       void compute_parent_indexes(TaskContext *alt_context = NULL);
-      void perform_intra_task_alias_analysis(bool is_tracing,
-          LegionTrace *trace, std::vector<RegionTreePath> &privilege_paths);
+      void perform_intra_task_alias_analysis(void);
     public:
       // From Memoizable
       virtual const RegionRequirement& get_requirement(unsigned idx) const
@@ -850,8 +849,6 @@ namespace Legion {
       // Special field for the top level task
       bool top_level_task;
       bool implicit_top_level_task;
-      // Whether we have to do intra-task alias analysis
-      bool need_intra_task_alias_analysis;
     };
 
     /**

@@ -1,4 +1,5 @@
 /* Copyright 2022 Stanford University, NVIDIA Corporation
+ * close_op->initialize(context, req, 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1238,7 +1239,6 @@ namespace Legion {
       outgoing.clear();
       unverified_regions.clear();
       verify_regions.clear();
-      logical_records.clear();
       if (mapping_tracker != NULL)
       {
         delete mapping_tracker;
@@ -1352,8 +1352,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::set_trace(LegionTrace *t,
-                              const std::vector<StaticDependence> *dependences,
-                              const LogicalTraceInfo *trace_info)
+                              const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1361,7 +1360,7 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      tracing = trace->initialize_op_tracing(this, dependences, trace_info);
+      tracing = trace->initialize_op_tracing(this, dependences);
     }
 
     //--------------------------------------------------------------------------
@@ -2203,43 +2202,38 @@ namespace Legion {
     {
       if (must_epoch != NULL)
         must_epoch->verify_dependence(this, gen, target, target_gen);
+      if (tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace != NULL);
+#endif
+        // If we're tracing check to see if the target is even in the
+        // trace, if it's not then there's no need to record the dependence
+        // because it will be handled by the mapping fence at the that
+        // was issued at the beginning of the trace
+        if (!trace->record_dependence(target, target_gen, this, gen))
+          return true;
+      }
       // The rest of this method is the same as the one below
       if (target == this)
       {
-        // Can't remove this if we are tracing
-        if (tracing)
-        {
-          // Don't forget to record the dependence
 #ifdef DEBUG_LEGION
-          assert(trace != NULL);
+        assert(target_gen < gen);
 #endif
-          if (target_gen < gen)
-            trace->record_dependence(this, target_gen, this, gen); 
-          return false;
-        }
-        else
-          return (target_gen < gen);
+        // Can prune it if we're not tracing
+        return !tracing;
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
       assert(mapping_tracker != NULL);
 #endif
-      bool prune = target->perform_registration(target_gen, this, gen,
+      const bool prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 mapping_tracker,
-                                                commit_event);
+                                                commit_event) && !tracing;
       if (registered_dependence)
         incoming[target] = target_gen;
-      if (tracing)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace != NULL);
-#endif
-        trace->record_dependence(target, target_gen, this, gen); 
-        // Unsound to prune when tracing
-        prune = false;
-      }
       return prune;
     }
 
@@ -2256,6 +2250,20 @@ namespace Legion {
         do_registration = 
           must_epoch->record_dependence(this, gen, target, target_gen, 
                                         idx, target_idx, dtype);
+      if (tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace != NULL);
+#endif
+        // If we're tracing check to see if the target is even in the
+        // trace, if it's not then there's no need to record the dependence
+        // because it will be handled by the mapping fence at the that
+        // was issued at the beginning of the trace
+        if (!trace->record_region_dependence(target, target_gen, 
+                                             this, gen, target_idx, idx,
+                                             dtype, validates, dependent_mask))
+          return true;
+      }
       // Can never register a dependence on ourself since it means
       // that the target was recycled and will never register. Return
       // true if the generation is older than our current generation.
@@ -2263,22 +2271,8 @@ namespace Legion {
       {
         if (target_gen == gen)
           report_interfering_requirements(target_idx, idx);
-        // Can't remove this if we are tracing
-        if (tracing)
-        {
-          // Don't forget to record the dependence
-#ifdef DEBUG_LEGION
-          assert(trace != NULL);
-#endif
-          if (target_gen < gen)
-            trace->record_region_dependence(this, target_gen, 
-                                            this, gen, target_idx, 
-                                            idx, dtype, validates,
-                                            dependent_mask); 
-          return false;
-        }
-        else
-          return (target_gen < gen);
+        // Can prune it if we're not tracing
+        return !tracing;
       }
       bool registered_dependence = false;
       AutoLock o_lock(op_lock);
@@ -2291,7 +2285,7 @@ namespace Legion {
         prune = target->perform_registration(target_gen, this, gen,
                                                 registered_dependence,
                                                 mapping_tracker,
-                                                commit_event);
+                                                commit_event) && !tracing;
       }
       if (registered_dependence)
       {
@@ -2300,35 +2294,7 @@ namespace Legion {
         if (validates)
           verify_regions[target].insert(idx);
       }
-      if (tracing)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace != NULL);
-#endif
-        trace->record_region_dependence(target, target_gen, 
-                                        this, gen, target_idx, 
-                                        idx, dtype, validates,
-                                        dependent_mask);
-        // Unsound to prune when tracing
-        prune = false;
-      }
       return prune;
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::register_no_dependence(unsigned idx, Operation *target,
-            GenerationID target_gen, unsigned target_idx, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(tracing);
-      assert(trace != NULL);
-      assert(!is_internal_op());
-#endif
-      if (target == this)
-        return;
-      trace->record_no_dependence(target, target_gen, this, gen, 
-                                  target_idx, idx, mask);
     }
 
     //--------------------------------------------------------------------------
@@ -2452,20 +2418,6 @@ namespace Legion {
       }
       if (need_trigger)
         trigger_commit();
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::record_logical_dependence(const LogicalUser &user)
-    //--------------------------------------------------------------------------
-    {
-      logical_records.push_back(user);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::clear_logical_records(void)
-    //--------------------------------------------------------------------------
-    {
-      logical_records.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -10139,8 +10091,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InternalOp::initialize_internal(Operation *creator, int intern_idx,
-                                         const LogicalTraceInfo &trace_info)
+    void InternalOp::initialize_internal(Operation *creator, int intern_idx)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10157,8 +10108,8 @@ namespace Legion {
       create_op = creator;
       create_gen = creator->get_generation();
       creator_req_idx = intern_idx;
-      if (trace_info.trace != NULL)
-        set_trace(trace_info.trace, NULL, &trace_info); 
+      trace = creator->get_trace();
+      tracing = (trace != NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -10371,14 +10322,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CloseOp::initialize_close(Operation *creator, unsigned idx,
                                    unsigned parent_req_index,
-                                   const RegionRequirement &req,
-                                   const LogicalTraceInfo &trace_info)
+                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(completion_event.exists());
 #endif
-      initialize_internal(creator, idx, trace_info);
+      initialize_internal(creator, idx);
       // We always track this so get the close index
       context_index = parent_ctx->register_new_close_operation(this);
       parent_task = parent_ctx->get_task();
@@ -10488,8 +10438,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MergeCloseOp::initialize(InnerContext *ctx,
-                              const RegionRequirement &req,
-                              const LogicalTraceInfo &trace_info, int close_idx,
+                              const RegionRequirement &req, int close_idx,
                               const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
     {
@@ -10497,7 +10446,7 @@ namespace Legion {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
                                        context_index, true/*inter close*/);
       parent_req_index = creator->find_parent_index(close_idx);
-      initialize_close(creator, close_idx, parent_req_index, req, trace_info);
+      initialize_close(creator, close_idx, parent_req_index, req);
       close_mask = close_m;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -11344,14 +11293,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize(Operation *creator, unsigned index,
-                                  const LogicalTraceInfo &trace_info,
-                                  RegionNode *root, const FieldMask &mask)
+                                  RegionNode *root, const FieldMask &mask,
+                                  LogicalRegion privilege_root)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(to_refine == NULL);
 #endif
-      initialize_internal(creator, index, trace_info);
+      initialize_internal(creator, index);
       to_refine = root;
       // Initialize the mask for make_from for now in case
       // get_internal_mask is called before recording any
@@ -11370,7 +11319,7 @@ namespace Legion {
                                       root->handle.field_space.id,
                                       root->handle.tree_id, LEGION_READ_WRITE, 
                                       LEGION_EXCLUSIVE, 0/*redop*/, 
-                                      trace_info.req.parent.index_space.id);
+                                      privilege_root.index_space.id);
         std::set<FieldID> fields;
         root->column_source->get_field_set(mask, parent_ctx, fields);
         LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);

@@ -3817,11 +3817,12 @@ namespace Legion {
        const void *buffer, size_t size, bool is_mutable, RtUserEvent ready) = 0;
     public:
       // Logical traversal operations
-      void register_logical_user(ContextID ctx,
-                                 const LogicalUser &user,
+      void register_logical_user(LogicalRegion privilege_root,
+                                 LogicalUser &user,
                                  const RegionTreePath &path,
                                  const LogicalTraceInfo &trace_info,
                                  const ProjectionInfo &projection_info,
+                                 const FieldMask &user_mask,
                                  FieldMask &unopened_field_mask,
                                  FieldMask &already_closed_mask,
                                  FieldMask &disjoint_complete_below,
@@ -3831,16 +3832,35 @@ namespace Legion {
                                  const bool track_disjoint_complete_below,
                                  const bool check_unversioned);
       void register_local_user(LogicalState &state,
-                               const LogicalUser &user,
-                               const LogicalTraceInfo &trace_info);
-      void add_open_field_state(LogicalState &state, bool arrived,
-                                const ProjectionInfo &projection_info,
+                               LogicalUser &user,
+                               const FieldMask &user_mask);
+      void add_open_field_state(LogicalState &state,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 RegionTreeNode *next_child);
-      void close_logical_node(LogicalCloser &closer,
+      void siphon_interfering_children(LogicalState &state,
+                                       LogicalAnalysis &analysis,
+                                       const FieldMask &closing_mask,
+                                       const LogicalUser &user,
+                                       LogicalRegion privilege_root,
+                                       RegionTreeNode *next_child,
+                                       FieldMask &open_below);
+      void perform_close_operations(const LogicalUser &user,
+                                    const FieldMask &close_mask,
+                                    FieldMaskSet<RegionTreeNode> &children,
+                                    LogicalRegion privilege_root,
+                                    RegionTreeNode *path_node,
+                                    RegionTreeNode *next_child,
+                                    FieldMask &open_below,
+                                    LogicalAnalysis &analysis,
+                                    const bool filter_next);
+      void close_logical_node(const LogicalUser &user,
                               const FieldMask &closing_mask,
-                              const bool read_only_close);
+                              LogicalRegion privilege_root,
+                              RegionTreeNode *path_node,
+                              LogicalAnalysis &analysis,
+                              FieldMask &still_open);
+#if 0
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &closing_mask,
@@ -3874,6 +3894,7 @@ namespace Legion {
                                     bool record_close_operations,
                                     bool record_closed_fields,
                                     FieldMask &output_mask); 
+#endif
       void merge_new_field_state(LogicalState &state, FieldState &new_state);
       void merge_new_field_states(LogicalState &state, 
                                   LegionDeque<FieldState> &new_states);
@@ -3886,10 +3907,6 @@ namespace Legion {
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
-      void record_logical_reduction(LogicalState &state, ReductionOpID redop,
-                                    const FieldMask &user_mask);
-      void clear_logical_reduction_fields(LogicalState &state,
-                                          const FieldMask &cleared_mask);
       void sanity_check_logical_state(LogicalState &state);
       void perform_tree_dominance_analysis(ContextID ctx,
                                            const LogicalUser &user,
@@ -3912,8 +3929,6 @@ namespace Legion {
                                    RegionTreeNode *next_child,
                                    FieldMask &open_below,
                                    bool force_close_next);
-      void record_close_no_dependences(ContextID ctx,
-                                       const LogicalUser &user);
     public:
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 
@@ -3985,19 +4000,16 @@ namespace Legion {
 #endif
     public:
       // Logical helper operations
-      template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
-      static FieldMask perform_dependence_checks(const LogicalUser &user, 
-          LegionList<LogicalUser, ALLOC> &users, 
+      template<bool TRACK_DOM>
+      FieldMask perform_dependence_checks(LogicalRegion privilege_root,
+          LogicalUser &user, FieldMaskSet<LogicalUser> &users,
           const FieldMask &check_mask, const FieldMask &open_below,
-          bool validates_regions, Operation *to_skip = NULL, 
-          GenerationID skip_gen = 0);
-      template<AllocationType ALLOC>
-      static void perform_closing_checks(LogicalCloser &closer,
-          LegionList<LogicalUser, ALLOC> &users, 
-          const FieldMask &check_mask);
-      template<AllocationType ALLOC>
-      static void perform_nodep_checks(const LogicalUser &user,
-          const LegionList<LogicalUser, ALLOC> &users);
+          const bool arrived, const ProjectionInfo &proj_info,
+          LogicalState &state, LogicalAnalysis &logical_analysis);
+      static void perform_closing_checks(LogicalAnalysis &analysis,
+          FieldMaskSet<LogicalUser> &users, const LogicalUser &user,
+          const FieldMask &check_mask, LogicalRegion root_privilege,
+          RegionTreeNode *path_node, FieldMask &still_open);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
         { return column_source; }

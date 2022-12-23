@@ -53,13 +53,12 @@ namespace Legion {
       struct CloseCheckValue {
       public:
         CloseCheckValue(void);
-        CloseCheckValue(const LogicalUser &user, RtBarrier barrier,
+        CloseCheckValue(Operation *op, RtBarrier barrier,
                         RegionTreeNode *node, bool read_only);
       public:
         bool operator==(const CloseCheckValue &rhs) const;
       public:
         unsigned operation_index;
-        unsigned region_requirement_index;
         RtBarrier barrier;
         LogicalRegion region;
         LogicalPartition partition;
@@ -1261,10 +1260,9 @@ namespace Legion {
      */
     class ElideCloseExchange : public AllGatherCollective<false> {
     public:
-      ElideCloseExchange(ReplicateContext *ctx, CollectiveIndexLocation loc,
-                         ProjectionTree *t)
-        : AllGatherCollective<false>(ctx, 
-            ctx->get_next_collective_index(loc, true/*logical*/)), tree(t) { }
+      ElideCloseExchange(ProjectionTree *t,
+                         ReplicateContext *ctx, CollectiveID id)
+        : AllGatherCollective<false>(ctx, id), tree(t) { }
     public:
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage) 
@@ -1273,6 +1271,28 @@ namespace Legion {
         { tree->deserialize(derez); }
     public:
       ProjectionTree *const tree;
+    };
+
+    /**
+     * \class MaskExchange
+     * This class will perform an all-reduce of a field mask between
+     * the shards so that all participants either get the union or
+     * intersection of all the fields in the field mask
+     */
+    template<bool UNION>
+    class MaskExchange : public AllGatherCollective<false> {
+    public:
+      MaskExchange(FieldMask &m, ReplicateContext *ctx, CollectiveID id)
+        : AllGatherCollective<false>(ctx, id), mask(m) { }
+    public:
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage) 
+        { rez.serialize(mask); }
+      virtual void unpack_collective_stage(Deserializer &derez, int stage)
+        { FieldMask m; derez.deserialize(m);
+          if (UNION) mask |= m; else mask &= m; }
+    private:
+      FieldMask &mask;
     };
 
     /**

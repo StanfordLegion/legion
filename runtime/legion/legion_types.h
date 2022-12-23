@@ -278,10 +278,6 @@ namespace Legion {
       OPEN_READ_WRITE         = 2, // unknown dirty information below
       OPEN_SINGLE_REDUCE      = 3, // only one open child with reductions below
       OPEN_MULTI_REDUCE       = 4, // multiple open children with same reduction
-      // Only projection states below here
-      OPEN_READ_ONLY_PROJ     = 5, // read-only projection
-      OPEN_READ_WRITE_PROJ    = 6, // read-write projection
-      OPEN_REDUCE_PROJ        = 7, // reduction-only projection
     }; 
 
     // Internal reduction operators
@@ -1841,7 +1837,6 @@ namespace Legion {
     class RegionAnalyzer;
     class RegionMapper;
 
-    struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
     struct LogicalTraceInfo;
@@ -1852,6 +1847,9 @@ namespace Legion {
     struct CloseInfo; 
     struct FieldDataDescriptor;
     struct PendingRemoteExpression;
+    struct ProjectionSummary;
+    class ProjectionInfo;
+
 
     // legion_spy.h
     class TreeStateLogger;
