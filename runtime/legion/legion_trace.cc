@@ -62,15 +62,18 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // LegionTrace 
+    // LogicalTrace 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(InnerContext *c, TraceID t, 
-                             bool logical_only, Provenance *p)
-      : ctx(c), tid(t), begin_provenance(p), end_provenance(NULL),
+    LogicalTrace::LogicalTrace(InnerContext *c, TraceID t, bool logical_only,
+                               bool static_trace, Provenance *p,
+                               const std::set<RegionTreeID> *trees)
+      : context(c), tid(t), begin_provenance(p), end_provenance(NULL),
         last_memoized(0), physical_op_count(0), blocking_call_observed(false), 
-        has_intermediate_ops(false), fixed(false)
+        has_intermediate_ops(false), fixed(false),
+        recording(true), trace_fence(NULL),
+        static_translator(static_trace ? new StaticTranslator(trees) : NULL)
     //--------------------------------------------------------------------------
     {
       state.store(LOGICAL_ONLY);
@@ -81,7 +84,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LegionTrace::~LegionTrace(void)
+    LogicalTrace::~LogicalTrace(void)
     //--------------------------------------------------------------------------
     {
       if (physical_trace != NULL)
@@ -93,7 +96,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::fix_trace(Provenance *provenance)
+    void LogicalTrace::fix_trace(Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -107,7 +110,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::register_physical_only(Operation *op)
+    bool LogicalTrace::initialize_op_tracing(Operation *op,
+                               const std::vector<StaticDependence> *dependences)
+    //--------------------------------------------------------------------------
+    {
+      if (fixed)
+        return false;
+      if (static_translator != NULL)
+        static_translator->push_dependences(dependences);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalTrace::skip_analysis(RegionTreeID tid) const
+    //--------------------------------------------------------------------------
+    {
+      if (!recording)
+        return true;
+      if (static_translator == NULL)
+        return false;
+      return static_translator->skip_analysis(tid);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::register_physical_only(Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -123,47 +149,383 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionTrace::end_trace_execution(FenceOp *op)
+    void LogicalTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
-      if (is_replaying())
+#ifdef DEBUG_LEGION
+      assert(!op->is_internal_op());
+#endif
+      std::pair<Operation*,GenerationID> key(op,gen);
+      const size_t index = operations.size();
+      if (!context->runtime->no_physical_tracing &&
+          op->is_memoizing() && !op->is_internal_op())
       {
+        if (index != last_memoized)
+        {
+          for (unsigned i = 0; i < operations.size(); ++i)
+          {
+            Operation *op = operations[i].first;
+            if (!op->is_internal_op() && op->get_memoizable() == NULL)
+              REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+                  "Invalid memoization request. Operation of type %s (UID %lld)"
+                  " at index %d in trace %d requested memoization, but physical"
+                  " tracing does not support this operation type yet.",
+                  Operation::get_string_rep(op->get_operation_kind()),
+                  op->get_unique_op_id(), i, tid);
+          }
+          REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
+              "Invalid memoization request. A trace cannot be partially "
+              "memoized. Please change the mapper to request memoization "
+              "for all the operations in the trace");
+        }
+        op->set_trace_local_id(index);
+        last_memoized = index + 1;
+      }
+      if (has_physical_trace() &&
+          !op->is_internal_op() && op->get_memoizable() == NULL)
+        REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
+            "Invalid memoization request. Operation of type %s (UID %lld) "
+            "at index %zd in trace %d requested memoization, but physical "
+            "tracing does not support this operation type yet.",
+            Operation::get_string_rep(op->get_operation_kind()),
+            op->get_unique_op_id(), index, tid);
+      if (recording)
+      {
+        // Recording
+        operations.push_back(key);
+        op_map[key] = index;
+        replay_info.push_back(OperationInfo(op));
+        if (static_translator != NULL)
+        {
+          // Add a mapping reference since we might need to refer to it later
+          op->add_mapping_reference(gen);
+          // Recording a static trace so see if we have dependences to translate
+          std::vector<StaticDependence> to_translate;
+          static_translator->pop_dependences(to_translate);
+          translate_dependence_records(op, index, to_translate);
+        }
+      }
+      else
+      {
+        // Replaying
+        if (index >= replay_info.size())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
+                        "Trace violation! Recorded %zd operations in trace "
+                        "%d in task %s (UID %lld) but %zd operations have "
+                        "now been issued!", replay_info.size(), tid,
+                        context->get_task_name(), 
+                        context->get_unique_id(), index+1)
+        // Check to see if the meta-data alignes
+        const OperationInfo &info = replay_info[index];
+        // Check that they are the same kind of operation
+        if (info.kind != op->get_operation_kind())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                        "Trace violation! Operation at index %zd of trace %d "
+                        "in task %s (UID %lld) was recorded as having type "
+                        "%s but instead has type %s in replay.",
+                        index, tid, context->get_task_name(),
+                        context->get_unique_id(),
+                        Operation::get_string_rep(info.kind),
+                        Operation::get_string_rep(op->get_operation_kind()))
+        // Check that they have the same number of region requirements
+        if (info.region_count != op->get_region_count())
+          REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
+                        "Trace violation! Operation at index %zd of trace %d "
+                        "in task %s (UID %lld) was recorded as having %d "
+                        "regions, but instead has %zd regions in replay.",
+                        index, tid, context->get_task_name(),
+                        context->get_unique_id(), info.region_count,
+                        op->get_region_count())
+
 #ifdef LEGION_SPY
-        for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
-              it = operations.begin(); it != operations.end(); it++)
-          it->first->remove_mapping_reference(it->second);
-        operations.clear();
-        current_uids.clear();
+        current_uids[key] = op->get_unique_op_id();
+        num_regions[key] = op->get_region_count();
+#endif
+        // Add a mapping reference since ops will be registering dependences
+        op->add_mapping_reference(gen);
+        operations.push_back(key);
+        frontiers.insert(key);
+        // First make any close operations needed for this operation and
+        // register their dependences
+        for (std::vector<CloseInfo>::const_iterator cit = 
+              info.closes.begin(); cit != info.closes.end(); cit++)
+        {
+#ifdef DEBUG_LEGION_COLLECTIVES
+          MergeCloseOp *close_op = context->get_merge_close_op(op, cit->node);
+#else
+          MergeCloseOp *close_op = context->get_merge_close_op();
+#endif
+          close_op->initialize(context, cit->requirement, cit->creator_idx,
+                               cit->close_mask, op);
+          const std::pair<Operation*,GenerationID> close_key(close_op, 
+                                            close_op->get_generation());
+          close_op->add_mapping_reference(gen);
+          operations.push_back(close_key);
+          close_op->begin_dependence_analysis();
+          close_op->trigger_dependence_analysis();
+          replay_operation_dependences(close_op, cit->dependences);
+          close_op->end_dependence_analysis();
+        }
+        // Then register the dependences for this operation
+        if (!info.dependences.empty())
+          replay_operation_dependences(op, info.dependences);
+        else // need to at least record a dependence on the fence event
+          op->register_dependence(trace_fence, trace_fence_gen);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::register_close(MergeCloseOp *op, unsigned creator_idx,
+                                      const RegionRequirement &req,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                                      RegionTreeNode *node,
+#endif
+                                      const FieldMask &close_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+      assert(!replay_info.empty());
+#endif
+      std::pair<Operation*,GenerationID> key(op, op->get_generation());
+      const size_t index = operations.size();
+      operations.push_back(key);
+      op_map[key] = index;
+      OperationInfo &info = replay_info.back();
+      info.closes.emplace_back(CloseInfo(req, creator_idx,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                                         node,
+#endif
+                                         close_mask));
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::replay_operation_dependences(Operation *op,
+                              const LegionVector<DependenceRecord> &dependences)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionVector<DependenceRecord>::const_iterator it =
+            dependences.begin(); it != dependences.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->operation_idx >= 0);
+        assert(((size_t)it->operation_idx) < operations.size());
+        assert(it->dtype != LEGION_NO_DEPENDENCE);
+#endif
+        const std::pair<Operation*,GenerationID> &target = 
+                                              operations[it->operation_idx];
+        std::set<std::pair<Operation*,GenerationID> >::iterator finder =
+          frontiers.find(target);
+        if (finder != frontiers.end())
+        {
+          finder->first->remove_mapping_reference(finder->second);
+          frontiers.erase(finder);
+        }
+        if ((it->prev_idx == -1) || (it->next_idx == -1))
+        {
+          op->register_dependence(target.first, target.second); 
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+           op->get_context()->get_unique_id(),
+           get_current_uid_by_index(it->operation_idx),
+           (it->prev_idx == -1) ? 0 : it->prev_idx,
+           op->get_unique_op_id(), 
+           (it->next_idx == -1) ? 0 : it->next_idx, LEGION_TRUE_DEPENDENCE);
+#endif
+        }
+        else
+        {
+          op->register_region_dependence(it->next_idx, target.first,
+                                         target.second, it->prev_idx,
+                                         it->dtype, it->validates,
+                                         it->dependent_mask);
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+              op->get_context()->get_unique_id(),
+              get_current_uid_by_index(it->operation_idx), it->prev_idx,
+              op->get_unique_op_id(), it->next_idx, it->dtype);
+#endif
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalTrace::record_dependence(Operation *target,
+            GenerationID target_gen, Operation *source, GenerationID source_gen)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      std::pair<Operation*,GenerationID> target_key(target, target_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        target_finder = op_map.find(target_key);
+      // The target is not part of the trace so there's no need to record it
+      if (target_finder == op_map.end())
+        return false;
+#ifdef DEBUG_LEGION
+      assert(!replay_info.empty());
+      assert(op_map.find(std::make_pair(source, source_gen)) != op_map.end());
+#endif
+      OperationInfo &info = replay_info.back();
+      DependenceRecord record(target_finder->second);
+      if (source->is_internal_op())
+      {
+#ifdef DEBUG_LEGION
+        assert(!info.closes.empty());
+#endif
+        CloseInfo &close = info.closes.back();
+        for (LegionVector<DependenceRecord>::iterator it =
+              close.dependences.begin(); it != close.dependences.end(); it++)
+          if (it->merge(record))
+            return true;
+        close.dependences.emplace_back(std::move(record));
+      }
+      else
+      {
+        for (LegionVector<DependenceRecord>::iterator it =
+              info.dependences.begin(); it != info.dependences.end(); it++)
+          if (it->merge(record))
+            return true;
+        info.dependences.emplace_back(std::move(record));
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool LogicalTrace::record_region_dependence(Operation *target, 
+                                                GenerationID target_gen,
+                                                Operation *source, 
+                                                GenerationID source_gen,
+                                                unsigned target_idx, 
+                                                unsigned source_idx,
+                                                DependenceType dtype,
+                                                bool validates,
+                                                const FieldMask &dep_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+#endif
+      std::pair<Operation*,GenerationID> target_key(target, target_gen);
+      std::map<std::pair<Operation*,GenerationID>,unsigned>::const_iterator
+        target_finder = op_map.find(target_key);
+      // The target is not part of the trace so there's no need to record it
+      if (target_finder == op_map.end())
+        return false;
+#ifdef DEBUG_LEGION
+      assert(!replay_info.empty());
+      assert(op_map.find(std::make_pair(source, source_gen)) != op_map.end());
+#endif
+      OperationInfo &info = replay_info.back();
+      DependenceRecord record(target_finder->second, target_idx, source_idx,
+                              validates, dtype, dep_mask);
+      if (source->is_internal_op())
+      {
+#ifdef DEBUG_LEGION
+        assert(!info.closes.empty());
+#endif
+        CloseInfo &close = info.closes.back();
+        for (LegionVector<DependenceRecord>::iterator it =
+              close.dependences.begin(); it != close.dependences.end(); it++)
+          if (it->merge(record))
+            return true;
+        close.dependences.emplace_back(std::move(record));
+      }
+      else
+      {
+        for (LegionVector<DependenceRecord>::iterator it =
+              info.dependences.begin(); it != info.dependences.end(); it++)
+          if (it->merge(record))
+            return true;
+        info.dependences.emplace_back(std::move(record));
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::begin_trace_execution(FenceOp *fence_op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace_fence == NULL);
+#endif
+      if (!recording)
+      {
+        trace_fence = fence_op;
+        trace_fence_gen = fence_op->get_generation();
+        fence_op->add_mapping_reference(trace_fence_gen);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::end_trace_execution(FenceOp *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace_fence != NULL);
+#endif
+      if (!recording)
+      {
+        op->register_dependence(trace_fence, trace_fence_gen);
+        trace_fence->remove_mapping_reference(trace_fence_gen);
+        trace_fence = NULL;
+        if (is_replaying())
+        {
+#ifdef LEGION_SPY
+          for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+                it = operations.begin(); it != operations.end(); it++)
+            it->first->remove_mapping_reference(it->second);
+          operations.clear();
+          current_uids.clear();
 #else
 #ifdef DEBUG_LEGION
-        assert(operations.empty());
+          assert(operations.empty());
 #endif
-        // Reset the physical op count for the next replay
-        physical_op_count = 0;
+          // Reset the physical op count for the next replay
+          physical_op_count = 0;
 #endif
-        return;
-      }
-
-      // Register for this fence on every one of the operations in
-      // the trace and then clear out the operations data structure
-      for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
-            frontiers.begin(); it != frontiers.end(); ++it)
-      {
-        const std::pair<Operation*,GenerationID> &target = *it;
-#ifdef DEBUG_LEGION
-        assert(!target.first->is_internal_op());
-#endif
-        op->register_dependence(target.first, target.second);
-#ifdef LEGION_SPY
-        for (unsigned req_idx = 0; req_idx < num_regions[target]; req_idx++)
-        {
-          LegionSpy::log_mapping_dependence(
-              op->get_context()->get_unique_id(), current_uids[target], req_idx,
-              op->get_unique_op_id(), 0, LEGION_TRUE_DEPENDENCE);
+          return;
         }
+
+        // Register for this fence on every one of the operations in
+        // the trace and then clear out the operations data structure
+        for (std::set<std::pair<Operation*,GenerationID> >::iterator it =
+              frontiers.begin(); it != frontiers.end(); ++it)
+        {
+          const std::pair<Operation*,GenerationID> &target = *it;
+#ifdef DEBUG_LEGION
+          assert(!target.first->is_internal_op());
 #endif
-        // Remove any mapping references that we hold
-        target.first->remove_mapping_reference(target.second);
+          op->register_dependence(target.first, target.second);
+#ifdef LEGION_SPY
+          for (unsigned req_idx = 0; req_idx < num_regions[target]; req_idx++)
+          {
+            LegionSpy::log_mapping_dependence(
+                op->get_context()->get_unique_id(), current_uids[target],
+                req_idx, op->get_unique_op_id(), 0, LEGION_TRUE_DEPENDENCE);
+          }
+#endif
+          // Remove any mapping references that we hold
+          target.first->remove_mapping_reference(target.second);
+        }
+      }
+      else // Finished the recording so we are done
+      {
+        recording = false;
+        op_map.clear();
+        if (static_translator != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(static_translator->dependences.empty());
+#endif
+          delete static_translator;
+          static_translator = NULL;
+          // Also remove the mapping references from all the operations
+          for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+                it = operations.begin(); it != operations.end(); it++)
+            it->first->remove_mapping_reference(it->second);
+        }
       }
       operations.clear();
       last_memoized = 0;
@@ -176,7 +538,7 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     //--------------------------------------------------------------------------
-    UniqueID LegionTrace::get_current_uid_by_index(unsigned op_idx) const
+    UniqueID LogicalTrace::get_current_uid_by_index(unsigned op_idx) const
     //--------------------------------------------------------------------------
     {
       assert(op_idx < operations.size());
@@ -186,10 +548,48 @@ namespace Legion {
       assert(finder != current_uids.end());
       return finder->second;
     }
+
+    //--------------------------------------------------------------------------
+    void LogicalTrace::perform_logging(
+                               UniqueID prev_fence_uid, UniqueID curr_fence_uid)
+    //--------------------------------------------------------------------------
+    {
+      // This function is really a hack because we need to pretend like 
+      // we performed the logical analysis for physical trace replays
+      // when at the moment we currently don't, so this does the logging
+      // the same as if we did perform the replay in program order, and 
+      // even then we don't quite do this fully correctly since we don't 
+      // have any close ops which will get the cross-shard analysis wrong
+      UniqueID context_uid = context->get_unique_id();
+      for (unsigned idx = 0; idx < operations.size(); idx++)
+      {
+        const UniqueID uid = get_current_uid_by_index(idx);
+        if (idx == 0)
+        {
+          LegionSpy::log_mapping_dependence(context_uid, prev_fence_uid,
+              0/*prev index*/, uid, 0/*next index*/, LEGION_TRUE_DEPENDENCE);
+        }
+        else
+        {
+          const UniqueID prev = get_current_uid_by_index(idx - 1);
+          LegionSpy::log_mapping_dependence(context_uid, prev,
+              0/*prev index*/, uid, 0/*next index*/, LEGION_TRUE_DEPENDENCE);
+        }
+      }
+      if (!operations.empty())
+      {
+        const UniqueID prev = get_current_uid_by_index(operations.size() - 1);
+        LegionSpy::log_mapping_dependence(context_uid, prev, 0, 
+            curr_fence_uid, 0, LEGION_TRUE_DEPENDENCE);
+      }
+      else
+        LegionSpy::log_mapping_dependence(context_uid, prev_fence_uid, 0,
+            curr_fence_uid, 0, LEGION_TRUE_DEPENDENCE);
+    }
 #endif
 
     //--------------------------------------------------------------------------
-    void LegionTrace::invalidate_trace_cache(Operation *invalidator)
+    void LogicalTrace::invalidate_trace_cache(Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       if (physical_trace == NULL)
@@ -219,7 +619,7 @@ namespace Legion {
         else
         {
           physical_trace->clear_cached_template();
-          current_template->issue_summary_operations(ctx, invalidator, 
+          current_template->issue_summary_operations(context, invalidator, 
                                                      end_provenance);
           has_intermediate_ops = false;
         }
@@ -228,6 +628,71 @@ namespace Legion {
         has_intermediate_ops = true;
     }
 
+    //--------------------------------------------------------------------------
+    void LogicalTrace::translate_dependence_records(Operation *op,
+         const unsigned index, const std::vector<StaticDependence> &dependences)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = context->runtime->forest;
+      const bool is_replicated = (context->get_replication_id() > 0);
+      for (std::vector<StaticDependence>::const_iterator it =
+            dependences.begin(); it != dependences.end(); it++)
+      {
+        if (it->dependence_type == LEGION_NO_DEPENDENCE)
+          continue;
+#ifdef DEBUG_LEGION
+        assert(it->previous_offset <= index);
+#endif
+        const std::pair<Operation*,GenerationID> &prev =
+            operations[index - it->previous_offset];
+        unsigned parent_index = op->find_parent_index(it->current_req_index);
+        LogicalRegion root_region = context->find_logical_region(parent_index);
+        FieldSpaceNode *fs = forest->get_node(root_region.get_field_space());
+        const FieldMask mask = fs->get_field_mask(it->dependent_fields);
+        if (is_replicated && !it->shard_only)
+        {
+          // Need a merge close op to mediate the dependence
+          RegionRequirement req(root_region, 
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, root_region);
+          req.privilege_fields = it->dependent_fields;
+#ifdef DEBUG_LEGION_COLLECTIVES
+          MergeCloseOp *close_op = context->get_merge_close_op(op,
+                                    forest->get_node(root_region));
+#else
+          MergeCloseOp *close_op = context->get_merge_close_op();
+#endif
+          close_op->initialize(context, req, it->current_req_index, mask, op);
+          register_close(close_op, it->current_req_index, req,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                         forest->get_node(root_region),
+#endif
+                         mask);
+          // Mark that we are starting our dependence analysis
+          close_op->begin_dependence_analysis();
+          // Do any other work for the dependence analysis
+          close_op->trigger_dependence_analysis();
+          // Record the dependence of the close on the previous op
+          close_op->register_region_dependence(0/*close index*/,
+              prev.first, prev.second, it->previous_req_index,
+              LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+          // Then record our dependence on the close operation
+          op->register_region_dependence(it->current_req_index,
+              close_op, close_op->get_generation(), 0/*close index*/,
+              LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+          // Dispatch this close op
+          close_op->end_dependence_analysis();
+        }
+        else
+        {
+          // Can just record a normal dependence
+          op->register_region_dependence(it->current_req_index,
+              prev.first, prev.second, it->previous_req_index,
+              it->dependence_type, it->validates, mask);
+        }
+      }
+    }
+
+#if 0
     /////////////////////////////////////////////////////////////
     // StaticTrace
     /////////////////////////////////////////////////////////////
@@ -1058,6 +1523,7 @@ namespace Legion {
       // If we make it here, we couldn't merge it so just add it
       deps.push_back(record);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // TraceOp 
@@ -1203,7 +1669,7 @@ namespace Legion {
       assert(local_trace != NULL);
 #endif
       // Indicate that we are done capturing this trace
-      local_trace->end_trace_capture();
+      local_trace->end_trace_execution(this);
       // Register this fence with all previous users in the parent's context
       FenceOp::trigger_dependence_analysis();
       parent_ctx->record_previous_trace(local_trace);
@@ -1516,8 +1982,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace,
-                                          Provenance *provenance)
+    void TraceReplayOp::initialize_replay(InnerContext *ctx, 
+                                    LogicalTrace *trace, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
@@ -1684,7 +2150,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace,
+    void TraceBeginOp::initialize_begin(InnerContext *ctx, LogicalTrace *trace,
                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -1724,6 +2190,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TRACE_BEGIN_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceBeginOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      local_trace->begin_trace_execution(this);
+      TraceOp::trigger_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1849,10 +2323,10 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTrace::PhysicalTrace(Runtime *rt, LegionTrace *lt)
+    PhysicalTrace::PhysicalTrace(Runtime *rt, LogicalTrace *lt)
       : runtime(rt), logical_trace(lt), perform_fence_elision(
           !(runtime->no_trace_optimization || runtime->no_fence_elision)),
-        repl_ctx(dynamic_cast<ReplicateContext*>(lt->ctx)),
+        repl_ctx(dynamic_cast<ReplicateContext*>(lt->context)),
         previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
         new_template_count(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
@@ -1890,7 +2364,7 @@ namespace Legion {
     {
       ApEvent pending_deletion;
       // See if we're going to exceed the maximum number of templates
-      if (templates.size() == logical_trace->ctx->get_max_trace_templates())
+      if (templates.size() == logical_trace->context->get_max_trace_templates())
       {
 #ifdef DEBUG_LEGION
         assert(!templates.empty());
@@ -1908,7 +2382,7 @@ namespace Legion {
       templates.push_back(tpl);
       if (++new_template_count > LEGION_NEW_TEMPLATE_WARNING_COUNT)
       {
-        InnerContext *ctx = logical_trace->ctx;
+        InnerContext *ctx = logical_trace->context;
         REPORT_LEGION_WARNING(LEGION_WARNING_NEW_TEMPLATE_COUNT_EXCEEDED,
             "WARNING: The runtime has created %d new replayable templates "
             "for trace %u in task %s (UID %lld) without replaying any "
@@ -1936,7 +2410,7 @@ namespace Legion {
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
-        InnerContext *ctx = logical_trace->ctx;
+        InnerContext *ctx = logical_trace->context;
         REPORT_LEGION_WARNING(LEGION_WARNING_NON_REPLAYABLE_COUNT_EXCEEDED,
             "WARNING: The runtime has failed to memoize the trace more than "
             "%u times, due to the absence of a replayable template. It is "
@@ -3156,7 +3630,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
                    RegionTreeForest *f, RegionNode *node, const FieldMask &mask)
-      : context(trace->logical_trace->ctx), forest(f),
+      : context(trace->logical_trace->context), forest(f),
         region(node), condition_expr(region->row_source), condition_mask(mask),
         invalid_mask(mask), precondition_views(NULL), anticondition_views(NULL),
         postcondition_views(NULL)
@@ -4031,11 +4505,11 @@ namespace Legion {
             if (not_subsumed)
               return Replayable(
                   false, "precondition not subsumed: " +
-                    condition.to_string(trace->logical_trace->ctx));
+                    condition.to_string(trace->logical_trace->context));
             else
               return Replayable(
                false, "postcondition anti dependent: " +
-                 condition.to_string(trace->logical_trace->ctx));
+                 condition.to_string(trace->logical_trace->context));
           }
           else
           {
@@ -5786,7 +6260,7 @@ namespace Legion {
     void PhysicalTemplate::dump_template(void)
     //--------------------------------------------------------------------------
     {
-      InnerContext *ctx = trace->logical_trace->ctx;
+      InnerContext *ctx = trace->logical_trace->context;
       log_tracing.info() << "#### " << replayable << " " << this << " Trace "
         << trace->logical_trace->tid << " for " << ctx->get_task_name()
         << " (UID " << ctx->get_unique_id() << ") ####";

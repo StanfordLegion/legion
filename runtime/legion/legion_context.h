@@ -544,8 +544,8 @@ namespace Legion {
         Provenance *provenance) = 0;
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance) = 0;
-      virtual void record_previous_trace(LegionTrace *trace) = 0;
-      virtual void invalidate_trace_cache(LegionTrace *trace,
+      virtual void record_previous_trace(LogicalTrace *trace) = 0;
+      virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator) = 0;
       virtual void record_blocking_call(void) = 0;
     public:
@@ -716,7 +716,7 @@ namespace Legion {
       inline void end_runtime_call(void);
       inline void begin_task_wait(bool from_runtime);
       inline void end_task_wait(void); 
-      void remap_unmapped_regions(LegionTrace *current_trace,
+      void remap_unmapped_regions(LogicalTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions,
                            Provenance *provenance);
     public:
@@ -1618,8 +1618,8 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
-      virtual void record_previous_trace(LegionTrace *trace);
-      virtual void invalidate_trace_cache(LegionTrace *trace,
+      virtual void record_previous_trace(LogicalTrace *trace);
+      virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator);
       virtual void record_blocking_call(void);
     public:
@@ -1763,7 +1763,7 @@ namespace Legion {
                                              CollectiveMapping *mapping = NULL);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
-                               LegionTrace *current_trace, 
+                               LogicalTrace *current_trace, 
                                Provenance *provenance, 
                                bool silence_warnings, bool inlining_enabled);
     public:
@@ -1889,9 +1889,9 @@ namespace Legion {
       CompletionQueue                                 post_task_comp_queue;
     protected:
       // Traces for this task's execution
-      LegionMap<TraceID,LegionTrace*,TASK_TRACES_ALLOC> traces;
-      LegionTrace *current_trace;
-      LegionTrace *previous_trace;
+      LegionMap<TraceID,LogicalTrace*,TASK_TRACES_ALLOC> traces;
+      LogicalTrace *current_trace;
+      LogicalTrace *previous_trace;
       // ID is either 0 for not replaying, 1 for replaying, or
       // the event id for signaling that the status isn't ready 
       std::atomic<realm_id_t> physical_trace_replay_status;
@@ -3708,8 +3708,8 @@ namespace Legion {
           Provenance *provenance);
       virtual void end_trace(TraceID tid, bool deprecated,
                              Provenance *provenance);
-      virtual void record_previous_trace(LegionTrace *trace);
-      virtual void invalidate_trace_cache(LegionTrace *trace,
+      virtual void record_previous_trace(LogicalTrace *trace);
+      virtual void invalidate_trace_cache(LogicalTrace *trace,
                                           Operation *invalidator);
       virtual void record_blocking_call(void);
     public:

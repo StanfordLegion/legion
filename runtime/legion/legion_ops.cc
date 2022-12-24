@@ -1351,7 +1351,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_trace(LegionTrace *t,
+    void Operation::set_trace(LogicalTrace *t,
                               const std::vector<StaticDependence> *dependences)
     //--------------------------------------------------------------------------
     {
@@ -10448,6 +10448,9 @@ namespace Legion {
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req);
       close_mask = close_m;
+      trace = creator->get_trace();
+      if (trace != NULL)
+        tracing = trace->initialize_op_tracing(this, NULL/*no deps*/);
       if (runtime->legion_spy_enabled)
         perform_logging();
     }

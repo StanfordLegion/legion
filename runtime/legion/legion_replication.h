@@ -2224,7 +2224,7 @@ namespace Legion {
       virtual bool exchange_replayable(ReplicateContext *ctx, bool replayable);
       virtual void sync_compute_frontiers(RtEvent precondition);
     protected:
-      LegionTrace *local_trace;
+      LogicalTrace *local_trace;
     };
     
     /**
@@ -2318,7 +2318,7 @@ namespace Legion {
     public:
       ReplTraceReplayOp& operator=(const ReplTraceReplayOp &rhs);
     public:
-      void initialize_replay(ReplicateContext *ctx, LegionTrace *trace,
+      void initialize_replay(ReplicateContext *ctx, LogicalTrace *trace,
                              Provenance *provenance);
     public:
       virtual void activate(void);
@@ -2354,13 +2354,14 @@ namespace Legion {
     public:
       ReplTraceBeginOp& operator=(const ReplTraceBeginOp &rhs);
     public:
-      void initialize_begin(ReplicateContext *ctx, LegionTrace *trace,
+      void initialize_begin(ReplicateContext *ctx, LogicalTrace *trace,
                             Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
     };
 
     /**

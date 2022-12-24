@@ -422,7 +422,7 @@ namespace Legion {
       virtual bool is_memoizing(void) const { return false; }
       inline bool is_tracing(void) const { return tracing; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
-      inline LegionTrace* get_trace(void) const { return trace; }
+      inline LogicalTrace* get_trace(void) const { return trace; }
       inline size_t get_ctx_index(void) const { return context_index; }
       inline MustEpochOp* get_must_epoch_op(void) const { return must_epoch; } 
       inline Provenance* get_provenance(void) const 
@@ -444,7 +444,7 @@ namespace Legion {
                                    const RegionRequirement &req,
                                    LogicalPartition start_node);
       void set_tracking_parent(size_t index);
-      void set_trace(LegionTrace *trace,
+      void set_trace(LogicalTrace *trace,
                      const std::vector<StaticDependence> *dependences);
       void set_trace_local_id(size_t id);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
@@ -810,7 +810,7 @@ namespace Legion {
       // Previous execution fence if there was one
       ApEvent execution_fence_event;
       // The trace for this operation if any
-      LegionTrace *trace;
+      LogicalTrace *trace;
       // Track whether we are tracing this operation
       bool tracing;
       // The id local to a trace

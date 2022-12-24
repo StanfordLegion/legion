@@ -1737,9 +1737,7 @@ namespace Legion {
     class LeafContext;
 
     // legion_trace.h
-    class LegionTrace;
-    class StaticTrace;
-    class DynamicTrace;
+    class LogicalTrace;
     class TraceCaptureOp;
     class TraceCompleteOp;
     class TraceReplayOp;

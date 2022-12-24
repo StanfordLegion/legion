@@ -1797,10 +1797,8 @@ namespace Legion {
       if (IS_NO_ACCESS(req))
         return;
       LogicalTraceInfo trace_info(op, idx, req); 
-      // If we're tracing and replaying then there is nothing for us to do
-      // since these mapping dependences and close operations were already
-      // performed by Memoizable class
-      if (trace_info.replaying_trace)
+      // If we've already replayed the analysis we don't need to do it
+      if (trace_info.skip_analysis)
         return;
       InnerContext *context = op->get_context();
       RegionNode *parent_node = get_node(req.parent);
@@ -16125,9 +16123,6 @@ namespace Legion {
       // with a close operation to make the equivalence set
       if (check_unversioned && !!unversioned)
       {
-#ifdef DEBUG_LEGION
-        assert(!trace_info.replaying_trace);
-#endif
         // See if we made refinements for any of these fields, if so
         // they will make the initial batch of equivalence sets
         if (!refinements.empty())
@@ -16150,7 +16145,7 @@ namespace Legion {
           // fields here at the root of the tree
           InnerContext *context = user.op->get_context();
 #ifdef DEBUG_LEGION_COLLECTIVES
-          MergeCloseOp *initializer = context->get_merge_close_op(user, this);
+          MergeCloseOp *initializer = context->get_merge_close_op(user.op,this);
 #else
           MergeCloseOp *initializer = context->get_merge_close_op();
 #endif

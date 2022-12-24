@@ -2465,7 +2465,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void TaskContext::remap_unmapped_regions(LegionTrace *trace,
+    void TaskContext::remap_unmapped_regions(LogicalTrace *trace,
                             const std::vector<PhysicalRegion> &unmapped_regions,
                             Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -2474,20 +2474,11 @@ namespace Legion {
       assert(!unmapped_regions.empty());
 #endif
       if (trace != NULL)
-      {
-        if (trace->is_static_trace())
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
-                      "Illegal runtime remapping in static trace inside of "
-                      "task %s (UID %lld). Static traces must perfectly "
-                      "manage their physical mappings with no runtime help.",
-                      get_task_name(), get_unique_id())
-        else
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
-                      "Illegal runtime remapping in dynamic trace %d inside of "
-                      "task %s (UID %lld). Dynamic traces must perfectly "
-                      "manage their physical mappings with no runtime help.",
-                      trace->tid, get_task_name(), get_unique_id())
-      }
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RUNTIME_REMAPPING,
+                    "Illegal runtime remapping in trace %d inside of "
+                    "task %s (UID %lld). Traces must perfectly "
+                    "manage their physical mappings with no runtime help.",
+                    trace->tid, get_task_name(), get_unique_id())
       std::set<ApEvent> mapped_events;
       for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
       {
@@ -2902,7 +2893,7 @@ namespace Legion {
         deferred_commit_comp_queue.destroy();
       if (post_task_comp_queue.exists())
         post_task_comp_queue.destroy();
-      for (std::map<TraceID,LegionTrace*>::const_iterator it = 
+      for (std::map<TraceID,LogicalTrace*>::const_iterator it = 
             traces.begin(); it != traces.end(); it++)
         if (it->second->remove_reference())
           delete (it->second);
@@ -9574,15 +9565,13 @@ namespace Legion {
           "Illegal nested trace with ID %d attempted in task %s (ID %lld)", 
           tid, get_task_name(), get_unique_id())
 
-      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
-      LegionTrace *trace = NULL;
+      std::map<TraceID,LogicalTrace*>::const_iterator finder = traces.find(tid);
+      LogicalTrace *trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        if (static_trace)
-          trace = new StaticTrace(tid, this, logical_only, provenance, trees);
-        else
-          trace = new DynamicTrace(tid, this, logical_only, provenance);
+        trace = new LogicalTrace(this, tid, logical_only, 
+                                 static_trace, provenance, trees);
         if (!deprecated)
           traces[tid] = trace;
         trace->add_reference();
@@ -9697,7 +9686,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::record_previous_trace(LegionTrace *trace)
+    void InnerContext::record_previous_trace(LogicalTrace *trace)
     //--------------------------------------------------------------------------
     {
       previous_trace = trace;
@@ -9705,7 +9694,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_trace_cache(
-                                     LegionTrace *trace, Operation *invalidator)
+                                    LogicalTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       if ((previous_trace != NULL) && (previous_trace != trace))
@@ -11463,8 +11452,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::execute_task_launch(TaskOp *task, bool index,
-                             LegionTrace *current_trace, Provenance *provenance,
-                             bool silence_warnings, bool inlining_enabled)
+                            LogicalTrace *current_trace, Provenance *provenance,
+                            bool silence_warnings, bool inlining_enabled)
     //--------------------------------------------------------------------------
     {
       bool inline_task = false;
@@ -18835,15 +18824,13 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
           "Illegal nested trace with ID %d attempted in "
            "task %s (ID %lld)", tid, get_task_name(), get_unique_id())
-      std::map<TraceID,LegionTrace*>::const_iterator finder = traces.find(tid);
-      LegionTrace *trace = NULL;
+      std::map<TraceID,LogicalTrace*>::const_iterator finder = traces.find(tid);
+      LogicalTrace *trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        if (static_trace)
-          trace = new StaticTrace(tid, this, logical_only, provenance, trees);
-        else
-          trace = new DynamicTrace(tid, this, logical_only, provenance);
+        trace = new LogicalTrace(this, tid, logical_only, 
+                                 static_trace, provenance, trees);
         if (!deprecated)
           traces[tid] = trace;
         trace->add_reference();
@@ -23367,7 +23354,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::record_previous_trace(LegionTrace *trace)
+    void LeafContext::record_previous_trace(LogicalTrace *trace)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23378,7 +23365,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::invalidate_trace_cache(
-                                     LegionTrace *trace, Operation *invalidator)
+                                    LogicalTrace *trace, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION

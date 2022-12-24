@@ -245,12 +245,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalTraceInfo::LogicalTraceInfo(Operation *op, unsigned idx, 
                                        const RegionRequirement &r)
-      : trace(((op->get_trace() != NULL) && 
-                op->get_trace()->handles_region_tree(r.parent.get_tree_id())) ?
-                op->get_trace() : NULL), req_idx(idx), req(r),
-        already_traced((trace != NULL) && !op->is_tracing()),
-        recording_trace((trace != NULL) && trace->is_recording()),
-        replaying_trace((trace != NULL) && trace->is_replaying())
+      : trace(op->get_trace()), req_idx(idx), req(r),
+        skip_analysis((trace != NULL) && 
+                       trace->skip_analysis(r.parent.get_tree_id()))
     //--------------------------------------------------------------------------
     {
     }
@@ -3901,6 +3898,13 @@ namespace Legion {
       node->column_source->get_field_set(mask, context,
                                          req.privilege_fields);
       close_op->initialize(context, req, pending->req_idx, mask, op);
+      LogicalTrace *trace = op->get_trace();
+      if (trace != NULL)
+        trace->register_close(close_op, pending->req_idx, req, 
+#ifdef DEBUG_LEGION_COLLECTIVES
+                              node,
+#endif
+                              mask);
       // Mark that we are starting our dependence analysis
       close_op->begin_dependence_analysis();
       // Do any other work for the dependence analysis
@@ -3926,6 +3930,10 @@ namespace Legion {
       node->register_local_user(state, *close_user, mask);
       // Mark that we are done, this puts the close op in the pipeline!
       close_op->end_dependence_analysis();
+      // Record a dependence on the close operation for ourself
+      op->register_region_dependence(pending->req_idx, close_op, 
+          close_user->gen, 0/*close idx*/, LEGION_TRUE_DEPENDENCE,
+          false/*validates*/, mask);
     }
 
     /////////////////////////////////////////////////////////////

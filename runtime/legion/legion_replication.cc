@@ -7488,7 +7488,7 @@ namespace Legion {
       assert(local_trace != NULL);
 #endif
       // Indicate that we are done capturing this trace
-      local_trace->end_trace_capture();
+      local_trace->end_trace_execution(this);
       if (local_trace->is_recording())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
@@ -7790,14 +7790,6 @@ namespace Legion {
         // Save this for later since we can't access it safely in mapping stage
         is_recording = true;
       } 
-
-      // If this is a static trace, then we remove our reference when we're done
-      if (local_trace->is_static_trace())
-      {
-        StaticTrace *static_trace = static_cast<StaticTrace*>(local_trace);
-        if (static_trace->remove_reference())
-          delete static_trace;
-      }
       ReplFenceOp::trigger_dependence_analysis();
     }
 
@@ -7963,7 +7955,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceReplayOp::initialize_replay(ReplicateContext *ctx, 
-                                     LegionTrace *trace, Provenance *provenance)
+                                     LogicalTrace*trace, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
@@ -8203,7 +8195,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplTraceBeginOp::initialize_begin(ReplicateContext *ctx, 
-                                     LegionTrace *trace, Provenance *provenance)
+                                    LogicalTrace *trace, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
@@ -8242,6 +8234,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TRACE_BEGIN_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplTraceBeginOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      local_trace->begin_trace_execution(this);
+      ReplTraceOp::trigger_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////

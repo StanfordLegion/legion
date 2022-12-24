@@ -143,12 +143,10 @@ namespace Legion {
       LogicalTraceInfo(Operation *op, unsigned idx,
                        const RegionRequirement &r);
     public:
-      LegionTrace *const trace;
+      LogicalTrace *const trace;
       const unsigned req_idx;
       const RegionRequirement &req;
-      const bool already_traced;
-      const bool recording_trace;
-      const bool replaying_trace;
+      const bool skip_analysis;
     };
 
     /**

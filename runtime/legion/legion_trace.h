@@ -26,6 +26,206 @@ namespace Legion {
   namespace Internal {
 
     /**
+     * \class LogicalTrace
+     * The logical trace class captures the tracing information
+     * for the logical dependence analysis so that it can be 
+     * replayed without needing to perform the analysis again
+     */
+    class LogicalTrace : public Collectable {
+    public:
+      enum TracingState {
+        LOGICAL_ONLY,
+        PHYSICAL_RECORD,
+        PHYSICAL_REPLAY,
+      };
+    public:
+      struct DependenceRecord {
+      public:
+        DependenceRecord(int idx)
+          : operation_idx(idx), prev_idx(-1), next_idx(-1),
+            validates(false), dtype(LEGION_TRUE_DEPENDENCE) { }
+        DependenceRecord(int op_idx, int pidx, int nidx,
+                         bool val, DependenceType d,
+                         const FieldMask &m)
+          : operation_idx(op_idx), prev_idx(pidx), 
+            next_idx(nidx), validates(val),
+            dtype(d), dependent_mask(m) { }
+      public:
+        inline bool merge(const DependenceRecord &record)
+        {
+          if ((operation_idx != record.operation_idx) ||
+              (prev_idx != record.prev_idx) ||
+              (next_idx != record.next_idx) ||
+              (validates != record.validates) ||
+              (dtype != record.dtype))
+            return false;
+          dependent_mask |= record.dependent_mask;
+          return true;
+        }
+      public:
+        int operation_idx;
+        int prev_idx; // previous region requirement index
+        int next_idx; // next region requirement index
+        bool validates;
+        DependenceType dtype;
+        FieldMask dependent_mask;
+      };
+      struct CloseInfo {
+      public:
+        CloseInfo(const RegionRequirement &r, unsigned idx,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                  RegionTreeNode *n,
+#endif
+                  const FieldMask &m)
+          : requirement(r), close_mask(m), creator_idx(idx)
+#ifdef DEBUG_LEGION_COLLECTIVES
+            , node(n)
+#endif
+        { }
+      public:
+        RegionRequirement requirement;
+        LegionVector<DependenceRecord> dependences;
+        FieldMask close_mask;
+        unsigned creator_idx;
+#ifdef DEBUG_LEGION_COLLECTIVES
+        RegionTreeNode *node;
+#endif
+      };
+      struct OperationInfo {
+      public:
+        OperationInfo(Operation *op)
+          : kind(op->get_operation_kind()),
+            region_count(op->get_region_count()) { }
+      public:
+        LegionVector<DependenceRecord> dependences;
+        LegionVector<CloseInfo> closes;
+        Operation::OpKind kind;
+        unsigned region_count;
+      };
+      class StaticTranslator {
+      public:
+        StaticTranslator(const std::set<RegionTreeID> *trs)
+        { if (trs != NULL) trees.insert(trs->begin(), trs->end()); }
+      public:
+        inline bool skip_analysis(RegionTreeID tid) const
+        { if (trees.empty()) return true; 
+          else return (trees.find(tid) != trees.end()); }
+        inline void push_dependences(const std::vector<StaticDependence> *deps)
+        {
+          AutoLock t_lock(translator_lock);
+          if (deps != NULL)
+            dependences.emplace_back(*deps);
+          else
+            dependences.resize(dependences.size() + 1);
+        }
+        inline void pop_dependences(std::vector<StaticDependence> &deps)
+        {
+          AutoLock t_lock(translator_lock);
+#ifdef DEBUG_LEGION
+          assert(!dependences.empty());
+#endif
+          deps.swap(dependences.front());
+          dependences.pop_front();
+        }
+      public:
+        LocalLock translator_lock;
+        std::deque<std::vector<StaticDependence> > dependences;
+        std::set<RegionTreeID> trees;
+      };
+    public:
+      LogicalTrace(InnerContext *ctx, TraceID tid, bool logical_only,
+                   bool static_trace, Provenance *provenance,
+                   const std::set<RegionTreeID> *trees);
+      ~LogicalTrace(void);
+    public:
+      inline TraceID get_trace_id(void) const { return tid; }
+    public:
+      bool initialize_op_tracing(Operation *op,
+                     const std::vector<StaticDependence> *dependences);
+      bool skip_analysis(RegionTreeID tid) const;
+      void register_operation(Operation *op, GenerationID gen);
+      void register_close(MergeCloseOp *op, unsigned creator_idx,
+                          const RegionRequirement &req,
+#ifdef DEBUG_LEGION_COLLECTIVES
+                          RegionTreeNode *node,
+#endif
+                          const FieldMask &close_mask);
+      bool record_dependence(Operation *target, GenerationID target_gen,
+                                Operation *source, GenerationID source_gen);
+      bool record_region_dependence(Operation *target, GenerationID target_gen,
+                                    Operation *source, GenerationID source_gen,
+                                    unsigned target_idx, unsigned source_idx,
+                                    DependenceType dtype, bool validates,
+                                    const FieldMask &dependent_mask);
+    public:
+      // Called by task execution thread
+      inline bool is_fixed(void) const { return fixed; }
+      void fix_trace(Provenance *provenance);
+    public:
+      bool has_physical_trace(void) { return physical_trace != NULL; }
+      PhysicalTrace* get_physical_trace(void) { return physical_trace; }
+      void register_physical_only(Operation *op);
+    public:
+      void begin_trace_execution(FenceOp *fence_op);
+      void end_trace_execution(FenceOp *fence_op);
+    public:
+      void initialize_tracing_state(void) { state = LOGICAL_ONLY; }
+      void set_state_record(void) { state.store(PHYSICAL_RECORD); }
+      void set_state_replay(void) { state.store(PHYSICAL_REPLAY); }
+      bool is_recording(void) const { return state.load() == PHYSICAL_RECORD; }
+      bool is_replaying(void) const { return state.load() == PHYSICAL_REPLAY; }
+    public:
+      inline void clear_blocking_call(void) { blocking_call_observed = false; }
+      inline void record_blocking_call(void) { blocking_call_observed = true; }
+      inline bool has_blocking_call(void) const {return blocking_call_observed;}
+      inline bool has_intermediate_operations(void) const 
+        { return has_intermediate_ops; }
+      inline void reset_intermediate_operations(void)
+        { has_intermediate_ops = false; }
+      void invalidate_trace_cache(Operation *invalidator);
+    protected:
+      void replay_operation_dependences(Operation *op,
+          const LegionVector<DependenceRecord> &dependences);
+      void translate_dependence_records(Operation *op, const unsigned index,
+          const std::vector<StaticDependence> &dependences);
+#ifdef LEGION_SPY
+    public:
+      void perform_logging(UniqueID prev_fence_uid, UniqueID curr_fence_uid);
+      UniqueID get_current_uid_by_index(unsigned op_idx) const;
+#endif
+    public:
+      InnerContext *const context;
+      const TraceID tid;
+      Provenance *const begin_provenance;
+      // Set after end_trace is called
+      Provenance *end_provenance;
+    protected:
+      std::atomic<TracingState> state;
+      // Pointer to a physical trace
+      PhysicalTrace *physical_trace;
+      size_t last_memoized;
+      size_t physical_op_count;
+      bool blocking_call_observed;
+      bool has_intermediate_ops;
+      bool fixed;
+      bool recording;
+      std::set<std::pair<Operation*,GenerationID> > frontiers;
+      std::vector<std::pair<Operation*,GenerationID> > operations;
+      std::deque<OperationInfo> replay_info;
+      // Only need this backwards lookup for trace capture
+      std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;
+      FenceOp *trace_fence;
+      GenerationID trace_fence_gen;
+      StaticTranslator *static_translator;
+#ifdef LEGION_SPY
+    protected:
+      std::map<std::pair<Operation*,GenerationID>,UniqueID> current_uids;
+      std::map<std::pair<Operation*,GenerationID>,unsigned> num_regions;
+#endif
+    };
+
+#if 0
+    /**
      * \class LegionTrace
      * This is the abstract base class for a trace object
      * and is used to support both static and dynamic traces
@@ -279,6 +479,7 @@ namespace Legion {
     protected:
       bool tracing;
     };
+#endif
 
     class TraceOp : public FenceOp {
     public:
@@ -290,7 +491,7 @@ namespace Legion {
     public:
       virtual void execute_dependence_analysis(void);
     protected:
-      LegionTrace *local_trace;
+      LogicalTrace *local_trace;
     };
 
     /**
@@ -377,7 +578,7 @@ namespace Legion {
     public:
       TraceReplayOp& operator=(const TraceReplayOp &rhs);
     public:
-      void initialize_replay(InnerContext *ctx, LegionTrace *trace,
+      void initialize_replay(InnerContext *ctx, LogicalTrace *trace,
                              Provenance *provenance);
     public:
       virtual void activate(void);
@@ -405,13 +606,14 @@ namespace Legion {
     public:
       TraceBeginOp& operator=(const TraceBeginOp &rhs);
     public:
-      void initialize_begin(InnerContext *ctx, LegionTrace *trace,
+      void initialize_begin(InnerContext *ctx, LogicalTrace *trace,
                             Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
     };
 
     class TraceSummaryOp : public TraceOp {
@@ -451,7 +653,7 @@ namespace Legion {
      */
     class PhysicalTrace {
     public:
-      PhysicalTrace(Runtime *runtime, LegionTrace *logical_trace);
+      PhysicalTrace(Runtime *runtime, LogicalTrace *logical_trace);
       PhysicalTrace(const PhysicalTrace &rhs) = delete;
       ~PhysicalTrace(void);
     public:
@@ -493,7 +695,7 @@ namespace Legion {
       void initialize_template(ApEvent fence_completion, bool recurrent);
     public:
       Runtime * const runtime;
-      const LegionTrace *logical_trace;
+      const LogicalTrace *logical_trace;
       const bool perform_fence_elision;
       ReplicateContext *const repl_ctx;
     private:
