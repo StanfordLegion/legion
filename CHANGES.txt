@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 22.12.0 (???? ??, ????)
+Version 22.12.0 (December 30, 2022)
   * Regent
     - Support for nested predication of `if` and `while` statements
   * Realm
