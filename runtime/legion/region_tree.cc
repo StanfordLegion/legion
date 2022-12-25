@@ -1866,15 +1866,13 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
       TaskContext *context = op->get_context();
       RegionTreeContext ctx = context->get_context(); 
-#ifdef DEBUG_LEGION
-      assert(ctx.exists());
-#endif
       RegionNode *parent_node = get_node(req.parent);
 #ifdef DEBUG_LEGION
-      // We should always be deleting the root of the region tree
-      assert(parent_node->parent == NULL);
+      assert(ctx.exists());
+      assert(!req.privilege_fields.empty() || invalidate_tree);
 #endif
-      FieldMask user_mask = 
+      const FieldMask user_mask = invalidate_tree ? 
+        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES) : 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
       LogicalUser user(op, idx, RegionUsage(req), user_mask);
@@ -1893,9 +1891,18 @@ namespace Legion {
       // Do the traversal
       FieldMask already_closed_mask;
       parent_node->register_logical_deletion(ctx.get_id(), user, user_mask,
-          path, trace_info, already_closed_mask, invalidate_tree);
-      // Once we are done we can clear out the list of recorded dependences
-      op->clear_logical_records();
+          path, trace_info, already_closed_mask);
+      if (invalidate_tree)
+      {
+        // We should only be invalidating the entire tree if we're deleting
+        // a root logical region
+#ifdef DEBUG_LEGION
+        assert(req.region == req.parent);
+        assert(parent_node->parent == NULL);
+#endif
+        CurrentInvalidator invalidator(ctx, false/*users only*/);
+        parent_node->visit_node(&invalidator);
+      }
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
                                      op->get_unique_op_id(), parent_node,
@@ -19050,10 +19057,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_deletion(ContextID ctx,
                                            const LogicalUser &user,
-                                           const FieldMask &check_mask,
+                                           const FieldMask &user_mask,
                                            const RegionTreePath &path,
                                            const LogicalTraceInfo &trace_info,
-                                           FieldMask &already_closed_mask,
+                                           FieldMask &unopened_field_mask,
                                            bool invalidate_tree)
     //--------------------------------------------------------------------------
     {
@@ -19065,6 +19072,38 @@ namespace Legion {
 #endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
+      RegionTreeNode *next_child = NULL;
+      if (!arrived)
+        next_child = get_tree_child(path.get_child(depth));
+      // Check to see if we need to traverse any interfering children
+      // and record dependences on prior operations in that tree
+      if (!!unopened_field_mask)
+        siphon_interfering_children(state, logical_analysis,
+            unopened_field_mask, user, privilege_root, next_child, open_below);
+      // Perform our local dependence analysis at this node along the path
+      FieldMask dominator_mask = 
+             perform_dependence_checks<true/*track dom*/>(privilege_root,
+                          user, state.curr_epoch_users, user_mask,
+                          open_below, arrived, proj_info,
+                          state, logical_analysis);
+      FieldMask non_dominated_mask = user_mask - dominator_mask;
+      // For the fields that weren't dominated, we have to check
+      // those fields against the previous epoch's users
+      if (!!non_dominated_mask)
+        perform_dependence_checks<false/*track dom*/>(privilege_root,
+                          user, state.prev_epoch_users, non_dominated_mask,
+                          open_below, arrived, proj_info,
+                          state, logical_analysis);
+      if (!arrived)
+      {
+
+      }
+      else
+        register_local_user(state, user, user_mask);
+
+      
+
+
       if (!arrived)
       {
         FieldMask open_below;

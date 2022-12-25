@@ -3916,6 +3916,7 @@ namespace Legion {
       void invalidate_disjoint_complete_tree(ContextID ctx, 
                                         const FieldMask &invalidate_mask,
                                         const bool invalidate_self);
+#if 0
       void register_logical_deletion(ContextID ctx,
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
@@ -3929,6 +3930,7 @@ namespace Legion {
                                    RegionTreeNode *next_child,
                                    FieldMask &open_below,
                                    bool force_close_next);
+#endif
     public:
       void migrate_logical_state(ContextID src, ContextID dst, bool merge);
       void migrate_version_state(ContextID src, ContextID dst, 

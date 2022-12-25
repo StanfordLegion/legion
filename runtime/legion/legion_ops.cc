@@ -9821,22 +9821,36 @@ namespace Legion {
       // region tree to serve as mapping dependences on things that might
       // use these data structures in the case of recycling, e.g. in the
       // case that we recycle a field index
-      unsigned index = 0;
-      for (std::vector<RegionRequirement>::iterator it =
-            deletion_requirements.begin(); it != 
-            deletion_requirements.end(); index++)
+      LogicalAnalysis logical_analysis(this, map_applied_conditions);
+      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
       {
-        // Perform the normal region requirement analysis
+        const RegionRequirement &req = deletion_requirements[idx];
+        if (req.privilege_fields.empty())
+        {
+#ifdef DEBUG_LEGION
+          // Only full region deletions shouldn't have any fields
+          assert(kind == LOGICAL_REGION_DELETION);
+#endif
+          continue;
+        }
+        ProjectionInfo proj_info;
         RegionTreePath privilege_path;
-        initialize_privilege_path(privilege_path, *it);
-        // Check to see if we can remove these requirements because
-        // they were never actually initialized in the first place
-        if (runtime->forest->perform_deletion_analysis(this, index, *it,
-            privilege_path,
-            (kind == LOGICAL_REGION_DELETION)) && it->privilege_fields.empty())
-          it = deletion_requirements.erase(it);
-        else
-          it++;
+        initialize_privilege_path(privilege_path, req);
+        runtime->forest->perform_dependence_analysis(this, idx, req,
+            proj_info, privilege_path, logical_analysis);
+      }
+      if (kind == LOGICAL_REGION_DELETION)
+      {
+        // For logical region deletions then we invalidate the whole tree
+        const RegionTreeContext ctx = parent_ctx->get_context();
+        for (std::vector<RegionRequirement>::const_iterator it =
+              deletion_requirements.begin(); it !=
+              deletion_requirements.end(); it++)
+        {
+          RegionNode *region = runtime->forest->get_node(it->region);
+          runtime->forest->invalidate_current_context(ctx, 
+                              false/*users only*/, region);
+        }
       }
       // Now pretend like this is going to be a mapping fence on everyone
       // who came before, although we will never actually record ourselves
