@@ -40,7 +40,7 @@ task main()
   var structured_lr = region(structured_is, fs)
 
   -- Note that you can create multiple regions with the same ispace
-  -- and fspace. This is a **NEW** region, distint from structured_lr
+  -- and fspace. This is a **NEW** region, distinct from structured_lr
   -- above.
   var no_clone_lr = region(structured_is, fs)
 end
