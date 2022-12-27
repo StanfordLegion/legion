@@ -5741,6 +5741,7 @@ class CollectiveRendezvous(object):
         total_points = len(self.points)
         matched_reqs = list()
         collective_reqs = list()
+        provenance = self.owner.get_provenance()
         for idx in range(len(self.matches)):
             diff_regions = len(self.matches[idx])
             assert diff_regions <= total_points
@@ -5757,10 +5758,17 @@ class CollectiveRendezvous(object):
             if diff_regions == total_points:
                 # Check to make sure the user didn't ask for any collective behavior
                 if requested:
-                    printf('WARNING: A collective rendezvous was requested for '+
-                            'region requirement '+str(idx)+' of '+str(self.owner)+
-                            ' but no point operations shared the same logical region.'+
-                            ' This could lead to unnecessary runtime overhead.')
+                    if provenance is not None and len(provenance) > 0:
+                        printf('WARNING: A collective rendezvous was requested for '+
+                                'region requirement '+str(idx)+' of '+str(self.owner)+
+                                ' (from '+provenance+') but no point operations shared '+
+                                'the same logical region. This could lead to unnecessary '+
+                                'runtime overhead.')
+                    else:
+                        printf('WARNING: A collective rendezvous was requested for '+
+                                'region requirement '+str(idx)+' of '+str(self.owner)+
+                                ' but no point operations shared the same logical region.'+
+                                ' This could lead to unnecessary runtime overhead.')
             elif requested:
                 matched_reqs.append(idx)
             else:
@@ -5774,9 +5782,15 @@ class CollectiveRendezvous(object):
                         total_matches += len(ops)
                 assert total_matches <= total_points
                 efficiency = "{:.2f}".format(100 * total_matches / total_points)
-                print('Matched '+str(total_matches)+' points of '+str(self.owner)+
-                        ' out of '+str(total_points)+' for region requirement '+
-                        str(idx)+' (Efficiency: '+efficiency+'%)')
+                if provenance is not None and len(provenance) > 0:
+                    print('Matched '+str(total_matches)+' points of '+str(self.owner)+
+                            ' (from '+provenance+') out of '+str(total_points)+
+                            ' for region requirement '+str(idx)+' (Efficiency: '+
+                            efficiency+'%)')
+                else:
+                    print('Matched '+str(total_matches)+' points of '+str(self.owner)+
+                            ' out of '+str(total_points)+' for region requirement '+
+                            str(idx)+' (Efficiency: '+efficiency+'%)')
                 for region,ops in iteritems(self.matches[idx]):
                     pointstr = ''
                     first = True
@@ -5796,10 +5810,16 @@ class CollectiveRendezvous(object):
                         total_matches += len(ops)
                 assert total_matches <= total_points
                 efficiency = "{:.2f}".format(100 * total_matches / total_points)
-                print('WARNING: Missed collective rendezvous optimization for region '+
-                        'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
-                        str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
-                        'use the same logical region as another point.')
+                if provenance is not None and len(provenance) > 0:
+                    print('WARNING: Missed collective rendezvous optimization for region '+
+                            'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
+                            ') which had '+str(total_points)+' out of '+str(total_points)+
+                            ' ('+efficiency+'%) use the same logical region as another point.')
+                else:
+                    print('WARNING: Missed collective rendezvous optimization for region '+
+                            'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                            str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                            'use the same logical region as another point.')
                 for region,ops in iteritems(self.matches[idx]):
                     pointstr = ''
                     first = True
