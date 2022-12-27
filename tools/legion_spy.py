@@ -6921,7 +6921,7 @@ class Operation(object):
         stop_index = self.context.operations.index(self)
         for index in xrange(start_index, stop_index):
             prev_op = self.context.operations[index]
-            if prev_op.replayed:
+            if prev_op.replayed or not prev_op.predicate_result:
                 continue
             if perform_checks:
                 found = False
@@ -7010,7 +7010,7 @@ class Operation(object):
     def perform_op_logical_verification(self, logical_op, previous_deps):
         # TODO: Remove this once we actually replay logical analysis correctly 
         # under all tracing cases
-        if self.replayed:
+        if self.replayed or not self.predicate_result:
             return True
         # We need a context to do this
         assert logical_op.context is not None
