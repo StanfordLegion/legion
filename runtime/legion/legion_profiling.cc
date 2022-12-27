@@ -614,6 +614,7 @@ namespace Legion {
         Realm::ProfilingMeasurements::OperationTimeline>(timeline);
 
       Realm::ProfilingMeasurements::OperationFinishEvent fevent;
+      fevent.finish_event = Realm::Event::NO_EVENT;
       response.get_measurement<
         Realm::ProfilingMeasurements::OperationFinishEvent>(fevent);
 

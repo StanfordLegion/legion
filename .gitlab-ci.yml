@@ -215,6 +215,7 @@ variables:
   USE_KOKKOS: "1"
   KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
   KOKKOS_BRANCH: "master"
+  KOKKOS_CUDA_ARCH: "PASCAL60"
   KKERNELS_REPO: "https://github.com/kokkos/kokkos-kernels.git"
   KKERNELS_BRANCH: "master"
 
@@ -380,7 +381,7 @@ before_script:
       tar -zxf cmake-3.16.7-Linux-x86_64.tar.gz
       PATH=`pwd`/cmake-3.16.7-Linux-x86_64/bin:$PATH
 
-      git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
+      git clone --depth 1 -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
       git -C kokkos log -n 1
       mkdir kokkos/build
       cd kokkos/build
@@ -397,11 +398,20 @@ before_script:
       fi
       if [[ "$USE_CUDA" -eq 1 ]]; then
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ENABLE_CUDA=ON -DKokkos_ENABLE_CUDA_LAMBDA=ON -DKokkos_ENABLE_CUDA_UVM=OFF"
-        # Rely on kokkos' auto-detect for the build.  This will need to be
-        # modified to include all sm-major for universal builds later on
-        #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
+        # Pick a base CUDA architecture to enable
+        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_ARCH_${KOKKOS_CUDA_ARCH}=ON"
+        # Force Kokkos build to always use the nvcc wrapper (even for clang)
+        # This allows kokkos to build SASS and PTX in a forward compatible way,
+        # allowing older toolkits to work on newer GPUs in CI
+        # This still requires a patch to Kokkos, coming in 4.0:
+        # https://github.com/kokkos/kokkos/pull/5527
+        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=$(realpath ../bin)/nvcc_wrapper"
+        export NVCC_WRAPPER_DEFAULT_COMPILER="$CXX"
         #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_CUDA_DIR=${CUDA}"
-        export CUDA_PATH="${CUDA}/lib64"
+        export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
+        # Make sure KOKKOS and Legion use the same compiler for NVCC as for HOST
+        # code and pass this into the -ccbin argument for nvcc
+        export CUDAHOSTCXX="$CXX"
         #export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
         #export CUDA_TOOLKIT_ROOT_DIR=$CUDA
         #export CUDA_PATH="${CUDA}/bin"
@@ -409,19 +419,8 @@ before_script:
         # kokkos expects (the right) nvcc to be in the path, both for toolkit
         #  detection as well as for nvcc_wrapper (if used)
         PATH=$PATH:${CUDA}/bin
-
-        if [[ "$CXX" == *clang* ]]; then
-          # clang speaks cuda, so can be used as Kokkos' "C++" compiler
-          export KOKKOS_CXX_COMPILER="$CXX"
-        else
-          # if not using clang, we need CXX to be Kokkos' nvcc_wrapper...
-          NVCC_WRAPPER=`pwd`/../bin/nvcc_wrapper
-          KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${NVCC_WRAPPER}"
-          export KOKKOS_CXX_COMPILER="${NVCC_WRAPPER}"
-          export NVCC_WRAPPER_DEFAULT_COMPILER="${CUDAHOSTCXX}"
-        fi
       else
-        export KOKKOS_CXX_COMPILER="$CXX"
+        KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=$CXX"
       fi
       echo cmake $KOKKOS_CMAKE_OPTS ..
       cmake $KOKKOS_CMAKE_OPTS ..
@@ -433,7 +432,7 @@ before_script:
       # now build kokkos-kernels - unless we've got cuda and clang (since
       #  kokkos-kernels fails to build for clang7 at least)
       if [[ "$CXX" != *clang* || "$USE_CUDA" -ne 1 ]]; then
-        git clone -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
+        git clone --depth 1 -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
         git -C kokkos-kernels log -n 1
         mkdir kokkos-kernels/build
         cd kokkos-kernels/build
@@ -514,7 +513,6 @@ before_script:
   <<: *p100_base
   CUDA: "/usr/local/cuda-8.0"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-8.0"
-  CUDAHOSTCXX: "g++-5"
   # cuda 8.0 does not come with thrust
   USE_COMPLEX: "0"
   # have to tell cudafe to expect c++11 stuff
@@ -524,13 +522,11 @@ before_script:
   <<: *p100_base
   CUDA: "/usr/local/cuda-9.0"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.0"
-  CUDAHOSTCXX: "g++-6"
 
 .p100_cuda92: &p100_cuda92
   <<: *p100_base
   CUDA: "/usr/local/cuda-9.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.2"
-  CUDAHOSTCXX: "g++-7"
   # cuda 9.2 has bugs in thrust that break complex reduction ops
   USE_COMPLEX: "0"
 
@@ -538,21 +534,18 @@ before_script:
   <<: *p100_base
   CUDA: "/usr/local/cuda-10.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-10.2"
-  CUDAHOSTCXX: "g++-8"
   USE_NVTX: "1"
 
 .p100_cuda110: &p100_cuda110
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.0"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.0"
-  CUDAHOSTCXX: "g++-9"
   USE_NVTX: "1"
 
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
   CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
-  CUDAHOSTCXX: "g++-9"
   USE_NVTX: "1"
 
 ###
@@ -1267,14 +1260,14 @@ p100_cuda112_gcc9_cxx17_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc9, *release, *cxx17_normal, *p100_cuda112, *cmake, *legion, *ctest]
-p100_cuda90_clang7_cxx11_release_cuda_regent:
+p100_cuda102_clang7_cxx11_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda90, *regent, *short]
-p100_cuda90_clang7_cxx11_release_cmake_cuda_regent:
+    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *regent, *short]
+p100_cuda102_clang7_cxx11_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda90, *cmake, *regent]
+    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *cmake, *regent]
 
 # CUDA+GASNet tests:
 p100_cuda112_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
@@ -1300,14 +1293,14 @@ clang9_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
 #     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
-p100_cuda90_clang7_cxx14_debug_kokkos_cuda_legion:
+p100_cuda102_clang7_cxx14_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda90, *kokkos, *cmake, *legion]
-p100_cuda90_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda102, *kokkos, *cmake, *legion]
+p100_cuda102_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda90, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
+    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 p100_cuda102_gcc8_cxx14_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:

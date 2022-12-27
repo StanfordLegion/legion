@@ -665,7 +665,10 @@ ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gpu=cc$(X))
 else
 COMMA=,
+# Add all the real architectures for all supported GPUs
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))
+# Add all PTX for the final architecture
+NVCC_FLAGS += -gencode arch=compute_$(lastword $(GPU_ARCH))$(COMMA)code=compute_$(lastword $(GPU_ARCH))
 endif
 
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
