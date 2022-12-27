@@ -2938,11 +2938,14 @@ class IndexPartition(object):
         # Check for dominance of children by parent
         for child in itervalues(self.children):
             if not self.parent.dominates(child):
-                print(('WARNING: child %s is not dominated by parent %s in %s. '+
-                      'This is definitely an application bug.') %
+                print(('ERROR: child %s is not dominated by parent %s in %s. '+
+                      'This is definitely an application bug and invalidates '+
+                      'all of Legion\'s dependence analysis. You must fix this '+
+                      'before Legion Spy can continue.') %
                       (child, self.parent, self))
-                if self.state.assert_on_warning:
+                if self.state.assert_on_error:
                     assert False
+                sys.exit(1)
             # Recurse down the tree too
             child.check_partition_properties()
         # Check disjointness
@@ -2957,9 +2960,12 @@ class IndexPartition(object):
                 if self.disjoint:
                     print(('ERROR: %s was labelled disjoint '+
                             'but there are overlapping children. This '+
-                            'is definitely an application bug.') % self)
+                            'is definitely an application bug and invalidates '+
+                            'all of Legion\'s dependence analysis. You must fix '+
+                            'this before Legion Spy can continue.') % self)
                     if self.state.assert_on_error:
                         assert False
+                    sys.exit(1)
                 break
             previous |= child_shape
         if self.disjoint is not None:
@@ -2977,9 +2983,12 @@ class IndexPartition(object):
                 if len(total) != len(self.parent.get_point_set()):
                     print(('ERROR: %s was labelled complete '+
                             'but there are missing points. This '+
-                            'is definitely an application bug.') % self)
+                            'is definitely an application bug and invalidates '+
+                            'all of Legion\'s dependence analysis. You must fix '+
+                            'this before Legion Spy can continue.') % self)
                     if self.state.assert_on_error:
                         assert False
+                    sys.exit(1)
             else:
                 if len(total) == len(self.parent.get_point_set()):
                     print(('WARNING: %s was labelled incomplete '+
