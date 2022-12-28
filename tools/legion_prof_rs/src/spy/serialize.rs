@@ -560,7 +560,7 @@ fn parse_record(input: &str) -> IResult<&str, Option<Record>> {
 
 fn parse(input: &str) -> IResult<&str, Vec<Record>> {
     let (input, records) = all_consuming(many1(parse_record))(input)?;
-    Ok((input, records.into_iter().filter_map(|x| x).collect()))
+    Ok((input, records.into_iter().flatten().collect()))
 }
 
 pub fn deserialize<P: AsRef<Path>>(path: P) -> io::Result<Vec<Record>> {

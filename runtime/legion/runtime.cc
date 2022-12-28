@@ -7927,7 +7927,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
-      if (memory.kind() == Memory::GPU_FB_MEM)
+      if ((memory.kind() == Memory::GPU_FB_MEM) || 
+          (memory.kind() == Memory::GPU_MANAGED_MEM) ||
+          (memory.kind() == Memory::GPU_DYNAMIC_MEM))
       {
         Machine::ProcessorQuery finder(runtime->machine);
         finder.best_affinity_to(memory);

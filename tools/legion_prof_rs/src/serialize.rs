@@ -226,14 +226,7 @@ fn parse_field_format(input: &[u8]) -> IResult<&[u8], FieldFormat> {
     let (input, value) = parse_value_format(input)?;
     let (input, _) = tag(":")(input)?;
     let (input, size) = parse_text_i32(input)?;
-    Ok((
-        input,
-        FieldFormat {
-            name: name,
-            value: value,
-            size: size,
-        },
-    ))
+    Ok((input, FieldFormat { name, value, size }))
 }
 
 fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
@@ -244,14 +237,7 @@ fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
     let (input, fields) = separated_list1(tag(", "), parse_field_format)(input)?;
     let (input, _) = tag("}")(input)?;
     let (input, _) = newline(input)?;
-    Ok((
-        input,
-        RecordFormat {
-            id: id,
-            name: name,
-            fields: fields,
-        },
-    ))
+    Ok((input, RecordFormat { id, name, fields }))
 }
 
 ///
@@ -287,52 +273,52 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 ///
 
 fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
-    map(le_u64, |x| EventID(x))(input)
+    map(le_u64, EventID)(input)
 }
 fn parse_inst_uid(input: &[u8]) -> IResult<&[u8], InstUID> {
-    map(le_u64, |x| InstUID(x))(input)
+    map(le_u64, InstUID)(input)
 }
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
-    map(le_u64, |x| InstID(x))(input)
+    map(le_u64, InstID)(input)
 }
 fn parse_ipart_id(input: &[u8]) -> IResult<&[u8], IPartID> {
-    map(le_u64, |x| IPartID(x))(input)
+    map(le_u64, IPartID)(input)
 }
 fn parse_ispace_id(input: &[u8]) -> IResult<&[u8], ISpaceID> {
-    map(le_u64, |x| ISpaceID(x))(input)
+    map(le_u64, ISpaceID)(input)
 }
 fn parse_fspace_id(input: &[u8]) -> IResult<&[u8], FSpaceID> {
-    map(le_u64, |x| FSpaceID(x))(input)
+    map(le_u64, FSpaceID)(input)
 }
 fn parse_field_id(input: &[u8]) -> IResult<&[u8], FieldID> {
-    map(le_u32, |x| FieldID(x))(input)
+    map(le_u32, FieldID)(input)
 }
 fn parse_tree_id(input: &[u8]) -> IResult<&[u8], TreeID> {
-    map(le_u32, |x| TreeID(x))(input)
+    map(le_u32, TreeID)(input)
 }
 fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
-    map(le_u32, |x| MapperCallKindID(x))(input)
+    map(le_u32, MapperCallKindID)(input)
 }
 fn parse_mem_id(input: &[u8]) -> IResult<&[u8], MemID> {
-    map(le_u64, |x| MemID(x))(input)
+    map(le_u64, MemID)(input)
 }
 fn parse_op_id(input: &[u8]) -> IResult<&[u8], OpID> {
-    map(le_u64, |x| OpID(x))(input)
+    map(le_u64, OpID)(input)
 }
 fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
-    map(le_u64, |x| ProcID(x))(input)
+    map(le_u64, ProcID)(input)
 }
 fn parse_runtime_call_kind_id(input: &[u8]) -> IResult<&[u8], RuntimeCallKindID> {
-    map(le_u32, |x| RuntimeCallKindID(x))(input)
+    map(le_u32, RuntimeCallKindID)(input)
 }
 fn parse_task_id(input: &[u8]) -> IResult<&[u8], TaskID> {
-    map(le_u32, |x| TaskID(x))(input)
+    map(le_u32, TaskID)(input)
 }
 fn parse_timestamp(input: &[u8]) -> IResult<&[u8], Timestamp> {
-    map(le_u64, |x| Timestamp(x))(input)
+    map(le_u64, Timestamp)(input)
 }
 fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
-    map(le_u32, |x| VariantID(x))(input)
+    map(le_u32, VariantID)(input)
 }
 
 ///
@@ -992,20 +978,12 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
     let mut input = input;
     let mut max_dim = -1;
     let mut records = Vec::new();
-    loop {
-        match parse_record(input, &parsers, max_dim) {
-            Ok((input_, record)) => {
-                match &record {
-                    Record::MaxDimDesc { max_dim: d } => {
-                        max_dim = *d;
-                    }
-                    _ => {}
-                }
-                records.push(record);
-                input = input_;
-            }
-            _ => break,
+    while let Ok((input_, record)) = parse_record(input, &parsers, max_dim) {
+        if let Record::MaxDimDesc { max_dim: d } = &record {
+            max_dim = *d;
         }
+        records.push(record);
+        input = input_;
     }
     Ok((input, records))
 }
