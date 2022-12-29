@@ -6331,8 +6331,7 @@ namespace Legion {
     {
       AutoLock v_lock(view_lock);
 #ifdef DEBUG_LEGION
-      assert((valid_state == PENDING_VALID_STATE) ||
-          (valid_state == FULL_VALID_STATE));
+      assert(valid_state == FULL_VALID_STATE);
 #endif
       sent_valid_references++;
     }
@@ -6343,8 +6342,7 @@ namespace Legion {
     {
       AutoLock v_lock(view_lock);
 #ifdef DEBUG_LEGION
-      assert((valid_state == PENDING_VALID_STATE) ||
-          (valid_state == FULL_VALID_STATE));
+      assert(valid_state == FULL_VALID_STATE);
 #endif
       received_valid_references++;
     }
@@ -6372,22 +6370,12 @@ namespace Legion {
         if (valid_state == NOT_VALID_STATE)
         {
           if (!local_views.empty())
-          {
-            // Add our local valid references
-            for (std::vector<IndividualView*>::const_iterator it =
-                  local_views.begin(); it != local_views.end(); it++)
-              (*it)->add_nested_valid_ref(did);
-            // This marks that we've already added our local view valid
-            // references and don't need to add them again when we get
-            // the valid notification from our parent
-            valid_state = PENDING_VALID_STATE;
-          }
-          else // remote instance not in the collective
-            valid_state = FULL_VALID_STATE;
-          add_base_gc_ref(INTERNAL_VALID_REF);
+            make_valid(false/*need lock*/);
+          else
+            add_base_gc_ref(INTERNAL_VALID_REF);
         }
-        else if (valid_state == PENDING_INVALID_STATE)
-          valid_state = PENDING_VALID_STATE;
+        else // restore ourselves back to full valid state
+          valid_state = FULL_VALID_STATE;
         // Not the owner so need to send a message on down the chain
         // to make the owner valid and ensure all the nodes are keeping
         // a valid reference
@@ -6417,6 +6405,9 @@ namespace Legion {
         assert(!local_views.empty());
         assert(is_owner() || collective_mapping->contains(local_space));
 #endif
+        // If we're already fully valid then there is nothing more to do
+        if (valid_state == FULL_VALID_STATE)
+          return;
         // Send the messages to the children to get them in flight
         if (collective_mapping != NULL)
         {
@@ -6431,14 +6422,10 @@ namespace Legion {
               runtime->send_collective_view_make_valid(*it, rez);
           }
         }
-        // If we haven't already then add our references
-        if (valid_state != PENDING_VALID_STATE)
-        {
-          for (std::vector<IndividualView*>::const_iterator it =
-                local_views.begin(); it != local_views.end(); it++)
-            (*it)->add_nested_valid_ref(did);
-          add_base_gc_ref(INTERNAL_VALID_REF);
-        }
+        for (std::vector<IndividualView*>::const_iterator it =
+              local_views.begin(); it != local_views.end(); it++)
+          (*it)->add_nested_valid_ref(did);
+        add_base_gc_ref(INTERNAL_VALID_REF);
         valid_state = FULL_VALID_STATE;
       }
     }
@@ -6472,6 +6459,14 @@ namespace Legion {
             (valid_state == PENDING_INVALID_STATE));
         assert(is_owner() || collective_mapping->contains(local_space));
 #endif
+        if (valid_state == FULL_VALID_STATE)
+        {
+          // This is a potential race with adding a valid reference for 
+          // mapping and a previous invalidation. These races should be
+          // mostly benign so we'll igonore them for now but we might
+          // need to do something about them in the future
+          return false;
+        }
         // Send it upstream to any children 
         if (collective_mapping != NULL)
         {
@@ -6524,8 +6519,7 @@ namespace Legion {
         assert((invalidation_generation < generation) || is_owner());
 #endif
         // See if we're going to fail right away
-        if ((valid_state == PENDING_VALID_STATE) || 
-            (valid_state == FULL_VALID_STATE))
+        if (valid_state == FULL_VALID_STATE)
         {
           Serializer rez;
           {
@@ -6638,9 +6632,7 @@ namespace Legion {
         if (--remaining_invalidation_responses == 0)
         {
           // Check that we are still not valid
-          if (!invalidation_failed &&
-              ((valid_state == PENDING_VALID_STATE) ||
-               (valid_state == FULL_VALID_STATE)))
+          if (!invalidation_failed && (valid_state == FULL_VALID_STATE))
             invalidation_failed = true;
           if (!is_owner())
           {
@@ -6734,8 +6726,7 @@ namespace Legion {
         // downgrade the valid state of this collective view which means
         // checking that none of our copies are valid on any node
         // Start by bumping the collection generation 
-        invalidation_generation++;
-        return perform_invalidate_request(invalidation_generation, 
+        return perform_invalidate_request(++invalidation_generation, 
                                           false/*need lock*/);
       }
       else
@@ -6755,7 +6746,10 @@ namespace Legion {
         // make_invalid call so they can remove their reference now
         if ((collective_mapping == NULL) || 
             !collective_mapping->contains(local_space))
+        {
+          valid_state = NOT_VALID_STATE;
           return remove_base_gc_ref(INTERNAL_VALID_REF);
+        }
       }
       return false;
     }

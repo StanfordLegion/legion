@@ -455,7 +455,6 @@ namespace Legion {
     public:
       enum ValidState {
         FULL_VALID_STATE,
-        PENDING_VALID_STATE,
         PENDING_INVALID_STATE,
         NOT_VALID_STATE, 
       };
