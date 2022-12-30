@@ -3022,6 +3022,10 @@ namespace Legion {
           const unsigned safe_level, const TaskLauncher &launcher) const;
       void hash_index_launcher(Murmur3Hasher &hasher,
           const unsigned safe_level, const IndexTaskLauncher &launcher);
+      void hash_execution_constraints(Murmur3Hasher &hasher,
+          const ExecutionConstraintSet &constraints);
+      void hash_layout_constraints(Murmur3Hasher &hasher,
+          const LayoutConstraintSet &constraints, bool hash_pointers);
     public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,
