@@ -526,6 +526,7 @@ namespace Legion {
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
+      static ApEvent init_ready(ApEvent r, Runtime *rt, PhysicalInstance inst);
       static bool check_meta_visible(Runtime *runtime, Memory memory,
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
@@ -1566,12 +1567,13 @@ namespace Legion {
     public:
       bool is_visible_memory(Memory other);
     public:
-      RtEvent create_eager_instance(PhysicalInstance &instance,
+      RtEvent create_eager_instance(PhysicalInstance &instance, LgEvent unique,
                                     Realm::InstanceLayoutGeneric *layout);
       // Create an external instance that is a view to the eager pool instance
       RtEvent create_sub_eager_instance(PhysicalInstance &instance,
                                         uintptr_t ptr, size_t size,
-                                        Realm::InstanceLayoutGeneric *layout);
+                                        Realm::InstanceLayoutGeneric *layout,
+                                        LgEvent unique_event);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
       static void handle_free_eager_instance(const void *args);
     public:

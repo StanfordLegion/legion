@@ -2084,7 +2084,8 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
-      const ApEvent wait_on(manager->create_eager_instance(instance, layout));
+      const ApEvent wait_on(manager->create_eager_instance(instance, 
+                                      LgEvent::NO_LG_EVENT, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
