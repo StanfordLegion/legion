@@ -16269,8 +16269,10 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
-      // Initialize our profiling instance
-      if (address_space < num_profiling_nodes)
+      // We've intentionally switched this to profile all the nodes if we're 
+      // profiling any nodes since some information about things like copies
+      // usage of instances are now split across multiple log files
+      if (num_profiling_nodes > 0)
         initialize_legion_prof(config);
 #ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count.store(0);
