@@ -280,7 +280,8 @@ if(Legion_USE_Python)
 
   # define variables for realm_defines.h
   set(REALM_USE_PYTHON ON)
-  set(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}")
+  # Set REALM_PYTHON_LIB to Python library's filename without the path
+  get_filename_component(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}" NAME)
   set(REALM_PYTHON_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
 
   string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
