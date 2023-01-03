@@ -840,6 +840,7 @@ option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
 option(Legion_BUILD_JUPYTER "Build Legion jupyter notebook support" OFF)
 option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
+option(Legion_BUILD_RUST_PROFILER "Build Rust version of Legion profiler" OFF)
 if(Legion_ENABLE_TESTING)
   enable_testing()
   # if Legion_TEST_LAUNCHER is set, split the string into a list
@@ -938,6 +939,43 @@ if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
   if(NOT HIP_THRUST_ROOT_DIR)
     message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
   endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# Build and install legion_prof_rs
+#------------------------------------------------------------------------------#
+
+if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
+  find_package(Corrosion 0.3.1 QUIET)
+
+  if(NOT Corrosion_FOUND)
+    include(FetchContent)
+
+    FetchContent_Declare(
+      Corrosion
+      GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+      GIT_TAG v0.3.1
+    )
+    set(CORROSION_VERBOSE_OUTPUT ON)
+    set(CORROSION_RESPECT_OUTPUT_DIRECTORY ON)
+    # Set any global configuration variables such as `Rust_TOOLCHAIN` before this line!
+    FetchContent_MakeAvailable(Corrosion)
+  endif()
+
+  corrosion_import_crate(
+    MANIFEST_PATH tools/legion_prof_rs/Cargo.toml
+    PROFILE $<IF:$<BOOL:$<$<CONFIG:Debug>:1>>,dev,release>
+  )
+
+  install(
+    PROGRAMS
+      ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/legion_prof
+    TYPE
+      BIN
+    PERMISSIONS
+      OWNER_EXECUTE OWNER_WRITE OWNER_READ
+      GROUP_EXECUTE GROUP_WRITE GROUP_READ
+      WORLD_EXECUTE WORLD_READ)
 endif()
 
 #------------------------------------------------------------------------------#
