@@ -13,9 +13,9 @@ use rayon::prelude::*;
 
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace,
-    FieldID, FillInstInfo, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID,
-    OpID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState,
-    State, TimePoint, Timestamp,
+    FieldID, FillInstInfo, ISpaceID, Inst, InstUID, Mem, MemID, MemKind, MemPoint, MemProcAffinity,
+    NodeID, OpID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID,
+    SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -130,8 +130,10 @@ impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            let inst = self.1.find_inst(elt.inst_uid).unwrap();
-            insts_set.insert(inst);
+            let inst = self.1.find_inst(elt.inst_uid);
+            if let Some(inst) = inst {
+                insts_set.insert(inst);
+            }
         }
         write!(f, "[")?;
         for (i, inst) in insts_set.iter().enumerate() {
@@ -412,34 +414,35 @@ impl fmt::Display for SizePretty {
 pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_inst
     pub Option<&'a Inst>, // src_dst
+    pub InstUID,          // src_inst_uid
+    pub InstUID,          // dst_inst_uid
 );
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (self.0, self.1) {
-            (Some(src_inst), Some(dst_inst)) => {
+        let mut src_inst_id = 0;
+        let mut dst_inst_id = 0;
+        if let Some(src_inst) = self.0 {
+            src_inst_id = src_inst.inst_id.unwrap().0;
+        }
+        if let Some(dst_inst) = self.1 {
+            dst_inst_id = dst_inst.inst_id.unwrap().0;
+        }
+        match (self.2 .0, self.3 .0) {
+            (0, 0) => unreachable!(),
+            (0, _) => {
+                write!(f, "Scatter: dst_indirect_inst=0x{:x}", dst_inst_id)
+            }
+            (_, 0) => {
+                write!(f, "Gather: src_indirect_inst=0x{:x}", src_inst_id)
+            }
+            (_, _) => {
                 write!(
                     f,
                     "src_inst=0x{:x}, dst_inst=0x{:x}",
-                    src_inst.inst_id.unwrap().0,
-                    dst_inst.inst_id.unwrap().0
+                    src_inst_id, dst_inst_id
                 )
             }
-            (None, Some(dst_inst)) => {
-                write!(
-                    f,
-                    "Scatter: dst_indirect_inst=0x{:x}",
-                    dst_inst.inst_id.unwrap().0
-                )
-            }
-            (Some(src_inst), None) => {
-                write!(
-                    f,
-                    "Gather: src_indirect_inst=0x{:x}",
-                    src_inst.inst_id.unwrap().0
-                )
-            }
-            (None, None) => unreachable!(),
         }
     }
 }
@@ -456,7 +459,7 @@ impl fmt::Display for CopyInstInfoVec<'_> {
                 f,
                 "$req[{}]: {}",
                 i,
-                CopyInstInfoDisplay(src_inst, dst_inst)
+                CopyInstInfoDisplay(src_inst, dst_inst, elt.src_inst_uid, elt.dst_inst_uid)
             )?;
         }
         Ok(())
@@ -496,16 +499,15 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
 }
 
 #[derive(Debug)]
-pub struct FillInstInfoDisplay<'a>(pub &'a Inst, pub FieldID);
+pub struct FillInstInfoDisplay<'a>(pub Option<&'a Inst>, pub FieldID);
 
 impl fmt::Display for FillInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "dst_inst=0x{:x}, fid={}",
-            self.0.inst_id.unwrap().0,
-            self.1 .0
-        )
+        let mut inst_id = 0;
+        if let Some(inst) = self.0 {
+            inst_id = inst.inst_id.unwrap().0;
+        }
+        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1 .0)
     }
 }
 
@@ -515,7 +517,7 @@ pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State);
 impl fmt::Display for FillInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            let inst = self.1.find_inst(elt.dst_inst_uid);
             write!(f, "$req[{}]: {}", i, FillInstInfoDisplay(inst, elt.fid))?;
         }
         Ok(())
