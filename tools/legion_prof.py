@@ -1375,13 +1375,15 @@ class OperationInstInfo(object):
                 flag = True
                 break
         if flag == False:
-            assert 0, "Operation can not find inst:" + str(hex(self.inst_uid))
+            print("Warning: Operation can not find inst:" + str(hex(self.inst_uid)))
 
     # TODO: they are not used now
     @typecheck
     def get_short_text(self) -> str:
-        assert self.instance is not None
-        return 'inst=%s, rr index=%s, field_id=%s' % (hex(self.instance.inst_id), self.index, self.field_id)
+        inst_id = '0x0'
+        if self.instance is not None:
+            inst_id = hex(self.instance.inst_id)
+        return 'inst=%s, rr index=%s, field_id=%s' % (inst_id, self.index, self.field_id)
 
     @typecheck
     def __repr__(self) -> str:
@@ -2063,22 +2065,29 @@ class CopyInstInfo(object):
             if src_flag and dst_flag:
                 break
         if src_flag == False:
-            assert 0, "Copy can not find src_inst:" + str(hex(self.src_inst_uid))
+            print("Warning: Copy can not find src_inst:" + str(hex(self.src_inst_uid)))
         if dst_flag == False:
-            assert 0, "Copy can not find dst_inst:" + str(hex(self.dst_inst_uid))
+            print("Warning: Copy can not find dst_inst:" + str(hex(self.dst_inst_uid)))
 
     @typecheck
     def get_short_text(self) -> str:
-        if (self.src_instance is not None) and (self.dst_instance is not None):
-            return 'src_inst=%s, dst_inst=%s' % (hex(self.src_instance.inst_id), hex(self.dst_instance.inst_id))
-        elif self.src_instance is None:
-            assert self.dst_instance is not None
-            return 'Scatter: dst_indirect_inst=%s' % (hex(self.dst_instance.inst_id))
-        elif self.dst_instance is None:
-            return 'Gather: src_indirect_inst=%s' % (hex(self.src_instance.inst_id))
+        src_inst_id = '0x0'
+        dst_inst_id = '0x0'
+        if self.src_instance is not None:
+            src_inst_id = hex(self.src_instance.inst_id)
+        if self.dst_instance is not None:
+            dst_inst_id = hex(self.dst_instance.inst_id)
+        if self.indirect == False:
+            assert (self.src_inst_uid != 0) and (self.dst_inst_uid != 0)
+            return 'src_inst=%s, dst_inst=%s' % (src_inst_id, dst_inst_id)
         else:
-            print(self.src_inst_uid, self.dst_inst_uid)
-            assert 0
+            if self.src_inst_uid == 0:
+                return 'Scatter: dst_indirect_inst=%s' % (dst_inst_id)
+            elif self.dst_inst_uid == 0:
+                return 'Gather: src_indirect_inst=%s' % (src_inst_id)
+            else:
+                print(self.src_inst_uid, self.dst_inst_uid)
+                assert 0
 
     @typecheck
     def __repr__(self) -> str:
@@ -2274,12 +2283,14 @@ class FillInstInfo(object):
                 dst_flag = True
                 break
         if dst_flag == False:
-           assert 0, "Fill can not find dst_inst:" + str(hex(self.dst_inst_uid))
+           print("Warning: Fill can not find dst_inst:" + str(hex(self.dst_inst_uid)))
 
     @typecheck
     def get_short_text(self) -> str:
-        assert self.dst_instance is not None
-        return 'dst_inst=%s, fid=%s' % (hex(self.dst_instance.inst_id), self.fid)
+        inst_id = '0x0'
+        if self.dst_instance is not None:
+            inst_id = hex(self.dst_instance.inst_id)
+        return 'dst_inst=%s, fid=%s' % (inst_id, self.fid)
 
     @typecheck
     def __repr__(self) -> str:
@@ -4724,8 +4735,8 @@ class State(object):
     def get_nodes(self) -> List[str]:
         nodes = {}
         for proc in self.processors.values():
-            if len(proc.tasks) > 0:
-                nodes[str(proc.node_id)] = 1
+            #if len(proc.tasks) > 0:
+            nodes[str(proc.node_id)] = 1
         if (len(nodes) > 1):
             return ["all"] + sorted(nodes.keys())
         else:
