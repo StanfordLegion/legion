@@ -23346,41 +23346,24 @@ namespace Legion {
     RtEvent AllReduceOp::all_reduce_redop(void)
     //--------------------------------------------------------------------------
     {
-      RtEvent completion_precondition;
-      std::vector<FutureInstance*> instances;
-      instances.reserve(sources.size());
-      for (std::map<DomainPoint,FutureImpl*>::const_iterator it = 
-            sources.begin(); it != sources.end(); it++)
-      {
-        FutureImpl *impl = it->second;
-        FutureInstance *instance = impl->get_canonical_instance();
-        if (instance->size != redop->sizeof_rhs)
-          REPORT_LEGION_ERROR(ERROR_FUTURE_MAP_REDOP_TYPE_MISMATCH,
-              "Future in future map reduction in task %s (UID %lld) does not "
-              "have the right input size for the given reduction operator. "
-              "Future has size %zd bytes but reduction operator expects "
-              "RHS inputs of %zd bytes.", parent_ctx->get_task_name(),
-              parent_ctx->get_unique_id(), instance->size, redop->sizeof_rhs)
-        instances.push_back(instance);
-        if (runtime->legion_spy_enabled)
-        {
-          const ApEvent ready_event = impl->get_ready_event();
-          if (ready_event.exists())
-            LegionSpy::log_future_use(unique_op_id, ready_event);
-        }
-      }
       std::vector<ApEvent> preconditions(targets.size());
       for (unsigned idx = 0; idx < targets.size(); idx++)
         preconditions[idx] = targets[idx]->initialize(redop, this);
       std::set<ApEvent> postconditions;
       if (deterministic)
       {
-        for (std::vector<FutureInstance*>::const_iterator it =
-              instances.begin(); it != instances.end(); it++)
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
-            preconditions[idx] = targets[idx]->reduce_from(*it, this, redop_id,
-                                  redop, true/*exclusive*/, preconditions[idx]);
+            preconditions[idx] = it->second->reduce_from_canonical(targets[idx],
+                this, redop_id, redop, true/*exclusive*/, preconditions[idx]);
+          if (runtime->legion_spy_enabled)
+          {
+            const ApEvent ready_event = it->second->get_ready_event();
+            if (ready_event.exists())
+              LegionSpy::log_future_use(unique_op_id, ready_event);
+          }
         }
         for (std::vector<ApEvent>::const_iterator it =
               preconditions.begin(); it != preconditions.end(); it++)
@@ -23389,18 +23372,25 @@ namespace Legion {
       }
       else
       {
-        for (std::vector<FutureInstance*>::const_iterator it =
-              instances.begin(); it != instances.end(); it++)
+        for (std::map<DomainPoint,FutureImpl*>::const_iterator it =
+              sources.begin(); it != sources.end(); it++)
         {
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const ApEvent done = targets[idx]->reduce_from(*it, this, redop_id,
-                                redop, false/*exclusive*/, preconditions[idx]);
+            const ApEvent done = it->second->reduce_from_canonical(targets[idx],
+                this, redop_id, redop, false/*exclusive*/, preconditions[idx]);
             if (done.exists())
               postconditions.insert(done);
           }
+          if (runtime->legion_spy_enabled)
+          {
+            const ApEvent ready_event = it->second->get_ready_event();
+            if (ready_event.exists())
+              LegionSpy::log_future_use(unique_op_id, ready_event);
+          }
         }
       }
+      RtEvent completion_precondition;
       if (!postconditions.empty())
       {
         const ApEvent done = Runtime::merge_events(NULL, postconditions); 
