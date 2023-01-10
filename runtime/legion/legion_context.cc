@@ -8739,6 +8739,8 @@ namespace Legion {
 #ifdef LEGION_SPY
           child_completion_events.swap(cummulative_child_completion_events);
 #endif
+          child_completion_events.reserve(
+              child_completion_events.size() + complete_children.size());
           for (LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
