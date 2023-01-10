@@ -8041,7 +8041,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         std::map<Operation*,GenerationID>::iterator finder = 
@@ -8060,11 +8060,31 @@ namespace Legion {
         {
           needs_trigger = true;
           children_complete_invoked = true;
+#ifdef LEGION_SPY
+          child_completion_events.swap(cummulative_child_completion_events);
+#endif
           for (LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
-            child_completion_events.insert(it->first->get_completion_event());
+            child_completion_events.push_back(
+                it->first->get_completion_event());
         }
+#ifdef LEGION_SPY
+        else
+        {
+          const ApEvent child_complete = op->get_completion_event();
+          cummulative_child_completion_events.push_back(child_complete);
+          // Make sure this vector doesn't grow too large for long-running tasks
+          constexpr size_t MAX_SIZE = 32;
+          if (cummulative_child_completion_events.size() == MAX_SIZE)
+          {
+            const ApEvent merged = 
+              Runtime::merge_events(NULL, cummulative_child_completion_events);
+            cummulative_child_completion_events.clear();
+            cummulative_child_completion_events.push_back(merged);
+          }
+        }
+#endif
       }
       if (needs_trigger)
       {
@@ -10285,7 +10305,7 @@ namespace Legion {
       bool need_complete = false;
       bool need_commit = false;
       std::set<RtEvent> preconditions;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         // Only need to do this for executing and executed children
@@ -10313,10 +10333,16 @@ namespace Legion {
           {
             need_complete = true;
             children_complete_invoked = true;
+#ifdef LEGION_SPY
+            child_completion_events.swap(cummulative_child_completion_events);
+#endif
+            child_completion_events.reserve(
+                child_completion_events.size() + complete_children.size()); 
             for (LegionMap<Operation*,GenerationID,
                   COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)
-              child_completion_events.insert(it->first->get_completion_event());
+              child_completion_events.push_back(
+                  it->first->get_completion_event());
           }
           if (complete_children.empty() && 
               !children_commit_invoked)

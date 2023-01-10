@@ -1675,6 +1675,9 @@ namespace Legion {
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
       std::set<ApEvent> previous_completion_events;
+      // And for verifying the cummulativity property of task
+      // (e.g. that they are not complete until all their children are)
+      std::vector<ApEvent> cummulative_child_completion_events;
 #endif
     protected: // Queues for fusing together small meta-tasks
       mutable LocalLock                               prepipeline_lock;
