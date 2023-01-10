@@ -18977,7 +18977,7 @@ namespace Legion {
           hasher.hash(it->second, strlen(it->second), "field_files");
         }
         hash_layout_constraints(hasher, launcher.constraints, 
-                                launcher.collective);
+                                !launcher.collective);
         for (std::set<FieldID>::const_iterator it = 
               launcher.privilege_fields.begin(); it !=
               launcher.privilege_fields.end(); it++)
