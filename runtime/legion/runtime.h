@@ -277,6 +277,8 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      // Finalize the future before everything shuts down
+      void prepare_for_shutdown(void);
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
       const void* get_buffer(Processor proc, Memory::Kind memory,
