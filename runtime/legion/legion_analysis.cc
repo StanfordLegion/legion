@@ -13537,20 +13537,18 @@ namespace Legion {
           inst_mask & partial_finder->second.get_valid_mask();
         if (!!partial_valid)
         {
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                partial_finder->second.begin(); it !=
-                partial_finder->second.end(); it++)
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                partial_finder->second.begin(); eit !=
+                partial_finder->second.end(); eit++)
           {
-            const FieldMask overlap = it->second & partial_valid;
+            FieldMask overlap = eit->second & partial_valid;
             if (!overlap)
               continue;
-#ifdef DEBUG_LEGION
-            assert(overlap * partial_valid_exprs.get_valid_mask());
-#endif
+            IndexSpaceExpression *expr_overlap;
             if (!expr_covers)
             {
-              IndexSpaceExpression *expr_overlap =
-                runtime->forest->intersect_index_spaces(expr, it->first);
+              expr_overlap =
+                runtime->forest->intersect_index_spaces(expr, eit->first);
               const size_t expr_volume = expr_overlap->get_volume();
               if (expr_volume == 0)
                 continue;
@@ -13561,13 +13559,46 @@ namespace Legion {
                 if (!inst_mask)
                   return true;
               }
-              else if (expr_volume == it->first->get_volume())
-                partial_valid_exprs.insert(it->first, overlap);
-              else
-                partial_valid_exprs.insert(expr_overlap, overlap);
+              else if (expr_volume == eit->first->get_volume())
+                expr_overlap = eit->first;
             }
             else // expr covers so we know it all intersects
-              partial_valid_exprs.insert(it->first, overlap);
+              expr_overlap = eit->first;
+            if (!(overlap * partial_valid_exprs.get_valid_mask()))
+            {
+              // If there are already some fields with expressions
+              // (which can happen if this function is called more
+              // than once for the same target), then we need to 
+              // merge expressions for any overlapping fields
+              FieldMaskSet<IndexSpaceExpression> to_add;
+              std::vector<IndexSpaceExpression*> to_delete;
+              for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                    partial_valid_exprs.begin(); it !=
+                    partial_valid_exprs.end(); it++)
+              {
+                const FieldMask prev_overlap = overlap & it->second;
+                if (!prev_overlap)
+                  continue;
+                IndexSpaceExpression *union_expr =
+                  runtime->forest->union_index_spaces(it->first, expr_overlap);
+                to_add.insert(union_expr, prev_overlap);
+                it.filter(prev_overlap);
+                if (!it->second)
+                  to_delete.push_back(it->first);
+                overlap -= prev_overlap;
+                if (!overlap)
+                  break;
+              }
+              for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                partial_valid_exprs.erase(*it);
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                    to_add.begin(); it != to_add.end(); it++)
+                partial_valid_exprs.insert(it->first, it->second);
+              if (!overlap)
+                return false;
+            }
+            partial_valid_exprs.insert(expr_overlap, overlap);
           }
         }
       }
