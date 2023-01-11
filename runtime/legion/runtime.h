@@ -277,6 +277,8 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
+      // Finalize the future before everything shuts down
+      void prepare_for_shutdown(void);
       // Wait without subscribing to the payload
       void wait(bool silence_warnings, const char *warning_string);
       const void* get_buffer(Processor proc, Memory::Kind memory,
@@ -305,6 +307,10 @@ namespace Legion {
       RtEvent request_internal_buffer(Operation *op, bool eager);
       const void *find_internal_buffer(TaskContext *ctx, size_t &expected_size);
       FutureInstance* get_canonical_instance(void);
+      ApEvent reduce_from_canonical(FutureInstance *target, AllReduceOp *op,
+                          const ReductionOpID redop_id,
+                          const ReductionOp *redop, bool exclusive,
+                          ApEvent precondition = ApEvent::NO_AP_EVENT);
       bool is_empty(bool block, bool silence_warnings = true,
                     const char *warning_string = NULL,
                     bool internal = false);
@@ -452,34 +458,29 @@ namespace Legion {
      * You'll have to look into the implementation to discover which
      * is happening, but when you get an unpacked copy on the remote
      * side it is a valid future instance that can you use regardless.
+     * Each future instance has a concept of instance ownership which 
+     * exists with exactly one copy of each future instance. If a future
+     * instance is packed and moved to a remote node then it can only be
+     * read from so we can track the appropriate read effects.
      * Current future instances are immutable after they are initially 
      * written, but are designed so that we might easily be able to relax
      * that later so we can support mutable future values.
+     * Note that none of the methods in this class are thread safe so
+     * atomicity needs to come from the caller.
      */
     class FutureInstance {
     public:
-      struct DeferDeleteFutureInstanceArgs :
-        public LgTaskArgs<DeferDeleteFutureInstanceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_DELETE_FUTURE_INST_TASK_ID;
-      public:
-        DeferDeleteFutureInstanceArgs(UniqueID uid, FutureInstance *inst)
-          : LgTaskArgs<DeferDeleteFutureInstanceArgs>(uid), instance(inst) { }
-      public:
-        FutureInstance *const instance;
-      };
       struct FreeExternalArgs : public LgTaskArgs<FreeExternalArgs> {
       public:
         static const LgTaskID TASK_ID = LG_FREE_EXTERNAL_TASK_ID;
       public:
         FreeExternalArgs(const Realm::ExternalInstanceResource *r,
             void (*func)(const Realm::ExternalInstanceResource&),
-            PhysicalInstance inst, ApEvent precondition);
+            PhysicalInstance inst);
       public:
         const Realm::ExternalInstanceResource *const resource;
         void (*const freefunc)(const Realm::ExternalInstanceResource&);
         const PhysicalInstance instance;
-        const ApEvent precondition;
       };
     public:
       FutureInstance(const void *data, size_t size,
@@ -487,7 +488,8 @@ namespace Legion {
                      bool external, bool own_allocation = true,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
                      Processor free_proc = Processor::NO_PROC,
-                     RtEvent use_event = RtEvent::NO_RT_EVENT);
+                     RtEvent use_event = RtEvent::NO_RT_EVENT,
+                     ApUserEvent remote_read = ApUserEvent::NO_AP_USER_EVENT);
       FutureInstance(const void *data, size_t size,
                      ApEvent ready_event, Runtime *runtime, bool own,
                      const Realm::ExternalInstanceResource *allocation,
@@ -495,7 +497,8 @@ namespace Legion {
                        const Realm::ExternalInstanceResource&) = NULL,
                      Processor free_proc = Processor::NO_PROC,
                      PhysicalInstance inst = PhysicalInstance::NO_INST,
-                     RtEvent use_event = RtEvent::NO_RT_EVENT);
+                     RtEvent use_event = RtEvent::NO_RT_EVENT,
+                     ApUserEvent remote_read = ApUserEvent::NO_AP_USER_EVENT);
       FutureInstance(const FutureInstance &rhs) = delete;
       ~FutureInstance(void);
     public:
@@ -509,16 +512,18 @@ namespace Legion {
                           const ReductionOpID redop_id,
                           const ReductionOp *redop, bool exclusive,
                           ApEvent precondition = ApEvent::NO_AP_EVENT);
+      void record_read_event(ApEvent read_event);
     public:
+      // This method can be called concurrently from different threads
       const void* get_data(void);
       bool is_ready(bool check_ready_event = true) const;
-      ApEvent get_ready(bool check_ready_event = true);
+      ApEvent get_ready(bool check_ready_event = true) const;
+      ApEvent collapse_reads(void);
       // This method will return an instance that represents the
       // data for this future instance of a given size, if the needed size
       // does not match the base size then a fresh instance will be returned
       // which will be the responsibility of the caller to destroy
       PhysicalInstance get_instance(size_t needed_size, bool &own_inst);
-      bool deferred_delete(Operation *op, ApEvent done_event);
     public:
       bool can_pack_by_value(void) const;
       bool pack_instance(Serializer &rez, bool pack_ownership, 
@@ -526,16 +531,13 @@ namespace Legion {
                          ApEvent ready = ApEvent::NO_AP_EVENT);
       static FutureInstance* unpack_instance(Deserializer &derez, Runtime *rt);
     public:
+      static ApEvent init_ready(ApEvent r, Runtime *rt, PhysicalInstance inst);
       static bool check_meta_visible(Runtime *runtime, Memory memory,
                                      bool has_freefunc = false);
       static FutureInstance* create_local(const void *value, size_t size, 
                                           bool own, Runtime *runtime);
-      static void free_external_allocation(Runtime *runtime, Processor proc,
-                       void (*freefunc)(const Realm::ExternalInstanceResource&),
-                       PhysicalInstance inst, RtEvent use, ApEvent precondition,
-                       const Realm::ExternalInstanceResource *resource);
+      static void handle_free_external(Deserializer &derez, Runtime *runtime);
       static void handle_free_external(const void *args);
-      static void handle_deferred_delete(const void *args);
       static void free_host_memory(const Realm::ExternalInstanceResource &mem);
     public:
       Runtime *const runtime;
@@ -554,9 +556,19 @@ namespace Legion {
       std::atomic<const void*> data;
       // This instance always has a domain of [0,0] and a field
       // size == `size` for the future instance
-      std::atomic<PhysicalInstance> instance;
-      std::atomic<RtEvent> use_event;
-      std::atomic<bool> own_instance;
+      PhysicalInstance instance;
+      // Event for when it is safe to use the instance
+      RtEvent use_event;
+      // Events for operations reading from this instance
+      std::vector<ApEvent> read_events;
+      // If we don't own our instance then we have an event to trigger
+      // when all our read events are done
+      ApUserEvent remote_reads_done;
+      // Whether we own this instance
+      // Note if we own the allocation then we must own the instance as well
+      // We can own the instance without owning the allocation in the case
+      // of external allocations that we don't own but make an instance later
+      bool own_instance;
     };
 
     /**
@@ -1566,12 +1578,13 @@ namespace Legion {
     public:
       bool is_visible_memory(Memory other);
     public:
-      RtEvent create_eager_instance(PhysicalInstance &instance,
+      RtEvent create_eager_instance(PhysicalInstance &instance, LgEvent unique,
                                     Realm::InstanceLayoutGeneric *layout);
       // Create an external instance that is a view to the eager pool instance
       RtEvent create_sub_eager_instance(PhysicalInstance &instance,
                                         uintptr_t ptr, size_t size,
-                                        Realm::InstanceLayoutGeneric *layout);
+                                        Realm::InstanceLayoutGeneric *layout,
+                                        LgEvent unique_event);
       void free_eager_instance(PhysicalInstance instance, RtEvent defer);
       static void handle_free_eager_instance(const void *args);
     public:

@@ -1828,6 +1828,9 @@ namespace Legion {
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
       std::set<ApEvent> previous_completion_events;
+      // And for verifying the cummulativity property of task
+      // (e.g. that they are not complete until all their children are)
+      std::vector<ApEvent> cummulative_child_completion_events;
 #endif
     protected: // Queues for fusing together small meta-tasks
       mutable LocalLock                               prepipeline_lock;
@@ -3011,6 +3014,10 @@ namespace Legion {
           const unsigned safe_level, const TaskLauncher &launcher) const;
       void hash_index_launcher(Murmur3Hasher &hasher,
           const unsigned safe_level, const IndexTaskLauncher &launcher);
+      void hash_execution_constraints(Murmur3Hasher &hasher,
+          const ExecutionConstraintSet &constraints);
+      void hash_layout_constraints(Murmur3Hasher &hasher,
+          const LayoutConstraintSet &constraints, bool hash_pointers);
     public:
       // A little help for ConsensusMatchExchange since it is templated
       static void help_complete_future(Future &f, const void *ptr,

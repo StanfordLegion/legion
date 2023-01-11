@@ -13,9 +13,9 @@ use rayon::prelude::*;
 
 use crate::state::{
     Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace,
-    FieldID, FillInstInfo, ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID,
-    OpID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState,
-    State, TimePoint, Timestamp,
+    FieldID, FillInstInfo, ISpaceID, Inst, InstUID, Mem, MemID, MemKind, MemPoint, MemProcAffinity,
+    NodeID, OpID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID,
+    SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -130,8 +130,10 @@ impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            let inst = self.1.find_inst(elt.inst_uid).unwrap();
-            insts_set.insert(inst);
+            let inst = self.1.find_inst(elt.inst_uid);
+            if let Some(inst) = inst {
+                insts_set.insert(inst);
+            }
         }
         write!(f, "[")?;
         for (i, inst) in insts_set.iter().enumerate() {
@@ -266,10 +268,10 @@ impl Proc {
                 let task = state.find_op(op_id).unwrap();
                 format!(
                     "{}",
-                    OperationInstInfoDumpInstVec(&task.operation_inst_infos, &state)
+                    OperationInstInfoDumpInstVec(&task.operation_inst_infos, state)
                 )
             } else {
-                format!("")
+                "".to_owned()
             }
         };
 
@@ -288,7 +290,7 @@ impl Proc {
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
-            op_id: op_id,
+            op_id,
             instances: &instances,
         };
 
@@ -297,7 +299,7 @@ impl Proc {
             for wait in &waiters.wait_intervals {
                 f.serialize(DataRecord {
                     ready: Some(start),
-                    start: start,
+                    start,
                     end: wait.start,
                     opacity: 1.0,
                     title: &name,
@@ -334,7 +336,7 @@ impl Proc {
             if start < time_range.stop.unwrap() {
                 f.serialize(DataRecord {
                     ready: Some(start),
-                    start: start,
+                    start,
                     end: time_range.stop.unwrap(),
                     opacity: 1.0,
                     title: &name,
@@ -344,7 +346,7 @@ impl Proc {
         } else {
             f.serialize(DataRecord {
                 ready: Some(time_range.ready.unwrap_or(start)),
-                start: start,
+                start,
                 end: time_range.stop.unwrap(),
                 // Somehow, these are coming through backwards...
                 in_: &out, //&in_,
@@ -412,34 +414,35 @@ impl fmt::Display for SizePretty {
 pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_inst
     pub Option<&'a Inst>, // src_dst
+    pub InstUID,          // src_inst_uid
+    pub InstUID,          // dst_inst_uid
 );
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match (self.0, self.1) {
-            (Some(src_inst), Some(dst_inst)) => {
+        let mut src_inst_id = 0;
+        let mut dst_inst_id = 0;
+        if let Some(src_inst) = self.0 {
+            src_inst_id = src_inst.inst_id.unwrap().0;
+        }
+        if let Some(dst_inst) = self.1 {
+            dst_inst_id = dst_inst.inst_id.unwrap().0;
+        }
+        match (self.2 .0, self.3 .0) {
+            (0, 0) => unreachable!(),
+            (0, _) => {
+                write!(f, "Scatter: dst_indirect_inst=0x{:x}", dst_inst_id)
+            }
+            (_, 0) => {
+                write!(f, "Gather: src_indirect_inst=0x{:x}", src_inst_id)
+            }
+            (_, _) => {
                 write!(
                     f,
                     "src_inst=0x{:x}, dst_inst=0x{:x}",
-                    src_inst.inst_id.unwrap().0,
-                    dst_inst.inst_id.unwrap().0
+                    src_inst_id, dst_inst_id
                 )
             }
-            (None, Some(dst_inst)) => {
-                write!(
-                    f,
-                    "Scatter: dst_indirect_inst=0x{:x}",
-                    dst_inst.inst_id.unwrap().0
-                )
-            }
-            (Some(src_inst), None) => {
-                write!(
-                    f,
-                    "Gather: src_indirect_inst=0x{:x}",
-                    src_inst.inst_id.unwrap().0
-                )
-            }
-            (None, None) => unreachable!(),
         }
     }
 }
@@ -456,7 +459,7 @@ impl fmt::Display for CopyInstInfoVec<'_> {
                 f,
                 "$req[{}]: {}",
                 i,
-                CopyInstInfoDisplay(src_inst, dst_inst)
+                CopyInstInfoDisplay(src_inst, dst_inst, elt.src_inst_uid, elt.dst_inst_uid)
             )?;
         }
         Ok(())
@@ -496,16 +499,15 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
 }
 
 #[derive(Debug)]
-pub struct FillInstInfoDisplay<'a>(pub &'a Inst, pub FieldID);
+pub struct FillInstInfoDisplay<'a>(pub Option<&'a Inst>, pub FieldID);
 
 impl fmt::Display for FillInstInfoDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "dst_inst=0x{:x}, fid={}",
-            self.0.inst_id.unwrap().0,
-            self.1 .0
-        )
+        let mut inst_id = 0;
+        if let Some(inst) = self.0 {
+            inst_id = inst.inst_id.unwrap().0;
+        }
+        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1 .0)
     }
 }
 
@@ -515,7 +517,7 @@ pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State);
 impl fmt::Display for FillInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            let inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            let inst = self.1.find_inst(elt.dst_inst_uid);
             write!(f, "$req[{}]: {}", i, FillInstInfoDisplay(inst, elt.fid))?;
         }
         Ok(())
@@ -650,7 +652,7 @@ impl Chan {
                         copy.copy_kind.unwrap(),
                         SizePretty(copy.size.unwrap()),
                         nreqs,
-                        CopyInstInfoVec(&copy.copy_inst_infos, &state)
+                        CopyInstInfoVec(&copy.copy_inst_infos, state)
                     )
                 } else {
                     format!(
@@ -666,7 +668,7 @@ impl Chan {
                     format!(
                         "Fill: num reqs={}{}",
                         nreqs,
-                        FillInstInfoVec(&fill.fill_inst_infos, &state)
+                        FillInstInfoVec(&fill.fill_inst_infos, state)
                     )
                 } else {
                     format!("Fill: num reqs={}", nreqs)
@@ -692,12 +694,12 @@ impl Chan {
 
         let instances = match entry {
             ChanEntryRef::Copy(_, copy) => {
-                format!("{}", CopyInstInfoDumpInstVec(&copy.copy_inst_infos, &state))
+                format!("{}", CopyInstInfoDumpInstVec(&copy.copy_inst_infos, state))
             }
             ChanEntryRef::Fill(_, fill) => {
-                format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, &state))
+                format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, state))
             }
-            ChanEntryRef::DepPart(_, _deppart) => format!(""),
+            ChanEntryRef::DepPart(_, _deppart) => "".to_owned(),
         };
 
         f.serialize(DataRecord {
@@ -755,7 +757,6 @@ impl Chan {
                 channel_kind
             ),
             (None, None, channel_kind) => format!("(None,_None,_{})", channel_kind),
-            _ => unreachable!(),
         };
 
         let long_name = match (
@@ -779,8 +780,7 @@ impl Chan {
                 )
             }
             (Some(src), None, _) => format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src),
-            (None, None, _) => format!("Dependent Partition Channel"),
-            _ => unreachable!(),
+            (None, None, _) => "Dependent Partition Channel".to_owned(),
         };
 
         let short_name = match (
@@ -824,8 +824,7 @@ impl Chan {
                     state
                 )
             ),
-            (None, None, _) => format!("Dependent Partition Channel"),
-            _ => unreachable!(),
+            (None, None, _) => "Dependent Partition Channel".to_owned(),
         };
 
         let mut filename = PathBuf::new();
@@ -859,19 +858,16 @@ impl fmt::Display for ISpacePretty<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ISpacePretty(ispace_id, state) = self;
 
-        let ispace = state.index_spaces.get(&ispace_id);
+        let ispace = state.index_spaces.get(ispace_id);
         if ispace.is_none() {
             write!(f, "ispace:{}", ispace_id.0)?;
             return Ok(());
         }
         let ispace = ispace.unwrap();
 
-        match &ispace.bounds {
-            Bounds::Empty => {
-                write!(f, "empty index space")?;
-                return Ok(());
-            }
-            _ => {}
+        if ispace.bounds == Bounds::Empty {
+            write!(f, "empty index space")?;
+            return Ok(());
         }
 
         if let Some(name) = &ispace.name {
@@ -980,42 +976,33 @@ impl fmt::Display for DimOrderPretty<'_> {
                 if *dim_order == DimKind::DimF {
                     aos = true;
                 }
-            } else {
-                if dim == dim_last.unwrap().0 {
-                    if *dim_order == DimKind::DimF {
-                        soa = true;
-                    }
-                } else {
-                    if *dim_order == DimKind::DimF {
-                        cmpx_order = true;
-                    }
+            } else if dim == dim_last.unwrap().0 {
+                if *dim_order == DimKind::DimF {
+                    soa = true;
                 }
+            } else if *dim_order == DimKind::DimF {
+                cmpx_order = true;
             }
 
             // SOA + order -> DIM_X, DIM_Y,.. DIM_F-> column_major
             // or .. DIM_Y, DIM_X, DIM_F? -> row_major
-            if *dim_last.unwrap().1 == DimKind::DimF {
-                if *dim_order != DimKind::DimF {
-                    if *dim_order == DimKind::try_from(dim.0).unwrap() {
-                        column_major += 1;
-                    }
-                    if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap()
-                    {
-                        row_major += 1;
-                    }
+            if *dim_last.unwrap().1 == DimKind::DimF && *dim_order != DimKind::DimF {
+                if *dim_order == DimKind::try_from(dim.0).unwrap() {
+                    column_major += 1;
+                }
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap() {
+                    row_major += 1;
                 }
             }
 
             // AOS + order -> DIM_F, DIM_X, DIM_Y -> column_major
             // or DIM_F, DIM_Y, DIM_X -> row_major?
-            if *dim_first.unwrap().1 == DimKind::DimF {
-                if *dim_order != DimKind::DimF {
-                    if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
-                        column_major += 1;
-                    }
-                    if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
-                        row_major += 1;
-                    }
+            if *dim_first.unwrap().1 == DimKind::DimF && *dim_order != DimKind::DimF {
+                if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
+                    column_major += 1;
+                }
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
+                    row_major += 1;
                 }
             }
         }
@@ -1065,10 +1052,12 @@ impl fmt::Display for InstPretty<'_> {
                 write!(f, "$")?;
             }
         }
+        if inst.dim_order.len() > 0 {
+            write!(f, "$Layout Order: {} ", DimOrderPretty(inst))?;
+        }
         write!(
             f,
-            "$Layout Order: {} $Inst: 0x{:x} $Size: {}",
-            DimOrderPretty(inst),
+            "$Inst: 0x{:x} $Size: {}",
             inst.inst_id.unwrap().0,
             SizePretty(inst.size.unwrap())
         )?;
@@ -1197,7 +1186,7 @@ impl State {
             }
         }
 
-        return Color(0x000000);
+        Color(0x000000)
     }
 
     fn has_multiple_nodes(&self) -> bool {
@@ -1234,7 +1223,7 @@ impl State {
                 if !proc.is_empty() {
                     timepoint
                         .entry(group)
-                        .or_insert_with(|| Vec::new())
+                        .or_insert_with(Vec::new)
                         .push((proc.proc_id, &proc.util_time_points));
                 }
             }
@@ -1254,7 +1243,7 @@ impl State {
                     let group = (node, mem.kind);
                     result
                         .entry(group)
-                        .or_insert_with(|| Vec::new())
+                        .or_insert_with(Vec::new)
                         .push((*mem_id, &mem.time_points))
                 }
             }
@@ -1269,23 +1258,21 @@ impl State {
         let mut result = BTreeMap::new();
 
         for (chan_id, chan) in &self.chans {
-            if !chan.time_points.is_empty() {
-                if chan_id.node_id().is_some() {
-                    // gathers/scatters
-                    let mut nodes = vec![None];
-                    if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
-                        nodes.push(chan_id.dst.map(|dst| dst.node_id()));
-                    }
-                    if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
-                        nodes.push(chan_id.src.map(|src| src.node_id()));
-                    }
-                    nodes.dedup();
-                    for node in nodes {
-                        result
-                            .entry(node)
-                            .or_insert_with(|| Vec::new())
-                            .push((*chan_id, &chan.time_points))
-                    }
+            if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
+                // gathers/scatters
+                let mut nodes = vec![None];
+                if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
+                    nodes.push(chan_id.dst.map(|dst| dst.node_id()));
+                }
+                if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
+                    nodes.push(chan_id.src.map(|src| src.node_id()));
+                }
+                nodes.dedup();
+                for node in nodes {
+                    result
+                        .entry(node)
+                        .or_insert_with(Vec::new)
+                        .push((*chan_id, &chan.time_points))
                 }
             }
         }
@@ -1329,7 +1316,7 @@ impl State {
         // add to the count. if it's second, decrement the count. Store the
         // (time, count) pair.
 
-        assert!(owners.len() > 0);
+        assert!(!owners.is_empty());
 
         let mut utilization = Vec::new();
         let mut last_time = None;
@@ -1361,7 +1348,7 @@ impl State {
         points: Vec<&MemPoint>,
         owners: BTreeSet<MemID>,
     ) -> Vec<(Timestamp, f64)> {
-        assert!(owners.len() > 0);
+        assert!(!owners.is_empty());
 
         let mut result = Vec::new();
 
@@ -1377,7 +1364,7 @@ impl State {
 
         for point in points {
             let mem_id = self.insts.get(&point.entry).unwrap();
-            let mem = self.mems.get(&mem_id).unwrap();
+            let mem = self.mems.get(mem_id).unwrap();
             let inst = mem.insts.get(&point.entry).unwrap();
             if point.first {
                 count += inst.size.unwrap();
@@ -1408,7 +1395,7 @@ impl State {
         // add to the count. if it's second, decrement the count. Store the
         // (time, count) pair.
 
-        assert!(owners.len() > 0);
+        assert!(!owners.is_empty());
 
         let max_count = owners.len();
 
@@ -1431,12 +1418,10 @@ impl State {
                 } else {
                     *utilization.last_mut().unwrap() = (point.time, count / max_count);
                 }
+            } else if count > 0.0 {
+                utilization.push((point.time, 1.0));
             } else {
-                if count > 0.0 {
-                    utilization.push((point.time, 1.0));
-                } else {
-                    utilization.push((point.time, count / max_count));
-                }
+                utilization.push((point.time, count / max_count));
             }
             last_time = Some(point.time);
         }
@@ -1490,7 +1475,7 @@ impl State {
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: time,
+                time,
                 count: Count(count),
             })?;
         }
@@ -1541,7 +1526,7 @@ impl State {
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: time,
+                time,
                 count: Count(count),
             })?;
         }
@@ -1593,7 +1578,7 @@ impl State {
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: time,
+                time,
                 count: Count(count),
             })?;
         }
@@ -1619,7 +1604,7 @@ impl State {
                 let group_name = format!("{} ({:?})", &node_name, kind);
                 stats
                     .entry(node_name)
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(group_name);
             }
         }
@@ -1634,7 +1619,7 @@ impl State {
                 let group_name = format!("{} ({} Memory)", &node_name, kind);
                 stats
                     .entry(node_name)
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(group_name);
             }
         }
@@ -1648,7 +1633,7 @@ impl State {
                 let group_name = format!("{} (Channel)", &node_name);
                 stats
                     .entry(node_name)
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(group_name);
             }
         }
@@ -1701,24 +1686,22 @@ fn create_unique_dir<P: AsRef<Path>>(path: P, force: bool) -> io::Result<PathBuf
         println!("Removing previous contents of {:?}", &path);
         let _ = remove_dir_all(&path); // ignore failure, we'll catch it on create
         create_dir(&path)?;
-    } else {
-        if create_dir(&path).is_err() {
-            let mut i = 1;
-            let retry_limit = 100;
-            loop {
-                let mut f = path.file_name().unwrap().to_owned();
-                f.push(format!(".{}", i));
-                let p = path.with_file_name(f);
-                let r = create_dir(&p);
-                if r.is_ok() {
-                    path = p.as_path().to_owned();
-                    break;
-                } else if i >= retry_limit {
-                    // tried too many times, assume this is a permanent failure
-                    r?;
-                }
-                i += 1;
+    } else if create_dir(&path).is_err() {
+        let mut i = 1;
+        let retry_limit = 100;
+        loop {
+            let mut f = path.file_name().unwrap().to_owned();
+            f.push(format!(".{}", i));
+            let p = path.with_file_name(f);
+            let r = create_dir(&p);
+            if r.is_ok() {
+                path = p.as_path().to_owned();
+                break;
+            } else if i >= retry_limit {
+                // tried too many times, assume this is a permanent failure
+                r?;
             }
+            i += 1;
         }
     }
     Ok(path)
@@ -1822,9 +1805,9 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         for (op_id, op) in &state.operations {
             let parent_id = op.parent_id.map(|x| x.0);
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
-            if let Some(proc_id) = state.tasks.get(&op_id) {
-                let proc = state.procs.get(&proc_id).unwrap();
-                let proc_record = proc_records.get(&proc_id).unwrap();
+            if let Some(proc_id) = state.tasks.get(op_id) {
+                let proc = state.procs.get(proc_id).unwrap();
+                let proc_record = proc_records.get(proc_id).unwrap();
                 let task = proc.find_task(*op_id).unwrap();
                 let (task_id, variant_id) = match task.kind {
                     ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
@@ -1845,13 +1828,13 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id,
+                    parent_id,
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
-                    provenance: provenance,
+                    provenance,
                 })?;
-            } else if let Some(task) = state.multi_tasks.get(&op_id) {
+            } else if let Some(task) = state.multi_tasks.get(op_id) {
                 let task_name = state
                     .task_kinds
                     .get(&task.task_id)
@@ -1862,11 +1845,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id,
+                    parent_id,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
-                    provenance: provenance,
+                    provenance,
                 })?;
             } else {
                 let desc = op.kind.and_then(|k| state.op_kinds.get(&k)).map_or_else(
@@ -1876,11 +1859,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id,
+                    parent_id,
                     desc: &desc,
                     proc: None,
                     level: None,
-                    provenance: provenance,
+                    provenance,
                 })?;
             }
         }
@@ -1891,7 +1874,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let scale_data = ScaleRecord {
             start: 0.0,
             end: (state.last_time.0 as f64 / 100. * 1.01).ceil() / 10.,
-            stats_levels: stats_levels,
+            stats_levels,
             max_level: base_level + 1,
         };
 

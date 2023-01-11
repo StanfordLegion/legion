@@ -261,16 +261,6 @@ namespace Legion {
      */
     class FutureAllReduceCollective : public AllGatherCollective<false> {
     public:
-      struct PendingReduce {
-      public:
-        PendingReduce(void) : instance(NULL) { }
-        PendingReduce(FutureInstance *inst, ApUserEvent post)
-          : instance(inst), postcondition(post) { }
-      public:
-        FutureInstance *instance;
-        ApUserEvent postcondition;
-      };
-    public:
       FutureAllReduceCollective(Operation *op, CollectiveIndexLocation loc, 
           ReplicateContext *ctx, ReductionOpID redop_id,
           const ReductionOp *redop, bool deterministic);
@@ -286,7 +276,7 @@ namespace Legion {
       void set_shadow_instance(FutureInstance *shadow);
       RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);
     protected:
-      ApEvent perform_reductions(const std::map<ShardID,PendingReduce> &pend);
+      ApEvent perform_reductions(const std::map<ShardID,FutureInstance*> &pend);
       void create_shadow_instance(void);
       void finalize(void);
     public:
@@ -296,8 +286,7 @@ namespace Legion {
       const bool deterministic;
     protected:
       const ApUserEvent finished;
-      std::map<int,std::map<ShardID,PendingReduce> > pending_reductions;
-      std::set<ApEvent> shadow_postconditions;
+      std::map<int,std::map<ShardID,FutureInstance*> > pending_reductions;
       FutureInstance *instance;
       FutureInstance *shadow_instance;
       ApEvent instance_ready;

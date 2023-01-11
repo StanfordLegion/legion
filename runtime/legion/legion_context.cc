@@ -2084,7 +2084,15 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
-      const ApEvent wait_on(manager->create_eager_instance(instance, layout));
+      LgEvent unique_event;
+      if (runtime->profiler != NULL)
+      {
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
+      const ApEvent wait_on(manager->create_eager_instance(instance, 
+                                              unique_event, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
@@ -8707,7 +8715,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         std::map<Operation*,GenerationID>::iterator finder = 
@@ -8726,11 +8734,33 @@ namespace Legion {
         {
           needs_trigger = true;
           children_complete_invoked = true;
+#ifdef LEGION_SPY
+          child_completion_events.swap(cummulative_child_completion_events);
+#endif
+          child_completion_events.reserve(
+              child_completion_events.size() + complete_children.size());
           for (LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
-            child_completion_events.insert(it->first->get_completion_event());
+            child_completion_events.push_back(
+                it->first->get_completion_event());
         }
+#ifdef LEGION_SPY
+        else
+        {
+          const ApEvent child_complete = op->get_completion_event();
+          cummulative_child_completion_events.push_back(child_complete);
+          // Make sure this vector doesn't grow too large for long-running tasks
+          constexpr size_t MAX_SIZE = 32;
+          if (cummulative_child_completion_events.size() == MAX_SIZE)
+          {
+            const ApEvent merged = 
+              Runtime::merge_events(NULL, cummulative_child_completion_events);
+            cummulative_child_completion_events.clear();
+            cummulative_child_completion_events.push_back(merged);
+          }
+        }
+#endif
       }
       if (needs_trigger)
       {
@@ -11042,7 +11072,7 @@ namespace Legion {
       bool need_complete = false;
       bool need_commit = false;
       std::set<RtEvent> preconditions;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         // Only need to do this for executing and executed children
@@ -11070,10 +11100,16 @@ namespace Legion {
           {
             need_complete = true;
             children_complete_invoked = true;
+#ifdef LEGION_SPY
+            child_completion_events.swap(cummulative_child_completion_events);
+#endif
+            child_completion_events.reserve(
+                child_completion_events.size() + complete_children.size()); 
             for (LegionMap<Operation*,GenerationID,
                   COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)
-              child_completion_events.insert(it->first->get_completion_event());
+              child_completion_events.push_back(
+                  it->first->get_completion_event());
           }
           if (complete_children.empty() && 
               !children_commit_invoked)
@@ -12044,10 +12080,14 @@ namespace Legion {
         if (registrar.task_variant_name != NULL)
           hasher.hash(registrar.task_variant_name, 
                       strlen(registrar.task_variant_name), "task_variant_name");
-        Serializer rez;
-        registrar.execution_constraints.serialize(rez);
-        registrar.layout_constraints.serialize(rez);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "constraints");
+        hash_execution_constraints(hasher, registrar.execution_constraints);
+        for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it =
+              registrar.layout_constraints.layouts.begin(); it !=
+              registrar.layout_constraints.layouts.end(); it++)
+        {
+          hasher.hash(it->first, "layout constraints");
+          hasher.hash(it->second, "layout_constraints");
+        }
         for (std::set<TaskID>::const_iterator it = 
               registrar.generator_tasks.begin(); it !=
               registrar.generator_tasks.end(); it++)
@@ -12707,6 +12747,122 @@ namespace Legion {
       hasher.hash(launcher.enable_inlining, "enable_inlining");
       hasher.hash(launcher.independent_requirements,"independent_requirements");
       hasher.hash(launcher.silence_warnings, "silence_warnings");
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::hash_execution_constraints(Murmur3Hasher &hasher,
+                                      const ExecutionConstraintSet &constraints)
+    //--------------------------------------------------------------------------
+    {
+      hasher.hash(constraints.isa_constraint.isa_prop, "ISA Constraint");
+      for (std::vector<Processor::Kind>::const_iterator it =
+            constraints.processor_constraint.valid_kinds.begin(); it !=
+            constraints.processor_constraint.valid_kinds.end(); it++)
+        hasher.hash(*it, "Processor Constraint");
+      for (std::vector<ResourceConstraint>::const_iterator it =
+            constraints.resource_constraints.begin(); it !=
+            constraints.resource_constraints.end(); it++)
+      {
+        hasher.hash(it->resource_kind, "Resource Constraint resource_kind");
+        hasher.hash(it->equality_kind, "Resource Constraint equality_kind");
+        hasher.hash(it->value, "Resource Constraint value");
+      }
+      for (std::vector<LaunchConstraint>::const_iterator it =
+            constraints.launch_constraints.begin(); it !=
+            constraints.launch_constraints.end(); it++)
+      {
+        hasher.hash(it->launch_kind, "Launch Constraint launch_kind");
+        hasher.hash(it->dims, "Launch Constraint dims");
+        for (int i = 0; i < it->dims; i++)
+          hasher.hash(it->values[i], "Launch Constraint value");
+      }
+      for (std::vector<ColocationConstraint>::const_iterator cit =
+            constraints.colocation_constraints.begin(); cit !=
+            constraints.colocation_constraints.end(); cit++)
+      {
+        for (std::set<FieldID>::const_iterator it =
+              cit->fields.begin(); it != cit->fields.end(); it++)
+          hasher.hash(*it, "Colocation Constraint fields");
+        for (std::set<unsigned>::const_iterator it =
+              cit->indexes.begin(); it != cit->indexes.end(); it++)
+          hasher.hash(*it, "Colocation Constraint indexes");
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::hash_layout_constraints(Murmur3Hasher &hasher,
+                     const LayoutConstraintSet &constraints, bool hash_pointers)
+    //--------------------------------------------------------------------------
+    {
+      hasher.hash(constraints.specialized_constraint.kind,
+          "Specialized Constraint kind");
+      hasher.hash(constraints.specialized_constraint.redop,
+          "Specialized Constraint redop");
+      hasher.hash(constraints.specialized_constraint.collective,
+          "Specialized Constraint collective");
+      hasher.hash(constraints.specialized_constraint.max_pieces,
+          "Specialized Constraint max_pieces");
+      hasher.hash(constraints.specialized_constraint.max_overhead,
+          "Specialized Constraint max_overhead");
+      hasher.hash(constraints.specialized_constraint.no_access,
+          "Specialized Constraint no_access");
+      hasher.hash(constraints.specialized_constraint.exact,
+          "Specialized Constraint exact");
+      for (std::vector<FieldID>::const_iterator it =
+            constraints.field_constraint.field_set.begin(); it !=
+            constraints.field_constraint.field_set.end(); it++)
+        hasher.hash(*it, "Field Constraint fields");
+      hasher.hash(constraints.field_constraint.contiguous, 
+          "Field Constraint contiguous");
+      hasher.hash(constraints.field_constraint.inorder, 
+          "Field Constraint inorder");
+      if (constraints.memory_constraint.has_kind)
+        hasher.hash(constraints.memory_constraint.kind, 
+            "Memory Constraint kind");
+      if (hash_pointers && constraints.pointer_constraint.is_valid)
+      {
+        hasher.hash(constraints.pointer_constraint.memory,
+            "Pointer Constraint memory");
+        hasher.hash(constraints.pointer_constraint.ptr,
+            "Pointer Constraint ptr");
+      }
+      for (std::vector<DimensionKind>::const_iterator it =
+            constraints.ordering_constraint.ordering.begin(); it !=
+            constraints.ordering_constraint.ordering.end(); it++)
+        hasher.hash(*it, "Ordering Constraint ordering");
+      hasher.hash(constraints.ordering_constraint.contiguous,
+          "Ordering Constraint contiguous");
+      for (std::vector<SplittingConstraint>::const_iterator it =
+            constraints.splitting_constraints.begin(); it !=
+            constraints.splitting_constraints.end(); it++)
+      {
+        hasher.hash(it->kind, "Splitting Constraint kind");
+        hasher.hash(it->value, "Splitting Constraint value");
+        hasher.hash(it->chunks, "Splitting Constraint chunks");
+      }
+      for (std::vector<DimensionConstraint>::const_iterator it =
+            constraints.dimension_constraints.begin(); it !=
+            constraints.dimension_constraints.end(); it++)
+      {
+        hasher.hash(it->kind, "Dimension Constraint kind");
+        hasher.hash(it->eqk, "Dimension Constraint eqk");
+        hasher.hash(it->value, "Splitting Constraint value");
+      }
+      for (std::vector<AlignmentConstraint>::const_iterator it =
+            constraints.alignment_constraints.begin(); it !=
+            constraints.alignment_constraints.end(); it++)
+      {
+        hasher.hash(it->fid, "Alignment Constraint fid");
+        hasher.hash(it->eqk, "Alignment Constraint eqk");
+        hasher.hash(it->alignment, "Alignment Constraint alignment");
+      }
+      for (std::vector<OffsetConstraint>::const_iterator it =
+            constraints.offset_constraints.begin(); it !=
+            constraints.offset_constraints.end(); it++)
+      {
+        hasher.hash(it->fid, "Offset Constraint fid");
+        hasher.hash(it->offset, "Offset Constraint offset");
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18324,9 +18480,8 @@ namespace Legion {
           hasher.hash(it->second, strlen(it->second), "field_files");
         }
         hasher.hash(launcher.local_files, "local_files");
-        Serializer rez;
-        launcher.constraints.serialize(rez);
-        hasher.hash(rez.get_buffer(), rez.get_used_bytes(), "constraints");
+        hash_layout_constraints(hasher, launcher.constraints, 
+                                false/*hash pointer*/);
         for (std::set<FieldID>::const_iterator it = 
               launcher.privilege_fields.begin(); it !=
               launcher.privilege_fields.end(); it++)

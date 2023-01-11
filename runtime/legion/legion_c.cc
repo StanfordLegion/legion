@@ -2484,6 +2484,35 @@ legion_logical_partition_retrieve_name(legion_runtime_t runtime_,
   runtime->retrieve_name(handle, *result);
 }
 
+void
+legion_advise_analysis_subtree(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_logical_region_t parent_,
+                               int num_regions,
+                               legion_logical_region_t* regions_,
+                               int num_partitions,
+                               legion_logical_partition_t* partitions_,
+                               int num_fields,
+                               legion_field_id_t* fields_) {
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  std::set<LogicalRegion> regions;
+  std::set<LogicalPartition> partitions;
+  std::set<FieldID> fields;
+  for (int i = 0; i < num_regions; i++) {
+    regions.insert(CObjectWrapper::unwrap(regions_[i]));
+  }
+  for (int i = 0; i < num_partitions; i++) {
+    partitions.insert(CObjectWrapper::unwrap(partitions_[i]));
+  }
+  for (int i = 0; i < num_fields; i++) {
+    fields.insert(fields_[i]);
+  }
+  runtime->advise_analysis_subtree(ctx, parent, regions, partitions, fields);
+}
+
 // -----------------------------------------------------------------------
 // Region Requirement Operations
 // -----------------------------------------------------------------------
