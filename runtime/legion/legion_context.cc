@@ -2065,8 +2065,15 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
+      LgEvent unique_event;
+      if (runtime->profiler != NULL)
+      {
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
       const ApEvent wait_on(manager->create_eager_instance(instance, 
-                                      LgEvent::NO_LG_EVENT, layout));
+                                              unique_event, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
@@ -8769,11 +8776,33 @@ namespace Legion {
         {
           needs_trigger = true;
           children_complete_invoked = true;
+#ifdef LEGION_SPY
+          child_completion_events.insert(
+              cummulative_child_completion_events.begin(),
+              cummulative_child_completion_events.end());
+          cummulative_child_completion_events.clear();
+#endif
           for (LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
             it->first->find_completion_effects(child_completion_events);
         }
+#ifdef LEGION_SPY
+        else
+        {
+          const ApEvent child_complete = op->get_completion_event();
+          cummulative_child_completion_events.push_back(child_complete);
+          // Make sure this vector doesn't grow too large for long-running tasks
+          constexpr size_t MAX_SIZE = 32;
+          if (cummulative_child_completion_events.size() == MAX_SIZE)
+          {
+            const ApEvent merged = 
+              Runtime::merge_events(NULL, cummulative_child_completion_events);
+            cummulative_child_completion_events.clear();
+            cummulative_child_completion_events.push_back(merged);
+          }
+        }
+#endif
       }
       if (needs_trigger)
       {
@@ -11581,6 +11610,11 @@ namespace Legion {
           {
             need_complete = true;
             children_complete_invoked = true;
+#ifdef LEGION_SPY
+            child_completion_events.insert(
+                cummulative_child_completion_events.begin(),
+                cummulative_child_completion_events.end());
+#endif
             for (LegionMap<Operation*,GenerationID,
                   COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)

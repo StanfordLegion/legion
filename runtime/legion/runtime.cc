@@ -741,6 +741,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureImpl::prepare_for_shutdown(void)
+    //--------------------------------------------------------------------------
+    {
+      // This future is leaking, so just force delete all our instances
+      AutoLock f_lock(future_lock);
+      for (std::map<Memory,FutureInstance*>::const_iterator it =
+            instances.begin(); it != instances.end(); it++)
+        delete it->second;
+      instances.clear();
+    }
+
+    //--------------------------------------------------------------------------
     void FutureImpl::wait(bool silence_warnings, const char *warning_string)
     //--------------------------------------------------------------------------
     {
@@ -10630,9 +10642,14 @@ namespace Legion {
       assert((ptr >= eager_pool) || ((size == 0) && (ptr == 0)));
 #endif
       Realm::ProfilingRequestSet requests;
-      if (unique_event.exists() && runtime->profiler != NULL)
+      if (runtime->profiler != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(unique_event.exists());
+#endif
         runtime->profiler->add_inst_request(requests, 
                   implicit_provenance, unique_event);
+      }
       if (size > 0)
       {
         int64_t offset = ptr - eager_pool;
@@ -17567,7 +17584,7 @@ namespace Legion {
       // Have the memory managers for deletion of all their instances
       for (std::map<Memory,MemoryManager*>::const_iterator it =
            memory_managers.begin(); it != memory_managers.end(); it++)
-        it->second->finalize(); 
+        it->second->finalize();
       if (profiler != NULL)
         profiler->finalize();
     }
@@ -26982,6 +26999,35 @@ namespace Legion {
       assert(!prepared_for_shutdown);
       assert(virtual_manager != NULL);
 #endif
+      std::vector<FutureImpl*> leaked_futures;
+      {
+        // Also have any leaking futures force delete their instances 
+        AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
+        for (std::map<DistributedID,DistributedCollectable*>::const_iterator it
+              = dist_collectables.begin(); it != dist_collectables.end(); it++)
+        {
+          // See if this is a future
+          if (LEGION_DISTRIBUTED_HELP_DECODE(it->first) != FUTURE_DC)
+            continue;
+#ifdef DEBUG_LEGION
+          FutureImpl *impl = dynamic_cast<FutureImpl*>(it->second);
+          assert(impl != NULL);
+#else
+          FutureImpl *impl = static_cast<FutureImpl*>(it->second);
+#endif
+          impl->add_base_resource_ref(RUNTIME_REF);
+          leaked_futures.push_back(impl);
+        }
+      }
+      for (std::vector<FutureImpl*>::const_iterator it =
+            leaked_futures.begin(); it != leaked_futures.end(); it++)
+      {
+        (*it)->prepare_for_shutdown();
+        if ((*it)->remove_base_resource_ref(RUNTIME_REF))
+          delete (*it);
+      }
+      // Search through all our distributed collectables and find any
+      // futures which are leaking and therefore need to be finalized
       for (std::map<Processor,ProcessorManager*>::const_iterator it = 
             proc_managers.begin(); it != proc_managers.end(); it++)
         it->second->prepare_for_shutdown();
