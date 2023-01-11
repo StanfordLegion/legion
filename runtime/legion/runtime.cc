@@ -10733,9 +10733,14 @@ namespace Legion {
       assert((ptr >= eager_pool) || ((size == 0) && (ptr == 0)));
 #endif
       Realm::ProfilingRequestSet requests;
-      if (unique_event.exists() && runtime->profiler != NULL)
+      if (runtime->profiler != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(unique_event.exists());
+#endif
         runtime->profiler->add_inst_request(requests, 
                   implicit_provenance, unique_event);
+      }
       if (size > 0)
       {
         int64_t offset = ptr - eager_pool;

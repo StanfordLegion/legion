@@ -2084,8 +2084,15 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
+      LgEvent unique_event;
+      if (runtime->profiler != NULL)
+      {
+        const RtUserEvent unique = Runtime::create_rt_user_event();
+        Runtime::trigger_event(unique);
+        unique_event = unique;
+      }
       const ApEvent wait_on(manager->create_eager_instance(instance, 
-                                      LgEvent::NO_LG_EVENT, layout));
+                                              unique_event, layout));
       if (!instance.exists())
       {
         const char *mem_names[] = {
