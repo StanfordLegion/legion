@@ -598,9 +598,6 @@ namespace Legion {
                                         const Realm::ProfilingResponse &result,
                                         const void *orig, size_t orig_length);
       virtual void handle_profiling_update(int count);
-      // Return the event to use for waiting for program order execution
-      virtual ApEvent get_program_order_event(void)
-        { return get_completion_event(); }
       // Record an application event that needs to trigger before this
       // operation can be considered completed
       virtual ApEvent get_completion_event(void);
@@ -1559,7 +1556,6 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(const unsigned index,
                                        Reservation lock, bool exclusive);
-      virtual ApEvent get_program_order_event(void);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual size_t get_context_index(void) const;

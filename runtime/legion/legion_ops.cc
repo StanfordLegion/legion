@@ -6095,12 +6095,7 @@ namespace Legion {
       } 
 #endif
       log_mapping_decision(0/*idx*/, requirement, mapped_instances);
-#ifdef LEGION_SPY
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
-                                        termination_event);
-#endif
-      record_completion_effect(termination_event);
+
       if (!atomic_locks.empty() || !arrive_barriers.empty())
       {
         // They've already been sorted in order 
@@ -6123,6 +6118,13 @@ namespace Legion {
                                         termination_event);    
         }
       }
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
+                                        ready_event);
+#endif
+      // Map operations do not wait for the unmapping to be considered complete
+      record_completion_effect(map_complete_event);
       // We can trigger the ready event now that we know its precondition
       Runtime::trigger_event(NULL, ready_event, map_complete_event);
       // Now we can trigger the mapping event and indicate
@@ -6258,13 +6260,6 @@ namespace Legion {
       }
       else
         atomic_locks[lock] = exclusive;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent MapOp::get_program_order_event(void)
-    //--------------------------------------------------------------------------
-    {
-      return ready_event;
     }
 
     //--------------------------------------------------------------------------

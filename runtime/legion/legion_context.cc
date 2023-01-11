@@ -6779,7 +6779,7 @@ namespace Legion {
       MapOp *map_op = runtime->get_available_map_op();
       map_op->initialize(this, region, provenance);
       register_inline_mapped_region(region);
-      const ApEvent result = map_op->get_program_order_event();
+      const ApEvent result = map_op->get_completion_event();
       add_to_dependence_queue(map_op);
       return result;
     }
@@ -7911,7 +7911,7 @@ namespace Legion {
       // physical trace since it might not be sound to block
       if (runtime->program_order_execution && !unordered && 
           !is_replaying_physical_trace())
-        term_event = op->get_program_order_event();
+        term_event = op->get_completion_event();
       {
         AutoLock d_lock(dependence_lock);
         if (unordered)
@@ -9287,7 +9287,7 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
-      previous_completion_events.insert(op->get_program_order_event());
+      previous_completion_events.insert(op->get_completion_event());
       // Periodically merge these to keep this data structure from exploding
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
@@ -9427,7 +9427,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_program_order_event());
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
@@ -9440,7 +9440,7 @@ namespace Legion {
             continue;
           // Record a dependence if it didn't come after our fence
           if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_program_order_event());
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
@@ -9472,7 +9472,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_program_order_event());
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
@@ -9486,7 +9486,7 @@ namespace Legion {
           if (op_index >= current_mapping_fence_index)
             previous_operations.insert(*it);
           if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_program_order_event());
+            previous_events.insert(it->first->get_completion_event());
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
@@ -9536,7 +9536,7 @@ namespace Legion {
         previous_events.insert(previous_completion_events.begin(),
                                previous_completion_events.end());
         // Don't include ourselves though
-        previous_events.erase(op->get_program_order_event());
+        previous_events.erase(op->get_completion_event());
       }
 #endif
       // Also include the current execution fence in case the operation
@@ -11614,6 +11614,7 @@ namespace Legion {
             child_completion_events.insert(
                 cummulative_child_completion_events.begin(),
                 cummulative_child_completion_events.end());
+            cummulative_child_completion_events.clear();
 #endif
             for (LegionMap<Operation*,GenerationID,
                   COMPLETE_CHILD_ALLOC>::const_iterator it =
@@ -18494,7 +18495,7 @@ namespace Legion {
       map_op->initialize(this, region, provenance);
       map_op->initialize_replication(this);
       register_inline_mapped_region(region);
-      const ApEvent result = map_op->get_program_order_event();
+      const ApEvent result = map_op->get_completion_event();
       add_to_dependence_queue(map_op);
       return result;
     }
@@ -19800,7 +19801,7 @@ namespace Legion {
       if (runtime->program_order_execution && !unordered &&
           !is_replaying_physical_trace())
       {
-        ApEvent term_event = op->get_program_order_event();
+        ApEvent term_event = op->get_completion_event();
         InnerContext::add_to_dependence_queue(op,unordered,false/*outermost*/);
         const ApBarrier inorder_bar = inorder_barrier.next(this);
         Runtime::phase_barrier_arrive(inorder_bar, 1/*count*/, term_event); 
