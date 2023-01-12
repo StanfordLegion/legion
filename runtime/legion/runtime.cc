@@ -2436,7 +2436,10 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+      // The future might be a collective future so wait for it if 
+      // it hasn't been registered yet
+      DistributedCollectable *dc = 
+        runtime->find_distributed_collectable(did, true/*wait*/);
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
       assert(future != NULL);
