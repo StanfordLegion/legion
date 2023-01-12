@@ -8155,6 +8155,8 @@ namespace Legion {
       if (parent != NULL)
         assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif
+      if (parent != NULL)
+        parent->add_nested_resource_ref(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Index Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
@@ -8167,6 +8169,8 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
+      if ((parent != NULL) && parent->remove_nested_resource_ref(did))
+        delete parent;
       // Remove ourselves from the context
       if (registered_with_runtime)
         context->remove_node(handle);
@@ -9664,11 +9668,7 @@ namespace Legion {
       if (parent->remove_nested_resource_ref(did))
         delete parent;
       if (color_space->remove_nested_resource_ref(did))
-        delete color_space;
-      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-            color_map.begin(); it != color_map.end(); it++)
-        if (it->second->remove_nested_resource_ref(did))
-          delete it->second;
+        delete color_space; 
       if ((shard_mapping != NULL) && shard_mapping->remove_reference())
         delete shard_mapping;
     }
@@ -9718,6 +9718,11 @@ namespace Legion {
       IndexSpaceExpression *expr = union_expr.load();
       if ((expr != NULL) && expr->remove_nested_expression_reference(did))
         delete expr;
+      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+            color_map.begin(); it != color_map.end(); it++)
+        if (it->second->remove_nested_resource_ref(did))
+          delete it->second;
+      color_map.clear();
     }
 
     //--------------------------------------------------------------------------
