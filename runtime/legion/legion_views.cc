@@ -70,7 +70,7 @@ namespace Legion {
       LogicalView *view = static_cast<LogicalView*>(dc);
 #endif
       view->send_view(source);
-    } 
+    }
 
 #ifdef DEBUG_LEGION_GC
     //--------------------------------------------------------------------------

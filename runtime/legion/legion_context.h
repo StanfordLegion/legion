@@ -3143,7 +3143,6 @@ namespace Legion {
       ShardID logical_region_allocator_shard;
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
-      ShardID fill_view_allocator_shard;
     protected:
       ApReplBar pending_partition_barrier;
       RtReplBar creation_barrier;

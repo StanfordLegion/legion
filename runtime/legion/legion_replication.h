@@ -1227,7 +1227,7 @@ namespace Legion {
     public:
       CreateCollectiveFillView(ReplicateContext *ctx, CollectiveID id,
                                FillOp *op, DistributedID fill_view,
-                               ShardID allocator_shard);
+                               DistributedID fresh_did);
       CreateCollectiveFillView(const CreateCollectiveFillView &rhs) = delete;
       virtual ~CreateCollectiveFillView(void) { }
     public:
@@ -1240,8 +1240,8 @@ namespace Legion {
       virtual RtEvent post_complete_exchange(void);
     protected:
       FillOp *const fill_op;
+      const DistributedID fresh_did;
       std::set<DistributedID> selected_views;
-      DistributedID fresh_did;
     };
 
     /**
@@ -1763,7 +1763,7 @@ namespace Legion {
       ReplFillOp& operator=(const ReplFillOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  ShardID allocator_shard,
+                                  DistributedID fresh_did,
                                   bool is_first_local);
     public:
       virtual void activate(void);
@@ -1781,7 +1781,7 @@ namespace Legion {
       RtBarrier collective_map_barrier;
       CreateCollectiveFillView *collective;
       CollectiveID collective_id;
-      ShardID fill_view_allocator_shard;
+      DistributedID fresh_did;
       bool is_first_local_shard;
     };
 
@@ -1811,7 +1811,7 @@ namespace Legion {
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
     public:
       void initialize_replication(ReplicateContext *ctx,
-                                  ShardID allocator_shard);
+                                  DistributedID fresh_did);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -1819,7 +1819,7 @@ namespace Legion {
       MapperManager *mapper;
       CreateCollectiveFillView *collective;
       CollectiveID collective_id;
-      ShardID fill_view_allocator_shard;
+      DistributedID fresh_did;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

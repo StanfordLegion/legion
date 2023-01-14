@@ -12178,9 +12178,8 @@ namespace Legion {
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), dynamic_id_allocator_shard(0),
-        equivalence_set_allocator_shard(0), fill_view_allocator_shard(0),
-        next_available_collective_index(0), next_logical_collective_index(1),
-        next_physical_template_index(0), 
+        equivalence_set_allocator_shard(0), next_available_collective_index(0),
+        next_logical_collective_index(1), next_physical_template_index(0), 
         next_replicate_bar_index(0), next_logical_bar_index(0),
         unordered_ops_counter(0), unordered_ops_epoch(MIN_UNORDERED_OPS_EPOCH)
     //--------------------------------------------------------------------------
@@ -18550,10 +18549,8 @@ namespace Legion {
       log_run.debug("Registering a fill operation in task %s (ID %lld)",
                      get_task_name(), get_unique_id());
 #endif
-      fill_op->initialize_replication(this, fill_view_allocator_shard,
+      fill_op->initialize_replication(this, get_next_distributed_id(),
           shard_manager->is_first_local_shard(owner_shard));
-      if (++fill_view_allocator_shard == total_shards)
-        fill_view_allocator_shard = 0;
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
@@ -18646,9 +18643,7 @@ namespace Legion {
       fill_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                        0/*owner shard*/, COLLECTIVE_LOC_46));
 #endif
-      fill_op->initialize_replication(this, fill_view_allocator_shard);
-      if (++fill_view_allocator_shard == total_shards)
-        fill_view_allocator_shard = 0;
+      fill_op->initialize_replication(this, get_next_distributed_id());
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;

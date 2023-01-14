@@ -2524,7 +2524,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // See if we are the first local shard on the lowest address space
-      const CollectiveMapping &mapping = 
+      const CollectiveMapping &mapping =
         repl_ctx->shard_manager->get_collective_mapping();
       const AddressSpace lowest = mapping[0];
       if ((lowest == runtime->address_space) && 
@@ -3561,12 +3561,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplFillOp::initialize_replication(ReplicateContext *ctx,
-                                            ShardID allocator_shard,
-                                            bool is_first)
+                                            DistributedID fresh, bool is_first)
     //--------------------------------------------------------------------------
     {
       collective_id = ctx->get_next_collective_index(COLLECTIVE_LOC_77);
-      fill_view_allocator_shard = allocator_shard;
+      fresh_did = fresh;
       is_first_local_shard = is_first;
     }
 
@@ -3578,7 +3577,7 @@ namespace Legion {
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       collective = NULL;
       collective_id = 0;
-      fill_view_allocator_shard = 0;
+      fresh_did = 0;
       is_first_local_shard = false;
     }
 
@@ -3661,7 +3660,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       collective = new CreateCollectiveFillView(repl_ctx, collective_id, this,
-          (fill_view == NULL) ? 0 : fill_view->did, fill_view_allocator_shard);
+          (fill_view == NULL) ? 0 : fill_view->did, fresh_did);
       collective->perform_collective_async();
       return collective->perform_collective_wait(false/*block*/);
     }
@@ -3746,7 +3745,7 @@ namespace Legion {
       mapper = NULL;
       collective = NULL;
       collective_id = 0;
-      fill_view_allocator_shard = 0;
+      fresh_did = 0;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -3914,7 +3913,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       collective = new CreateCollectiveFillView(repl_ctx, collective_id, this,
-          (fill_view == NULL) ? 0 : fill_view->did, fill_view_allocator_shard);
+          (fill_view == NULL) ? 0 : fill_view->did, fresh_did);
       collective->perform_collective_async();
       return collective->perform_collective_wait(false/*block*/);
     }
@@ -3967,11 +3966,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx,
-                                                 ShardID allocator_shard)
+                                                 DistributedID fresh)
     //--------------------------------------------------------------------------
     {
       collective_id = ctx->get_next_collective_index(COLLECTIVE_LOC_93);
-      fill_view_allocator_shard = allocator_shard;
+      fresh_did = fresh;
     }
 
     /////////////////////////////////////////////////////////////
@@ -17060,13 +17059,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CreateCollectiveFillView::CreateCollectiveFillView(ReplicateContext *ctx, 
                                   CollectiveID id, FillOp *op,
-                                  DistributedID did, ShardID allocator_shard)
-      : AllGatherCollective<false>(ctx, id), fill_op(op), fresh_did(0)
+                                  DistributedID did, DistributedID fresh)
+      : AllGatherCollective<false>(ctx, id), fill_op(op), fresh_did(fresh)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(fresh_did > 0);
+#endif
       selected_views.insert(did);
-      if (local_shard == allocator_shard)
-        fresh_did = manager->runtime->get_available_distributed_id();
+      // Preregister the fresh did with the runtime in case we end up
+      // needing to use it, note this has to be done before we do the
+      // rendezvous so we can guarantee that all the participants have
+      // done it before we start
+      if (manager->is_first_local_shard(ctx->owner_shard))
+        context->runtime->record_pending_distributed_collectable(fresh_did);
     }
 
     //--------------------------------------------------------------------------
@@ -17078,7 +17084,6 @@ namespace Legion {
       for (std::set<DistributedID>::const_iterator it =
             selected_views.begin(); it != selected_views.end(); it++)
         rez.serialize(*it);
-      rez.serialize(fresh_did);
     }
 
     //--------------------------------------------------------------------------
@@ -17094,15 +17099,6 @@ namespace Legion {
         derez.deserialize(did);
         selected_views.insert(did);
       }
-      DistributedID did;
-      derez.deserialize(did);
-      if (did > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert((fresh_did == 0) || (fresh_did == did));
-#endif
-        fresh_did = did;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -17110,7 +17106,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(fresh_did > 0);
       assert(!selected_views.empty());
 #endif
       if ((selected_views.size() > 1) || ((*selected_views.begin()) == 0))
@@ -17123,6 +17118,8 @@ namespace Legion {
 #endif
         fill_op->register_fill_view_creation(fill_view, set_view);
       }
+      else // Didn't use the fresh did so we can revoke it
+        context->runtime->revoke_pending_distributed_collectable(fresh_did);
       return RtEvent::NO_RT_EVENT;
     }
 
