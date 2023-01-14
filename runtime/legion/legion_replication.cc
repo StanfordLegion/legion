@@ -17071,8 +17071,15 @@ namespace Legion {
       // needing to use it, note this has to be done before we do the
       // rendezvous so we can guarantee that all the participants have
       // done it before we start
+      
       if (manager->is_first_local_shard(ctx->owner_shard))
-        context->runtime->record_pending_distributed_collectable(fresh_did);
+      {
+        Runtime *runtime = context->runtime;
+        // Note that where we got the fresh_did from already did the pending
+        // registration for us so we don't need to do that on this node
+        if (runtime->determine_owner(fresh_did) != runtime->address_space)
+          runtime->record_pending_distributed_collectable(fresh_did);
+      }
     }
 
     //--------------------------------------------------------------------------
