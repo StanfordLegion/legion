@@ -254,6 +254,8 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       ApEvent term_event;
       derez.deserialize(term_event);
       size_t local_collective_arrivals;
@@ -278,7 +280,7 @@ namespace Legion {
       std::set<RtEvent> applied_events;
       ApEvent pre = inst_view->register_user(usage, user_mask, user_expr,
                                              op_id, op_ctx_index, index,
-                                             term_event,
+                                             match_space, term_event,
                                              target, NULL/*no mapping*/,
                                              local_collective_arrivals,
                                              registered_events, applied_events,
@@ -2293,6 +2295,7 @@ namespace Legion {
                                       PredEvent predicate_guard,
                                       IndexSpaceExpression *fill_expression,
                                       Operation *op, const unsigned index,
+                                      const IndexSpaceID collective_match_space,
                                       const FieldMask &fill_mask,
                                       const PhysicalTraceInfo &trace_info,
                                       std::set<RtEvent> &recorded_events,
@@ -2356,6 +2359,7 @@ namespace Legion {
                                       ReductionOpID reduction_op_id,
                                       IndexSpaceExpression *copy_expression,
                                       Operation *op, const unsigned index,
+                                      const IndexSpaceID collective_match_space,
                                       const FieldMask &copy_mask,
                                       PhysicalManager *src_point,
                                       const PhysicalTraceInfo &trace_info,
@@ -2723,7 +2727,8 @@ namespace Legion {
       assert(is_owner());
 #endif
       const RendezvousKey key(analysis->get_context_index(), 
-                              analysis->get_requirement_index());
+                              analysis->get_requirement_index(),
+                              analysis->get_match_space());
       RtUserEvent to_trigger;
       {
         AutoLock v_lock(view_lock);
@@ -2762,14 +2767,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CollectiveAnalysis* IndividualView::find_collective_analysis(
-                                    size_t context_index, unsigned region_index)
+          size_t context_index, unsigned region_index, IndexSpaceID match_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       RtEvent wait_on;
-      const RendezvousKey key(context_index, region_index);
+      const RendezvousKey key(context_index, region_index, match_space);
       {
         AutoLock v_lock(view_lock);
         std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
@@ -2808,11 +2813,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndividualView::unregister_collective_analysis(
-      const CollectiveView *source, size_t context_index, unsigned region_index)
+                             const CollectiveView *source, size_t context_index,
+                             unsigned region_index, IndexSpaceID match_space)
     //--------------------------------------------------------------------------
     {
       CollectiveAnalysis *removed = NULL;
-      const RendezvousKey key(context_index, region_index);
+      const RendezvousKey key(context_index, region_index, match_space);
       {
         AutoLock v_lock(view_lock);
         std::map<RendezvousKey,RegisteredAnalysis>::iterator finder =
@@ -2851,6 +2857,7 @@ namespace Legion {
                                        const UniqueID op_id,
                                        const size_t op_ctx_index,
                                        const unsigned index,
+                                       const IndexSpaceID match_space,
                                        ApEvent term_event,
                                        PhysicalManager *target,
                                        CollectiveMapping *analysis_mapping,
@@ -2881,7 +2888,7 @@ namespace Legion {
       RtUserEvent applied, registered;
       std::vector<ApEvent> term_events;
       PhysicalTraceInfo *result_info = NULL;
-      const RendezvousKey key(op_ctx_index, index);
+      const RendezvousKey key(op_ctx_index, index, match_space);
       {
         AutoLock v_lock(view_lock);
         // Check to see if we're the first one to arrive on this node
@@ -2981,6 +2988,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(origin);
           result_info->pack_trace_info(rez, applied_events);
           rez.serialize(term_event);
@@ -2995,7 +3003,7 @@ namespace Legion {
         std::vector<RtEvent> local_registered;
         std::set<RtEvent> local_applied; 
         const ApEvent ready = register_user(usage, user_mask, expr, op_id,
-            op_ctx_index, index, term_event, target, 
+            op_ctx_index, index, match_space, term_event, target, 
             NULL/*analysis*/, 0/*no collective arrivals*/, local_registered,
             local_applied, *result_info, runtime->address_space, symbolic);
         Runtime::trigger_event(result_info, result, ready);
@@ -3020,6 +3028,7 @@ namespace Legion {
     void IndividualView::process_collective_user_registration(
                                             const size_t op_ctx_index,
                                             const unsigned index,
+                                            const IndexSpaceID match_space,
                                             const AddressSpaceID origin,
                                             const PhysicalTraceInfo &trace_info,
                                             ApEvent remote_term_event,
@@ -3032,7 +3041,7 @@ namespace Legion {
       assert(collective_mapping != NULL);
 #endif
       UserRendezvous to_perform;
-      const RendezvousKey key(op_ctx_index, index);
+      const RendezvousKey key(op_ctx_index, index, match_space);
       {
         AutoLock v_lock(view_lock);
         // Check to see if we're the first one to arrive on this node
@@ -3098,6 +3107,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(origin);
           to_perform.trace_info->pack_trace_info(rez, applied_events);
           rez.serialize(term_event);
@@ -3121,7 +3131,7 @@ namespace Legion {
         std::set<RtEvent> applied_events;
         const ApEvent ready = register_user(to_perform.usage,
             *to_perform.mask, to_perform.expr, to_perform.op_id, op_ctx_index,
-            index, term_event, manager,
+            index, match_space, term_event, manager,
             NULL/*no analysis mapping*/, 0/*no collective arrivals*/,
             registered_events, applied_events, *to_perform.trace_info,
             runtime->address_space, to_perform.symbolic);
@@ -3159,6 +3169,8 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       AddressSpaceID origin;
       derez.deserialize(origin);
       PhysicalTraceInfo trace_info = 
@@ -3174,8 +3186,9 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
 
-      view->process_collective_user_registration(op_ctx_index, index, origin,
-          trace_info, term_event, ready_event, registered_event, applied_event);
+      view->process_collective_user_registration(op_ctx_index, index, 
+          match_space, origin, trace_info, term_event, ready_event,
+          registered_event, applied_event);
     }
 
     //--------------------------------------------------------------------------
@@ -3703,6 +3716,7 @@ namespace Legion {
                                          const UniqueID op_id,
                                          const size_t op_ctx_index,
                                          const unsigned index,
+                                         const IndexSpaceID match_space,
                                          ApEvent term_event,
                                          PhysicalManager *target,
                                          CollectiveMapping *analysis_mapping,
@@ -3720,7 +3734,7 @@ namespace Legion {
       // Handle the collective rendezvous if necessary
       if (local_collective_arrivals > 0)
         return register_collective_user(usage, user_mask, user_expr,
-              op_id, op_ctx_index, index, term_event,
+              op_id, op_ctx_index, index, match_space, term_event,
               target, analysis_mapping, local_collective_arrivals,
               registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
@@ -3751,6 +3765,7 @@ namespace Legion {
             rez.serialize(op_id);
             rez.serialize(op_ctx_index);
             rez.serialize(index);
+            rez.serialize(match_space);
             rez.serialize(term_event);
             rez.serialize(local_collective_arrivals);
             rez.serialize(ready_event);
@@ -3871,6 +3886,7 @@ namespace Legion {
                 rez.serialize(op_id);
                 rez.serialize(op_ctx_index);
                 rez.serialize(index);
+                rez.serialize(match_space);
                 rez.serialize(term_event);
                 rez.serialize(local_collective_arrivals);
                 rez.serialize(ApUserEvent::NO_AP_USER_EVENT);
@@ -5641,6 +5657,7 @@ namespace Legion {
                                          const UniqueID op_id,
                                          const size_t op_ctx_index,
                                          const unsigned index,
+                                         const IndexSpaceID match_space,
                                          ApEvent term_event,
                                          PhysicalManager *target,
                                          CollectiveMapping *analysis_mapping,
@@ -5659,7 +5676,7 @@ namespace Legion {
       // Handle the collective rendezvous if necessary
       if (local_collective_arrivals > 0)
         return register_collective_user(usage, user_mask, user_expr,
-              op_id, op_ctx_index, index, term_event,
+              op_id, op_ctx_index, index, match_space, term_event,
               target, analysis_mapping, local_collective_arrivals,
               registered, applied_events, trace_info, symbolic);
       // Quick test for empty index space expressions
@@ -5684,6 +5701,7 @@ namespace Legion {
           rez.serialize(op_id);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(term_event);
           rez.serialize(local_collective_arrivals);
           rez.serialize(ready_event);
@@ -6906,6 +6924,7 @@ namespace Legion {
                                       PredEvent predicate_guard,
                                       IndexSpaceExpression *fill_expression,
                                       Operation *op, const unsigned index,
+                                      const IndexSpaceID collective_match_space,
                                       const FieldMask &fill_mask,
                                       const PhysicalTraceInfo &trace_info,
                                       std::set<RtEvent> &recorded_events,
@@ -6946,6 +6965,7 @@ namespace Legion {
           if (fill_restricted)
             op->pack_remote_operation(rez, origin, applied_events);
           rez.serialize(index);
+          rez.serialize(collective_match_space);
           rez.serialize(op->get_ctx_index());
           rez.serialize(fill_mask);
           trace_info.pack_trace_info(rez, applied_events);
@@ -6990,7 +7010,8 @@ namespace Legion {
           result = to_trigger;
         }
         perform_collective_fill(fill_view, precondition,
-            predicate_guard, fill_expression, op, index, op->get_ctx_index(),
+            predicate_guard, fill_expression, op, index,
+            collective_match_space, op->get_ctx_index(),
             fill_mask, trace_info, recorded_events, applied_events,
             to_trigger, local_space, fill_restricted);
       }
@@ -7004,6 +7025,7 @@ namespace Legion {
                                       ReductionOpID reduction_op_id,
                                       IndexSpaceExpression *copy_expression,
                                       Operation *op, const unsigned index,
+                                      const IndexSpaceID collective_match_space,
                                       const FieldMask &copy_mask,
                                       PhysicalManager *src_point,
                                       const PhysicalTraceInfo &trace_info,
@@ -7111,6 +7133,7 @@ namespace Legion {
             if (copy_restricted)
               op->pack_remote_operation(rez, origin, applied_events);
             rez.serialize(index);
+            rez.serialize(collective_match_space);
             rez.serialize(op->get_ctx_index());
             rez.serialize(copy_mask);
             trace_info.pack_trace_info(rez, applied_events);
@@ -7152,15 +7175,15 @@ namespace Legion {
           if (reduction_op_id > 0)
             perform_collective_reducecast(source_view->as_reduction_view(), 
                 src_fields, precondition, predicate_guard, copy_expression,
-                op, index, op->get_ctx_index(), copy_mask, src_inst, 
-                source_manager->get_unique_event(), trace_info, 
-                recorded_events, applied_events, copy_done, all_bar,
-                owner_shard, origin, copy_restricted);
+                op, index, collective_match_space, op->get_ctx_index(), 
+                copy_mask, src_inst, source_manager->get_unique_event(),
+                trace_info, recorded_events, applied_events, copy_done,
+                all_bar, owner_shard, origin, copy_restricted);
           else
             perform_collective_broadcast(src_fields, precondition,
                 predicate_guard, copy_expression, op, index, 
-                op->get_ctx_index(), copy_mask, src_inst, 
-                source_manager->get_unique_event(), trace_info,
+                collective_match_space, op->get_ctx_index(), copy_mask,
+                src_inst, source_manager->get_unique_event(), trace_info,
                 recorded_events, applied_events, copy_done, all_done,
                 all_bar, owner_shard, origin, copy_restricted); 
         }
@@ -7193,8 +7216,9 @@ namespace Legion {
             // on the destination collective instance
             perform_collective_hourglass(collective->as_allreduce_view(),
                 precondition, predicate_guard, copy_expression, op, index, 
-                copy_mask, (src_point != NULL) ? src_point->did : 0, 
-                trace_info, recorded_events, applied_events, 
+                collective_match_space, copy_mask, 
+                (src_point != NULL) ? src_point->did : 0, trace_info,
+                recorded_events, applied_events, 
                 all_done, origin, copy_restricted);
             return all_done;
           }
@@ -7234,6 +7258,7 @@ namespace Legion {
             if (copy_restricted)
               op->pack_remote_operation(rez, origin, applied_events);
             rez.serialize(index);
+            rez.serialize(collective_match_space);
             rez.serialize(op->get_ctx_index());
             rez.serialize(copy_mask);
             if (src_point != NULL)
@@ -7261,7 +7286,8 @@ namespace Legion {
         }
         else
           perform_collective_pointwise(collective, precondition,
-              predicate_guard, copy_expression, op, index, op->get_ctx_index(),
+              predicate_guard, copy_expression, op, index, 
+              collective_match_space, op->get_ctx_index(),
               copy_mask, (src_point != NULL) ? src_point->did : 0, 
               op->get_unique_op_id(), trace_info, recorded_events, 
               applied_events, all_done, all_bar, owner_shard, origin, 
@@ -7277,6 +7303,7 @@ namespace Legion {
                                           const UniqueID op_id,
                                           const size_t op_ctx_index,
                                           const unsigned index,
+                                          const IndexSpaceID match_space,
                                           ApEvent term_event,
                                           PhysicalManager *target,
                                           CollectiveMapping *analysis_mapping,
@@ -7307,6 +7334,7 @@ namespace Legion {
             rez.serialize(op_id);
             rez.serialize(op_ctx_index);
             rez.serialize(index);
+            rez.serialize(match_space);
             rez.serialize(term_event);
             rez.serialize(local_collective_arrivals);
             rez.serialize(ready_event);
@@ -7321,7 +7349,7 @@ namespace Legion {
         }
         else
           return register_collective_user(usage, user_mask, user_expr,
-              op_id, op_ctx_index, index, term_event,
+              op_id, op_ctx_index, index, match_space, term_event,
               target, local_collective_arrivals, registered,
               applied_events, trace_info, symbolic);
       }
@@ -7333,7 +7361,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < local_views.size(); idx++)
         if (local_views[idx]->get_manager() == target)
           return local_views[idx]->register_user(usage, user_mask, 
-              user_expr, op_id, op_ctx_index, index, term_event,
+              user_expr, op_id, op_ctx_index, index, match_space, term_event,
               target, analysis_mapping, local_collective_arrivals,
               registered, applied_events, trace_info, source, symbolic);
       // Should never get here
@@ -8247,6 +8275,7 @@ namespace Legion {
                                        const UniqueID op_id,
                                        const size_t op_ctx_index,
                                        const unsigned index,
+                                       const IndexSpaceID match_space,
                                        ApEvent term_event,
                                        PhysicalManager *target,
                                        size_t local_collective_arrivals,
@@ -8291,7 +8320,7 @@ namespace Legion {
       std::vector<RtEvent> remote_registered, remote_applied;
       std::vector<ApUserEvent> local_ready_events;
       std::vector<std::vector<ApEvent> > local_term_events;
-      const RendezvousKey key(op_ctx_index, index);
+      const RendezvousKey key(op_ctx_index, index, match_space);
       {
         AutoLock v_lock(view_lock);
         // Check to see if we're the first one to arrive on this node
@@ -8424,6 +8453,7 @@ namespace Legion {
                 rez.serialize(did);
                 rez.serialize(op_ctx_index);
                 rez.serialize(index);
+                rez.serialize(match_space);
                 rez.serialize(registered);
                 rez.serialize(applied);
               }
@@ -8456,7 +8486,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       finalize_collective_user(usage, user_mask, expr, op_id, op_ctx_index, 
-          index, local_registered, global_registered,
+          index, match_space, local_registered, global_registered,
           local_applied, global_applied, local_ready_events, 
           local_term_events, result_info, symbolic);
       RtEvent all_registered = local_registered;
@@ -8479,6 +8509,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CollectiveView::process_register_user_request(
                                 const size_t op_ctx_index, const unsigned index,
+                                const IndexSpaceID match_space, 
                                 RtEvent registered, RtEvent applied)
     //--------------------------------------------------------------------------
     {
@@ -8486,7 +8517,7 @@ namespace Legion {
       assert(!local_views.empty());
 #endif
       UserRendezvous to_perform;
-      const RendezvousKey key(op_ctx_index, index);
+      const RendezvousKey key(op_ctx_index, index, match_space);
       {
         AutoLock v_lock(view_lock);
         // Check to see if we're the first one to arrive on this node
@@ -8541,6 +8572,7 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(op_ctx_index);
             rez.serialize(index);
+            rez.serialize(match_space);
             rez.serialize(registered);
             rez.serialize(applied);
           }
@@ -8561,7 +8593,7 @@ namespace Legion {
 #endif
       finalize_collective_user(to_perform.usage, *(to_perform.mask),
           to_perform.expr, to_perform.op_id, op_ctx_index, index, 
-          to_perform.local_registered,
+          match_space, to_perform.local_registered,
           to_perform.global_registered, to_perform.local_applied,
           to_perform.global_applied, to_perform.ready_events, 
           to_perform.local_term_events, to_perform.trace_info,
@@ -8598,19 +8630,22 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       RtEvent registered, applied;
       derez.deserialize(registered);
       derez.deserialize(applied);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      view->process_register_user_request(op_ctx_index, index,
+      view->process_register_user_request(op_ctx_index, index, match_space,
                                           registered, applied);
     }
 
     //--------------------------------------------------------------------------
     void CollectiveView::process_register_user_response(
             const size_t op_ctx_index, const unsigned index, 
+            const IndexSpaceID match_space, 
             const RtEvent registered, const RtEvent applied)
     //--------------------------------------------------------------------------
     {
@@ -8619,7 +8654,7 @@ namespace Legion {
       assert(!local_views.empty());
 #endif
       UserRendezvous to_perform;
-      const RendezvousKey key(op_ctx_index, index);
+      const RendezvousKey key(op_ctx_index, index, match_space);
       {
         AutoLock v_lock(view_lock);
         // Check to see if we're the first one to arrive on this node
@@ -8636,7 +8671,7 @@ namespace Legion {
       // Now we can perform the user registration
       finalize_collective_user(to_perform.usage, *(to_perform.mask),
           to_perform.expr, to_perform.op_id, op_ctx_index, index,
-          to_perform.local_registered, 
+          match_space, to_perform.local_registered, 
           to_perform.global_registered, to_perform.local_applied,
           to_perform.global_applied, to_perform.ready_events,
           to_perform.local_term_events, to_perform.trace_info,
@@ -8661,13 +8696,15 @@ namespace Legion {
       derez.deserialize(op_ctx_index);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       RtEvent registered, applied;
       derez.deserialize(registered);
       derez.deserialize(applied);
 
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      view->process_register_user_response(op_ctx_index, index, 
+      view->process_register_user_response(op_ctx_index, index, match_space,
                                            registered, applied);
     }
 
@@ -8679,6 +8716,7 @@ namespace Legion {
                                 const UniqueID op_id,
                                 const size_t op_ctx_index,
                                 const unsigned index,
+                                const IndexSpaceID match_space,
                                 RtUserEvent local_registered,
                                 RtEvent global_registered,
                                 RtUserEvent local_applied,
@@ -8701,6 +8739,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(op_ctx_index);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(global_registered);
           rez.serialize(global_applied);
         }
@@ -8720,14 +8759,14 @@ namespace Legion {
         const ApEvent term_event = 
           Runtime::merge_events(trace_info, term_events[idx]);
         const ApEvent ready = local_views[idx]->register_user(usage, user_mask,
-            expr, op_id, op_ctx_index, index, term_event,
+            expr, op_id, op_ctx_index, index, match_space, term_event,
             local_views[idx]->get_manager(), NULL/*analysis mapping*/,
             0/*no collective arrivals*/, registered_events, applied_events,
             *trace_info, runtime->address_space, symbolic);
         Runtime::trigger_event(trace_info, ready_events[idx], ready);
         // Also unregister the collective analyses
-        local_views[idx]->unregister_collective_analysis(this, 
-                                          op_ctx_index, index);
+        local_views[idx]->unregister_collective_analysis(this, op_ctx_index,
+                                                         index, match_space);
       }
       if (!registered_events.empty())
         Runtime::trigger_event(local_registered,
@@ -8761,6 +8800,7 @@ namespace Legion {
                                          PredEvent predicate_guard,
                                          IndexSpaceExpression *fill_expression,
                                          Operation *op, const unsigned index,
+                                         const IndexSpaceID match_space,
                                          const size_t op_context_index,
                                          const FieldMask &fill_mask,
                                          const PhysicalTraceInfo &trace_info,
@@ -8782,8 +8822,8 @@ namespace Legion {
         // If this is not a fill-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        first_local_analysis =
-          local_views.front()->find_collective_analysis(op_context_index,index);
+        first_local_analysis = local_views.front()->find_collective_analysis(
+                                        op_context_index, index, match_space);
 #ifdef DEBUG_LEGION
         assert(first_local_analysis != NULL);
 #endif
@@ -8868,8 +8908,8 @@ namespace Legion {
       {
         const PhysicalTraceInfo &inst_info = 
           (first_local_analysis == NULL) ? trace_info :
-          local_views[idx]->find_collective_analysis(op_context_index, 
-                                                     index)->get_trace_info();
+          local_views[idx]->find_collective_analysis(op_context_index,
+                                index, match_space)->get_trace_info();
         IndividualView *local_view = local_views[idx];
         ApEvent dst_precondition = local_view->find_copy_preconditions(
             false/*reading*/, 0/*redop*/, fill_mask, fill_expression,
@@ -8947,6 +8987,8 @@ namespace Legion {
         op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       FieldMask fill_mask;
@@ -8993,9 +9035,9 @@ namespace Legion {
       }
 
       view->perform_collective_fill(fill_view, precondition,
-          predicate_guard, fill_expression, op, index, op_ctx_index,
-          fill_mask, trace_info, recorded_events, applied_events, ready,
-          origin, fill_restricted);
+          predicate_guard, fill_expression, op, index, match_space,
+          op_ctx_index, fill_mask, trace_info, recorded_events,
+          applied_events, ready, origin, fill_restricted);
 
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
@@ -9199,6 +9241,7 @@ namespace Legion {
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID match_space,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const UniqueInst &src_inst,
@@ -9225,8 +9268,8 @@ namespace Legion {
         // If this is not a copy-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        first_local_analysis = 
-          local_views.front()->find_collective_analysis(op_ctx_index, index);
+        first_local_analysis = local_views.front()->find_collective_analysis(
+                                            op_ctx_index, index, match_space);
 #ifdef DEBUG_LEGION
         assert(first_local_analysis != NULL);
 #endif
@@ -9318,6 +9361,7 @@ namespace Legion {
           if (copy_restricted)
             op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
           local_info.pack_trace_info(rez, applied_events);
@@ -9371,8 +9415,8 @@ namespace Legion {
         dst_manager->compute_copy_offsets(copy_mask, dst_fields);
         const PhysicalTraceInfo &inst_info = 
           (first_local_analysis == NULL) ? trace_info : 
-          local_views[idx]->find_collective_analysis(op_ctx_index, index)->
-                                                      get_trace_info();
+          local_views[idx]->find_collective_analysis(op_ctx_index, 
+              index, match_space)->get_trace_info();
         ApEvent dst_pre = dst_view->find_copy_preconditions(
           false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
           op_id, index, applied_events, inst_info);
@@ -9468,6 +9512,8 @@ namespace Legion {
         op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
@@ -9514,9 +9560,10 @@ namespace Legion {
       }
 
       view->perform_collective_broadcast(src_fields, precondition,
-          predicate_guard, copy_expression, op, index, op_ctx_index, copy_mask,
-          src_inst, src_unique_event, trace_info,recorded_events,applied_events,
-          ready, all_done, all_bar, owner_shard, origin, copy_restricted);
+          predicate_guard, copy_expression, op, index, match_space,
+          op_ctx_index, copy_mask, src_inst, src_unique_event, trace_info,
+          recorded_events, applied_events, ready, all_done, all_bar,
+          owner_shard, origin, copy_restricted);
 
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
@@ -9537,6 +9584,7 @@ namespace Legion {
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID match_space,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const UniqueInst &src_inst,
@@ -9593,6 +9641,7 @@ namespace Legion {
           if (copy_restricted)
             op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
           trace_info.pack_trace_info(rez, applied_events);
@@ -9622,8 +9671,8 @@ namespace Legion {
         // If this is not a copy-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        first_local_analysis = 
-          local_views.front()->find_collective_analysis(op_ctx_index, index);
+        first_local_analysis = local_views.front()->find_collective_analysis(
+                                            op_ctx_index, index, match_space);
 #ifdef DEBUG_LEGION
         assert(first_local_analysis != NULL);
 #endif
@@ -9650,8 +9699,8 @@ namespace Legion {
       {
         const PhysicalTraceInfo &inst_info =
           (first_local_analysis == NULL) ? trace_info : 
-          local_views[idx]->find_collective_analysis(op_ctx_index, index)->
-                                                      get_trace_info();
+          local_views[idx]->find_collective_analysis(op_ctx_index, 
+              index, match_space)->get_trace_info();
         IndividualView *dst_view = local_views[idx];
         // Compute the reducing precondition for our local instances
         ApEvent reduce_pre = dst_view->find_copy_preconditions(
@@ -9752,6 +9801,8 @@ namespace Legion {
         op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
@@ -9787,9 +9838,10 @@ namespace Legion {
       }
 
       view->perform_collective_reducecast(src_view, src_fields, precondition,
-          predicate_guard, copy_expression, op, index, op_ctx_index, copy_mask,
-          src_inst, src_unique_event, trace_info, recorded_events,
-          applied_events, ready, all_bar, owner_shard, origin, copy_restricted);
+          predicate_guard, copy_expression, op, index, match_space, 
+          op_ctx_index, copy_mask, src_inst, src_unique_event, trace_info, 
+          recorded_events, applied_events, ready, all_bar, owner_shard, 
+          origin, copy_restricted);
 
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
@@ -9810,6 +9862,7 @@ namespace Legion {
                                           PredEvent predicate_guard,
                                           IndexSpaceExpression *copy_expression,
                                           Operation *op, const unsigned index,
+                                          const IndexSpaceID match_space,
                                           const FieldMask &copy_mask,
                                           const DistributedID src_inst_did,
                                           const PhysicalTraceInfo &trace_info,
@@ -9840,6 +9893,7 @@ namespace Legion {
           copy_expression->pack_expression(rez, target);
           op->pack_remote_operation(rez, target, applied_events);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(copy_mask);
           rez.serialize(src_inst_did);
           trace_info.pack_trace_info(rez, applied_events);
@@ -10002,6 +10056,7 @@ namespace Legion {
             if (copy_restricted)
               op->pack_remote_operation(rez, origin, applied_events); 
             rez.serialize(index);
+            rez.serialize(match_space);
             rez.serialize(op->get_ctx_index());
             rez.serialize(copy_mask);
             trace_info.pack_trace_info(rez, applied_events);
@@ -10149,6 +10204,8 @@ namespace Legion {
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events); 
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       FieldMask copy_mask;
       derez.deserialize(copy_mask);
       DistributedID src_inst_did;
@@ -10175,8 +10232,8 @@ namespace Legion {
           wait_on.wait();
       }
 
-      target->perform_collective_hourglass(src_view,
-          precondition, predicate_guard, copy_expression, op, index,
+      target->perform_collective_hourglass(src_view, precondition,
+          predicate_guard, copy_expression, op, index, match_space,
           copy_mask, src_inst_did, trace_info, recorded_events, applied_events,
           all_done, runtime->address_space, copy_restricted);
 
@@ -10198,6 +10255,7 @@ namespace Legion {
                                           PredEvent predicate_guard,
                                           IndexSpaceExpression *copy_expression,
                                           Operation *op, const unsigned index,
+                                          const IndexSpaceID match_space,
                                           const size_t op_ctx_index,
                                           const FieldMask &copy_mask,
                                           const DistributedID src_inst_did,
@@ -10224,8 +10282,8 @@ namespace Legion {
         // If this is not a copy-out to a restricted collective instance 
         // then we should be able to find our local analyses to use for 
         // performing operations
-        first_local_analysis =
-          local_views.front()->find_collective_analysis(op_ctx_index, index);
+        first_local_analysis = local_views.front()->find_collective_analysis(
+                                            op_ctx_index, index, match_space);
 #ifdef DEBUG_LEGION
         assert(first_local_analysis != NULL);
 #endif
@@ -10264,6 +10322,7 @@ namespace Legion {
           if (copy_restricted)
             op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(op_ctx_index);
           rez.serialize(copy_mask);
           rez.serialize(src_inst_did);
@@ -10313,7 +10372,8 @@ namespace Legion {
           local_analyses.resize(local_views.size());
           for (unsigned idx = 0; idx < local_views.size(); idx++)
             local_analyses[idx] = 
-              local_views[idx]->find_collective_analysis(op_ctx_index, index);
+              local_views[idx]->find_collective_analysis(op_ctx_index, 
+                                                         index, match_space);
         }
         allreduce->perform_collective_allreduce(precondition,
             predicate_guard, copy_expression, op, index, copy_mask, local_info,
@@ -10323,8 +10383,8 @@ namespace Legion {
       {
         const PhysicalTraceInfo &inst_info =
           (first_local_analysis == NULL) ? trace_info : 
-          local_views[idx]->find_collective_analysis(op_ctx_index, index)->
-                                                      get_trace_info();
+          local_views[idx]->find_collective_analysis(op_ctx_index, 
+              index, match_space)->get_trace_info();
         IndividualView *local_view = local_views[idx];
         // Find the precondition for all our local copies
         const ApEvent dst_pre = local_view->find_copy_preconditions(
@@ -10357,7 +10417,8 @@ namespace Legion {
         if (!copy_restricted)
         {
           CollectiveAnalysis *analysis =
-            local_views[idx]->find_collective_analysis(op_ctx_index, index);
+            local_views[idx]->find_collective_analysis(op_ctx_index, 
+                                                       index, match_space);
           // See if this is the same analysis that already had a change to
           // pick the source instance because it was the one issuing this
           // copy in the first place. If not then we give the mapper a 
@@ -10482,6 +10543,8 @@ namespace Legion {
         op = RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       size_t op_ctx_index;
       derez.deserialize(op_ctx_index);
       FieldMask copy_mask;
@@ -10530,8 +10593,8 @@ namespace Legion {
         allreduce_tag = allreduce->generate_unique_allreduce_tag();
       }
 
-      dst_view->perform_collective_pointwise(src_view,
-          precondition, predicate_guard, copy_expression, op, index,
+      dst_view->perform_collective_pointwise(src_view, precondition,
+          predicate_guard, copy_expression, op, index, match_space,
           op_ctx_index, copy_mask, src_inst_did, src_inst_did_op,
           trace_info, recorded_events, applied_events, all_done, all_bar,
           owner_shard, origin, allreduce_tag, copy_restricted);

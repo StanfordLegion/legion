@@ -5247,6 +5247,7 @@ namespace Legion {
       assert((fills[0]->across_helper == NULL) || !manage_dst_events);
       assert((dst_events == NULL) || track_events);
 #endif
+      const IndexSpaceID match_space = analysis->get_collective_match_space();
       if (fills.size() == 1)
       {
         FillUpdate *update = fills[0];
@@ -5271,6 +5272,7 @@ namespace Legion {
                                                  precondition,
                                                  update->fill_guard, fill_expr,
                                                  analysis->op, dst_index,
+                                                 match_space,
                                                  fill_mask, trace_info,
                                                  recorded_events, effects,
                                                  fills[0]->across_helper,
@@ -5326,6 +5328,7 @@ namespace Legion {
                                                    precondition,
                                                    it->first.second, fill_expr,
                                                    analysis->op, dst_index,
+                                                   match_space,
                                                    fill_mask, trace_info,
                                                    recorded_events, effects, 
                                                    fills[0]->across_helper,
@@ -5359,6 +5362,7 @@ namespace Legion {
       assert((src_index == dst_index) || !manage_dst_events);
       assert((dst_events == NULL) || track_events);
 #endif
+      const IndexSpaceID match_space = analysis->get_collective_match_space();
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
             cit = copies.begin(); cit != copies.end(); cit++)
       {
@@ -5391,8 +5395,9 @@ namespace Legion {
           const ApEvent result = target->copy_from(source, precondition,
                                     predicate_guard, update->redop, copy_expr,
                                     analysis->op, manage_dst_events ? dst_index
-                                      : src_index, copy_mask, update->src_man,
-                                    trace_info, recorded_events, effects, 
+                                      : src_index, match_space, copy_mask,
+                                    update->src_man, trace_info, 
+                                    recorded_events, effects, 
                                     cit->second[0]->across_helper, 
                                     manage_dst_events, restricted_output,
                                     track_events);
@@ -5447,8 +5452,8 @@ namespace Legion {
             const ApEvent result = target->copy_from(it->first.first, 
                                     precondition, predicate_guard, redop,
                                     copy_expr, analysis->op, manage_dst_events ?
-                                      dst_index : src_index, copy_mask, 
-                                    it->first.second, trace_info, 
+                                      dst_index : src_index, match_space,
+                                    copy_mask, it->first.second, trace_info, 
                                     recorded_events, effects,
                                     cit->second[0]->across_helper,
                                     manage_dst_events, restricted_output,
@@ -6299,6 +6304,7 @@ namespace Legion {
 #endif
       std::vector<RtEvent> registered_events;
       std::vector<ApEvent> inst_ready_events;
+      const IndexSpaceID match_space = get_collective_match_space();
       for (unsigned idx = 0; idx < target_views.size(); idx++)
       {
         for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -6315,7 +6321,7 @@ namespace Legion {
             view_collective_arrivals = finder->second;
           }
           const ApEvent ready = it->first->register_user(usage, it->second,
-              expr_node, op_id, op_ctx_index, index, termination,
+              expr_node, op_id, op_ctx_index, index, match_space, termination,
               target_instances[idx], collective_mapping,
               view_collective_arrivals, registered_events, applied_events,
               trace_info, local_space, symbolic);
@@ -6354,6 +6360,13 @@ namespace Legion {
       return RtEvent::NO_RT_EVENT;
     }
 
+    //--------------------------------------------------------------------------
+    IndexSpaceID RegistrationAnalysis::get_collective_match_space(void) const
+    //--------------------------------------------------------------------------
+    {
+      return region->row_source->handle.get_id();
+    }
+
     /////////////////////////////////////////////////////////////
     // RemoteCollectiveAnalysis
     /////////////////////////////////////////////////////////////
@@ -6365,6 +6378,7 @@ namespace Legion {
     {
       rez.serialize(get_context_index());
       rez.serialize(get_requirement_index());
+      rez.serialize(get_match_space());
       Operation *op = get_operation();
       op->pack_remote_operation(rez, target, applied);
       const PhysicalTraceInfo &trace_info = get_trace_info();
@@ -6373,8 +6387,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteCollectiveAnalysis::RemoteCollectiveAnalysis(size_t ctx_index,
-        unsigned req_index, RemoteOp *op, Deserializer &derez, Runtime *runtime)
-      : context_index(ctx_index), requirement_index(req_index), operation(op),
+                          unsigned req_index, IndexSpaceID match, RemoteOp *op,
+                          Deserializer &derez, Runtime *runtime)
+      : context_index(ctx_index), requirement_index(req_index),
+        match_space(match), operation(op),
         trace_info(PhysicalTraceInfo::unpack_trace_info(derez, runtime))
     //--------------------------------------------------------------------------
     {
@@ -6403,10 +6419,12 @@ namespace Legion {
       derez.deserialize(context_index);
       unsigned requirement_index;
       derez.deserialize(requirement_index);
+      IndexSpaceID match_space;
+      derez.deserialize(match_space);
       RemoteOp *op =
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       return new RemoteCollectiveAnalysis(context_index, requirement_index,
-                                          op, derez, runtime);
+                                          match_space, op, derez, runtime);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8871,6 +8889,7 @@ namespace Legion {
 #else
       IndexSpaceNode *expr_node = static_cast<IndexSpaceNode*>(analysis_expr);
 #endif
+      const IndexSpaceID match_space = expr_node->handle.get_id();
       std::vector<RtEvent> registered_events;
       std::vector<ApEvent> inst_ready_events;
       for (unsigned idx = 0; idx < target_views.size(); idx++)
@@ -8889,7 +8908,7 @@ namespace Legion {
             view_collective_arrivals = finder->second;
           }
           const ApEvent ready = it->first->register_user(usage, it->second,
-              expr_node, op_id, op_ctx_index, index, termination,
+              expr_node, op_id, op_ctx_index, index, match_space, termination,
               target_instances[idx], collective_mapping,
               view_collective_arrivals, registered_events, applied_events,
               trace_info, local_space, symbolic);

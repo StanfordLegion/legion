@@ -149,18 +149,21 @@ namespace Legion {
       struct RendezvousKey {
       public:
         RendezvousKey(void)
-          : op_context_index(0), index(0) { }
-        RendezvousKey(size_t ctx, unsigned idx)
-          : op_context_index(ctx), index(idx) { }
+          : op_context_index(0), match(0), index(0) { }
+        RendezvousKey(size_t ctx, unsigned idx, IndexSpaceID m)
+          : op_context_index(ctx), match(m), index(idx) { }
       public:
         inline bool operator<(const RendezvousKey &rhs) const
         {
           if (op_context_index < rhs.op_context_index) return true;
           if (op_context_index > rhs.op_context_index) return false;
+          if (match < rhs.match) return true;
+          if (match > rhs.match) return false;
           return (index < rhs.index);
         }
       public:
         size_t op_context_index; // unique name operation in context
+        IndexSpaceID match; // index space of regions that should match
         unsigned index; // uniquely name analysis for op by region req index
       };
     public:
@@ -176,6 +179,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -188,6 +192,7 @@ namespace Legion {
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &copy_mask,
                                 PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
@@ -204,6 +209,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const size_t op_ctx_index,
                                     const unsigned index,
+                                    const IndexSpaceID collective_match_space,
                                     ApEvent term_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
@@ -257,6 +263,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -269,6 +276,7 @@ namespace Legion {
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &copy_mask,
                                 PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
@@ -325,10 +333,11 @@ namespace Legion {
       void register_collective_analysis(const CollectiveView *source,
                                         CollectiveAnalysis *analysis);
       CollectiveAnalysis* find_collective_analysis(size_t context_index,
-                                                   unsigned region_index);
+                        unsigned region_index, IndexSpaceID match_space);
       void unregister_collective_analysis(const CollectiveView *source,
                                           size_t context_index,
-                                          unsigned region_index);
+                                          unsigned region_index,
+                                          IndexSpaceID match_space);
     protected:
       ApEvent register_collective_user(const RegionUsage &usage,
                                        const FieldMask &user_mask,
@@ -336,6 +345,7 @@ namespace Legion {
                                        const UniqueID op_id,
                                        const size_t op_ctx_index,
                                        const unsigned index,
+                                       const IndexSpaceID match_space,
                                        ApEvent term_event,
                                        PhysicalManager *target,
                                        CollectiveMapping *analysis_mapping,
@@ -346,6 +356,7 @@ namespace Legion {
                                        const bool symbolic);
       void process_collective_user_registration(const size_t op_ctx_index,
                                             const unsigned index,
+                                            const IndexSpaceID match_space,
                                             const AddressSpaceID origin,
                                             const PhysicalTraceInfo &trace_info,
                                             ApEvent remote_term_event,
@@ -481,6 +492,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
@@ -493,6 +505,7 @@ namespace Legion {
                                 PredEvent predicate_guard, ReductionOpID redop,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &copy_mask,
                                 PhysicalManager *src_point,
                                 const PhysicalTraceInfo &trace_info,
@@ -508,6 +521,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const size_t op_ctx_index,
                                     const unsigned index,
+                                    const IndexSpaceID collective_match_space,
                                     ApEvent term_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
@@ -522,6 +536,7 @@ namespace Legion {
                                 ApEvent precondition, PredEvent predicate_guard,
                                 IndexSpaceExpression *expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID match_space,
                                 const size_t op_context_index,
                                 const FieldMask &fill_mask,
                                 const PhysicalTraceInfo &trace_info,
@@ -551,6 +566,7 @@ namespace Legion {
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expresison,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const UniqueInst &src_inst,
@@ -568,6 +584,7 @@ namespace Legion {
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expresison,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const UniqueInst &src_inst,
@@ -584,6 +601,7 @@ namespace Legion {
                                 PredEvent predicate_guard,
                                 IndexSpaceExpression *copy_expresison,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const FieldMask &copy_mask,
                                 const DistributedID src_inst_did,
                                 const PhysicalTraceInfo &trace_info,
@@ -597,6 +615,7 @@ namespace Legion {
                                 PredEvent predicate_guard, 
                                 IndexSpaceExpression *copy_expression,
                                 Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
                                 const size_t op_ctx_index,
                                 const FieldMask &copy_mask,
                                 const DistributedID src_inst_did,
@@ -653,6 +672,7 @@ namespace Legion {
                                        const UniqueID op_id,
                                        const size_t op_ctx_index,
                                        const unsigned index,
+                                       const IndexSpaceID match_space,
                                        ApEvent term_event,
                                        PhysicalManager *target,
                                        size_t local_collective_arrivals,
@@ -662,9 +682,11 @@ namespace Legion {
                                        const bool symbolic);
       void process_register_user_request(const size_t op_ctx_index,
                                        const unsigned index,
+                                       const IndexSpaceID match_space,
                                        RtEvent registered, RtEvent applied);
       void process_register_user_response(const size_t op_ctx_index,
                                        const unsigned index,
+                                       const IndexSpaceID match_space,
                                        const RtEvent registered,
                                        const RtEvent applied);
       void finalize_collective_user(const RegionUsage &usage,
@@ -673,6 +695,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const size_t op_ctx_index,
                                     const unsigned index,
+                                    const IndexSpaceID match_space,
                                     RtUserEvent local_registered,
                                     RtEvent global_registered,
                                     RtUserEvent local_applied,
@@ -1093,6 +1116,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const size_t op_ctx_index,
                                     const unsigned index,
+                                    const IndexSpaceID collective_match_space,
                                     ApEvent term_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,
@@ -1280,6 +1304,7 @@ namespace Legion {
                                     const UniqueID op_id,
                                     const size_t op_ctx_index,
                                     const unsigned index,
+                                    const IndexSpaceID collective_match_space,
                                     ApEvent term_event,
                                     PhysicalManager *target,
                                     CollectiveMapping *collective_mapping,

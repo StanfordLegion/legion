@@ -1846,6 +1846,7 @@ namespace Legion {
       virtual ApEvent perform_output(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
+      virtual IndexSpaceID get_collective_match_space(void) const { return 0; }
     public:
       void process_remote_instances(Deserializer &derez,
                                     std::set<RtEvent> &ready_events);
@@ -1952,6 +1953,7 @@ namespace Legion {
                                            ApEvent termination_event,
                                            ApEvent &instances_ready,
                                            bool symbolic = false);
+      virtual IndexSpaceID get_collective_match_space(void) const; 
     public:
       RegionNode *const region;
       const size_t context_index;
@@ -1980,6 +1982,7 @@ namespace Legion {
       virtual ~CollectiveAnalysis(void) { }
       virtual size_t get_context_index(void) const = 0;
       virtual unsigned get_requirement_index(void) const = 0;
+      virtual IndexSpaceID get_match_space(void) const = 0;
       virtual Operation* get_operation(void) const = 0;
       virtual const PhysicalTraceInfo& get_trace_info(void) const = 0;
       void pack_collective_analysis(Serializer &rez,
@@ -1997,11 +2000,13 @@ namespace Legion {
                                      public Collectable {
     public:
       RemoteCollectiveAnalysis(size_t ctx_index, unsigned req_index,
-                RemoteOp *op, Deserializer &derez, Runtime *runtime);
+                               IndexSpaceID match_space, RemoteOp *op,
+                               Deserializer &derez, Runtime *runtime);
       virtual ~RemoteCollectiveAnalysis(void);
       virtual size_t get_context_index(void) const { return context_index; }
       virtual unsigned get_requirement_index(void) const
         { return requirement_index; }
+      virtual IndexSpaceID get_match_space(void) const { return match_space; }
       virtual Operation* get_operation(void) const;
       virtual const PhysicalTraceInfo& get_trace_info(void) const
         { return trace_info; }
@@ -2013,6 +2018,7 @@ namespace Legion {
     public:
       const size_t context_index;
       const unsigned requirement_index;
+      const IndexSpaceID match_space;
       RemoteOp *const operation;
       const PhysicalTraceInfo trace_info;
     };
@@ -2048,6 +2054,8 @@ namespace Legion {
     public:
       virtual size_t get_context_index(void) const { return context_index; }
       virtual unsigned get_requirement_index(void) const { return index; }
+      virtual IndexSpaceID get_match_space(void) const 
+        { return get_collective_match_space(); }
       virtual Operation* get_operation(void) const { return op; }
       virtual const PhysicalTraceInfo& get_trace_info(void) const 
         { return trace_info; }
