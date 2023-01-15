@@ -8867,6 +8867,7 @@ namespace Legion {
           if (fill_restricted)
             op->pack_remote_operation(rez, *it, applied_events);
           rez.serialize(index);
+          rez.serialize(match_space);
           rez.serialize(op_context_index);
           rez.serialize(fill_mask);
           local_info.pack_trace_info(rez, applied_events);
