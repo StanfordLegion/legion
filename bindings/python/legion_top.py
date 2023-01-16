@@ -88,7 +88,17 @@ def input_args(filter_runtime_options=False):
     if filter_runtime_options:
         i = 1 # Skip program name
 
-        prefixes = ['-cuda:', '-numa:', '-dm:', '-bishop:']
+        # Legion & Realm will remove any flag that they consume, but we need to
+        # do some extra filtering on top of that in some cases, to make sure
+        # runtime arguments don't make it to the user code.
+        prefixes = [
+            # These flags are consumed by optional modules. If that module
+            # is not loaded, the flag will not be cleared.
+            '-cuda:', '-numa:', '-ucx:', '-gex:',
+            # These flags are read by other parts of the stack, which cannot
+            # remove the arguments they parse.
+            '-dm:', '-bishop:'
+        ]
         while i < len(args):
             match = False
             for prefix in prefixes:
