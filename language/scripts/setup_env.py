@@ -532,11 +532,11 @@ if __name__ == '__main__':
         help='Use CMake to build Terra.')
     parser.add_argument(
         '--gasnet-version', dest='gasnet_version', required=False,
-        default=os.environ.get('GASNET_VERSION', 'GASNet-2022.9.0'),
+        default=os.environ.get('GASNET_VERSION', 'GASNet-2022.9.2'),
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='f9d1a06553f4f8a230a339c1e321a62825de3fd7',
+        default='3903e0f417393c33f481f10eaa547f2306d8ed5d',
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
