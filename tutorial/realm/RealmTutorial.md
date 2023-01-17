@@ -42,7 +42,7 @@ TODO
 A.k.a. mutexes, give an example of child sub-tasks updating shared data
 structure with some analysis. Present fork-join parallelism?
 ###Barriers
-Ghost-cell exchange example (we have barrier_reduce.cc test FYI)
+Ghost-cell exchange example (we have barrier reduce.cc test FYI)
 
 ## Profiling
 We want to show how to profile Realm.
