@@ -946,18 +946,15 @@ endif()
 #------------------------------------------------------------------------------#
 
 if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
-  find_package(Corrosion 0.3.1 QUIET)
+  find_package(Corrosion 0.3.2 QUIET)
 
   if(NOT Corrosion_FOUND)
     include(FetchContent)
-
     FetchContent_Declare(
       Corrosion
       GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
-      GIT_TAG v0.3.1
+      GIT_TAG 020d11f092314a58942891f14b4cd20c0edff80a # v0.3.2
     )
-    set(CORROSION_VERBOSE_OUTPUT ON)
-    set(CORROSION_RESPECT_OUTPUT_DIRECTORY ON)
     # Set any global configuration variables such as `Rust_TOOLCHAIN` before this line!
     FetchContent_MakeAvailable(Corrosion)
   endif()
