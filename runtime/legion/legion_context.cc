@@ -2084,11 +2084,12 @@ namespace Legion {
       const ApEvent wait_on(manager->allocate_legion_instance(layout->clone(),
                                                       no_requests, instance));
 #else
-      LgEvent unique_event;
+      ApEvent unique_event(Processor::get_current_finish_event());
       if (runtime->profiler != NULL)
       {
-        const RtUserEvent unique = Runtime::create_rt_user_event();
-        Runtime::trigger_event(unique);
+        // If we're profiling then each of these needs a unique event
+        const ApUserEvent unique = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, unique, unique_event);
         unique_event = unique;
       }
       const ApEvent wait_on(manager->create_eager_instance(instance, 
@@ -2109,7 +2110,7 @@ namespace Legion {
             mem_names[memory.kind()], memory.id)
       }
 #endif
-      task_local_instances.insert(instance);
+      task_local_instances[instance] = unique_event;
       if (wait_on.exists())
       {
         bool poisoned = false;
@@ -2125,7 +2126,7 @@ namespace Legion {
     void TaskContext::destroy_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      std::set<PhysicalInstance>::iterator finder =
+      std::map<PhysicalInstance,ApEvent>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
@@ -2183,9 +2184,8 @@ namespace Legion {
         assert(freefunc == NULL);
 #endif
         // escape this task local instance
-        escape_task_local_instance(deferred_result_instance);
-        instance = new FutureInstance(res, res_size,
-            ApEvent(Processor::get_current_finish_event()), runtime,
+        ApEvent ready = escape_task_local_instance(deferred_result_instance);
+        instance = new FutureInstance(res, res_size, ready, runtime,
             true/*eager*/, false/*external*/, true/*own alloc*/,
             deferred_result_instance);
       }
@@ -2374,18 +2374,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    uintptr_t TaskContext::escape_task_local_instance(PhysicalInstance instance)
+    ApEvent TaskContext::escape_task_local_instance(PhysicalInstance instance)
     //--------------------------------------------------------------------------
     {
-      std::set<PhysicalInstance>::iterator finder =
+      std::map<PhysicalInstance,ApEvent>::iterator finder =
         task_local_instances.find(instance);
 #ifdef DEBUG_LEGION
       assert(finder != task_local_instances.end());
 #endif
+      const ApEvent result = finder->second;
       // Remove the instance from the set of task local instances
       task_local_instances.erase(finder);
-      void *ptr = instance.pointer_untyped(0,0);
-      return reinterpret_cast<uintptr_t>(ptr);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2571,11 +2571,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RtEvent done(Processor::get_current_finish_event());
-      for (std::set<PhysicalInstance>::iterator it =
+      for (std::map<PhysicalInstance,ApEvent>::iterator it =
            task_local_instances.begin(); it !=
            task_local_instances.end(); ++it)
       {
-        PhysicalInstance inst = *it;
+        PhysicalInstance inst = it->first;
         MemoryManager *manager =
           runtime->find_memory_manager(inst.get_location());
 #ifdef LEGION_MALLOC_INSTANCES
