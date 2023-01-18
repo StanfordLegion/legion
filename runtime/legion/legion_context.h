@@ -598,7 +598,7 @@ namespace Legion {
                                  FutureFunctor *callback_functor,
                                  bool own_callback_functor) = 0;
       bool is_task_local_instance(PhysicalInstance instance);
-      uintptr_t escape_task_local_instance(PhysicalInstance instance);
+      ApEvent escape_task_local_instance(PhysicalInstance instance);
       FutureInstance* copy_to_future_inst(const void *value, size_t size,
                                           RtEvent &done);
       FutureInstance* copy_to_future_inst(Memory memory, FutureInstance *src);
@@ -791,7 +791,9 @@ namespace Legion {
       // Our cached set of index spaces for immediate domains
       std::map<Domain,IndexSpace> index_launch_spaces;
     protected:
-      std::set<PhysicalInstance> task_local_instances;
+      // Map of task local instances including their unique events
+      // from the profilters perspective
+      std::map<PhysicalInstance,ApEvent> task_local_instances;
     protected:
       bool task_executed;
       bool has_inline_accessor;

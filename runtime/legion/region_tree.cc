@@ -8717,8 +8717,7 @@ namespace Legion {
 
       IndexPartNode *parent_node = NULL;
       if (parent != IndexPartition::NO_PART)
-        parent_node = context->get_node(parent, NULL/*defer*/,
-            true/*can fail*/, true/*first*/, true/*local only*/);
+        parent_node = context->get_node(parent);
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
           false/*is domain*/, parent_node, color, did, initialized, provenance,
           ready_event,expr_id,mapping,false/*add root reference*/,depth,valid);

@@ -5746,7 +5746,9 @@ namespace Legion {
       // The realm instance backing a deferred buffer is currently tagged as
       // a task local instance, so we need to tell the runtime that the instance
       // now escapes the context.
-      uintptr_t ptr = context->escape_task_local_instance(instance);
+      context->escape_task_local_instance(instance);
+      const uintptr_t ptr = 
+        reinterpret_cast<uintptr_t>(instance.pointer_untyped(0,0)); 
 
       if (check_constraints && constraints != NULL)
       {
