@@ -2,11 +2,14 @@
 This document represents a set of incremental tutorials for Realm.
 
 ## Hello World
-TODO
 
 ## Machine Model
 Discuss `Processor` and query interface. Query various processor types, 
 setup core reservation (not Reservations), use affinity.
+
+## Realm Events
+Reader/Writer
+### Completion Queue
 
 ## Region Instances
 Discuss `RegionInstance` basics and explore its interface. Understand
