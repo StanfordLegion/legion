@@ -22,7 +22,6 @@ enum
 {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   READER_TASK,
-  WRITER_TASK,
 };
 
 Logger log_app("app");
