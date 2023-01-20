@@ -23,11 +23,13 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import cffi
-
-header = {header}
-libname = {libname}
-
-ffi = cffi.FFI()
-ffi.cdef(header)
-lib = ffi.dlopen(libname)
+# check which python interpreter is launched and then import the correct cffi
+is_legion_python = None
+try:
+    from legion_builtin_cffi import ffi, lib
+    # as long as lib is not empty, we are running with legion_python
+    lib.legion_runtime_has_context()
+    is_legion_python = True
+except AttributeError:
+    is_legion_python = False
+    from legion_canonical_cffi import ffi, lib
