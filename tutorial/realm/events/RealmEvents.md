@@ -1,17 +1,18 @@
 ## Realm Events
 
 ### Introduction
-Events are the foundation of a deferred execution
-model in Realm and describe dependencies between operations.
+In this tutorial we introduce Realm events by providing base
+definitions and working through an existing interface with a concrete
+example.
 
 ### General Events
-Events are typically created by the runtime as a result of internal
-operations. An event can be used as either pre or post condition for any Realm
-operation and offers an interface to query its status. General events
-cannot be triggered by a user.
+Events are the foundation of a deferred execution model in Realm. They
+describe dependencies between operations and are typically created by
+the runtime. An event can be used as either pre or post condition for 
+any Realm operation which in turn can query its status through a
+dedicated interface.
 
 ### Events Interface
-TODO: Update line numbers
 ```c++
  1 namespace Realm {
  2     ...
@@ -38,10 +39,11 @@ TODO: Update line numbers
 ```
 
 ### User Events
-Runtime offers a separate event type `UserEvent` which has all the properties of
-a general event and it can triggered in the application code by a user.
+General events cannot be triggered by a user and therefore runtime
+offers a separate event type `UserEvent`. A user event has all the
+properties of a  general event but it on the contrary can be triggered
+by the application code via the following interface:
 
-TODO: Update line numbers
 ```c++
 23  namespace Realm {
 24     class REALM_PUBLIC_API UserEvent : public Event {
@@ -58,15 +60,15 @@ TODO: Update line numbers
 ```
 
 ### Expressing Control Dependency
-In this example we demonstrate a control dependency which can be
-established by means of events. The application creates several reader
+In the following example we demonstrate how events can be used in order
+to create a control dependency. The application creates several reader
 tasks `reader_task` at `line:68` that do nothing more but read an
 input argument `x`. We create a user event `event1` at `line:32` which
 used as a precondition for any reader task launch which means that before
 `event1` is triggered `(line:37)` none of the reader tasks will start the
 execution. Each task returns an internal event `(line:34)` that is
-stored in a common event pool `line:36`. The `top_level_task` waits
-until all the events in event pool have been triggered by calling
+stored in the event pool `line:36`. The `top_level_task` waits
+until all the events in the event pool have been triggered by calling
 `Event::merge_events(events).wait()` at `line:40`.
 
   TODO: Seriously consider either doing a more complex example or doing
