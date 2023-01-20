@@ -30,10 +30,19 @@ target_link_libraries(legion_python Legion::Legion)
 if(BINDINGS_DEFAULT_MODULE)
   target_compile_definitions(legion_python PRIVATE "BINDINGS_DEFAULT_MODULE=${BINDINGS_DEFAULT_MODULE}")
 endif()
+
+add_library(legion_canonical_python SHARED canonical_python.cc)
+target_link_libraries(legion_canonical_python Legion::Legion)
+
 install(TARGETS legion_python
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(TARGETS legion_canonical_python
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
 # Allow passing extra args to `setup.py` on install like

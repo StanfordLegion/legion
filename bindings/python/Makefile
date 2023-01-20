@@ -46,9 +46,15 @@ LD_FLAGS	?=
 # Use reduction operators for complex types by default
 USE_COMPLEX = 1
 
+ifeq ($(shell uname -s),Darwin)
+LEGION_CANONICAL_PYTHON_LIB := liblegion_canonical_python.dylib
+else
+LEGION_CANONICAL_PYTHON_LIB := liblegion_canonical_python.so
+endif
+
 NO_BUILD_ALL=1
 .PHONY: all
-all: $(OUTFILE) legion_cffi.py
+all: $(OUTFILE) legion_builtin_cffi.py legion_canonical_cffi.py $(LEGION_CANONICAL_PYTHON_LIB)
 
 ###########################################################################
 #
@@ -60,9 +66,16 @@ PYTHON_BINDINGS_DIR:=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 include $(LG_RT_DIR)/runtime.mk
 
-legion_cffi.py: legion_cffi.py.in legion_cffi_build.py $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+legion_builtin_cffi.py: legion_cffi.py.in legion_cffi_build.py $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
 	$(PYTHON_EXE) $(PYTHON_BINDINGS_DIR)/legion_cffi_build.py --defines-dir $(DEFINE_HEADERS_DIR)
 
+legion_canonical_cffi.py: legion_cffi.py.in legion_cffi_build.py $(LEGION_DEFINES_HEADER) $(REALM_DEFINES_HEADER)
+	$(PYTHON_EXE) $(PYTHON_BINDINGS_DIR)/legion_cffi_build.py --canonical --defines-dir $(DEFINE_HEADERS_DIR) --libname $(LEGION_CANONICAL_PYTHON_LIB)
+
+# build the shared lib for canonical python
+$(LEGION_CANONICAL_PYTHON_LIB): canonical_python.cc $(SLIB_LEGION) $(SLIB_REALM)
+	$(CXX) $(CC_FLAGS) $(INC_FLAGS) -shared $< $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) -o $@
+
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) legion_defines.h realm_defines.h legion_cffi.py *.pyc
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_CANONICAL_PYTHON_LIB) legion_defines.h realm_defines.h legion_builtin_cffi.py legion_canonical_cffi.py *.pyc
 	$(RM) -rf build dist *.egg-info
