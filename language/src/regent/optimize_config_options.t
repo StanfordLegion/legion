@@ -514,7 +514,7 @@ local node_is_replicable = {
     local methods = rawget(value_type, "methods")
     if methods then
       local method = rawget(methods, node.method_name)
-      return {method and type(method) == "table" and rawget(method, "replicable"), node}
+      return {method and type(method) == "table" and rawget(method, "replicable") or false, node}
     end
     return {false, node}
   end,
