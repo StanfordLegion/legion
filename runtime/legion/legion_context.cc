@@ -6548,7 +6548,7 @@ namespace Legion {
     FutureMap InnerContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
-                                ShardingID sid, bool implicit)
+                                ShardingID sid, bool implicit, bool internal)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
@@ -6588,8 +6588,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // this method is deprecated so don't care about provenance
+      // pretend this is internal since it is deprecated and we don't 
+      // want to check collective behavior which could be wrong since 
+      // each shard might have a different index space
       return construct_future_map(find_index_launch_space(domain, NULL/*prov*/),
-          data, NULL/*deprecated so no provenance*/, collective, sid, implicit);
+          data, NULL/*deprecated so no provenance*/, collective, sid, 
+          implicit, true/*internal*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6630,8 +6634,11 @@ namespace Legion {
                                  ShardingID sid, bool implicit) 
     //--------------------------------------------------------------------------
     {
+      // pretend this is internal since it is deprecated and we don't 
+      // want to check collective behavior which could be wrong since 
+      // each shard might have a different index space
       return construct_future_map(find_index_launch_space(domain, NULL),
-              futures, NULL/*deprecated so no provenance*/, internal, 
+              futures, NULL/*deprecated so no provenance*/, true/*internal*/,
               collective, sid, implicit);
     }
 
@@ -17777,31 +17784,36 @@ namespace Legion {
     FutureMap ReplicateContext::construct_future_map(IndexSpace space,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
-                                ShardingID sid, bool implicit)
+                                ShardingID sid, bool implicit, bool internal)
     //--------------------------------------------------------------------------
     {
-      AutoRuntimeCall call(this);
-      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
-            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      if (!internal)
       {
-        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
-                              i > 0, provenance);
-        hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP, __func__);
-        hasher.hash(space, "space");
-        if (!collective)
+        AutoRuntimeCall call(this);
+        for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+              ((current_trace == NULL) || !current_trace->is_fixed()); i++)
         {
-          for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
-                data.begin(); it != data.end(); it++)
+          Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+                                i > 0, provenance);
+          hasher.hash(REPLICATE_CONSTRUCT_FUTURE_MAP, __func__);
+          hasher.hash(space, "space");
+          if (!collective)
           {
-            hasher.hash(it->first, "data");
-            if (runtime->safe_control_replication > 1)
-              hasher.hash(it->second.get_ptr(), it->second.get_size(), "data");
+            for (std::map<DomainPoint,UntypedBuffer>::const_iterator it =
+                  data.begin(); it != data.end(); it++)
+            {
+              hasher.hash(it->first, "data");
+              if (runtime->safe_control_replication > 1)
+                hasher.hash(it->second.get_ptr(), it->second.get_size(),"data");
+            }
           }
+          else if (!implicit)
+            hasher.hash(sid, "sid");
+          if (hasher.verify(__func__))
+            break;
         }
-        else if (!implicit)
-          hasher.hash(sid, "sid");
-        if (hasher.verify(__func__))
-          break;
+        return construct_future_map(space, data, provenance, collective,
+                                    sid, implicit, true/*internal*/);
       }
       IndexSpaceNode *domain_node = runtime->forest->get_node(space);
       Domain domain;
@@ -23019,7 +23031,7 @@ namespace Legion {
     FutureMap LeafContext::construct_future_map(IndexSpace domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                 Provenance *provenance, bool collective,
-                                ShardingID sid, bool implicit)
+                                ShardingID sid, bool implicit, bool internal)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
