@@ -31,6 +31,11 @@ import warnings
 
 from legion_cffi import ffi, lib as c
 
+
+#################################################################
+### Shared between Legion builtin Python and canonical Python ###
+#################################################################
+
 try:
     unicode # Python 2
 except NameError:
@@ -41,8 +46,6 @@ try:
 except:
     FileNotFoundError = IOError # Python 2
 
-# This has to match the unique name in main.cc
-_unique_name = 'legion_python'
 
 # Storage for variables that apply to the top-level task.
 # IMPORTANT: They are valid ONLY in the top-level task.
@@ -162,6 +165,26 @@ def input_args(filter_runtime_options=False):
                 continue
             i += 1
     return args
+
+
+# In general we discourage the use of this function, but some libraries are
+# not safe to use with control replication so this will give them a way
+# to check whether they are running in a safe context or not
+def is_control_replicated():
+    try:
+        # We should only be doing something for this if we're the top-level task
+        return c.legion_context_get_num_shards(top_level.runtime[0],
+                top_level.context[0], True) > 1
+    except AttributeError:
+        raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
+
+
+###########################################################
+################ Legion Python starts here ################
+###########################################################
+
+# This has to match the unique name in main.cc
+_unique_name = 'legion_python'
 
 
 # This code is borrowed from the Python docs:
@@ -364,18 +387,6 @@ def import_global(module, check_depth=True, block=True):
         return None
     else:
         return future
-
-
-# In general we discourage the use of this function, but some libraries are
-# not safe to use with control replication so this will give them a way
-# to check whether they are running in a safe context or not
-def is_control_replicated():
-    try:
-        # We should only be doing something for this if we're the top-level task
-        return c.legion_context_get_num_shards(top_level.runtime[0],
-                top_level.context[0], True) > 1
-    except AttributeError:
-        raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
 
 
 def legion_python_main(raw_args, user_data, proc):
@@ -584,3 +595,63 @@ def legion_python_import_global(raw_args, user_data, proc):
     result = struct.pack('i',failures)
 
     c.legion_task_postamble(runtime[0], context[0], ffi.from_buffer(result), 4)
+
+
+###########################################################
+############## Canonical Python starts here ###############
+###########################################################
+
+# This variable is used to track how many times the legion_canonical_python_main
+# has been called. We only initialize the top level task when top_level_counter == 0
+_top_level_counter = 0
+
+# Since we are not able to shut down and re-start Legion, we use this variable to
+# track if Legion has been inited
+_legion_inited = False
+
+
+def legion_canonical_python_main(sys_argv=None):
+    global _curr_modules
+    _curr_modules = set(sys.modules.keys())
+
+    # Do not init top level task if it has been initialized
+    global _top_level_counter
+    _top_level_counter += 1
+    if _top_level_counter > 1:
+        return
+    global _legion_inited
+    assert _legion_inited == False
+
+    if sys_argv is None:
+        sys_argv = sys.argv
+    argv = []
+    for arg in sys_argv:
+        argv.append(ffi.new("char[]", arg.encode('ascii')))
+    c.legion_canonical_python_begin_top_level_task(len(argv), argv)
+    context = c.legion_runtime_get_context()
+    runtime = c.legion_runtime_get_runtime()
+    top_level.runtime, top_level.context, top_level.task = [runtime], [context], [None]
+    _legion_inited = True
+
+def legion_canonical_python_cleanup():
+    global _top_level_counter
+    _top_level_counter -= 1
+    if _top_level_counter > 0:
+        return
+    global _legion_inited
+    assert _legion_inited == True
+    # add an execution fence to make sure all previous tasks are done
+    future = c.legion_runtime_issue_execution_fence(
+               top_level.runtime[0], top_level.context[0])
+    c.legion_future_wait(future, True, ffi.NULL)
+    c.legion_future_destroy(future)
+    # clean up modules
+    add_delta_module_cleanup()
+    for cleanup in reversed(_cleanup_items):
+        cleanup()
+    # clean up context
+    c.legion_context_destroy(top_level.context[0])
+    c.legion_canonical_python_end_top_level_task()
+    del top_level.context
+    del top_level.runtime
+    gc.collect()
