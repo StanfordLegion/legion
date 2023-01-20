@@ -27,40 +27,33 @@ enum
 
 Logger log_app("app");
 
-int x;
+namespace ProgramConfig {
+  size_t num_tasks = 2;
+};
 
 void reader_task(const void *args, size_t arglen, const void *userdata,
                  size_t userlen, Processor p)
 {
-  log_app.info() << "reader task: proc=" << p;
-  assert(x == 8);
-}
-
-void writer_task(const void *args, size_t arglen, const void *userdata,
-                 size_t userlen, Processor p)
-{
-  log_app.info() << "writer task: proc=" << p;
-  x += 7;
+  int x = *reinterpret_cast<const int *>(args);
+  log_app.info() << "reader task: proc=" << p << " x=" << x;
 }
 
 void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p)
 {
-  x = 1;
+  int x = 7;
 
-  // TODO(apryakhin@): Add documentation.
-  Machine::ProcessorQuery pq(Machine::get_machine());
-  pq.only_kind(p.kind());
-  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
-
+  std::vector<Event> events;
+  for(size_t i = 0; i < ProgramConfig::num_tasks; i++) {
     UserEvent event1 = UserEvent::create_user_event();
 
-    Event event2 = (*it).spawn(WRITER_TASK, 0, 0, event1);
-    Event event3 = (*it).spawn(READER_TASK, 0, 0, event2);
+    Event task_event = p.spawn(READER_TASK, &x, sizeof(int), event1);
 
+    events.push_back(task_event);
     event1.trigger();
-    event3.wait();
   }
+
+  Event::merge_events(events).wait();
 
   log_app.info() << "Completed successfully";
 
@@ -90,11 +83,6 @@ int main(int argc, const char **argv)
 
   Processor::register_task_by_kind(p.kind(), false /*!global*/, READER_TASK,
                                    CodeDescriptor(reader_task),
-                                   ProfilingRequestSet())
-      .external_wait();
-
-  Processor::register_task_by_kind(p.kind(), false /*!global*/, WRITER_TASK,
-                                   CodeDescriptor(writer_task),
                                    ProfilingRequestSet())
       .external_wait();
 
