@@ -4,11 +4,13 @@ permalink: /tutorial/realm_index.html
 title: Realm Tutorials
 ---
 
-The following tutorial are meant to showcase the Realm programming model
-and teach how to write Realm programs in C++. This tutorial has an
-incremental complexity which progressively exposes more Realm features.
-It can be used either independetly or as a supplemental learning
-material along with Realm documentation.
+The following tutorial is meant to showcase the Realm's programming
+model, highlight existing interfaces and teach how to write Realm
+programs in C++. This tutorial has an
+incremental complexity which progressively exposes various Realm features.
+It is designed to be a self-sufficient resource that provides a certain
+amount of theoretical background necessary to work through the
+examples.
 
 ## Realm API Tutorial
 
