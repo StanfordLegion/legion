@@ -1,7 +1,7 @@
 import argparse
 from distutils.core import setup
 from distutils.command.build_py import build_py
-import sys, platform
+import os, sys, platform
 
 import legion_cffi_build
 
