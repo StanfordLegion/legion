@@ -171,7 +171,12 @@ def input_args(filter_runtime_options=False):
 # not safe to use with control replication so this will give them a way
 # to check whether they are running in a safe context or not
 def is_control_replicated():
-  return False
+    try:
+        # We should only be doing something for this if we're the top-level task
+        return c.legion_context_get_num_shards(top_level.runtime[0],
+                top_level.context[0], True) > 1
+    except AttributeError:
+        raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
 
 
 ###########################################################
@@ -384,21 +389,6 @@ def import_global(module, check_depth=True, block=True):
         return future
 
 
-<<<<<<< HEAD
-# In general we discourage the use of this function, but some libraries are
-# not safe to use with control replication so this will give them a way
-# to check whether they are running in a safe context or not
-def is_control_replicated():
-    try:
-        # We should only be doing something for this if we're the top-level task
-        return c.legion_context_get_num_shards(top_level.runtime[0],
-                top_level.context[0], True) > 1
-    except AttributeError:
-        raise RuntimeError('"is_control_replicated" must be called in a legion_python task')
-
-
-=======
->>>>>>> origin/master
 def legion_python_main(raw_args, user_data, proc):
     global _curr_modules
     _curr_modules = set(sys.modules.keys())
