@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -435,7 +435,8 @@ namespace Legion {
                                              Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false) = 0;
+                                             bool implicit = false,
+                                             bool internal = false) = 0;
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -1459,7 +1460,8 @@ namespace Legion {
                                              Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool internal = false);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
@@ -2776,7 +2778,8 @@ namespace Legion {
                                              Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool internal = false);
       virtual FutureMap construct_future_map(IndexSpace space,
                     const std::map<DomainPoint,Future> &futures,
                                              Provenance *provenance,
@@ -3737,7 +3740,8 @@ namespace Legion {
                                              Provenance *provenance,
                                              bool collective = false,
                                              ShardingID sid = 0,
-                                             bool implicit = false);
+                                             bool implicit = false,
+                                             bool internal = false);
       virtual FutureMap construct_future_map(const Domain &domain,
                                 const std::map<DomainPoint,UntypedBuffer> &data,
                                              bool collective = false,
