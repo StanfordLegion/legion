@@ -6722,7 +6722,7 @@ class Operation(object):
         # If we get here we have to make our copy
         copy = self.state.create_copy(self)
         copy.set_tree_properties(None, req.tid, req.tid)
-        copy.add_field(field.fid, src, field.fid, dst, src.redop)
+        copy.add_field(field.fid, src, field.fid, dst, src.redop, first=False)
         self.realm_copies.append(copy)
         return copy
 
@@ -6747,7 +6747,7 @@ class Operation(object):
         # If we get here we have to make our own copy
         copy = self.state.create_copy(self)
         copy.set_tree_properties(None, src_req.tid, dst_req.tid)
-        copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop)
+        copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop, first=False)
         self.realm_copies.append(copy)
         return copy
 
@@ -6843,7 +6843,7 @@ class Operation(object):
             dst = dst_inst
         copy.set_indirection_properties(index_expr, indirections)
         copy.add_indirect_field(src_field.fid, src, src_index, 
-                            dst_field.fid, dst, dst_index, redop) 
+                            dst_field.fid, dst, dst_index, redop, first=True) 
         self.realm_copies.append(copy)
         return copy
 
