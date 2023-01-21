@@ -6843,7 +6843,7 @@ class Operation(object):
             dst = dst_inst
         copy.set_indirection_properties(index_expr, indirections)
         copy.add_indirect_field(src_field.fid, src, src_index, 
-                            dst_field.fid, dst, dst_index, redop, first=True) 
+                            dst_field.fid, dst, dst_index, redop, first=False) 
         self.realm_copies.append(copy)
         return copy
 
