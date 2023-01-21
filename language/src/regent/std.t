@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2023 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2151,6 +2151,7 @@ local bounded_type = data.weak_memoize(function(index_type, ...)
   terra st:to_domain_point()
     return ([index_type](@self)):to_domain_point()
   end
+  st.methods.to_domain_point.replicable = true
 
   function st:force_cast(from, to, expr)
     assert(std.is_bounded_type(from) and std.is_bounded_type(to) and
@@ -2464,6 +2465,7 @@ function std.index_type(base_type, displayname)
   terra st:to_domain_point()
     return [make_domain_point(self)]
   end
+  st.methods.to_domain_point.replicable = true
 
   -- Generate `from_domain_point` function.
   local function make_from_domain_point(pt_expr)

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2023 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -161,7 +161,9 @@ terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
     hi = hi:to_point(),
   }
 end
+to_rect.replicable = true
 
+__demand(__inline)
 task make_private_partition(points : region(ispace(int2d), point),
                             tiles : ispace(int1d),
                             n : int2d, nt : int2d, radius : int64)
@@ -177,11 +179,12 @@ task make_private_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, complete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
 
+__demand(__inline)
 task make_interior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
                              n : int2d, nt : int2d, radius : int64)
@@ -197,11 +200,12 @@ task make_interior_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
 
+__demand(__inline)
 task make_exterior_partition(points : region(ispace(int2d), point),
                              tiles : ispace(int1d),
                              n : int2d, nt : int2d, radius : int64)
@@ -226,7 +230,7 @@ task make_exterior_partition(points : region(ispace(int2d), point),
         coloring, i:to_domain_point(), c.legion_domain_from_rect_2d(rect))
     end
   end
-  var p = partition(disjoint, points, coloring, tiles)
+  var p = partition(disjoint, incomplete, points, coloring, tiles)
   c.legion_domain_point_coloring_destroy(coloring)
   return p
 end
@@ -234,10 +238,11 @@ end
 terra clamp(val : int64, lo : int64, hi : int64)
   return min(max(val, lo), hi)
 end
-
+clamp.replicable = true
 
 function make_ghost_x_partition(is_complete)
-  local task ghost_x_partition(points : region(ispace(int2d), point),
+  local __demand(__inline)
+  task ghost_x_partition(points : region(ispace(int2d), point),
                                tiles : ispace(int1d),
                                n : int2d, nt : int2d, radius : int64,
                                dir : int64)
@@ -256,11 +261,9 @@ function make_ghost_x_partition(is_complete)
     var p = [(
         function()
           if is_complete then
-            return rexpr partition(disjoint, points, coloring, tiles) end
+            return rexpr partition(disjoint, complete, points, coloring, tiles) end
           else
-            -- Hack: Since the compiler does not track completeness as
-            -- a static property, mark incomplete partitions as aliased.
-            return rexpr partition(aliased, points, coloring, tiles) end
+            return rexpr partition(disjoint, incomplete, points, coloring, tiles) end
           end
         end)()]
     c.legion_domain_point_coloring_destroy(coloring)
@@ -270,7 +273,8 @@ function make_ghost_x_partition(is_complete)
 end
 
 function make_ghost_y_partition(is_complete)
-  local task ghost_y_partition(points : region(ispace(int2d), point),
+  local __demand(__inline)
+  task ghost_y_partition(points : region(ispace(int2d), point),
                                tiles : ispace(int1d),
                                n : int2d, nt : int2d, radius : int64,
                                dir : int64)
@@ -289,11 +293,9 @@ function make_ghost_y_partition(is_complete)
     var p = [(
         function()
           if is_complete then
-            return rexpr partition(disjoint, points, coloring, tiles) end
+            return rexpr partition(disjoint, complete, points, coloring, tiles) end
           else
-            -- Hack: Since the compiler does not track completeness as
-            -- a static property, mark incomplete partitions as aliased.
-            return rexpr partition(aliased, points, coloring, tiles) end
+            return rexpr partition(disjoint, incomplete, points, coloring, tiles) end
           end
         end)()]
     c.legion_domain_point_coloring_destroy(coloring)
@@ -535,21 +537,48 @@ where writes(times) do
   for x in times do x.init_start = t end
 end
 
-task get_elapsed(all_times : region(ispace(int1d), timestamp))
-where reads(all_times) do
+task get_init_start(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.init_start) do
   var init_start = [int64:max()]
-  var init_stop = [int64:min()]
-  var start = [int64:max()]
-  var stop = [int64:min()]
 
   for t in all_times do
     init_start min= t.init_start
+  end
+
+  return init_start
+end
+
+task get_init_stop(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.init_stop) do
+  var init_stop = [int64:min()]
+
+  for t in all_times do
     init_stop max= t.init_stop
+  end
+
+  return init_stop
+end
+
+task get_start(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.start) do
+  var start = [int64:max()]
+
+  for t in all_times do
     start min= t.start
+  end
+
+  return start
+end
+
+task get_stop(all_times : region(ispace(int1d), timestamp))
+where reads(all_times.stop) do
+  var stop = [int64:min()]
+
+  for t in all_times do
     stop max= t.stop
   end
 
-  return { init_time = 1e-6 * (init_stop - init_start), sim_time = 1e-6 * (stop - start) }
+  return stop
 end
 
 task print_time(color : int, init_time : double, sim_time : double)
@@ -654,7 +683,30 @@ task main()
     end
   end
 
-  var { init_time, sim_time } = get_elapsed(times)
+  var init_start = [int64:max()]
+  var init_stop = [int64:min()]
+  var start = [int64:max()]
+  var stop = [int64:min()]
+
+  __demand(__index_launch)
+  for i in tiles do
+    init_start min= get_init_start(p_times[i])
+  end
+  __demand(__index_launch)
+  for i in tiles do
+    init_stop max= get_init_stop(p_times[i])
+  end
+  __demand(__index_launch)
+  for i in tiles do
+    start min= get_start(p_times[i])
+  end
+  __demand(__index_launch)
+  for i in tiles do
+    stop max= get_stop(p_times[i])
+  end
+
+  var init_time = 1e-6 * (init_stop - init_start)
+  var sim_time = 1e-6 * (stop - start)
   for i = 0, nt2 do print_time(i, init_time, sim_time) end
 end
 
