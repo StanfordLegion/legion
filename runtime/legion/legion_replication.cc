@@ -8029,8 +8029,6 @@ namespace Legion {
     void ReplAttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Create the external instance
-      create_external_instance();
       // Register this instance with the memory manager
       PhysicalManager *external_manager =
         external_instances[0].get_physical_manager();
