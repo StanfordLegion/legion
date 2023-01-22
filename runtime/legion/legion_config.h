@@ -467,23 +467,6 @@
 #define LEGION_INITIAL_LIBRARY_ID_OFFSET (1 << 30)
 #endif
 
-// Default number of consecutive accesses to the
-// same disjoint+complete partition before Legion
-// will switch physical analysis to using it
-// Pick prime numbers to avoid aliasing during sampling
-#ifndef LEGION_REFINEMENT_SAME_CHILD
-#define LEGION_REFINEMENT_SAME_CHILD      7
-#endif
-
-// Default number of consecutive accesses to any
-// disjoint+complete partition other than the current
-// one being used for analysis before Legion will
-// switch physical analysis to using a new partition
-// Pick prime numbers to avoid aliasing during sampling
-#ifndef LEGION_REFINEMENT_DIFF_CHILD
-#define LEGION_REFINEMENT_DIFF_CHILD      31
-#endif
-
 // Default percentage of the number of children in a
 // disjoint+complete partition that need to be accessed
 // before we consider the whole partition as accessed

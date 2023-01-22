@@ -2413,6 +2413,195 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // RefinementNode
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RefinementNode::RefinementNode(RegionTreeNode *n)
+      : node(n)
+    //--------------------------------------------------------------------------
+    {
+      node->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementNode::~RefinementNode(void)
+    //--------------------------------------------------------------------------
+    {
+      if (node->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+        delete node;
+      for (std::map<LegionColor,RefinementNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        if (it->second->remove_reference())
+          delete it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldMask RefinementNode::increment_touches(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask result;
+      for (LegionMap<unsigned,FieldMask>::reverse_iterator it =
+            touches.rbegin(); it != touches.rend(); /*nothing*/)
+      {
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        const unsigned next = it->first + 1;
+        if (next == REFINEMENT_CHANGE_COUNT)
+          result = overlap;
+        LegionMap<unsigned,FieldMask>::iterator finder = touches.find(next);
+        if (finder == touches.end())
+          touches[next] = overlap;
+        else
+          finder->second |= overlap;
+        it->second -= overlap;
+        if (!it->second)
+        {
+          it++;
+          touches.erase(it.base());
+        }
+        else
+          it++;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldMask RefinementNode::dominates_touches(const FieldMask &mask,
+                                                const RefinementNode *rhs) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMask result;
+      for (LegionMap<unsigned,FieldMask>::const_iterator it =
+            touches.begin(); it != touches.end(); it++)
+      {
+        FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        for (LegionMap<unsigned,FieldMask>::const_reverse_iterator rit =
+              rhs->touches.rbegin(); rit != rhs->touches.rend(); rit++)
+        {
+          // As soon as the right hand side count is less than the left
+          // hand side count then we can stop filtering
+          if (rit->first < it->first)
+            break;
+          overlap -= rit->second;
+          if (!overlap)
+            break;
+        }
+        result |= overlap;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementNode::filter_touches(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<unsigned,FieldMask>::iterator it =
+            touches.begin(); it != touches.end(); /*nothing*/)
+      {
+        it->second -= mask;
+        if (!it->second)
+        {
+          LegionMap<unsigned,FieldMask>::iterator to_delete = it++;
+          touches.erase(to_delete);
+        }
+        else
+          it++;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementNode::record_refinement_tree(ContextID ctx, 
+                                                const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RegionTreeNode*> to_record;
+      to_record.reserve(children.size());
+      for (std::map<LegionColor,RefinementNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        to_record.push_back(it->second->node);
+      node->record_refinement_tree(ctx, mask, to_record);
+    }
+
+    //--------------------------------------------------------------------------
+    bool RefinementNode::is_mostly_complete(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (node->is_region())
+        return true;
+      // This is a heuristic but we'll consider this node to be complete
+      // once we get an indication that more than half of its children
+      // have been touched and can therefore be refined
+      PartitionNode *partition = node->as_partition_node();
+      return ((partition->get_num_children()/2) < children.size());
+    }
+
+    //--------------------------------------------------------------------------
+    bool RefinementNode::matches(const RefinementNode *sibling) const
+    //--------------------------------------------------------------------------
+    {
+      if (children.size() != sibling->children.size())
+        return false;
+      for (std::map<LegionColor,RefinementNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        std::map<LegionColor,RefinementNode*>::const_iterator finder =
+          sibling->children.find(it->first);
+        if (finder == sibling->children.end())
+          return false;
+        if (it->second != finder->second)
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RefinementNode::matches_child(LegionColor color, 
+                                       RefinementNode *child) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<LegionColor,RefinementNode*>::const_iterator finder =
+        children.find(color);
+      if (finder == children.end())
+        return false;
+      return (child == finder->second);
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementNode::update_child(LegionColor color, RefinementNode *child)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LegionColor,RefinementNode*>::iterator finder =
+        children.find(color);
+      if (finder != children.end())
+      {
+        if (finder->second == child)
+          return;
+        if (finder->second->remove_reference())
+          delete finder->second;
+        finder->second = child;
+      }
+      else
+        children[color] = child;
+      child->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementNode* RefinementNode::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      RefinementNode *copy = new RefinementNode(node);  
+      for (std::map<LegionColor,RefinementNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        copy->update_child(it->first, it->second);
+      copy->touches = touches;
+      return copy;
+    }
+
+    /////////////////////////////////////////////////////////////
     // LogicalState 
     ///////////////////////////////////////////////////////////// 
 
@@ -2455,10 +2644,8 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
-      assert(!disjoint_complete_tree);
-      assert(disjoint_complete_accesses.empty());
-      assert(disjoint_complete_child_counts.empty());
-      assert(disjoint_complete_projections.empty());
+      assert(current_refinement_tree.empty());
+      assert(candidate_refinement_trees.empty());
       assert(symbolic_elide_close_results == NULL);
 #endif
     }
@@ -2491,33 +2678,30 @@ namespace Legion {
     {
       field_states.clear();
       clear_logical_users(); 
-      disjoint_complete_tree.clear();
-      if (!disjoint_complete_children.empty())
+      if (!current_refinement_tree.empty())
       {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              disjoint_complete_children.begin(); it !=
-              disjoint_complete_children.end(); it++)
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              current_refinement_tree.begin(); it != 
+              current_refinement_tree.end(); it++)
           if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
             delete it->first;
-        disjoint_complete_children.clear();
+        current_refinement_tree.clear();
       }
-      disjoint_complete_accesses.clear(); 
-      disjoint_complete_child_counts.clear();
-      if (!disjoint_complete_projections.empty())
+      if (!candidate_refinement_trees.empty())
       {
-        for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
-              disjoint_complete_projections.begin(); it !=
-              disjoint_complete_projections.end(); it++)
+        for (FieldMaskSet<RefinementNode>::const_iterator it =
+              candidate_refinement_trees.begin(); it !=
+              candidate_refinement_trees.end(); it++)
           if (it->first->remove_reference())
             delete it->first;
-        disjoint_complete_projections.clear();
+        candidate_refinement_trees.clear();
       }
       if (symbolic_elide_close_results != NULL)
       {
         delete symbolic_elide_close_results;
         symbolic_elide_close_results = NULL;
       }
-    } 
+    }
 
     //--------------------------------------------------------------------------
     void LogicalState::clear_deleted_state(const FieldMask &deleted_mask)
@@ -2569,54 +2753,21 @@ namespace Legion {
             src.prev_epoch_users.end(); it++)
         if (prev_epoch_users.insert(it->first, it->second))
           it->first->add_reference();
-      if (!!src.disjoint_complete_tree)
-      {
-        disjoint_complete_tree |= src.disjoint_complete_tree;
-        src.disjoint_complete_tree.clear();
-      }
-      if (!src.disjoint_complete_children.empty())
-      {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-              src.disjoint_complete_children.begin(); it !=
-              src.disjoint_complete_children.end(); it++)
-        {
-          to_traverse.insert(it->first);
-          // Remove duplicate references if they are already there
-          // Otherwise the reference flows back with the node
-          if (disjoint_complete_children.insert(it->first, it->second))
-            it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
-        }
-        src.disjoint_complete_children.clear();
-      }
-      if (!src.disjoint_complete_accesses.empty())
+      if (!src.current_refinement_tree.empty())
       {
         for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              src.disjoint_complete_accesses.begin(); it !=
-              src.disjoint_complete_accesses.end(); it++)
-          disjoint_complete_accesses.insert(it->first, it->second);
-      }
-      if (!src.disjoint_complete_child_counts.empty())
-      {
-        for (LegionMap<size_t,FieldMask>::const_iterator it =
-              src.disjoint_complete_child_counts.begin(); it !=
-              src.disjoint_complete_child_counts.end(); it++)
+              src.current_refinement_tree.begin(); it !=
+              src.current_refinement_tree.end(); it++)
         {
-          LegionMap<size_t,FieldMask>::iterator finder =
-            disjoint_complete_child_counts.find(it->first);
-          if (finder == disjoint_complete_child_counts.end())
-            disjoint_complete_child_counts.insert(*it);
-          else
-            finder->second |= it->second;
+          to_traverse.insert(it->first);
+          // Remove disjoint references if we already had it
+          // otherwise the reference automatically moves over
+          if (!current_refinement_tree.insert(it->first, it->second))
+            it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
         }
+        src.current_refinement_tree.clear();
       }
-      if (!src.disjoint_complete_projections.empty())
-      {
-        for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
-              src.disjoint_complete_projections.begin(); it !=
-              src.disjoint_complete_projections.end(); it++)
-          disjoint_complete_projections.insert(it->first, it->second);
-        src.disjoint_complete_projections.clear();
-      }
+      // No need to bother moving over the candidate refinement trees
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -2633,23 +2784,15 @@ namespace Legion {
       field_states.swap(src.field_states);
       curr_epoch_users.swap(src.curr_epoch_users);
       prev_epoch_users.swap(src.prev_epoch_users);
-      if (!!src.disjoint_complete_tree)
-      {
-        disjoint_complete_tree = src.disjoint_complete_tree;
-        src.disjoint_complete_tree.clear();
-      }
-      disjoint_complete_accesses.swap(src.disjoint_complete_accesses);
-      disjoint_complete_child_counts.swap(src.disjoint_complete_child_counts);
-      disjoint_complete_children.swap(src.disjoint_complete_children);
-      disjoint_complete_projections.swap(src.disjoint_complete_projections);
+      current_refinement_tree.swap(src.current_refinement_tree);
       for (LegionList<FieldState>::const_iterator fit = 
             field_states.begin(); fit != field_states.end(); fit++)
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
               fit->open_children.begin(); it != fit->open_children.end(); it++)
           to_traverse.insert(it->first);
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            disjoint_complete_children.begin(); it != 
-            disjoint_complete_children.end(); it++)
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+            current_refinement_tree.begin(); it !=
+            current_refinement_tree.end(); it++)
         to_traverse.insert(it->first);
 #ifdef DEBUG_LEGION
       src.check_init();

@@ -906,6 +906,41 @@ namespace Legion {
     };
 
     /**
+     * \class RefinementNode
+     * This data structure defines a (potential) node in the disjoint-complete
+     * refinement tree of a region tree. The sub-regions at the leaves of this
+     * tree are the current set of equivalence sets used for representing the
+     * meta-data for the physical analysis.
+     */
+    class RefinementNode : public Collectable {
+    public:
+      RefinementNode(RegionTreeNode *node);
+      RefinementNode(const RefinementNode &rhs) = delete;
+      ~RefinementNode(void); 
+    public:
+      RefinementNode& operator=(const RefinementNode &rhs) = delete;
+    public:
+      FieldMask increment_touches(const FieldMask &mask);
+      FieldMask dominates_touches(const FieldMask &mask,
+                                  const RefinementNode *rhs) const;
+      void filter_touches(const FieldMask &mask);
+      void record_refinement_tree(ContextID ctx, const FieldMask &mask) const;
+    public:
+      inline size_t count_children(void) const { return children.size(); }
+      bool is_mostly_complete(void) const;
+      bool matches(const RefinementNode *sibling) const;
+      bool matches_child(LegionColor color, RefinementNode *child) const;
+      void update_child(LegionColor color, RefinementNode *child);
+      RefinementNode* clone(void) const;
+    public:
+      RegionTreeNode *const node;
+      static constexpr unsigned REFINEMENT_CHANGE_COUNT = 16;
+    protected:
+      std::map<LegionColor,RefinementNode*> children;
+      LegionMap<unsigned,FieldMask> touches;
+    };
+
+    /**
      * \class LogicalState
      * Track all the information about the current state
      * of a logical region from a given context. This
@@ -941,6 +976,18 @@ namespace Legion {
       FieldMaskSet<LogicalUser> curr_epoch_users;
       FieldMaskSet<LogicalUser> prev_epoch_users;
     public:
+      // The nodes that make up the current disjoint-complete refinement tree
+      // On region nodes this points to the next partition in the refinement
+      // On partition nodes this will be empty but will have a valid mask
+      // describing which fields are refined, except in the case where we
+      // have a sharded refinement for control replication, in which case 
+      // we will record the exact names of the child regions that are
+      // refined locally in this shard
+      FieldMaskSet<RegionTreeNode> current_refinement_tree;
+      // Keep track of the candidate refinement trees that we could make.
+      // Alternative sub-trees to consider for refinement from the current
+      FieldMaskSet<RefinementNode> candidate_refinement_trees;
+#if 0
       // Track whether this node is part of the disjoint-complete tree
       FieldMask disjoint_complete_tree;
       // Use this data structure for tracking where the disjoint-complete
@@ -973,6 +1020,7 @@ namespace Legion {
       // these at the bottom of the disjoint complete access trees to say
       // how to project from a given node in the region tree
       FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
+#endif
     public:
       struct SymbolicCacheEntry {
       public:
@@ -1123,7 +1171,11 @@ namespace Legion {
           PartitionNode *partition, const FieldMask &refinement_mask,
           LogicalRegion privilege_root);
       bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
+      void record_pending_refinement(RegionNode *root,
+          RefinementNode *refinement, const FieldMask &refinement_mask);
     public:
+      // Record a prior operation that we need to depend on with a 
+      // close operation to group together dependences
       void record_close_dependence(LogicalRegion privilege,
                                    RegionTreeNode *path_node,
                                    LogicalUser *user, FieldMask mask);

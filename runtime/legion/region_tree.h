@@ -3824,12 +3824,11 @@ namespace Legion {
                                  const ProjectionInfo &projection_info,
                                  const FieldMask &user_mask,
                                  FieldMask &unopened_field_mask,
-                                 FieldMask &already_closed_mask,
-                                 FieldMask &disjoint_complete_below,
-                                 FieldMask &first_touch_refinement,
+                                 const FieldMask &track_disjoint_complete,
+                                 FieldMaskSet<RefinementNode> &candidates,
                                  FieldMaskSet<RefinementOp> &refinements,
                                  LogicalAnalysis &logical_analysis,
-                                 const bool track_disjoint_complete_below,
+                                 const bool disjoint_complete_path,
                                  const bool check_unversioned);
       void register_local_user(LogicalState &state,
                                LogicalUser &user,
@@ -3899,23 +3898,23 @@ namespace Legion {
       void merge_new_field_states(LogicalState &state, 
                                   LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask,
-                                   const bool tracing);
+      void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_disjoint_complete_accesses(LogicalState &state,
                                              const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
-      void sanity_check_logical_state(LogicalState &state);
+      void sanity_check_logical_state(const LogicalState &state);
       void perform_tree_dominance_analysis(ContextID ctx,
                                            const LogicalUser &user,
                                            const FieldMask &field_mask,
                                            Operation *skip_op = NULL,
                                            GenerationID skip_gen = 0);
-      void invalidate_disjoint_complete_tree(ContextID ctx, 
-                                        const FieldMask &invalidate_mask,
-                                        const bool invalidate_self);
+      void record_refinement_tree(ContextID ctx, const FieldMask &mask,
+                                  const std::vector<RegionTreeNode*> &children);
+      void invalidate_refinement_tree(ContextID ctx, 
+                                      const FieldMask &invalidate_mask);
 #if 0
       void register_logical_deletion(ContextID ctx,
                                      const LogicalUser &user,
