@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4220,7 +4220,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #if defined(LEGION_USE_CUDA) || defined(LEGION_USE_HIP)
-      if (memory.kind() == Memory::GPU_FB_MEM)
+      if ((memory.kind() == Memory::GPU_FB_MEM) || 
+          (memory.kind() == Memory::GPU_MANAGED_MEM) ||
+          (memory.kind() == Memory::GPU_DYNAMIC_MEM))
       {
         Machine::ProcessorQuery finder(runtime->machine);
         finder.best_affinity_to(memory);
@@ -9628,8 +9630,8 @@ namespace Legion {
         ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(target.spawn(descriptor_id, 
-                    &ctx, sizeof(ctx), requests, pre, priority));
+        return Runtime::ignorefaults(ApEvent(target.spawn(descriptor_id, 
+                    &ctx, sizeof(ctx), requests, pre, priority)));
       }
       else
       {
@@ -11180,8 +11182,10 @@ namespace Legion {
       // Do some mixing
       for (int i = 0; i < 256; i++)
         nrand48(random_state);
-      // Initialize our profiling instance
-      if (address_space < num_profiling_nodes)
+      // We've intentionally switched this to profile all the nodes if we're 
+      // profiling any nodes since some information about things like copies
+      // usage of instances are now split across multiple log files
+      if (num_profiling_nodes > 0)
         initialize_legion_prof(config);
 #ifdef LEGION_TRACE_ALLOCATION
       allocation_tracing_count.store(0);
@@ -19699,7 +19703,7 @@ namespace Legion {
       forest->create_index_space(result, &domain, did, provenance);
       if (legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id, address_space,
-            (provenance == NULL) ? NULL : provenance->provenance.c_str());
+            (provenance == NULL) ? NULL : provenance->human.c_str());
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
       AutoLock is_lock(is_slice_lock);
@@ -23047,7 +23051,7 @@ namespace Legion {
         log_run.print("Legion endpoint task has Realm ID %d",
                       LG_ENDPOINT_TASK_ID);
 #ifdef LEGION_SEPARATE_META_TASKS
-        RUNTIME_CALL_DESCRIPTIONS(descs);
+        LG_TASK_DESCRIPTIONS(descs);
         for (unsigned idx = 0; idx < LG_LAST_TASK_ID; idx++)
         {
           if (idx == LG_MESSAGE_ID)

@@ -3,5 +3,6 @@ dist
 *.egg-info
 
 /cached_legion.h
-/legion_cffi.py
+/legion_canonical_cffi.py
+/legion_builtin_cffi.py
 /legion_python

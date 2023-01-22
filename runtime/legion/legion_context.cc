@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -728,9 +728,6 @@ namespace Legion {
     void TaskContext::log_created_requirements(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<MappingInstance> instances(1, 
-            Mapping::PhysicalInstance::get_virtual_instance());
-      const UniqueID unique_op_id = get_unique_id();
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -738,14 +735,7 @@ namespace Legion {
         // Skip it if there are no privilege fields
         if (it->second.privilege_fields.empty())
           continue;
-        InstanceSet instance_set;
-        std::vector<PhysicalManager*> unacquired;  
-        RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-        runtime->forest->physical_convert_mapping(owner_task, 
-            it->second, instances, instance_set, bad_tree, 
-            missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-        runtime->forest->log_mapping_decision(unique_op_id, this,
-            it->first, it->second, instance_set);
+        owner_task->log_virtual_mapping(it->first, it->second);
       }
     } 
 
@@ -888,7 +878,7 @@ namespace Legion {
               "in task tree rooted by %s (provenance %s)", 
               it->region.index_space.id, it->region.field_space.id, 
               it->region.tree_id, get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_regions.clear();
       }
       if (!deleted_fields.empty())
@@ -899,7 +889,7 @@ namespace Legion {
               "Duplicate deletions were performed on field %d of "
               "field space %x in task tree rooted by %s (provenance %s)", 
               it->fid, it->space.id, get_task_name(), 
-              (it->provenance != NULL) ? it->provenance->provenance.c_str() :
+              (it->provenance != NULL) ? it->provenance->human.c_str() :
               "unknown")
         deleted_fields.clear();
       }
@@ -912,7 +902,7 @@ namespace Legion {
               "Duplicate deletions were performed on field space %x "
               "in task tree rooted by %s (provenance %s)", it->space.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_field_spaces.clear();
       }
       if (!deleted_index_spaces.empty())
@@ -924,7 +914,7 @@ namespace Legion {
               "Duplicate deletions were performed on index space %x "
               "in task tree rooted by %s (provenance %s)", it->space.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_index_spaces.clear();
       }
       if (!deleted_index_partitions.empty())
@@ -936,7 +926,7 @@ namespace Legion {
               "Duplicate deletions were performed on index partition %x "
               "in task tree rooted by %s (provenance %s)", it->partition.id,
               get_task_name(), (it->provenance != NULL) ?
-              it->provenance->provenance.c_str() : "unknown")
+              it->provenance->human.c_str() : "unknown")
         deleted_index_partitions.clear();
       }
       // Now we go through and delete anything that the user leaked
@@ -1109,16 +1099,7 @@ namespace Legion {
           {
             LegionSpy::log_requirement_fields(get_unique_id(),
                                               it->first, overlapping_fields);
-            std::vector<MappingInstance> instances(1, 
-                          Mapping::PhysicalInstance::get_virtual_instance());
-            InstanceSet instance_set;
-            std::vector<PhysicalManager*> unacquired;  
-            RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-            runtime->forest->physical_convert_mapping(owner_task, 
-                req, instances, instance_set, bad_tree, 
-                missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-            runtime->forest->log_mapping_decision(get_unique_id(), this,
-                it->first, req, instance_set);
+            owner_task->log_virtual_mapping(it->first, req);
           }
         }
       }
@@ -1153,7 +1134,6 @@ namespace Legion {
         // We need some extra logging for legion spy
         std::vector<MappingInstance> instances(1, 
               Mapping::PhysicalInstance::get_virtual_instance());
-        const UniqueID unique_op_id = get_unique_id();
         AutoLock priv_lock(privilege_lock);
         for (std::map<unsigned,RegionRequirement>::iterator it = 
               created_requirements.begin(); it != 
@@ -1172,14 +1152,7 @@ namespace Legion {
             if (!it->second.privilege_fields.empty())
             {
               // Do extra logging for legion spy
-              InstanceSet instance_set;
-              std::vector<PhysicalManager*> unacquired;  
-              RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
-              runtime->forest->physical_convert_mapping(owner_task, 
-                  it->second, instances, instance_set, bad_tree, 
-                  missing_fields, NULL, unacquired, false/*do acquire_checks*/);
-              runtime->forest->log_mapping_decision(unique_op_id, this,
-                  it->first, it->second, instance_set);
+              owner_task->log_virtual_mapping(it->first, it->second);
               // Then do the result of the normal operations
               delete_reqs.resize(delete_reqs.size()+1);
               RegionRequirement &req = delete_reqs.back();
@@ -8068,7 +8041,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         std::map<Operation*,GenerationID>::iterator finder = 
@@ -8087,11 +8060,31 @@ namespace Legion {
         {
           needs_trigger = true;
           children_complete_invoked = true;
+#ifdef LEGION_SPY
+          child_completion_events.swap(cummulative_child_completion_events);
+#endif
           for (LegionMap<Operation*,GenerationID,
                 COMPLETE_CHILD_ALLOC>::const_iterator it =
                 complete_children.begin(); it != complete_children.end(); it++)
-            child_completion_events.insert(it->first->get_completion_event());
+            child_completion_events.push_back(
+                it->first->get_completion_event());
         }
+#ifdef LEGION_SPY
+        else
+        {
+          const ApEvent child_complete = op->get_completion_event();
+          cummulative_child_completion_events.push_back(child_complete);
+          // Make sure this vector doesn't grow too large for long-running tasks
+          constexpr size_t MAX_SIZE = 32;
+          if (cummulative_child_completion_events.size() == MAX_SIZE)
+          {
+            const ApEvent merged = 
+              Runtime::merge_events(NULL, cummulative_child_completion_events);
+            cummulative_child_completion_events.clear();
+            cummulative_child_completion_events.push_back(merged);
+          }
+        }
+#endif
       }
       if (needs_trigger)
       {
@@ -10312,7 +10305,7 @@ namespace Legion {
       bool need_complete = false;
       bool need_commit = false;
       std::set<RtEvent> preconditions;
-      std::set<ApEvent> child_completion_events;
+      std::vector<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
         // Only need to do this for executing and executed children
@@ -10340,10 +10333,16 @@ namespace Legion {
           {
             need_complete = true;
             children_complete_invoked = true;
+#ifdef LEGION_SPY
+            child_completion_events.swap(cummulative_child_completion_events);
+#endif
+            child_completion_events.reserve(
+                child_completion_events.size() + complete_children.size()); 
             for (LegionMap<Operation*,GenerationID,
                   COMPLETE_CHILD_ALLOC>::const_iterator it =
                  complete_children.begin(); it != complete_children.end(); it++)
-              child_completion_events.insert(it->first->get_completion_event());
+              child_completion_events.push_back(
+                  it->first->get_completion_event());
           }
           if (complete_children.empty() && 
               !children_commit_invoked)
@@ -10795,8 +10794,9 @@ namespace Legion {
         if (!unmapped_regions.empty())
         {
           Provenance *prov = task->get_provenance();
-          remap_unmapped_regions(current_trace, unmapped_regions,
-              (prov == NULL) ? (const char*)NULL : prov->provenance.c_str());
+          char *string = (prov == NULL) ? (char*)NULL : prov->clone();
+          remap_unmapped_regions(current_trace, unmapped_regions, string);
+          free(string);
         }
       }
     }
@@ -11034,12 +11034,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::string& RemoteTask::get_provenance_string(void) const
+    const std::string& RemoteTask::get_provenance_string(bool human) const
     //--------------------------------------------------------------------------
     {
       Provenance *provenance = owner->get_provenance();
       if (provenance != NULL)
-        return provenance->provenance;
+        return human ? provenance->human : provenance->machine;
       else
         return Provenance::no_provenance;
     }

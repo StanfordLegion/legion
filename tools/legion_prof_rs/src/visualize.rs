@@ -12,9 +12,10 @@ use serde::{Serialize, Serializer};
 use rayon::prelude::*;
 
 use crate::state::{
-    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInfo, DimKind, FSpace,
-    ISpaceID, Inst, Mem, MemID, MemKind, MemPoint, MemProcAffinity, NodeID, OpID, Proc,
-    ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID, SpyState, State, TimePoint, Timestamp,
+    Bounds, Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace,
+    FieldID, FillInstInfo, ISpaceID, Inst, InstUID, Mem, MemID, MemKind, MemPoint, MemProcAffinity,
+    NodeID, OpID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcKind, ProcPoint, ProfUID,
+    SpyState, State, TimePoint, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../legion_prof_files/index.html");
@@ -77,6 +78,7 @@ struct DataRecord<'a> {
     parents: &'a str,
     prof_uid: u64,
     op_id: Option<u64>,
+    instances: &'a str,
 }
 
 #[derive(Serialize, Copy, Clone)]
@@ -118,6 +120,36 @@ fn prof_uid_record(prof_uid: ProfUID, state: &State) -> Option<DependencyRecord>
         proc_id.proc_in_node(),
         prof_uid.0,
     ))
+}
+
+#[derive(Debug)]
+pub struct OperationInstInfoDumpInstVec<'a>(pub &'a Vec<OperationInstInfo>, pub &'a State);
+
+impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for elt in self.0.iter() {
+            let inst = self.1.find_inst(elt.inst_uid);
+            if let Some(inst) = inst {
+                insts_set.insert(inst);
+            }
+        }
+        write!(f, "[")?;
+        for (i, inst) in insts_set.iter().enumerate() {
+            write!(
+                f,
+                "[\"0x{:x}\",{}]",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
+            )?;
+            if i < insts_set.len() - 1 {
+                write!(f, ",")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
 }
 
 impl Proc {
@@ -230,6 +262,19 @@ impl Proc {
         let level = self.max_levels + 1 - base.level.unwrap();
         let level_ready = base.level_ready.map(|l| self.max_levels_ready + 1 - l);
 
+        let instances = {
+            // ProfTask has no op_id
+            if let Some(op_id) = entry.op_id {
+                let task = state.find_op(op_id).unwrap();
+                format!(
+                    "{}",
+                    OperationInstInfoDumpInstVec(&task.operation_inst_infos, state)
+                )
+            } else {
+                "".to_owned()
+            }
+        };
+
         let default = DataRecord {
             level,
             level_ready,
@@ -245,7 +290,8 @@ impl Proc {
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
-            op_id: op_id,
+            op_id,
+            instances: &instances,
         };
 
         let mut start = time_range.start.unwrap();
@@ -253,7 +299,7 @@ impl Proc {
             for wait in &waiters.wait_intervals {
                 f.serialize(DataRecord {
                     ready: Some(start),
-                    start: start,
+                    start,
                     end: wait.start,
                     opacity: 1.0,
                     title: &name,
@@ -290,7 +336,7 @@ impl Proc {
             if start < time_range.stop.unwrap() {
                 f.serialize(DataRecord {
                     ready: Some(start),
-                    start: start,
+                    start,
                     end: time_range.stop.unwrap(),
                     opacity: 1.0,
                     title: &name,
@@ -300,7 +346,7 @@ impl Proc {
         } else {
             f.serialize(DataRecord {
                 ready: Some(time_range.ready.unwrap_or(start)),
-                start: start,
+                start,
                 end: time_range.stop.unwrap(),
                 // Somehow, these are coming through backwards...
                 in_: &out, //&in_,
@@ -365,13 +411,143 @@ impl fmt::Display for SizePretty {
 }
 
 #[derive(Debug)]
-pub struct CopyInfoVec<'a>(pub &'a Vec<CopyInfo>);
+pub struct CopyInstInfoDisplay<'a>(
+    pub Option<&'a Inst>, // src_inst
+    pub Option<&'a Inst>, // src_dst
+    pub InstUID,          // src_inst_uid
+    pub InstUID,          // dst_inst_uid
+);
 
-impl fmt::Display for CopyInfoVec<'_> {
+impl fmt::Display for CopyInstInfoDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut src_inst_id = 0;
+        let mut dst_inst_id = 0;
+        if let Some(src_inst) = self.0 {
+            src_inst_id = src_inst.inst_id.unwrap().0;
+        }
+        if let Some(dst_inst) = self.1 {
+            dst_inst_id = dst_inst.inst_id.unwrap().0;
+        }
+        match (self.2 .0, self.3 .0) {
+            (0, 0) => unreachable!(),
+            (0, _) => {
+                write!(f, "Scatter: dst_indirect_inst=0x{:x}", dst_inst_id)
+            }
+            (_, 0) => {
+                write!(f, "Gather: src_indirect_inst=0x{:x}", src_inst_id)
+            }
+            (_, _) => {
+                write!(
+                    f,
+                    "src_inst=0x{:x}, dst_inst=0x{:x}",
+                    src_inst_id, dst_inst_id
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CopyInstInfoVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
+
+impl fmt::Display for CopyInstInfoVec<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, elt) in self.0.iter().enumerate() {
-            write!(f, "$req[{}]: {}", i, elt)?;
+            let src_inst = self.1.find_inst(elt.src_inst_uid);
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid);
+            write!(
+                f,
+                "$req[{}]: {}",
+                i,
+                CopyInstInfoDisplay(src_inst, dst_inst, elt.src_inst_uid, elt.dst_inst_uid)
+            )?;
         }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CopyInstInfoDumpInstVec<'a>(pub &'a Vec<CopyInstInfo>, pub &'a State);
+
+impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for elt in self.0.iter() {
+            if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+                insts_set.insert(src_inst);
+            }
+            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                insts_set.insert(dst_inst);
+            }
+        }
+        write!(f, "[")?;
+        for (i, inst) in insts_set.iter().enumerate() {
+            write!(
+                f,
+                "[\"0x{:x}\",{}]",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
+            )?;
+            if i < insts_set.len() - 1 {
+                write!(f, ",")?;
+            }
+        }
+        write!(f, "]")?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FillInstInfoDisplay<'a>(pub Option<&'a Inst>, pub FieldID);
+
+impl fmt::Display for FillInstInfoDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut inst_id = 0;
+        if let Some(inst) = self.0 {
+            inst_id = inst.inst_id.unwrap().0;
+        }
+        write!(f, "dst_inst=0x{:x}, fid={}", inst_id, self.1 .0)
+    }
+}
+
+#[derive(Debug)]
+pub struct FillInstInfoVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State);
+
+impl fmt::Display for FillInstInfoVec<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, elt) in self.0.iter().enumerate() {
+            let inst = self.1.find_inst(elt.dst_inst_uid);
+            write!(f, "$req[{}]: {}", i, FillInstInfoDisplay(inst, elt.fid))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FillInstInfoDumpInstVec<'a>(pub &'a Vec<FillInstInfo>, pub &'a State);
+
+impl fmt::Display for FillInstInfoDumpInstVec<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // remove duplications
+        let mut insts_set = BTreeSet::new();
+        for elt in self.0.iter() {
+            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
+            insts_set.insert(dst_inst);
+        }
+        write!(f, "[")?;
+        for (i, inst) in insts_set.iter().enumerate() {
+            write!(
+                f,
+                "[\"0x{:x}\",{}]",
+                inst.inst_id.unwrap().0,
+                inst.base.prof_uid.0
+            )?;
+            if i < insts_set.len() - 1 {
+                write!(f, ",")?;
+            }
+        }
+        write!(f, "]")?;
         Ok(())
     }
 }
@@ -469,36 +645,62 @@ impl Chan {
         let (base, time_range) = (entry.base(), entry.time_range());
         let name = match entry {
             ChanEntryRef::Copy(_, copy) => {
-                let nreqs = copy.copy_info.len();
+                let nreqs = copy.copy_inst_infos.len();
                 if nreqs > 0 {
                     format!(
-                        "size={}, num reqs={}{}",
-                        SizePretty(copy.size),
+                        "{}: size={}, num reqs={}{}",
+                        copy.copy_kind.unwrap(),
+                        SizePretty(copy.size.unwrap()),
                         nreqs,
-                        CopyInfoVec(&copy.copy_info)
+                        CopyInstInfoVec(&copy.copy_inst_infos, state)
                     )
                 } else {
-                    format!("size={}, num reqs={}", SizePretty(copy.size), nreqs)
+                    format!(
+                        "Copy: size={}, num reqs={}",
+                        SizePretty(copy.size.unwrap()),
+                        nreqs
+                    )
                 }
             }
-            ChanEntryRef::Fill(_, _) => format!("Fill"),
+            ChanEntryRef::Fill(_, fill) => {
+                let nreqs = fill.fill_inst_infos.len();
+                if nreqs > 0 {
+                    format!(
+                        "Fill: num reqs={}{}",
+                        nreqs,
+                        FillInstInfoVec(&fill.fill_inst_infos, state)
+                    )
+                } else {
+                    format!("Fill: num reqs={}", nreqs)
+                }
+            }
             ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
         };
         let ready_timestamp = match point.entry {
-            ChanEntry::Copy(_, _) => time_range.ready,
-            ChanEntry::Fill(_, _) => None,
+            ChanEntry::Copy(_) => time_range.ready,
+            ChanEntry::Fill(_) => time_range.ready,
             ChanEntry::DepPart(_, _) => None,
         };
 
-        let initiation = match point.entry {
-            ChanEntry::Copy(op_id, _) => op_id,
-            ChanEntry::Fill(op_id, _) => op_id,
-            ChanEntry::DepPart(op_id, _) => op_id,
+        let initiation = match entry {
+            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
+            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
+            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
         };
 
         let color = format!("#{:06x}", state.get_op_color(initiation));
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap();
+
+        let instances = match entry {
+            ChanEntryRef::Copy(_, copy) => {
+                format!("{}", CopyInstInfoDumpInstVec(&copy.copy_inst_infos, state))
+            }
+            ChanEntryRef::Fill(_, fill) => {
+                format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, state))
+            }
+            ChanEntryRef::DepPart(_, _deppart) => "".to_owned(),
+        };
 
         f.serialize(DataRecord {
             level,
@@ -516,6 +718,7 @@ impl Chan {
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: None,
+            instances: &instances,
         })?;
 
         Ok(())
@@ -528,34 +731,64 @@ impl Chan {
                 .get(&mem_id)
                 .map_or(MemKind::NoMemKind, |mem| mem.kind)
         };
-        let slug = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
-                "({}_Memory_0x{:x},_{}_Memory_0x{:x})",
+        let slug = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_kind,
+        ) {
+            (Some(src), Some(dst), channel_kind) => format!(
+                "({}_Memory_0x{:x},_{}_Memory_0x{:x},_{})",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
-                &dst
+                &dst,
+                channel_kind
             ),
-            (None, Some(dst)) => format!("{}_Memory_0x{:x}", mem_kind(dst), dst),
-            (None, None) => format!("None"),
-            _ => unreachable!(),
+            (None, Some(dst), channel_kind) => format!(
+                "(None,_{}_Memory_0x{:x},_{})",
+                mem_kind(dst),
+                dst,
+                channel_kind
+            ),
+            (Some(src), None, channel_kind) => format!(
+                "({}_Memory_0x{:x},_None,_{})",
+                mem_kind(src),
+                src,
+                channel_kind
+            ),
+            (None, None, channel_kind) => format!("(None,_None,_{})", channel_kind),
         };
 
-        let long_name = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
+        let long_name = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_kind,
+        ) {
+            (Some(src), Some(dst), _) => format!(
                 "{} Memory 0x{:x} to {} Memory 0x{:x} Channel",
                 mem_kind(src),
                 &src,
                 mem_kind(dst),
                 &dst
             ),
-            (None, Some(dst)) => format!("Fill {} Memory 0x{:x} Channel", mem_kind(dst), dst),
-            (None, None) => format!("Dependent Partition Channel"),
-            _ => unreachable!(),
+            (None, Some(dst), channel_kind) => {
+                format!(
+                    "{} {} Memory 0x{:x} Channel",
+                    channel_kind,
+                    mem_kind(dst),
+                    dst
+                )
+            }
+            (Some(src), None, _) => format!("Scatter {} Memory 0x{:x} Channel", mem_kind(src), src),
+            (None, None, _) => "Dependent Partition Channel".to_owned(),
         };
 
-        let short_name = match (self.chan_id.src, self.chan_id.dst) {
-            (Some(src), Some(dst)) => format!(
+        let short_name = match (
+            self.chan_id.src,
+            self.chan_id.dst,
+            self.chan_id.channel_kind,
+        ) {
+            (Some(src), Some(dst), _) => format!(
                 "{} to {}",
                 MemShort(
                     mem_kind(src),
@@ -570,17 +803,28 @@ impl Chan {
                     state
                 )
             ),
-            (None, Some(dst)) => format!(
-                "{}",
+            (None, Some(dst), channel_kind) => {
+                format!(
+                    "{} {}",
+                    channel_kind,
+                    MemShort(
+                        mem_kind(dst),
+                        state.mems.get(&dst),
+                        state.mem_proc_affinity.get(&dst),
+                        state
+                    )
+                )
+            }
+            (Some(src), None, _) => format!(
+                "Scatter {}",
                 MemShort(
-                    mem_kind(dst),
-                    state.mems.get(&dst),
-                    state.mem_proc_affinity.get(&dst),
+                    mem_kind(src),
+                    state.mems.get(&src),
+                    state.mem_proc_affinity.get(&src),
                     state
                 )
             ),
-            (None, None) => format!("Dependent Partition Channel"),
-            _ => unreachable!(),
+            (None, None, _) => "Dependent Partition Channel".to_owned(),
         };
 
         let mut filename = PathBuf::new();
@@ -614,19 +858,16 @@ impl fmt::Display for ISpacePretty<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ISpacePretty(ispace_id, state) = self;
 
-        let ispace = state.index_spaces.get(&ispace_id);
+        let ispace = state.index_spaces.get(ispace_id);
         if ispace.is_none() {
             write!(f, "ispace:{}", ispace_id.0)?;
             return Ok(());
         }
         let ispace = ispace.unwrap();
 
-        match &ispace.bounds {
-            Bounds::Empty => {
-                write!(f, "empty index space")?;
-                return Ok(());
-            }
-            _ => {}
+        if ispace.bounds == Bounds::Empty {
+            write!(f, "empty index space")?;
+            return Ok(());
         }
 
         if let Some(name) = &ispace.name {
@@ -735,42 +976,33 @@ impl fmt::Display for DimOrderPretty<'_> {
                 if *dim_order == DimKind::DimF {
                     aos = true;
                 }
-            } else {
-                if dim == dim_last.unwrap().0 {
-                    if *dim_order == DimKind::DimF {
-                        soa = true;
-                    }
-                } else {
-                    if *dim_order == DimKind::DimF {
-                        cmpx_order = true;
-                    }
+            } else if dim == dim_last.unwrap().0 {
+                if *dim_order == DimKind::DimF {
+                    soa = true;
                 }
+            } else if *dim_order == DimKind::DimF {
+                cmpx_order = true;
             }
 
             // SOA + order -> DIM_X, DIM_Y,.. DIM_F-> column_major
             // or .. DIM_Y, DIM_X, DIM_F? -> row_major
-            if *dim_last.unwrap().1 == DimKind::DimF {
-                if *dim_order != DimKind::DimF {
-                    if *dim_order == DimKind::try_from(dim.0).unwrap() {
-                        column_major += 1;
-                    }
-                    if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap()
-                    {
-                        row_major += 1;
-                    }
+            if *dim_last.unwrap().1 == DimKind::DimF && *dim_order != DimKind::DimF {
+                if *dim_order == DimKind::try_from(dim.0).unwrap() {
+                    column_major += 1;
+                }
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0 - 1).unwrap() {
+                    row_major += 1;
                 }
             }
 
             // AOS + order -> DIM_F, DIM_X, DIM_Y -> column_major
             // or DIM_F, DIM_Y, DIM_X -> row_major?
-            if *dim_first.unwrap().1 == DimKind::DimF {
-                if *dim_order != DimKind::DimF {
-                    if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
-                        column_major += 1;
-                    }
-                    if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
-                        row_major += 1;
-                    }
+            if *dim_first.unwrap().1 == DimKind::DimF && *dim_order != DimKind::DimF {
+                if *dim_order == DimKind::try_from(dim.0 - 1).unwrap() {
+                    column_major += 1;
+                }
+                if *dim_order == DimKind::try_from(dim_last.unwrap().0 .0 - dim.0).unwrap() {
+                    row_major += 1;
                 }
             }
         }
@@ -820,11 +1052,13 @@ impl fmt::Display for InstPretty<'_> {
                 write!(f, "$")?;
             }
         }
+        if inst.dim_order.len() > 0 {
+            write!(f, "$Layout Order: {} ", DimOrderPretty(inst))?;
+        }
         write!(
             f,
-            "$Layout Order: {} $Inst: 0x{:x} $Size: {}",
-            DimOrderPretty(inst),
-            inst.inst_id.0,
+            "$Inst: 0x{:x} $Size: {}",
+            inst.inst_id.unwrap().0,
             SizePretty(inst.size.unwrap())
         )?;
 
@@ -839,14 +1073,13 @@ impl Mem {
         point: &MemPoint,
         state: &State,
     ) -> io::Result<()> {
-        let (_, op_id) = point.entry;
         let inst = self.insts.get(&point.entry).unwrap();
         let (base, time_range) = (&inst.base, &inst.time_range);
         let name = format!("{}", InstPretty(inst, state));
 
-        let initiation = op_id;
+        let initiation = inst.op_id;
 
-        let color = format!("#{:06x}", state.get_op_color(initiation));
+        let color = format!("#{:06x}", state.get_op_color(initiation.unwrap()));
 
         let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
 
@@ -859,13 +1092,14 @@ impl Mem {
             color: &color,
             opacity: 0.45,
             title: &format!("{} (deferred)", &name),
-            initiation: Some(initiation.0),
+            initiation: Some(initiation.unwrap().0),
             in_: "",
             out: "",
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: None,
+            instances: "",
         })?;
 
         f.serialize(DataRecord {
@@ -877,13 +1111,14 @@ impl Mem {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.0),
+            initiation: Some(initiation.unwrap().0),
             in_: "",
             out: "",
             children: "",
             parents: "",
             prof_uid: base.prof_uid.0,
             op_id: None,
+            instances: "",
         })?;
 
         Ok(())
@@ -951,7 +1186,7 @@ impl State {
             }
         }
 
-        return Color(0x000000);
+        Color(0x000000)
     }
 
     fn has_multiple_nodes(&self) -> bool {
@@ -988,7 +1223,7 @@ impl State {
                 if !proc.is_empty() {
                     timepoint
                         .entry(group)
-                        .or_insert_with(|| Vec::new())
+                        .or_insert_with(Vec::new)
                         .push((proc.proc_id, &proc.util_time_points));
                 }
             }
@@ -1008,7 +1243,7 @@ impl State {
                     let group = (node, mem.kind);
                     result
                         .entry(group)
-                        .or_insert_with(|| Vec::new())
+                        .or_insert_with(Vec::new)
                         .push((*mem_id, &mem.time_points))
                 }
             }
@@ -1023,23 +1258,21 @@ impl State {
         let mut result = BTreeMap::new();
 
         for (chan_id, chan) in &self.chans {
-            if !chan.time_points.is_empty() {
-                if chan_id.node_id().is_some() {
-                    // gathers/scatters
-                    let mut nodes = vec![None];
-                    if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
-                        nodes.push(chan_id.dst.map(|dst| dst.node_id()));
-                    }
-                    if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
-                        nodes.push(chan_id.src.map(|src| src.node_id()));
-                    }
-                    nodes.dedup();
-                    for node in nodes {
-                        result
-                            .entry(node)
-                            .or_insert_with(|| Vec::new())
-                            .push((*chan_id, &chan.time_points))
-                    }
+            if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
+                // gathers/scatters
+                let mut nodes = vec![None];
+                if chan_id.dst.is_some() && chan_id.dst.unwrap() != MemID(0) {
+                    nodes.push(chan_id.dst.map(|dst| dst.node_id()));
+                }
+                if chan_id.src.is_some() && chan_id.src.unwrap() != MemID(0) {
+                    nodes.push(chan_id.src.map(|src| src.node_id()));
+                }
+                nodes.dedup();
+                for node in nodes {
+                    result
+                        .entry(node)
+                        .or_insert_with(Vec::new)
+                        .push((*chan_id, &chan.time_points))
                 }
             }
         }
@@ -1083,7 +1316,7 @@ impl State {
         // add to the count. if it's second, decrement the count. Store the
         // (time, count) pair.
 
-        assert!(owners.len() > 0);
+        assert!(!owners.is_empty());
 
         let mut utilization = Vec::new();
         let mut last_time = None;
@@ -1115,7 +1348,7 @@ impl State {
         points: Vec<&MemPoint>,
         owners: BTreeSet<MemID>,
     ) -> Vec<(Timestamp, f64)> {
-        assert!(owners.len() > 0);
+        assert!(!owners.is_empty());
 
         let mut result = Vec::new();
 
@@ -1131,7 +1364,7 @@ impl State {
 
         for point in points {
             let mem_id = self.insts.get(&point.entry).unwrap();
-            let mem = self.mems.get(&mem_id).unwrap();
+            let mem = self.mems.get(mem_id).unwrap();
             let inst = mem.insts.get(&point.entry).unwrap();
             if point.first {
                 count += inst.size.unwrap();
@@ -1162,7 +1395,7 @@ impl State {
         // add to the count. if it's second, decrement the count. Store the
         // (time, count) pair.
 
-        assert!(owners.len() > 0);
+        assert!(!owners.is_empty());
 
         let max_count = owners.len();
 
@@ -1185,12 +1418,10 @@ impl State {
                 } else {
                     *utilization.last_mut().unwrap() = (point.time, count / max_count);
                 }
+            } else if count > 0.0 {
+                utilization.push((point.time, 1.0));
             } else {
-                if count > 0.0 {
-                    utilization.push((point.time, 1.0));
-                } else {
-                    utilization.push((point.time, count / max_count));
-                }
+                utilization.push((point.time, count / max_count));
             }
             last_time = Some(point.time);
         }
@@ -1244,7 +1475,7 @@ impl State {
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: time,
+                time,
                 count: Count(count),
             })?;
         }
@@ -1295,7 +1526,7 @@ impl State {
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: time,
+                time,
                 count: Count(count),
             })?;
         }
@@ -1347,7 +1578,7 @@ impl State {
         })?;
         for (time, count) in utilization {
             f.serialize(UtilizationRecord {
-                time: time,
+                time,
                 count: Count(count),
             })?;
         }
@@ -1373,7 +1604,7 @@ impl State {
                 let group_name = format!("{} ({:?})", &node_name, kind);
                 stats
                     .entry(node_name)
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(group_name);
             }
         }
@@ -1388,7 +1619,7 @@ impl State {
                 let group_name = format!("{} ({} Memory)", &node_name, kind);
                 stats
                     .entry(node_name)
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(group_name);
             }
         }
@@ -1402,7 +1633,7 @@ impl State {
                 let group_name = format!("{} (Channel)", &node_name);
                 stats
                     .entry(node_name)
-                    .or_insert_with(|| Vec::new())
+                    .or_insert_with(Vec::new)
                     .push(group_name);
             }
         }
@@ -1455,24 +1686,22 @@ fn create_unique_dir<P: AsRef<Path>>(path: P, force: bool) -> io::Result<PathBuf
         println!("Removing previous contents of {:?}", &path);
         let _ = remove_dir_all(&path); // ignore failure, we'll catch it on create
         create_dir(&path)?;
-    } else {
-        if create_dir(&path).is_err() {
-            let mut i = 1;
-            let retry_limit = 100;
-            loop {
-                let mut f = path.file_name().unwrap().to_owned();
-                f.push(format!(".{}", i));
-                let p = path.with_file_name(f);
-                let r = create_dir(&p);
-                if r.is_ok() {
-                    path = p.as_path().to_owned();
-                    break;
-                } else if i >= retry_limit {
-                    // tried too many times, assume this is a permanent failure
-                    r?;
-                }
-                i += 1;
+    } else if create_dir(&path).is_err() {
+        let mut i = 1;
+        let retry_limit = 100;
+        loop {
+            let mut f = path.file_name().unwrap().to_owned();
+            f.push(format!(".{}", i));
+            let p = path.with_file_name(f);
+            let r = create_dir(&p);
+            if r.is_ok() {
+                path = p.as_path().to_owned();
+                break;
+            } else if i >= retry_limit {
+                // tried too many times, assume this is a permanent failure
+                r?;
             }
+            i += 1;
         }
     }
     Ok(path)
@@ -1576,9 +1805,9 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         for (op_id, op) in &state.operations {
             let parent_id = op.parent_id.map(|x| x.0);
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
-            if let Some(proc_id) = state.tasks.get(&op_id) {
-                let proc = state.procs.get(&proc_id).unwrap();
-                let proc_record = proc_records.get(&proc_id).unwrap();
+            if let Some(proc_id) = state.tasks.get(op_id) {
+                let proc = state.procs.get(proc_id).unwrap();
+                let proc_record = proc_records.get(proc_id).unwrap();
                 let task = proc.find_task(*op_id).unwrap();
                 let (task_id, variant_id) = match task.kind {
                     ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
@@ -1599,13 +1828,13 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id,
+                    parent_id,
                     desc: &desc,
                     proc: Some(&proc_record.full_text),
                     level: task.base.level.map(|x| x + 1),
-                    provenance: provenance,
+                    provenance,
                 })?;
-            } else if let Some(task) = state.multi_tasks.get(&op_id) {
+            } else if let Some(task) = state.multi_tasks.get(op_id) {
                 let task_name = state
                     .task_kinds
                     .get(&task.task_id)
@@ -1616,11 +1845,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id,
+                    parent_id,
                     desc: &format!("{} <{}>", task_name, op_id.0),
                     proc: None,
                     level: None,
-                    provenance: provenance,
+                    provenance,
                 })?;
             } else {
                 let desc = op.kind.and_then(|k| state.op_kinds.get(&k)).map_or_else(
@@ -1630,11 +1859,11 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
 
                 file.serialize(OpRecord {
                     op_id: op_id.0,
-                    parent_id: parent_id,
+                    parent_id,
                     desc: &desc,
                     proc: None,
                     level: None,
-                    provenance: provenance,
+                    provenance,
                 })?;
             }
         }
@@ -1645,7 +1874,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
         let scale_data = ScaleRecord {
             start: 0.0,
             end: (state.last_time.0 as f64 / 100. * 1.01).ceil() / 10.,
-            stats_levels: stats_levels,
+            stats_levels,
             max_level: base_level + 1,
         };
 

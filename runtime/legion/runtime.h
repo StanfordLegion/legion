@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3523,7 +3523,7 @@ namespace Legion {
       static inline void trigger_event(PredEvent to_trigger);
       static inline void poison_event(PredEvent to_poison);
     public:
-      static inline ApEvent ignorefaults(Realm::Event e);
+      static inline ApEvent ignorefaults(ApEvent e);
       static inline RtEvent protect_event(ApEvent to_protect);
       static inline RtEvent protect_merge_events(
                                           const std::set<ApEvent> &events);
@@ -4035,7 +4035,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ inline ApEvent Runtime::ignorefaults(Realm::Event e)
+    /*static*/ inline ApEvent Runtime::ignorefaults(ApEvent e)
     //--------------------------------------------------------------------------
     {
       ApEvent result(Realm::Event::ignorefaults(e));
@@ -4050,7 +4050,7 @@ namespace Legion {
       LegionSpy::log_event_dependence(ApEvent(e), result);
 #endif
 #endif
-      return ApEvent(result);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4139,8 +4139,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      if (precondition.exists())
-        LegionSpy::log_event_dependence(precondition, result);
+      LegionSpy::log_reservation_acquire(r, precondition, result);
 #endif
       return result;
     }

@@ -1,4 +1,4 @@
-/* Copyright 2022 Argonne National Laboratory
+/* Copyright 2023 Argonne National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,19 +45,25 @@ namespace MPI {
   atomic<size_t> messages_rcvd(0);
 
 
-void AM_Init(int *p_node_this, int *p_node_size)
+int AM_Init(int *p_node_this, int *p_node_size)
 {
     char *s;
+    int mpi_thread_model = MPI_THREAD_MULTIPLE;
 
     MPI_Initialized(&pre_initialized);
     if (pre_initialized) {
-        int mpi_thread_model;
         MPI_Query_thread(&mpi_thread_model);
-        assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
     } else {
         int mpi_thread_model;
         MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &mpi_thread_model);
-        assert(mpi_thread_model == MPI_THREAD_MULTIPLE);
+    }
+    if (mpi_thread_model < MPI_THREAD_MULTIPLE) {
+      fprintf(stderr,
+              "MPI: Unsupported threading module found for MPI, please ensure "
+              "your MPI implementation supports MPI_THREAD_MULTIPLE and no "
+              "other networking modules loaded initialized prior to MPI "
+              "requires a different threading model\n");
+      return -1;
     }
     MPI_Comm_size(MPI_COMM_WORLD, &node_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &node_this);
@@ -72,6 +78,7 @@ void AM_Init(int *p_node_this, int *p_node_size)
         CHECK_MPI( MPI_Irecv(buf_recv_list[i], AM_BUF_SIZE_W_HEADER, MPI_CHAR, MPI_ANY_SOURCE, TAG_COMMAND, MPI_COMM_WORLD, &req_recv_list[i]) );
     }
     MPI_Comm_dup(MPI_COMM_WORLD, &comm_medium);
+    return 0;
 }
 
 void AM_Finalize()

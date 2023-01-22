@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -154,29 +154,27 @@ namespace Realm {
     class NetworkRegistrationBase {
     public:
       NetworkRegistrationBase() : next(0) {}
-      virtual NetworkModule *create_network_module(RuntimeImpl *runtime,
-						   int *argc,
-						   const char ***argv) const = 0;
+      virtual NetworkModule *
+      create_network_module(RuntimeImpl *runtime, int *argc,
+                            const char ***argv) const = 0;
       NetworkRegistrationBase *next;
     };
     template <typename T>
     class NetworkRegistration : public NetworkRegistrationBase {
     public:
-      NetworkRegistration(void)
-      {
-	ModuleRegistrar::add_network_registration(this);
+      NetworkRegistration(const std::string &name, size_t order = 9999) {
+        ModuleRegistrar::add_network_registration(this, name, order);
       }
 
       virtual NetworkModule *create_network_module(RuntimeImpl *runtime,
-						   int *argc,
-						   const char ***argv) const
-      {
-	return T::create_network_module(runtime, argc, argv);
+                                                   int *argc,
+                                                   const char ***argv) const {
+        return T::create_network_module(runtime, argc, argv);
       }
     };
 
     // called by the module registration helpers
-    static void add_network_registration(NetworkRegistrationBase *reg);
+    static void add_network_registration(NetworkRegistrationBase *reg, const std::string& name, size_t order = 9999);
 
   protected:
     RuntimeImpl *runtime;

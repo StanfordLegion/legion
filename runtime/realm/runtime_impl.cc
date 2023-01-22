@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,10 @@
 
 #ifdef REALM_USE_KOKKOS
 #include "realm/kokkos_interop.h"
+#endif
+
+#ifdef REALM_USE_NVTX
+#include "realm/nvtx.h"
 #endif
 
 #include <string.h>
@@ -1228,6 +1232,20 @@ namespace Realm {
       }
       Clock::calibrate(use_cpu_tsc, force_cpu_tsq_freq);
 
+#ifdef REALM_USE_NVTX
+      // need to init nvtx at the very beginning
+      std::vector<std::string> nvtx_module_list;
+      {
+        CommandLineParser cp;
+        // modules are defined as the key of the nvtx_categories_predefined in nvtx.cc
+        //   if all is passed, all modules will be enabled. 
+        cp.add_option_stringlist("-ll:nvtx_modules", nvtx_module_list);
+        bool ok = cp.parse_command_line(cmdline);
+        assert(ok);
+      }
+      init_nvtx(nvtx_module_list);
+#endif
+
       // start up the threading subsystem - modules will likely want threads
       if(!Threading::initialize()) exit(1);
 
@@ -1279,6 +1297,9 @@ namespace Realm {
       int bitset_twolevel = -1024; // i.e. yes if > 1024 nodes
       int active_msg_handler_threads = 0; // default is none (use bgwork)
       bool active_msg_handler_bgwork = true;
+      // This dummy network list is actually handled in network_init()
+      // this is just here to help verify low-level arguement
+      std::vector<std::string> dummy_network_list;
 
       CommandLineParser cp;
       cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
@@ -1314,6 +1335,7 @@ namespace Realm {
       cp.add_option_int("-ll:aminline", Config::max_inline_message_time);
       cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
       cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
+      cp.add_option_stringlist("-ll:networks", dummy_network_list);
 
       // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
       cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
@@ -2451,6 +2473,11 @@ namespace Realm {
       if (Config::path_cache_lru_size) {
         finalize_path_cache();
       }
+
+#ifdef REALM_USE_NVTX
+      // finalize nvtx
+      finalize_nvtx();
+#endif
 
       return shutdown_result_code;
     }

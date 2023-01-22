@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1675,6 +1675,9 @@ namespace Legion {
       // Some help for Legion Spy for validating fences
       std::deque<UniqueID> ops_since_last_fence;
       std::set<ApEvent> previous_completion_events;
+      // And for verifying the cummulativity property of task
+      // (e.g. that they are not complete until all their children are)
+      std::vector<ApEvent> cummulative_child_completion_events;
 #endif
     protected: // Queues for fusing together small meta-tasks
       mutable LocalLock                               prepipeline_lock;
@@ -1881,7 +1884,7 @@ namespace Legion {
       virtual const Task* get_parent_task(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool has_trace(void) const;
-      virtual const std::string& get_provenance_string(void) const;
+      virtual const std::string& get_provenance_string(bool human = true) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;

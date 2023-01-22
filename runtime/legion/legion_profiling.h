@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -210,16 +210,14 @@ namespace Legion {
       };
       struct PhysicalInstRegionDesc {
       public:
-	UniqueID op_id;
-	IDType inst_id;
+        LgEvent inst_uid;
 	IDType ispace_id;
 	unsigned fspace_id;
 	unsigned tree_id;
       };
       struct PhysicalInstLayoutDesc {
       public:
-	UniqueID op_id;
-	IDType inst_id;
+        LgEvent inst_uid;
 	unsigned field_id;
 	unsigned fspace_id;
         EqualityKind eqk;
@@ -228,10 +226,16 @@ namespace Legion {
       };
       struct PhysicalInstDimOrderDesc {
       public:
-        UniqueID op_id;
-        IDType inst_id;
+        LgEvent inst_uid;
         unsigned dim;
         DimensionKind k;
+      };
+      struct PhysicalInstanceUsage {
+      public:
+        LgEvent inst_uid;
+        UniqueID op_id;
+        unsigned index;
+        unsigned field;
       };
       struct IndexSpaceSizeDesc {
       public:
@@ -252,54 +256,48 @@ namespace Legion {
       };
       struct CopyInstInfo {
       public:
-        InstID src_inst_id;
-        InstID dst_inst_id;
-        unsigned num_fields;
-        unsigned num_hops;
-        unsigned request_type;
+        MemID src, dst;
+        FieldID src_fid, dst_fid;
+        LgEvent src_inst_uid, dst_inst_uid;
+        LgEvent fevent;
+        bool indirect;
       };
       struct CopyInfo {
       public:
         UniqueID op_id;
-        MemID src, dst;
         unsigned long long size;
         timestamp_t create, ready, start, stop;
+        unsigned num_hops;
+        unsigned request_type;
         LgEvent fevent;
-        unsigned num_requests;
-        std::deque<CopyInstInfo> requests;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif
+      };
+      struct FillInstInfo {
+      public:
+        MemID dst;
+        FieldID fid;
+        LgEvent dst_inst_uid;
+        LgEvent fevent;
       };
       struct FillInfo {
       public:
         UniqueID op_id;
-        MemID dst;
-        timestamp_t create, ready, start, stop;
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
-      };
-      struct InstCreateInfo {
-      public:
-        UniqueID op_id;
-        InstID inst_id;
-        timestamp_t create; // time of HLR creation request
-#ifdef LEGION_PROF_PROVENANCE
-        LgEvent provenance;
-#endif
-      };
-      struct InstUsageInfo {
-      public:
-        UniqueID op_id;
-        InstID inst_id;
-        MemID mem_id;
         unsigned long long size;
+        timestamp_t create, ready, start, stop;
+        LgEvent fevent;
+#ifdef LEGION_PROF_PROVENANCE
+        LgEvent provenance;
+#endif
       };
       struct InstTimelineInfo {
       public:
-        UniqueID op_id;
+        LgEvent inst_uid;
         InstID inst_id;
+        MemID mem_id;
+        unsigned long long size;
+        UniqueID op_id; // creator op for the instance
         timestamp_t create, ready, destroy;
       };
       struct PartitionInfo {
@@ -397,18 +395,21 @@ namespace Legion {
       void register_logical_region(IDType index_space,
 				   unsigned field_space, unsigned tree_id,
 				   const char* name);
-      void register_physical_instance_region(UniqueID op_id, IDType inst_id,
+      void register_physical_instance_region(LgEvent inst_uid,
 					     LogicalRegion handle);
-      void register_physical_instance_field(UniqueID op_id, IDType inst_id, 
+      void register_physical_instance_field(LgEvent inst_uid,
                                             unsigned field_id,
                                             unsigned fspace,
                                             unsigned align,
                                             bool has_align,
                                             EqualityKind eqk);
-      void register_physical_instance_dim_order(UniqueID op_id,
-                                                IDType inst_id,
+      void register_physical_instance_dim_order(LgEvent inst_uid,
                                                 unsigned dim,
                                                 DimensionKind k);
+      void register_physical_instance_use(LgEvent inst_uid,
+                                          UniqueID op_id,
+                                          unsigned index,
+                                          const std::vector<FieldID> &fields);
       void register_index_space_size(UniqueID id,
                                      unsigned long long
                                      dense_size,
@@ -431,13 +432,9 @@ namespace Legion {
       void process_fill(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
             const Realm::ProfilingMeasurements::OperationMemoryUsage &usage);
-      void process_inst_create(UniqueID op_id, PhysicalInstance inst,
-                               timestamp_t create);
-      void process_inst_usage(const ProfilingInfo *info,
-            const Realm::ProfilingResponse &response,
-            const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage);
       void process_inst_timeline(const ProfilingInfo *info,
             const Realm::ProfilingResponse &response,
+            const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage,
             const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(const ProfilingInfo *info,
                              const Realm::ProfilingResponse &response);
@@ -452,6 +449,15 @@ namespace Legion {
                               timestamp_t stop);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
                                timestamp_t start, timestamp_t stop);
+    public:
+      void record_fill_instance(FieldID fid, PhysicalInstance dst_inst,
+                                LgEvent dst_name, LgEvent fevent);
+      void record_copy_instances(FieldID src_fid, FieldID dst_fid,
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
+      void record_indirect_instances(FieldID src_fid, FieldID dst_fid,
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
       void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
@@ -483,12 +489,13 @@ namespace Legion {
       std::deque<PhysicalInstRegionDesc> phy_inst_rdesc;
       std::deque<PhysicalInstLayoutDesc> phy_inst_layout_rdesc;
       std::deque<PhysicalInstDimOrderDesc> phy_inst_dim_order_rdesc;
+      std::deque<PhysicalInstanceUsage> phy_inst_usage;
       std::deque<IndexSpaceSizeDesc> index_space_size_desc;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
+      std::deque<CopyInstInfo> copy_inst_infos;
       std::deque<FillInfo> fill_infos;
-      std::deque<InstCreateInfo> inst_create_infos;
-      std::deque<InstUsageInfo> inst_usage_infos;
+      std::deque<FillInstInfo> fill_inst_infos;
       std::deque<InstTimelineInfo> inst_timeline_infos;
       std::deque<PartitionInfo> partition_infos;
       std::deque<MapperCallInfo> mapper_call_infos;
@@ -566,7 +573,7 @@ namespace Legion {
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             Operation *op);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
-                            Operation *op);
+                            Operation *op, LgEvent unique_event);
       void handle_failed_instance_allocation(void);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
                                  Operation *op, DepPartOpKind part_op);
@@ -587,7 +594,7 @@ namespace Legion {
       void add_fill_request(Realm::ProfilingRequestSet &requests,
                             UniqueID uid);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
-                            UniqueID uid);
+                            UniqueID uid, LgEvent unique_event);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
                                  UniqueID uid, DepPartOpKind part_op);
     public:
@@ -599,8 +606,6 @@ namespace Legion {
       // Dump all the results
       void finalize(void);
     public:
-      void record_instance_creation(PhysicalInstance inst, Memory memory,
-                                    UniqueID op_id, timestamp_t create);
       void record_empty_index_space(IDType handle);
       void record_field_space(UniqueID uid, const char* name);
       void record_field(UniqueID unique_id,
@@ -612,13 +617,12 @@ namespace Legion {
 				 const DomainPoint &point);
       void record_logical_region(IDType index_space, unsigned field_space,
 				 unsigned tree_id, const char* name);
-      void record_physical_instance_region(UniqueID op_id, IDType inst_id, 
+      void record_physical_instance_region(LgEvent unique_event, 
                                            LogicalRegion handle);
-      void record_physical_instance_fields(UniqueID op_id, IDType inst_id, 
-                                  FieldSpace fs, std::vector<FieldID>& fields);
-      void record_physical_instance_layout(UniqueID op_id,
-                                           IDType inst_id, FieldSpace fs,
-                                           const LayoutConstraints *lc);
+      void record_physical_instance_layout(LgEvent unique_event, FieldSpace fs,
+                                           const LayoutConstraintSet &lc);
+      void record_physical_instance_use(LgEvent unique_event, UniqueID op_id,
+                          unsigned index, const std::vector<FieldID> &fields);
       void record_index_part(UniqueID id, const char* name);
       void record_index_partition(UniqueID parent_id, UniqueID id, 
                                   bool disjoint, LegionColor c);
@@ -638,6 +642,15 @@ namespace Legion {
                                      unsigned int num_runtime_call_kinds);
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
+    public:
+      void record_fill_instance(FieldID fid, PhysicalInstance dst_inst,
+                                LgEvent dst_name, LgEvent fevent);
+      void record_copy_instances(FieldID src_fid, FieldID dst_fid,
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
+      void record_indirect_instances(FieldID src_fid, FieldID dst_fid,
+          PhysicalInstance src_inst, PhysicalInstance dst_inst,
+          LgEvent src_name, LgEvent dst_name, LgEvent fevent);
     public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,

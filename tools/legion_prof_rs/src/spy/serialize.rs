@@ -80,6 +80,9 @@ pub struct FutureID(HexU64);
 pub struct EventID(pub HexU64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct ReservationID(pub HexU64);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 pub struct IndirectID(HexU64);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -184,6 +187,8 @@ pub enum Record {
     // Physical event and operation patterns
     #[serde(rename = "Event Event")]
     EventDependence { id1: EventID, id2: EventID },
+    #[serde(rename = "Reservation")]
+    ReservationAcquire { r: ReservationID, pre: EventID, post: EventID }, 
     #[serde(rename = "Ap User Event Trigger")]
     ApUserEventTrigger { id: EventID },
     #[serde(rename = "Ap User Event")]
@@ -553,7 +558,7 @@ fn parse_record(input: &str) -> IResult<&str, Option<Record>> {
 
 fn parse(input: &str) -> IResult<&str, Vec<Record>> {
     let (input, records) = all_consuming(many1(parse_record))(input)?;
-    Ok((input, records.into_iter().filter_map(|x| x).collect()))
+    Ok((input, records.into_iter().flatten().collect()))
 }
 
 pub fn deserialize<P: AsRef<Path>>(path: P) -> io::Result<Vec<Record>> {

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -396,7 +396,7 @@ namespace Legion {
         DeferIndividualManagerArgs(DistributedID d, AddressSpaceID own, 
             Memory m, PhysicalInstance i, size_t f, IndexSpaceExpression *lx,
             const PendingRemoteExpression &pending, FieldSpace h, 
-            RegionTreeID tid, LayoutConstraintID l, ApEvent use,
+            RegionTreeID tid, LayoutConstraintID l, LgEvent use,
             ReductionOpID redop, const void *piece_list, size_t piece_list_size,
             AddressSpaceID src, GarbageCollectionState state);
       public:
@@ -410,7 +410,7 @@ namespace Legion {
         const FieldSpace handle;
         const RegionTreeID tree_id;
         const LayoutConstraintID layout_id;
-        const ApEvent use_event;
+        const LgEvent unique_event;
         const ReductionOpID redop;
         const void *const piece_list;
         const size_t piece_list_size;
@@ -426,8 +426,8 @@ namespace Legion {
                         FieldSpaceNode *node, RegionTreeID tree_id,
                         LayoutDescription *desc, ReductionOpID redop, 
                         bool register_now, size_t footprint,
-                        ApEvent use_event, bool external_instance,
-                        const ReductionOp *op = NULL);
+                        ApEvent use_event, LgEvent unique_event,
+                        bool external_instance, const ReductionOp *op = NULL);
       IndividualManager(const IndividualManager &rhs) = delete;
       virtual ~IndividualManager(void);
     public:
@@ -482,7 +482,7 @@ namespace Legion {
           size_t inst_footprint, IndexSpaceExpression *inst_domain,
           const void *piece_list, size_t piece_list_size,
           FieldSpaceNode *space_node, RegionTreeID tree_id,
-          LayoutConstraints *constraints, ApEvent use_event,
+          LayoutConstraints *constraints, LgEvent unique_event,
           ReductionOpID redop, GarbageCollectionState state);
     public:
       virtual void get_instance_pointers(Memory memory, 

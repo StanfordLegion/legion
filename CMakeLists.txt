@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2023 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -280,7 +280,8 @@ if(Legion_USE_Python)
 
   # define variables for realm_defines.h
   set(REALM_USE_PYTHON ON)
-  set(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}")
+  # Set REALM_PYTHON_LIB to Python library's filename without the path
+  get_filename_component(REALM_PYTHON_LIB "${PYTHON_LIBRARIES}" NAME)
   set(REALM_PYTHON_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
 
   string(REPLACE "." ";" PYTHON_VERSION_SPLIT ${PYTHONLIBS_VERSION_STRING})
@@ -620,6 +621,55 @@ if(Legion_USE_Fortran)
 endif()
 
 #------------------------------------------------------------------------------#
+# NVTX configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_NVTX "Enable profiling using the NVTX" OFF)
+if(Legion_USE_NVTX)
+  # nvtx usually comes with cuda, so we search cuda first
+  #   we also search for NVTX_PATH if no cuda is installed
+  find_package(CUDA)
+  find_path(NVTX_INCLUDE_DIRS
+    NAMES nvToolsExt.h
+    HINTS ${CUDA_INCLUDE_DIRS} $ENV{NVTX_PATH}
+    PATHS ${CUDA_INCLUDE_DIRS} $ENV{NVTX_PATH}
+    PATH_SUFFIXES include/nvtx3 nvtx3
+  )
+  find_library(NVTX_LIBRARIES
+    NAMES libnvToolsExt.so nvToolsExt64_1
+    HINTS ${CUDA_TOOLKIT_ROOT_DIR} $ENV{NVTX_PATH}
+    PATHS ${CUDA_TOOLKIT_ROOT_DIR} $ENV{NVTX_PATH}
+    PATH_SUFFIXES lib lib64 lib/x64
+  )
+  if(NVTX_LIBRARIES AND NVTX_INCLUDE_DIRS)
+    # Get the NVTX version from the headerfile, by reading it and regex matching
+    file(READ "${NVTX_INCLUDE_DIRS}/nvToolsExt.h" nvtx_header_text)
+    string(REGEX MATCH "define NVTX_VERSION ([0-9]+)" NVTX_VERSION_DEFINE ${nvtx_header_text})
+    set(NVTX_VERSION "${CMAKE_MATCH_1}")
+    if(NVTX_VERSION LESS 3)
+      message(FATAL_ERROR
+      " Found NVTX, but its version is older than 3\n"
+      "   NVTX_LIBRARIES: ${NVTX_LIBRARIES}\n"
+      "   NVTX_INCLUDE_DIRS: ${NVTX_INCLUDE_DIRS}\n"
+      "   NVTX_VERSION: ${NVTX_VERSION}")
+    else()
+      # since we include<nvtx3/nvToolsExt.h>, we remove the nvtx3 here
+      get_filename_component(NVTX_INCLUDE_DIRS ${NVTX_INCLUDE_DIRS} DIRECTORY)
+      set(REALM_USE_NVTX ON)
+      message(STATUS
+        " Found NVTX:\n"
+        "   NVTX_LIBRARIES: ${NVTX_LIBRARIES}\n"
+        "   NVTX_INCLUDE_DIRS: ${NVTX_INCLUDE_DIRS}\n"
+        "   NVTX_VERSION: ${NVTX_VERSION}")
+    endif()
+  else()
+    message(FATAL_ERROR
+      " Could not find NVTX - set NVTX_PATH if needed -- got:\n"
+      "   NVTX_LIBRARIES: ${NVTX_LIBRARIES}\n"
+      "   NVTX_INCLUDE_DIRS: ${NVTX_INCLUDE_DIRS}")
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")
@@ -791,6 +841,7 @@ option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
 option(Legion_BUILD_JUPYTER "Build Legion jupyter notebook support" OFF)
 option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
+option(Legion_BUILD_RUST_PROFILER "Build Rust version of Legion profiler" OFF)
 if(Legion_ENABLE_TESTING)
   enable_testing()
   # if Legion_TEST_LAUNCHER is set, split the string into a list
@@ -889,6 +940,40 @@ if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
   if(NOT HIP_THRUST_ROOT_DIR)
     message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
   endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# Build and install legion_prof_rs
+#------------------------------------------------------------------------------#
+
+if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
+  find_package(Corrosion 0.3.2 QUIET)
+
+  if(NOT Corrosion_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+      Corrosion
+      GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+      GIT_TAG 020d11f092314a58942891f14b4cd20c0edff80a # v0.3.2
+    )
+    # Set any global configuration variables such as `Rust_TOOLCHAIN` before this line!
+    FetchContent_MakeAvailable(Corrosion)
+  endif()
+
+  corrosion_import_crate(
+    MANIFEST_PATH tools/legion_prof_rs/Cargo.toml
+    PROFILE $<IF:$<BOOL:$<$<CONFIG:Debug>:1>>,dev,release>
+  )
+
+  install(
+    PROGRAMS
+      ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/legion_prof
+    TYPE
+      BIN
+    PERMISSIONS
+      OWNER_EXECUTE OWNER_WRITE OWNER_READ
+      GROUP_EXECUTE GROUP_WRITE GROUP_READ
+      WORLD_EXECUTE WORLD_READ)
 endif()
 
 #------------------------------------------------------------------------------#

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2023 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1131,6 +1131,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       local arg_type = std.as_read(arg.expr_type)
       -- XXX: This will break again if arg isn't unique for each argument,
       --      which can happen when de-duplicating AST nodes.
+      -- See: https://github.com/StanfordLegion/legion/issues/1345
       assert(mapping[arg] == nil)
       mapping[arg] = param_types[i]
       -- Tests for conformance to index launch requirements.

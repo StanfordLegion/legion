@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -103,7 +103,7 @@ namespace Legion {
         virtual int get_depth(void) const;
         virtual bool has_parent_task(void) const;
         virtual const Legion::Task* get_parent_task(void) const;
-        virtual const std::string& get_provenance_string(void) const;
+        virtual const std::string& get_provenance_string(bool human=true) const;
         virtual const char* get_task_name(void) const;
         virtual Domain get_slice_domain(void) const;
         virtual bool has_trace(void) const;
@@ -145,7 +145,7 @@ namespace Legion {
         virtual size_t get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual const Legion::Task* get_parent_task(void) const;
-        virtual const std::string& get_provenance_string(void) const;
+        virtual const std::string& get_provenance_string(bool human=true) const;
       public:
         inline UniqueID get_unique_inline_id(void) const { return unique_id; }
       public:
@@ -169,7 +169,7 @@ namespace Legion {
         virtual size_t get_context_index(void) const;
         virtual int get_depth(void) const;
         virtual const Legion::Task* get_parent_task(void) const;
-        virtual const std::string& get_provenance_string(void) const;
+        virtual const std::string& get_provenance_string(bool human=true) const;
       public:
         inline UniqueID get_unique_copy_id(void) const { return unique_id; }
       public:

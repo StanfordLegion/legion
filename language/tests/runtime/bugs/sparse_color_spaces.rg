@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2023 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -42,7 +42,8 @@ do
                                                           c.DISJOINT_KIND,
                                                           c.AUTO_GENERATE_ID,
                                                           0,
-                                                          0)
+                                                          0,
+                                                          c.legion_untyped_buffer_t {nil, 0})
 
   var raw_part = c.legion_logical_partition_create(__runtime(), __raw(mat), ip)
 

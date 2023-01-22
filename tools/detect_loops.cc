@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -324,6 +324,50 @@ int read_events(FILE *f)
 	  }
 	}
 
+        {
+          unsigned long long ev2_id, lock_id;
+	  unsigned wgen, pos, ts;
+	  int delta;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred lock: lock=%llx after=%llx",
+			   &wgen, &pos, &lock_id, &ev2_id);
+	  if(ret == 3) {
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+	    continue;
+	  }
+        }
+
+        {
+          unsigned long long lock_id;
+	  unsigned wgen, pos, ts;
+	  int delta;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ndeferred unlock: lock=%llx",
+			   &wgen, &pos, &lock_id);
+	  if(ret == 2) {
+	    continue;
+	  }
+        }
+
+        {
+          unsigned long long ev2_id, cq;
+	  unsigned wgen, pos, ts;
+	  int delta;
+	  int ret = sscanf(s, "  [%d] L:%*p - %ncompletion queue insertion: cq=%llx event=%llx",
+			   &wgen, &pos, &cq, &ev2_id);
+	  if(ret == 3) {
+#if 0
+            // Don't do anything with these for the moment
+	    Event *e1 = Event::get_event(ev_id, wgen);
+	    Event *e2 = Event::get_event(ev2_id);
+	    Event::link_events(e1, e2);
+	    e2->set_desc(s + pos);
+#endif
+	    continue;
+	  }
+        }
+
 	{
 	  unsigned long long ev2_id;
 	  unsigned wgen;
@@ -383,16 +427,18 @@ int read_events(FILE *f)
 	  }
 	}
 
-	{
+        {
 	  unsigned wgen;
-	  int ret = sscanf(s, "  [%d] L:%*p - external waiter",
-			   &wgen);
-	  if(ret == 1) {
+	  void *dummy;
+	  int ret = sscanf(s, "  [%d] L:%*p - operation table entry (table=%p)",
+			   &wgen, &dummy);
+	  if(ret == 2) {
 	    // these are probably fine to ignore
 	    continue;
 	  }
 	}
 
+#if 0
 	{
 	  unsigned wgen, dummy;
 	  int ret = sscanf(s, "  [%d] R: %d",
@@ -402,6 +448,7 @@ int read_events(FILE *f)
 	    continue;
 	  }
 	}
+#endif
 
 	// if we get here, we failed to parse the dependent event
 	printf("unparseable: (%s)\n", s);

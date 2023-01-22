@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1503,6 +1503,13 @@ namespace Legion {
         if (one != two)
           log_spy.print("Event Event " IDFMT " " IDFMT, 
 			one.id, two.id);
+      }
+
+      static inline void log_reservation_acquire(Reservation r, 
+                                                 LgEvent pre, LgEvent post)
+      {
+        log_spy.print("Reservation " IDFMT " " IDFMT " " IDFMT,
+                      r.id, pre.id, post.id);
       }
 
       static inline void log_ap_user_event(ApUserEvent event)

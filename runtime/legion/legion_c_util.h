@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2023 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -713,7 +713,7 @@ namespace Legion {
         assert(false);
         return NULL;
       }
-      virtual const std::string& get_provenance_string(void) const {
+      virtual const std::string& get_provenance_string(bool human=true) const {
         assert(false);
         return (*new std::string());
       }

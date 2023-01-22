@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2023 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -169,6 +169,13 @@ if(REALM_USE_MPI)
     realm/mpi/mpi_module.cc
     realm/mpi/am_mpi.h
     realm/mpi/am_mpi.cc
+  )
+endif()
+
+if(REALM_USE_NVTX)
+  list(APPEND REALM_SRC
+    realm/nvtx.h
+    realm/nvtx.cc
   )
 endif()
 
@@ -610,6 +617,11 @@ if(Legion_USE_OpenMP)
   endif()
 endif()
 
+if(REALM_USE_NVTX)
+  target_include_directories(RealmRuntime PRIVATE ${NVTX_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ${NVTX_LIBRARIES})
+endif()
+
 set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME "realm${INSTALL_SUFFIX}")
 
 target_include_directories(RealmRuntime
@@ -747,7 +759,7 @@ if(LEGION_CUDA_SRC)
   if("${Legion_CUDA_ARCH}" STREQUAL "")
     if (${CUDA_VERSION_STRING} VERSION_LESS "11.5")
       # Prior to 11.5, we don't have -arch=all and have to list the architectures out manually
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "10.0")
+      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "9.0")
         list(APPEND Legion_CUDA_ARCH 20)
       endif ()
       if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "11.0")
@@ -774,16 +786,18 @@ if(LEGION_CUDA_SRC)
     endif ()
   else ()
       # If the user specified a specific gencode to use, use that
-      list(SORT Legion_CUDA_ARCH)
-      string(REPLACE "," ";" CUDA_GENCODE "${Legion_CUDA_ARCH}")
-      # Add all the specified architectures we support
-      string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
-      list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)
-      # For the last architecture we support, add PTX
-      list(APPEND CUDA_GENCODE "-gencode arch=compute_${COMPUTE_ARCH},code=compute_${COMPUTE_ARCH}")
+      string(REPLACE "," ";" Legion_CUDA_ARCH "${Legion_CUDA_ARCH}")
   endif ()
 
-  message("${CUDA_GENCODE}")
+  if (Legion_CUDA_ARCH)
+    list(SORT Legion_CUDA_ARCH)
+    set(CUDA_GENCODE "${Legion_CUDA_ARCH}")
+    # Add all the specified architectures we support
+    string(REGEX REPLACE "([0-9]+)" "-gencode arch=compute_\\1,code=sm_\\1" CUDA_GENCODE "${CUDA_GENCODE}")
+    list(GET Legion_CUDA_ARCH -1 COMPUTE_ARCH)
+    # For the last architecture we support, add PTX
+    list(APPEND CUDA_GENCODE "-gencode arch=compute_${COMPUTE_ARCH},code=compute_${COMPUTE_ARCH}")
+  endif ()
 
   # starting with NVCC 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND CUDA_VERSION VERSION_GREATER "10.1")

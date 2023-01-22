@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,11 @@
 
 #include "realm/realm_config.h"
 
+#include <memory>
 #include <cuda.h>
+#if defined(REALM_USE_CUDART_HIJACK)
+#include <cuda_runtime_api.h>   // For cudaDeviceProp
+#endif
 
 // For CUDA runtime's dim3 definition
 #include <vector_types.h>
@@ -74,97 +78,6 @@
   if(ret != CUDA_SUCCESS) REPORT_CU_ERROR(#cmd, ret); \
 } while(0)
 
-#ifdef REALM_USE_CUDART_HIJACK
-#define CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
-  __op__(major, COMPUTE_CAPABILITY_MAJOR)                \
-  __op__(minor, COMPUTE_CAPABILITY_MINOR)                \
-  __op__(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK) \
-  __op__(regsPerBlock,      MAX_REGISTERS_PER_BLOCK)     \
-  __op__(warpSize,          WARP_SIZE)                   \
-  __op__(memPitch, MAX_PITCH)                            \
-  __op__(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK)      \
-  __op__(maxThreadsDimX, MAX_BLOCK_DIM_X)                \
-  __op__(maxThreadsDimY, MAX_BLOCK_DIM_Y)                \
-  __op__(maxThreadsDimZ, MAX_BLOCK_DIM_Z)                \
-  __op__(maxGridSizeX, MAX_GRID_DIM_X)                   \
-  __op__(maxGridSizeY, MAX_GRID_DIM_Y)                   \
-  __op__(maxGridSizeZ, MAX_GRID_DIM_Z)                   \
-  __op__(clockRate, CLOCK_RATE)                          \
-  __op__(totalConstMem, TOTAL_CONSTANT_MEMORY)           \
-  __op__(deviceOverlap, GPU_OVERLAP)                     \
-  __op__(multiProcessorCount, MULTIPROCESSOR_COUNT)      \
-  __op__(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT)  \
-  __op__(integrated, INTEGRATED)                         \
-  __op__(canMapHostMemory, CAN_MAP_HOST_MEMORY)          \
-  __op__(computeMode, COMPUTE_MODE)                      \
-  __op__(concurrentKernels, CONCURRENT_KERNELS)          \
-  __op__(ECCEnabled, ECC_ENABLED)                        \
-  __op__(pciBusID, PCI_BUS_ID)                           \
-  __op__(pciDeviceID, PCI_DEVICE_ID)                     \
-  __op__(pciDomainID, PCI_DOMAIN_ID)                     \
-  __op__(tccDriver, TCC_DRIVER)                          \
-  __op__(asyncEngineCount, ASYNC_ENGINE_COUNT)           \
-  __op__(unifiedAddressing, UNIFIED_ADDRESSING)          \
-  __op__(memoryClockRate, MEMORY_CLOCK_RATE)             \
-  __op__(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH)        \
-  __op__(l2CacheSize, L2_CACHE_SIZE)                     \
-  __op__(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR) \
-  __op__(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED)      \
-  __op__(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED)           \
-  __op__(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED)             \
-  __op__(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR)  \
-  __op__(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR)           \
-  __op__(managedMemory, MANAGED_MEMORY)                                     \
-  __op__(isMultiGpuBoard, MULTI_GPU_BOARD)                                  \
-  __op__(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID)
-
-#if CUDA_VERSION >= 8000
-#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)                                        \
-  __op__(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO) \
-  __op__(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS)                            \
-  __op__(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS)
-#else
-#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)
-#endif
-
-#if CUDA_VERSION >= 9000
-#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)                                            \
-  __op__(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED)                    \
-  __op__(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM)  \
-  __op__(cooperativeLaunch, COOPERATIVE_LAUNCH)                                       \
-  __op__(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH)               \
-  __op__(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)
-#else
-#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)
-#endif
-
-#if CUDA_VERSION >= 9200
-#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)                                                      \
-  __op__(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES)  \
-  __op__(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST)
-#else
-#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)
-#endif
-#if CUDA_VERSION >= 11000
-#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)                         \
-  __op__(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR) \
-  __op__(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE)
-#else
-#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
-#endif
-
-#define CUDA_DEVICE_ATTRIBUTES(__op__)   \
-  CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
-  CUDA_DEVICE_ATTRIBUTES_8_0 (__op__)    \
-  CUDA_DEVICE_ATTRIBUTES_9_0 (__op__)    \
-  CUDA_DEVICE_ATTRIBUTES_9_2 (__op__)    \
-  CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
-#else
-#define CUDA_DEVICE_ATTRIBUTES(__op__)      \
-  __op__(major, COMPUTE_CAPABILITY_MAJOR)   \
-  __op__(minor, COMPUTE_CAPABILITY_MINOR)
-#endif
-
 namespace Realm {
 
   namespace Cuda {
@@ -173,16 +86,16 @@ namespace Realm {
     {
       int index;  // index used by CUDA runtime
       CUdevice device;
-      #define DEFINE_CUDA_ATTRIBUTES(name, attr) int name;
-      CUDA_DEVICE_ATTRIBUTES(DEFINE_CUDA_ATTRIBUTES)
-
-#ifndef REALM_USE_CUDART_HIAJCK
-      static const size_t MAX_NAME_LEN = 64;
+      int major;
+      int minor;
+      static const size_t MAX_NAME_LEN = 256;
       char name[MAX_NAME_LEN];
-
       size_t totalGlobalMem;
-#endif
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
+
+      #ifdef REALM_USE_CUDART_HIJACK
+      cudaDeviceProp prop;
+      #endif
     };
 
     enum GPUMemcpyKind {

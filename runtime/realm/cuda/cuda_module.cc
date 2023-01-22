@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3925,12 +3925,6 @@ namespace Realm {
 	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name), info->device) );
 	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceTotalMem)
                       (&info->totalGlobalMem, info->device) );
-      #define CUDA_GET_DEVICE_PROP(name, attr)                                         \
-            do {								                                       \
-              CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)                        \
-                        (&info->name, CU_DEVICE_ATTRIBUTE_##attr, info->device) );     \
-            } while(0);
-      CUDA_DEVICE_ATTRIBUTES(CUDA_GET_DEVICE_PROP)
 	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
 			   << info->major << '.' << info->minor
 			   << ") " << (info->totalGlobalMem >> 20) << " MB";

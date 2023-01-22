@@ -17,8 +17,8 @@ use nom::{
 };
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, MapperCallKindID, MemID, OpID, ProcID,
-    RuntimeCallKindID, TaskID, Timestamp, TreeID, VariantID,
+    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID, OpID,
+    ProcID, RuntimeCallKindID, TaskID, Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -98,9 +98,10 @@ pub enum Record {
     IndexPartitionDesc { parent_id: ISpaceID, unique_id: IPartID, disjoint: bool, point0: u64 },
     IndexSpaceSizeDesc { ispace_id: ISpaceID, dense_size: u64, sparse_size: u64, is_sparse: bool },
     LogicalRegionDesc { ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID, name: String },
-    PhysicalInstRegionDesc { op_id: OpID, inst_id: InstID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
-    PhysicalInstLayoutDesc { op_id: OpID, inst_id: InstID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
-    PhysicalInstDimOrderDesc { op_id: OpID, inst_id: InstID, dim: u32, dim_kind: u32 },
+    PhysicalInstRegionDesc { inst_uid: InstUID, ispace_id: ISpaceID, fspace_id: u32, tree_id: TreeID },
+    PhysicalInstLayoutDesc { inst_uid: InstUID, field_id: FieldID, fspace_id: u32, has_align: bool, eqk: u32, align_desc: u32 },
+    PhysicalInstDimOrderDesc { inst_uid: InstUID, dim: u32, dim_kind: u32 },
+    PhysicalInstanceUsage { inst_uid: InstUID, op_id: OpID, index_id: u32, field_id: FieldID },
     TaskKind { task_id: TaskID, name: String, overwrite: bool },
     TaskVariant { task_id: TaskID, variant_id: VariantID, name: String },
     OperationInstance { op_id: OpID, parent_id: OpID, kind: u32, provenance: String },
@@ -111,12 +112,11 @@ pub enum Record {
     TaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     GPUTaskInfo { op_id: OpID, task_id: TaskID, variant_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, gpu_start: Timestamp, gpu_stop: Timestamp },
     MetaInfo { op_id: OpID, lg_id: VariantID, proc_id: ProcID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
-    CopyInfo { op_id: OpID, src: MemID, dst: MemID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID, num_requests: u32 },
-    CopyInstInfo { op_id: OpID, src_inst: InstID, dst_inst: InstID, fevent: EventID, num_fields: u32, request_type: u32, num_hops: u32 },
-    FillInfo { op_id: OpID, dst: MemID, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
-    InstCreateInfo { op_id: OpID, inst_id: InstID, create: Timestamp },
-    InstUsageInfo { op_id: OpID, inst_id: InstID, mem_id: MemID, size: u64 },
-    InstTimelineInfo { op_id: OpID, inst_id: InstID, create: Timestamp, ready: Timestamp, destroy: Timestamp },
+    CopyInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, num_hops: u32, request_type: u32, fevent: EventID },
+    CopyInstInfo { src: MemID, dst: MemID, src_fid: FieldID, dst_fid: FieldID, src_inst: InstUID, dst_inst: InstUID, fevent: EventID, indirect: bool },
+    FillInfo { op_id: OpID, size: u64, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp, fevent: EventID },
+    FillInstInfo { dst: MemID, fid: FieldID, dst_inst: InstUID, fevent: EventID },
+    InstTimelineInfo { inst_uid: InstUID, inst_id: InstID, mem_id: MemID, size: u64, op_id: OpID, create: Timestamp, ready: Timestamp, destroy: Timestamp },
     PartitionInfo { op_id: OpID, part_op: DepPartOpKind, create: Timestamp, ready: Timestamp, start: Timestamp, stop: Timestamp },
     MapperCallInfo { kind: MapperCallKindID, op_id: OpID, start: Timestamp, stop: Timestamp, proc_id: ProcID },
     RuntimeCallInfo { kind: RuntimeCallKindID, start: Timestamp, stop: Timestamp, proc_id: ProcID },
@@ -226,14 +226,7 @@ fn parse_field_format(input: &[u8]) -> IResult<&[u8], FieldFormat> {
     let (input, value) = parse_value_format(input)?;
     let (input, _) = tag(":")(input)?;
     let (input, size) = parse_text_i32(input)?;
-    Ok((
-        input,
-        FieldFormat {
-            name: name,
-            value: value,
-            size: size,
-        },
-    ))
+    Ok((input, FieldFormat { name, value, size }))
 }
 
 fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
@@ -244,14 +237,7 @@ fn parse_record_format(input: &[u8]) -> IResult<&[u8], RecordFormat> {
     let (input, fields) = separated_list1(tag(", "), parse_field_format)(input)?;
     let (input, _) = tag("}")(input)?;
     let (input, _) = newline(input)?;
-    Ok((
-        input,
-        RecordFormat {
-            id: id,
-            name: name,
-            fields: fields,
-        },
-    ))
+    Ok((input, RecordFormat { id, name, fields }))
 }
 
 ///
@@ -287,50 +273,52 @@ fn parse_string(input: &[u8]) -> IResult<&[u8], String> {
 ///
 
 fn parse_event_id(input: &[u8]) -> IResult<&[u8], EventID> {
-    map(le_u64, |x| EventID(x))(input)
+    map(le_u64, EventID)(input)
 }
-
+fn parse_inst_uid(input: &[u8]) -> IResult<&[u8], InstUID> {
+    map(le_u64, InstUID)(input)
+}
 fn parse_inst_id(input: &[u8]) -> IResult<&[u8], InstID> {
-    map(le_u64, |x| InstID(x))(input)
+    map(le_u64, InstID)(input)
 }
 fn parse_ipart_id(input: &[u8]) -> IResult<&[u8], IPartID> {
-    map(le_u64, |x| IPartID(x))(input)
+    map(le_u64, IPartID)(input)
 }
 fn parse_ispace_id(input: &[u8]) -> IResult<&[u8], ISpaceID> {
-    map(le_u64, |x| ISpaceID(x))(input)
+    map(le_u64, ISpaceID)(input)
 }
 fn parse_fspace_id(input: &[u8]) -> IResult<&[u8], FSpaceID> {
-    map(le_u64, |x| FSpaceID(x))(input)
+    map(le_u64, FSpaceID)(input)
 }
 fn parse_field_id(input: &[u8]) -> IResult<&[u8], FieldID> {
-    map(le_u32, |x| FieldID(x))(input)
+    map(le_u32, FieldID)(input)
 }
 fn parse_tree_id(input: &[u8]) -> IResult<&[u8], TreeID> {
-    map(le_u32, |x| TreeID(x))(input)
+    map(le_u32, TreeID)(input)
 }
 fn parse_mapper_call_kind_id(input: &[u8]) -> IResult<&[u8], MapperCallKindID> {
-    map(le_u32, |x| MapperCallKindID(x))(input)
+    map(le_u32, MapperCallKindID)(input)
 }
 fn parse_mem_id(input: &[u8]) -> IResult<&[u8], MemID> {
-    map(le_u64, |x| MemID(x))(input)
+    map(le_u64, MemID)(input)
 }
 fn parse_op_id(input: &[u8]) -> IResult<&[u8], OpID> {
-    map(le_u64, |x| OpID(x))(input)
+    map(le_u64, OpID)(input)
 }
 fn parse_proc_id(input: &[u8]) -> IResult<&[u8], ProcID> {
-    map(le_u64, |x| ProcID(x))(input)
+    map(le_u64, ProcID)(input)
 }
 fn parse_runtime_call_kind_id(input: &[u8]) -> IResult<&[u8], RuntimeCallKindID> {
-    map(le_u32, |x| RuntimeCallKindID(x))(input)
+    map(le_u32, RuntimeCallKindID)(input)
 }
 fn parse_task_id(input: &[u8]) -> IResult<&[u8], TaskID> {
-    map(le_u32, |x| TaskID(x))(input)
+    map(le_u32, TaskID)(input)
 }
 fn parse_timestamp(input: &[u8]) -> IResult<&[u8], Timestamp> {
-    map(le_u64, |x| Timestamp(x))(input)
+    map(le_u64, Timestamp)(input)
 }
 fn parse_variant_id(input: &[u8]) -> IResult<&[u8], VariantID> {
-    map(le_u32, |x| VariantID(x))(input)
+    map(le_u32, VariantID)(input)
 }
 
 ///
@@ -521,16 +509,14 @@ fn parse_logical_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Reco
     ))
 }
 fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, inst_id) = parse_inst_id(input)?;
+    let (input, inst_uid) = parse_inst_uid(input)?;
     let (input, ispace_id) = parse_ispace_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, tree_id) = parse_tree_id(input)?;
     Ok((
         input,
         Record::PhysicalInstRegionDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             ispace_id,
             fspace_id,
             tree_id,
@@ -538,8 +524,7 @@ fn parse_physical_inst_region_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     ))
 }
 fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, inst_id) = parse_inst_id(input)?;
+    let (input, inst_uid) = parse_inst_uid(input)?;
     let (input, field_id) = parse_field_id(input)?;
     let (input, fspace_id) = le_u32(input)?;
     let (input, has_align) = parse_bool(input)?;
@@ -548,8 +533,7 @@ fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     Ok((
         input,
         Record::PhysicalInstLayoutDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             field_id,
             fspace_id,
             has_align,
@@ -559,17 +543,30 @@ fn parse_physical_inst_layout_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8]
     ))
 }
 fn parse_physical_inst_layout_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, inst_id) = parse_inst_id(input)?;
+    let (input, inst_uid) = parse_inst_uid(input)?;
     let (input, dim) = le_u32(input)?;
     let (input, dim_kind) = le_u32(input)?;
     Ok((
         input,
         Record::PhysicalInstDimOrderDesc {
-            op_id,
-            inst_id,
+            inst_uid,
             dim,
             dim_kind,
+        },
+    ))
+}
+fn parse_physical_inst_usage(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, inst_uid) = parse_inst_uid(input)?;
+    let (input, op_id) = parse_op_id(input)?;
+    let (input, index_id) = le_u32(input)?;
+    let (input, field_id) = parse_field_id(input)?;
+    Ok((
+        input,
+        Record::PhysicalInstanceUsage {
+            inst_uid,
+            op_id,
+            index_id,
+            field_id,
         },
     ))
 }
@@ -733,110 +730,105 @@ fn parse_meta_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
 }
 fn parse_copy_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
-    let (input, src) = parse_mem_id(input)?;
-    let (input, dst) = parse_mem_id(input)?;
     let (input, size) = le_u64(input)?;
     let (input, create) = parse_timestamp(input)?;
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
+    let (input, num_hops) = le_u32(input)?;
+    let (input, request_type) = le_u32(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, num_requests) = le_u32(input)?;
     Ok((
         input,
         Record::CopyInfo {
             op_id,
-            src,
-            dst,
             size,
             create,
             ready,
             start,
             stop,
+            num_hops,
+            request_type,
             fevent,
-            num_requests,
         },
     ))
 }
 fn parse_copy_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, src_inst) = parse_inst_id(input)?;
-    let (input, dst_inst) = parse_inst_id(input)?;
+    let (input, src) = parse_mem_id(input)?;
+    let (input, dst) = parse_mem_id(input)?;
+    let (input, src_fid) = parse_field_id(input)?;
+    let (input, dst_fid) = parse_field_id(input)?;
+    let (input, src_inst) = parse_inst_uid(input)?;
+    let (input, dst_inst) = parse_inst_uid(input)?;
     let (input, fevent) = parse_event_id(input)?;
-    let (input, num_fields) = le_u32(input)?;
-    let (input, request_type) = le_u32(input)?;
-    let (input, num_hops) = le_u32(input)?;
+    let (input, indirect) = parse_bool(input)?;
     Ok((
         input,
         Record::CopyInstInfo {
-            op_id,
+            src,
+            dst,
+            src_fid,
+            dst_fid,
             src_inst,
             dst_inst,
             fevent,
-            num_fields,
-            request_type,
-            num_hops,
+            indirect,
         },
     ))
 }
 fn parse_fill_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, op_id) = parse_op_id(input)?;
-    let (input, dst) = parse_mem_id(input)?;
+    let (input, size) = le_u64(input)?;
     let (input, create) = parse_timestamp(input)?;
     let (input, ready) = parse_timestamp(input)?;
     let (input, start) = parse_timestamp(input)?;
     let (input, stop) = parse_timestamp(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
         Record::FillInfo {
             op_id,
-            dst,
+            size,
             create,
             ready,
             start,
             stop,
+            fevent,
         },
     ))
 }
-fn parse_inst_create(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, inst_id) = parse_inst_id(input)?;
-    let (input, create) = parse_timestamp(input)?;
+fn parse_fill_inst_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, dst) = parse_mem_id(input)?;
+    let (input, fid) = parse_field_id(input)?;
+    let (input, dst_inst) = parse_inst_uid(input)?;
+    let (input, fevent) = parse_event_id(input)?;
     Ok((
         input,
-        Record::InstCreateInfo {
-            op_id,
-            inst_id,
-            create,
-        },
-    ))
-}
-fn parse_inst_usage(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
-    let (input, inst_id) = parse_inst_id(input)?;
-    let (input, mem_id) = parse_mem_id(input)?;
-    let (input, size) = le_u64(input)?;
-    Ok((
-        input,
-        Record::InstUsageInfo {
-            op_id,
-            inst_id,
-            mem_id,
-            size,
+        Record::FillInstInfo {
+            dst,
+            fid,
+            dst_inst,
+            fevent,
         },
     ))
 }
 fn parse_inst_timeline(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, op_id) = parse_op_id(input)?;
+    let (input, inst_uid) = parse_inst_uid(input)?;
     let (input, inst_id) = parse_inst_id(input)?;
+    let (input, mem_id) = parse_mem_id(input)?;
+    let (input, size) = le_u64(input)?;
+    let (input, op_id) = parse_op_id(input)?;
     let (input, create) = parse_timestamp(input)?;
     let (input, ready) = parse_timestamp(input)?;
     let (input, destroy) = parse_timestamp(input)?;
     Ok((
         input,
         Record::InstTimelineInfo {
-            op_id,
+            inst_uid,
             inst_id,
+            mem_id,
+            size,
+            op_id,
             create,
             ready,
             destroy,
@@ -962,6 +954,7 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
         ids["PhysicalInstDimOrderDesc"],
         parse_physical_inst_layout_dim_desc,
     );
+    parsers.insert(ids["PhysicalInstanceUsage"], parse_physical_inst_usage);
     parsers.insert(ids["TaskKind"], parse_task_kind);
     parsers.insert(ids["TaskVariant"], parse_task_variant);
     parsers.insert(ids["OperationInstance"], parse_operation);
@@ -975,8 +968,7 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
     parsers.insert(ids["CopyInfo"], parse_copy_info);
     parsers.insert(ids["CopyInstInfo"], parse_copy_inst_info);
     parsers.insert(ids["FillInfo"], parse_fill_info);
-    parsers.insert(ids["InstCreateInfo"], parse_inst_create);
-    parsers.insert(ids["InstUsageInfo"], parse_inst_usage);
+    parsers.insert(ids["FillInstInfo"], parse_fill_inst_info);
     parsers.insert(ids["InstTimelineInfo"], parse_inst_timeline);
     parsers.insert(ids["PartitionInfo"], parse_partition_info);
     parsers.insert(ids["MapperCallInfo"], parse_mapper_call_info);
@@ -986,20 +978,12 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
     let mut input = input;
     let mut max_dim = -1;
     let mut records = Vec::new();
-    loop {
-        match parse_record(input, &parsers, max_dim) {
-            Ok((input_, record)) => {
-                match &record {
-                    Record::MaxDimDesc { max_dim: d } => {
-                        max_dim = *d;
-                    }
-                    _ => {}
-                }
-                records.push(record);
-                input = input_;
-            }
-            _ => break,
+    while let Ok((input_, record)) = parse_record(input, &parsers, max_dim) {
+        if let Record::MaxDimDesc { max_dim: d } = &record {
+            max_dim = *d;
         }
+        records.push(record);
+        input = input_;
     }
     Ok((input, records))
 }

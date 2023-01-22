@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -101,7 +101,8 @@ LoggingWrapper::LoggingWrapper(Mapper* mapper, Logger* _logger)
   mem_query.local_address_space();
   for (Machine::MemoryQuery::iterator it = mem_query.begin();
        it != mem_query.end(); ++it) {
-    buf.line() << "  " << *it << " (" << to_string(it->kind()) << ")";
+    buf.line() << "  " << *it << " (" << to_string(it->kind()) << "): "
+               << it->capacity() << " bytes";
   }
   buf.line() << "Processors on rank " << rank << ":";
   Machine::ProcessorQuery proc_query(machine);

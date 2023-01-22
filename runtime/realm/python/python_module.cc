@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1145,7 +1145,7 @@ namespace Realm {
 						       cfg_init_scripts);
           runtime->add_processor(pi);
 
-          // create affinities between this processor and system/reg memories
+          // create affinities between this processor and system, numa, reg, and zc memories
           // if the memory is one we created, use the kernel-reported distance
           // to adjust the answer
           std::vector<MemoryImpl *>& local_mems = runtime->nodes[Network::my_node_id].memories;
@@ -1153,7 +1153,7 @@ namespace Realm {
               it2 != local_mems.end();
               ++it2) {
             Memory::Kind kind = (*it2)->get_kind();
-            if((kind != Memory::SYSTEM_MEM) && 
+            if((kind != Memory::SYSTEM_MEM) && (kind != Memory::SOCKET_MEM) &&
                (kind != Memory::REGDMA_MEM) && (kind != Memory::Z_COPY_MEM))
               continue;
 

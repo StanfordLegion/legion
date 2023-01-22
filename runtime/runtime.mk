@@ -1,5 +1,5 @@
-# Copyright 2022 Stanford University, NVIDIA Corporation
-# Copyright 2022 Los Alamos National Laboratory
+# Copyright 2023 Stanford University, NVIDIA Corporation
+# Copyright 2023 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -448,6 +448,27 @@ endif
 
 # Flags for Realm
 
+# General NVTX variables
+ifeq ($(strip $(USE_NVTX)),1)
+  ifndef NVTX_PATH
+    # try to auto-detect NVTX location, which is usually under cuda dir
+    NVTX_PATH := $(patsubst %/bin/nvcc,%,$(shell which nvcc | head -1))
+    ifeq ($(strip $(NVTX_PATH)),)
+      $(error Can not find NVTX, please specify it via NVTX_PATH)
+    else
+      NVTX_HEADER := $(shell find $(NVTX_PATH) -name 'nvToolsExt.h')
+      ifeq ($(strip $(NVTX_HEADER)),)
+        $(error NVTX is not under cuda dir, please specify it via NVTX_PATH)
+      else
+        $(info auto-detected NVTX at: $(NVTX_PATH) $(NVTX_HEADER))
+      endif
+    endif
+  endif
+  REALM_CC_FLAGS	+= -DREALM_USE_NVTX
+  INC_FLAGS		+= -I$(NVTX_PATH)/include
+  LEGION_LD_FLAGS	+= -L$(NVTX_PATH)/lib64 -lnvToolsExt
+endif
+
 # General HIP variables
 ifeq ($(strip $(USE_HIP)),1)
   HIP_TARGET ?= ROCM
@@ -644,7 +665,10 @@ ifeq ($(findstring nvc++,$(shell $(NVCC) --version)),nvc++)
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gpu=cc$(X))
 else
 COMMA=,
+# Add all the real architectures for all supported GPUs
 NVCC_FLAGS += $(foreach X,$(subst $(COMMA), ,$(GPU_ARCH)),-gencode arch=compute_$(X)$(COMMA)code=sm_$(X))
+# Add all PTX for the final architecture
+NVCC_FLAGS += -gencode arch=compute_$(lastword $(GPU_ARCH))$(COMMA)code=compute_$(lastword $(GPU_ARCH))
 endif
 
 NVCC_FLAGS += -Xcudafe --diag_suppress=boolean_controlling_expr_is_constant
@@ -976,6 +1000,9 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
+ifeq ($(strip $(USE_NVTX)),1)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/nvtx.cc
+endif
 REALM_SRC 	+= $(LG_RT_DIR)/realm/activemsg.cc \
                    $(LG_RT_DIR)/realm/nodeset.cc \
                    $(LG_RT_DIR)/realm/network.cc
@@ -1106,7 +1133,8 @@ INSTALL_HEADERS += legion.h \
 		   realm/timers.h \
 		   realm/timers.inl \
 		   realm/utils.h \
-		   realm/utils.inl
+		   realm/utils.inl \
+                   realm/nvtx.h
 
 ifeq ($(strip $(USE_CUDA)),1)
 INSTALL_HEADERS += realm/cuda/cuda_redop.h \

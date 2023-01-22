@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2023 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -370,6 +370,10 @@ end
 
 function context:add_codegen_context(name, context)
   self.codegen_contexts[name] = context
+end
+
+function context:remove_codegen_context(name)
+  self.codegen_contexts[name] = nil
 end
 
 function context:get_codegen_context(name)
@@ -5019,7 +5023,8 @@ function codegen.expr_partition_by_field(cx, node)
     var [ip] = c.legion_index_partition_create_by_field(
       [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
       field_id, [colors.value].impl, c.AUTO_GENERATE_ID, 0, 0,
-      [partition_kind(std.disjoint, node.completeness)])
+      [partition_kind(std.disjoint, node.completeness)],
+      c.legion_untyped_buffer_t {nil, 0})
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [region.value].impl, [ip])
   end
@@ -5125,7 +5130,7 @@ function codegen.expr_image(cx, node)
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id, colors,
       [partition_kind(node.disjointness, node.completeness)],
-      c.AUTO_GENERATE_ID, 0, 0)
+      c.AUTO_GENERATE_ID, 0, 0, c.legion_untyped_buffer_t {nil, 0})
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [parent.value].impl, [ip])
   end
@@ -5189,7 +5194,7 @@ function codegen.expr_preimage(cx, node)
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
       [parent.value].impl, [region_parent].impl, field_id, colors,
       [partition_kind(node.disjointness, node.completeness)],
-      c.AUTO_GENERATE_ID, 0, 0)
+      c.AUTO_GENERATE_ID, 0, 0, c.legion_untyped_buffer_t {nil, 0})
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [region.value].impl, [ip])
   end
@@ -7364,6 +7369,14 @@ function codegen.expr_attach_hdf5(cx, node)
        end)]
   end
 
+  if cx.variant:get_config_options().inner then
+    actions = quote
+      [actions]
+
+      c.legion_runtime_unmap_region([cx.runtime], [cx.context], [new_pr])
+    end
+  end
+
   return values.value(node, expr.just(actions, empty_quote), terralib.types.unit)
 end
 
@@ -8682,7 +8695,11 @@ function codegen.stat_for_list(cx, node)
   -- Check if the loop needs the CUDA or OpenMP code generation
   local cuda = cx.variant:is_cuda() and
                (node.metadata and node.metadata.parallelizable) and
-               not node.annotations.cuda:is(ast.annotation.Forbid)
+               (not node.annotations.cuda:is(ast.annotation.Forbid) and
+                -- if there's a cuda codegen context, this is a part of the kernel
+                -- that is being generated, so we shouldn't enable the cuda codegen
+                -- on this loop
+                not cx:has_codegen_context("cuda"))
   local openmp = not cx.variant:is_cuda() and
                  openmphelper.check_openmp_available() and
                  node.annotations.openmp:is(ast.annotation.Demand)
@@ -8959,6 +8976,7 @@ function codegen.stat_for_list(cx, node)
 
       preamble = host_preamble
       postamble = quote [host_postamble]; [buffer_cleanups]; end
+      cx:remove_codegen_context("cuda")
     end  -- if openmp then
   end
 

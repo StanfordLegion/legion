@@ -803,16 +803,132 @@ extern "C" {
     return cudaSuccess;
   }
 
+#define CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
+  __op__(major, COMPUTE_CAPABILITY_MAJOR)                  \
+  __op__(minor, COMPUTE_CAPABILITY_MINOR)                  \
+  __op__(sharedMemPerBlock, MAX_SHARED_MEMORY_PER_BLOCK)   \
+  __op__(regsPerBlock,      MAX_REGISTERS_PER_BLOCK)       \
+  __op__(warpSize,          WARP_SIZE)                     \
+  __op__(memPitch,          MAX_PITCH)                     \
+  __op__(maxThreadsPerBlock, MAX_THREADS_PER_BLOCK)        \
+  __op__(maxThreadsDim[0], MAX_BLOCK_DIM_X)                \
+  __op__(maxThreadsDim[1], MAX_BLOCK_DIM_Y)                \
+  __op__(maxThreadsDim[2], MAX_BLOCK_DIM_Z)                \
+  __op__(maxGridSize[0], MAX_GRID_DIM_X)                   \
+  __op__(maxGridSize[1], MAX_GRID_DIM_Y)                   \
+  __op__(maxGridSize[2], MAX_GRID_DIM_Z)                   \
+  __op__(maxSurface1D,  MAXIMUM_SURFACE1D_WIDTH)           \
+  __op__(maxSurface2D[0], MAXIMUM_SURFACE2D_WIDTH)         \
+  __op__(maxSurface2D[1], MAXIMUM_SURFACE2D_HEIGHT)        \
+  __op__(maxSurface3D[0], MAXIMUM_SURFACE3D_WIDTH)         \
+  __op__(maxSurface3D[1], MAXIMUM_SURFACE3D_HEIGHT)        \
+  __op__(maxSurface3D[2], MAXIMUM_SURFACE3D_DEPTH)         \
+  __op__(maxSurface1DLayered[0],  MAXIMUM_SURFACE1D_LAYERED_WIDTH)           \
+  __op__(maxSurface1DLayered[1],  MAXIMUM_SURFACE1D_LAYERED_LAYERS)          \
+  __op__(maxSurface2DLayered[0], MAXIMUM_SURFACE2D_LAYERED_WIDTH)            \
+  __op__(maxSurface2DLayered[1], MAXIMUM_SURFACE2D_LAYERED_HEIGHT)           \
+  __op__(maxSurface2DLayered[2], MAXIMUM_SURFACE2D_LAYERED_LAYERS)           \
+  __op__(maxSurfaceCubemap, MAXIMUM_SURFACECUBEMAP_WIDTH)                    \
+  __op__(maxSurfaceCubemapLayered[0], MAXIMUM_SURFACECUBEMAP_LAYERED_WIDTH)  \
+  __op__(maxSurfaceCubemapLayered[1], MAXIMUM_SURFACECUBEMAP_LAYERED_LAYERS) \
+  __op__(clockRate, CLOCK_RATE)                          \
+  __op__(totalConstMem, TOTAL_CONSTANT_MEMORY)           \
+  __op__(deviceOverlap, GPU_OVERLAP)                     \
+  __op__(multiProcessorCount, MULTIPROCESSOR_COUNT)      \
+  __op__(kernelExecTimeoutEnabled, KERNEL_EXEC_TIMEOUT)  \
+  __op__(integrated, INTEGRATED)                         \
+  __op__(canMapHostMemory, CAN_MAP_HOST_MEMORY)          \
+  __op__(computeMode, COMPUTE_MODE)                      \
+  __op__(concurrentKernels, CONCURRENT_KERNELS)          \
+  __op__(ECCEnabled, ECC_ENABLED)                        \
+  __op__(pciBusID, PCI_BUS_ID)                           \
+  __op__(pciDeviceID, PCI_DEVICE_ID)                     \
+  __op__(pciDomainID, PCI_DOMAIN_ID)                     \
+  __op__(tccDriver, TCC_DRIVER)                          \
+  __op__(asyncEngineCount, ASYNC_ENGINE_COUNT)           \
+  __op__(unifiedAddressing, UNIFIED_ADDRESSING)          \
+  __op__(memoryClockRate, MEMORY_CLOCK_RATE)             \
+  __op__(memoryBusWidth, GLOBAL_MEMORY_BUS_WIDTH)        \
+  __op__(l2CacheSize, L2_CACHE_SIZE)                     \
+  __op__(maxThreadsPerMultiProcessor, MAX_THREADS_PER_MULTIPROCESSOR) \
+  __op__(streamPrioritiesSupported, STREAM_PRIORITIES_SUPPORTED)      \
+  __op__(globalL1CacheSupported, GLOBAL_L1_CACHE_SUPPORTED)           \
+  __op__(localL1CacheSupported, LOCAL_L1_CACHE_SUPPORTED)             \
+  __op__(sharedMemPerMultiprocessor, MAX_SHARED_MEMORY_PER_MULTIPROCESSOR)  \
+  __op__(regsPerMultiprocessor, MAX_REGISTERS_PER_MULTIPROCESSOR)           \
+  __op__(managedMemory, MANAGED_MEMORY)                                     \
+  __op__(isMultiGpuBoard, MULTI_GPU_BOARD)                                  \
+  __op__(multiGpuBoardGroupID, MULTI_GPU_BOARD_GROUP_ID)
+
+#if CUDA_VERSION >= 8000
+#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)                                        \
+  __op__(singleToDoublePrecisionPerfRatio, SINGLE_TO_DOUBLE_PRECISION_PERF_RATIO) \
+  __op__(pageableMemoryAccess, PAGEABLE_MEMORY_ACCESS)                            \
+  __op__(concurrentManagedAccess, CONCURRENT_MANAGED_ACCESS)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_8_0(__op__)
+#endif
+
+#if CUDA_VERSION >= 9000
+#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)                                            \
+  __op__(computePreemptionSupported, COMPUTE_PREEMPTION_SUPPORTED)                    \
+  __op__(canUseHostPointerForRegisteredMem, CAN_USE_HOST_POINTER_FOR_REGISTERED_MEM)  \
+  __op__(cooperativeLaunch, COOPERATIVE_LAUNCH)                                       \
+  __op__(cooperativeMultiDeviceLaunch, COOPERATIVE_MULTI_DEVICE_LAUNCH)               \
+  __op__(sharedMemPerBlockOptin, MAX_SHARED_MEMORY_PER_BLOCK_OPTIN)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_9_0(__op__)
+#endif
+
+#if CUDA_VERSION >= 9200
+#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)                                                      \
+  __op__(pageableMemoryAccessUsesHostPageTables, PAGEABLE_MEMORY_ACCESS_USES_HOST_PAGE_TABLES)  \
+  __op__(directManagedMemAccessFromHost, DIRECT_MANAGED_MEM_ACCESS_FROM_HOST)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_9_2(__op__)
+#endif
+#if CUDA_VERSION >= 11000
+#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)                         \
+  __op__(maxBlocksPerMultiProcessor, MAX_BLOCKS_PER_MULTIPROCESSOR) \
+  __op__(accessPolicyMaxWindowSize, MAX_ACCESS_POLICY_WINDOW_SIZE)
+#else
+#define CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
+#endif
+
+#define CUDA_DEVICE_ATTRIBUTES(__op__)   \
+  CUDA_DEVICE_ATTRIBUTES_PRE_8_0(__op__) \
+  CUDA_DEVICE_ATTRIBUTES_8_0 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_9_0 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_9_2 (__op__)    \
+  CUDA_DEVICE_ATTRIBUTES_11_0(__op__)
+
   REALM_PUBLIC_API
   cudaError_t cudaGetDeviceProperties(cudaDeviceProp *prop, int index)
   {
     GPUProcessor *p = get_gpu_or_die("cudaGetDeviceProperties");
     const std::vector<GPUInfo*> &infos = p->gpu->module->gpu_info;
-    for (const GPUInfo* info : infos) {
+    for (GPUInfo* info : infos) {
       if (info->index != index)
         continue;
-      static_assert(std::is_trivially_copyable<cudaDeviceProp>::value, "cudaDeviceProp is no longer trivially copyable");
-      memcpy(prop, info, sizeof(cudaDeviceProp));
+
+      if (info->prop.totalGlobalMem != info->totalGlobalMem) {
+        // TODO: Replace with cuDeviceGetAttributes to batch
+        #define CUDA_GET_DEVICE_PROP(name, attr)                     \
+          do {								                                       \
+            int val = 0;                                             \
+            CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)        \
+                      (&val, CU_DEVICE_ATTRIBUTE_##attr, info->device) );     \
+            info->prop.name = val;                                           \
+          } while(0);
+        CUDA_DEVICE_ATTRIBUTES(CUDA_GET_DEVICE_PROP);
+
+        strncpy(info->prop.name, info->name, sizeof(info->prop.name));
+        info->prop.totalGlobalMem = info->totalGlobalMem;
+        #undef CUDA_GET_DEVICE_PROP
+      }
+
+      memcpy(prop, &info->prop, sizeof(*prop));
+
       return cudaSuccess;
     }
     return cudaErrorInvalidDevice;
