@@ -22,6 +22,7 @@ enum
 {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
   READER_TASK,
+  WAITER_TASK,
 };
 
 Logger log_app("app");
@@ -37,6 +38,19 @@ void reader_task(const void *args, size_t arglen, const void *userdata,
   log_app.info() << "reader task: proc=" << p << " x=" << x;
 }
 
+void waiter_task(const void *args, size_t arglen, const void *userdata,
+                 size_t userlen, Processor p)
+{
+  UserEvent e = *reinterpret_cast<const UserEvent *>(args);
+  log_app.info() << "waiter task: proc=" << p;
+  if(e.has_triggered()) {
+    log_app.info() << "Event has triggered.";
+    return;
+  }
+  e.subscribe();
+  e.wait();
+}
+
 void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p)
 {
@@ -44,12 +58,13 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
 
   std::vector<Event> events;
   for(size_t i = 0; i < ProgramConfig::num_tasks; i++) {
-    UserEvent event1 = UserEvent::create_user_event();
+    UserEvent user_event = UserEvent::create_user_event();
 
-    Event task_event = p.spawn(READER_TASK, &x, sizeof(int), event1);
+    Event waiter_event = p.spawn(WAITER_TASK, &user_event, sizeof(Event));
+    Event reader_event = p.spawn(READER_TASK, &x, sizeof(int), waiter_event);
 
-    events.push_back(task_event);
-    event1.trigger();
+    events.push_back(reader_event);
+    user_event.trigger();
   }
 
   Event::merge_events(events).wait();
@@ -82,6 +97,11 @@ int main(int argc, const char **argv)
 
   Processor::register_task_by_kind(p.kind(), false /*!global*/, READER_TASK,
                                    CodeDescriptor(reader_task),
+                                   ProfilingRequestSet())
+      .external_wait();
+
+  Processor::register_task_by_kind(p.kind(), false /*!global*/, WAITER_TASK,
+                                   CodeDescriptor(waiter_task),
                                    ProfilingRequestSet())
       .external_wait();
 

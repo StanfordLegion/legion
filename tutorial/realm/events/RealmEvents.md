@@ -1,36 +1,29 @@
 ## Realm Events
 
 ### Introduction
-In this tutorial we introduce Realm events by providing base
-definitions and working through an existing interface with a concrete
-example.
+This tutorial discusses Realm events.
 
 ### General Events
-Events are the foundation of a deferred execution model in Realm. They
-describe dependencies between operations and are typically created by
-the runtime. An event can be used as either pre or post condition for 
-any Realm operation which in turn can query its status through a
-dedicated interface.
+Events are the foundation of Realm's programming model where
+they describe dependencies between operations. An event is typically created by
+the runtime and can be used as either a pre or post condition for any
+Realm operation. Events offer an interface which enables the runtime to
+effictively manage a program execution.
 
 ### Events Interface
+TODO: Update line numbers and describe an interface.
 ```c++
  1 namespace Realm {
  2     ...
  3     class REALM_PUBLIC_API Event {
  4     public:
  5       ...
- 6       bool exists(void) const;
- 7 
  8       bool has_triggered(void) const;
- 9 
+ 9       ...
 10       void wait(void) const;
-11       void external_wait(void) const;
-12 
-13       bool external_timedwait(long long max_ns) const;
-15 
+15       ...
 16       void subscribe(void) const;
-18 
-19       void set_operation_priority(int new_priority) const;
+18       ...
 20       static Event merge_events(const std::vector<Event>& wait_for);
 21       ...
 22     };
@@ -41,8 +34,8 @@ dedicated interface.
 ### User Events
 General events cannot be triggered by a user and therefore runtime
 offers a separate event type `UserEvent`. A user event has all the
-properties of a  general event but it on the contrary can be triggered
-by the application code via the following interface:
+properties of a general event and it (unlike to a general event ) can be 
+triggered by the application code via the following interface:
 
 ```c++
 23  namespace Realm {
@@ -59,7 +52,9 @@ by the application code via the following interface:
 
 ```
 
-### Expressing Control Dependency
+### Example
+TODO: Update this example with the latest code.
+
 In the following example we demonstrate how events can be used in order
 to create a control dependency. The application creates several reader
 tasks `reader_task` at `line:68` that do nothing more but read an
@@ -70,10 +65,6 @@ execution. Each task returns an internal event `(line:34)` that is
 stored in the event pool `line:36`. The `top_level_task` waits
 until all the events in the event pool have been triggered by calling
 `Event::merge_events(events).wait()` at `line:40`.
-
-  TODO: Seriously consider either doing a more complex example or doing
-another examples that covers the most important features of event
-interface.
 
 ```c++
  1 #include <realm.h>
