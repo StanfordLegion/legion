@@ -7992,8 +7992,12 @@ namespace Legion {
           add_reference();
           // Make the queue the first time if necessary
           if (!comp_queue.exists())
-            comp_queue = CompletionQueue::create_completion_queue(
-                HAS_BOUND ? context_configuration.max_window_size : 0);
+            // We can put an upper bound on the number of operations as long
+            // as we aren't using frames to runahead, if we're using frames
+            // to run ahead then we can't know the maximum run ahead size
+            comp_queue = CompletionQueue::create_completion_queue((HAS_BOUND &&
+                (context_configuration.min_frames_to_schedule == 0)) ?
+                  context_configuration.max_window_size : 0);
         }
         queue.push_back(entry);
         comp_queue.add_event(entry.ready);
