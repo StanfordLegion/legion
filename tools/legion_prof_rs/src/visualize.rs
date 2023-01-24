@@ -1358,14 +1358,29 @@ impl State {
             max_count += mem.capacity;
         }
 
-        let max_count = max_count as f64;
         let mut count = 0;
+
+        if max_count == 0 {
+            // we are in external memory, so we need to calculate the max capacity
+            for point in &points {
+                let inst = self.find_inst(point.entry).unwrap();
+                if point.first {
+                    count += inst.size.unwrap();
+                } else {
+                    count -= inst.size.unwrap();
+                }
+                if count > max_count {
+                    max_count = count;
+                }
+            }
+            count = 0;
+        }
+
+        let max_count = max_count as f64;
         let mut last_time = None;
 
-        for point in points {
-            let mem_id = self.insts.get(&point.entry).unwrap();
-            let mem = self.mems.get(mem_id).unwrap();
-            let inst = mem.insts.get(&point.entry).unwrap();
+        for point in &points {
+            let inst = self.find_inst(point.entry).unwrap();
             if point.first {
                 count += inst.size.unwrap();
             } else {

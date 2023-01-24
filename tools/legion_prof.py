@@ -4583,6 +4583,18 @@ class State(object):
                 return potential_dir
             i += 1
 
+    def calculate_dynamic_memory_size(self, timepoints: List[TimePoint]) -> int:
+        max_count = 0
+        count = 0
+        for point in timepoints:
+            if point.first:
+                count += point.thing.size #type: ignore
+            else:
+                count -= point.thing.size #type: ignore
+            if count > max_count:
+                max_count = count
+        return max_count
+
     @typeassert(timepoints=list, owners=list, count=int)
     def calculate_utilization_data(self, timepoints: List[TimePoint], 
                                    owners: Union[List[Processor], List[Memory], List[Channel]], 
@@ -4610,10 +4622,13 @@ class State(object):
 
         max_count = float(max_count) #type: ignore
 
+        if max_count == 0:
+            assert isMemory
+            max_count = self.calculate_dynamic_memory_size(timepoints)
+
         utilization: List[Tuple[float, float]] = list()
         count = 0
         last_time = None
-        increment = 1.0 / max_count
         for point in timepoints:
             if isMemory:
                 if point.first:
@@ -4625,7 +4640,6 @@ class State(object):
                     count += 1
                 else:
                     count -= 1
-
 
             if point.time == last_time:
                 if isChannel and count > 0:
@@ -4798,9 +4812,9 @@ class State(object):
             else:
                 count = 0
                 if tp_group in proc_count:
-                    count = proc_count[tp_group];
+                    count = proc_count[tp_group]
                 else:
-                    count = len(owners);
+                    count = len(owners)
                 utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), owners, count)
 
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
