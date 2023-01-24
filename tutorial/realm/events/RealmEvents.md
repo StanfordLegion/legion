@@ -1,7 +1,8 @@
 ## Realm Events
 
 ### Introduction
-This tutorial discusses Realm events.
+Events are the foundation of Realm's programming model. They are used to
+describe explicit dependencies between operations.
 
 ### General Events
 Events are the foundation of Realm's programming model where
@@ -51,6 +52,9 @@ triggered by the application code via the following interface:
 33 }
 
 ```
+
+### Generational Events
+TODO
 
 ### Example
 TODO: Update this example with the latest code.
