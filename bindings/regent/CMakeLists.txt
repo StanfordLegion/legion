@@ -80,6 +80,13 @@ endif()
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(Regent PROPERTIES OUTPUT_NAME "regent${INSTALL_SUFFIX}")
 set_target_properties(Regent PROPERTIES SOVERSION ${SOVERSION})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(Regent PROPERTIES BUILD_RPATH "\$ORIGIN")
+  set_target_properties(Regent PROPERTIES INSTALL_RPATH "\$ORIGIN")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set_target_properties(Regent PROPERTIES BUILD_RPATH "@loader_path")
+  set_target_properties(Regent PROPERTIES INSTALL_RPATH "@loader_path")
+endif ()
 
 install(TARGETS Regent EXPORT LegionTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
