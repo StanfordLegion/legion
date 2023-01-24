@@ -21308,7 +21308,7 @@ namespace Legion {
           fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
         delete fill_view;
       fill_view = view;
-      fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+      // No need to add a reference here since we got it from the caller
       if (future.impl == NULL)
       {
         // Make sure to set the value before registering any eager fill views

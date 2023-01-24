@@ -10846,14 +10846,22 @@ namespace Legion {
           {
             created_fill_views.erase(finder);
             set_view = true;
+            // Return the extra reference we added when we made the view
           }
+          else // Add a reference to return
+            result->add_base_valid_ref(MAPPING_ACQUIRE_REF);
           return result;
         }
         result = new FillView(runtime, fill_did,
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
-                       true/*register now*/, collective_mapping);
+                       false/*register now*/, collective_mapping);
+        // Make sure we hold a valid reference before we register it
+        // otherwise there can be races with deletions, add two of them
+        // one for returning and one for us to hold until we're done
+        result->add_base_valid_ref(MAPPING_ACQUIRE_REF, 2/*ref count*/);
+        result->register_with_runtime();
         // Record it for the shards that come later
         std::pair<FillView*,size_t> &pending = created_fill_views[fill_did];
         pending.first = result;
@@ -10866,7 +10874,11 @@ namespace Legion {
 #ifdef LEGION_SPY
                        op->get_unique_op_id(),
 #endif
-                       true/*register now*/, collective_mapping);
+                       false/*register now*/, collective_mapping);
+        // Make sure we hold a valid reference before we register it
+        // otherwise there can be races with deletions
+        fill_view->add_base_valid_ref(MAPPING_ACQUIRE_REF);
+        fill_view->register_with_runtime();
         // Only one shard so do the setting
         set_view = true;
         return fill_view;
@@ -17116,11 +17128,13 @@ namespace Legion {
       if ((selected_views.size() > 1) || ((*selected_views.begin()) == 0))
       {
         bool set_view = false;
+        // This call comes back with a MAPPING_ACQUIRE_REF already on the view
         FillView *fill_view =
           manager->deduplicate_fill_view_creation(fresh_did, fill_op, set_view);
 #ifdef DEBUG_LEGION
         assert(fill_view != NULL);
 #endif
+        // Pass the MAPPING_ACQUIRE_REF into the registration
         fill_op->register_fill_view_creation(fill_view, set_view);
       }
       else // Didn't use the fresh did so we can revoke it
