@@ -6,6 +6,26 @@ stored in this memory cannot be moved. Any data migration in Realm
 results in a copy operation.
 
 ## Public Interface
+`RegionInstance` offers a public interface to create instance objects
+such as `create_instance`. The `create_instance` call returns a `Event`
+handle which can be used a precondition for any subsequent Realm
+operation. The `block_size` argument allows to specify an instance
+layout which could `0` for structure of arrays `SOA`, `1` for arrays of
+structures `AOS` and `2` for hybrid layouts. We discuss layouts more in
+detail later in this section.
+
+We create a `RegionInstance` with a standard `AOS` layout (line 79) that
+encompasses two logical layouts `InstanceLogicalLayout1` and
+`InstanceLogicalLayout2`. The layouts are attributed by the `FieldID`
+and supplied to the instance interface as part of the `field_sizes` map
+(line 74).
+
+The `AOS` layout means that a structure (InstanceLogicalLayout0/1) is
+stored sequentially in memory where all fields for an element 0 would
+preceed all fields for an element 1.
+
+TODO: field_sizes, memory
+
 ```c++
   class REALM_PUBLIC_API RegionInstance {
   public:
@@ -16,7 +36,7 @@ results in a copy operation.
 				 const Rect<N,T>& rect,
 				 const std::map<FieldID, size_t>& field_sizes,
 				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
-				 const ProfilingRequestSet& prs,
+         ...
 				 Event wait_on = Event::NO_EVENT);
     ...
    }
@@ -30,7 +50,6 @@ rectangles and bitmasks for sparse unstructured data.
 TODO: Discuss AffineAccessor, MultiAffineAccessor, GenericAccessor.
 
 ## Example
-TODO: Demonstrate AOS/SOA.
 
 ```c++
 }  1 #include <realm.h>
@@ -112,7 +131,7 @@ TODO: Demonstrate AOS/SOA.
  77 
  78   RegionInstance inst = RegionInstance::NO_INST;
  79   RegionInstance::create_instance(inst, *memories.begin(), bounds, field_sizes,
- 80                                   /*SOA=*/0, ProfilingRequestSet())
+ 80                                   /*AOS=*/1, ProfilingRequestSet())
  81       .wait();
  82 
  83   update<InstanceLogicalLayout1, int, float>(inst, bounds, FID1, /*add=*/1);
