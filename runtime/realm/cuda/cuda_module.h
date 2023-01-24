@@ -39,11 +39,12 @@ namespace Realm {
     class GPUWorker;
     struct GPUInfo;
     class GPUZCMemory;
+    class GPUReplHeapListener;
 
     // our interface to the rest of the runtime
     class CudaModule : public Module {
     protected:
-      CudaModule(void);
+      CudaModule(RuntimeImpl *_runtime);
       
     public:
       virtual ~CudaModule(void);
@@ -101,6 +102,8 @@ namespace Realm {
       int cfg_d2d_stream_priority;
       bool cfg_use_cuda_ipc;
 
+      RuntimeImpl *runtime;
+
       // "global" variables live here too
       GPUWorker *shared_worker;
       std::map<GPU *, GPUWorker *> dedicated_workers;
@@ -111,6 +114,7 @@ namespace Realm {
       void *uvm_base; // guaranteed to be same for CPU and GPU
       GPUZCMemory *uvmmem;
       std::vector<void *> registered_host_ptrs;
+      GPUReplHeapListener *rh_listener;
 
       Mutex cudaipc_mutex;
       Mutex::CondVar cudaipc_condvar;

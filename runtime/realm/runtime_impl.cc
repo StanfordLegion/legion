@@ -1300,6 +1300,7 @@ namespace Realm {
       // This dummy network list is actually handled in network_init()
       // this is just here to help verify low-level arguement
       std::vector<std::string> dummy_network_list;
+      size_t replheap_size = 16 << 20;
 
       CommandLineParser cp;
       cp.add_option_int_units("-ll:rsize", reg_mem_size, 'm')
@@ -1336,6 +1337,7 @@ namespace Realm {
       cp.add_option_int("-ll:ahandlers", active_msg_handler_threads);
       cp.add_option_int("-ll:handler_bgwork", active_msg_handler_bgwork);
       cp.add_option_stringlist("-ll:networks", dummy_network_list);
+      cp.add_option_int_units("-ll:replheap", replheap_size);
 
       // The default of path_cache_size is 0, when it is set to non-zero, the caching is enabled.
       cp.add_option_int("-ll:path_cache_size", Config::path_cache_lru_size);
@@ -1670,6 +1672,10 @@ namespace Realm {
 	printf("HELP!  Could not satisfy all core reservations!\n");
 	exit(1);
       }
+
+      // create the "replicated heap" that puts instance layouts and sparsity
+      //  maps where non-CPU devices can see them
+      repl_heap.init(replheap_size, 1 /*chunks*/);
 
       for(std::vector<Module *>::const_iterator it = modules.begin();
 	  it != modules.end();
@@ -2349,6 +2355,8 @@ namespace Realm {
 	  ++it)
 	(*it)->shutdown();
       stop_dma_system();
+
+      repl_heap.cleanup();
 
       // let network-dependent cleanup happen before we detach
       for(std::vector<Module *>::iterator it = modules.begin();

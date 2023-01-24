@@ -927,6 +927,7 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \
+	           $(LG_RT_DIR)/realm/repl_heap.cc \
 	           $(LG_RT_DIR)/realm/deppart/partitions.cc \
 	           $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
 	           $(LG_RT_DIR)/realm/deppart/image.cc \
