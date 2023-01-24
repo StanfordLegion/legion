@@ -24,18 +24,56 @@ enum
   CREATE_REGION_TASK,
 };
 
+enum {
+  FID_INPUT = 101,
+};
+
 Logger log_app("app");
+
+struct CreateRegionArgs {
+  Memory memory;
+  Rect<1, int> bounds;
+};
+
+struct InstanceLogicalLayout {
+  int x;
+  float y;
+};
 
 void create_region_task(const void *args, size_t arglen, const void *userdata,
                  size_t userlen, Processor p)
 {
+  assert(arglen == sizeof(CreateRegionArgs));
+  const CreateRegionArgs &a = *reinterpret_cast<const CreateRegionArgs *>(args);
+
+  std::map<FieldID, size_t> field_sizes;
+  field_sizes[FID_INPUT] = sizeof(InstanceLogicalLayout);
+
+  RegionInstance inst = RegionInstance::NO_INST;
+  RegionInstance::create_instance(inst, a.memory, a.bounds, field_sizes,
+                                  /*SOA=*/0, ProfilingRequestSet())
+      .wait();
   log_app.info() << "Create region task finished!";
 }
 
 void top_level_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p)
 {
-  p.spawn(CREATE_REGION_TASK, 0, 0, Event::NO_EVENT).wait();
+  CreateRegionArgs region_args;
+  region_args.bounds.lo = Point<1, int>::ZEROES();
+  region_args.bounds.hi = Point<1, int>(7);
+
+  std::vector<Memory> memories;
+  Machine::MemoryQuery mq(Machine::get_machine());
+  mq.only_kind(Memory::SYSTEM_MEM).has_capacity(1);
+  memories.assign(mq.begin(), mq.end());
+  assert(!memories.empty());
+
+  region_args.memory = *memories.begin();
+
+  p.spawn(CREATE_REGION_TASK, &region_args, sizeof(CreateRegionArgs),
+          Event::NO_EVENT)
+      .wait();
   Runtime::get_runtime().shutdown(Event::NO_EVENT, 0 /*success*/);
 }
 
