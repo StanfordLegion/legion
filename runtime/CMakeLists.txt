@@ -806,13 +806,19 @@ if(LEGION_CUDA_SRC)
   else()
     set(CUDA_WARNINGS "")
   endif()
+
+  set(NVCC_EXTRA_FLAGS -Xcompiler -fPIC)
+
+  if (CMAKE_CXX_STANDARD)
+    list(APPEND NVCC_EXTRA_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
+  endif()
   cuda_compile(LEGION_CUDA_OBJS ${LEGION_CUDA_SRC} OPTIONS
     -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
     ${CUDA_WARNINGS}
     ${CUDA_GENCODE}
     -I ${CMAKE_CURRENT_SOURCE_DIR}
     -I ${PROJECT_BINARY_DIR}/runtime
-    -Xcompiler -fPIC
+    ${NVCC_EXTRA_FLAGS}
     DEBUG -g
     RELEASE -O2
     RELWITHDEBINFO -g -O2)

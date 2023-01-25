@@ -10,6 +10,15 @@ variables:
   REALM_SYNTHETIC_CORE_MAP: "" # Disable Realm thread pinning.
   TIMELIMIT: "600"  # each test should take less than 10 minutes
   USE_DEFCHECK: "1"
+  CCACHE_BASEDIR: $CI_PROJECT_DIR
+  CCACHE_DIR: $CI_PROJECT_DIR/ccache
+  USE_CCACHE: "1"
+
+cache: &global_cache
+  key: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+  paths:
+    - $CCACHE_DIR
+
 
 # Local variables (included on a case-by-case basis in each job):
 .gcc5: &gcc5
@@ -73,6 +82,7 @@ variables:
   CC: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc"
   CXX: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvc++"
   F90: "/opt/nvidia/hpc_sdk/Linux_x86_64/22.11/compilers/bin/nvfortran"
+  USE_CCACHE: "0"
   # cmake gets confused and can't figure out library arch
   # EXTRA_CMAKE_ARGS: "-DCMAKE_LIBRARY_ARCHITECTURE=x86_64-linux-gnu"
 .icc212: &icc212
@@ -280,6 +290,9 @@ before_script:
   - |
     if [[ "$(uname)" = "Linux" ]]; then
       export THREADS=$(nproc --all)
+      if [[ "$USE_CCACHE" -eq 1 ]]; then
+        apt install -y ccache
+      fi
     elif [[ "$(uname)" = "Darwin" ]]; then
       export THREADS=$(sysctl -n hw.ncpu)
     else
@@ -367,10 +380,18 @@ before_script:
       fi
     fi
   - |
+    if [ "$USE_CCACHE" -eq 1 ]; then
+      export CCACHE_COMPILER=${CXX}
+      ccache --zero-stats
+      ccache --show-stats
+    fi
+  - |
     if [[ "$USE_CUDA" -eq 1 ]]; then
       # make sure dynamic loading finds the right libcudart.so
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${CUDA}/lib64"
       export PATH=$PATH:${CUDA}/bin
+      # Try to use the stubs over the driver
+      export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs:/usr/local/nvidia/lib64"
     fi
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
@@ -408,7 +429,6 @@ before_script:
         KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=$(realpath ../bin)/nvcc_wrapper"
         export NVCC_WRAPPER_DEFAULT_COMPILER="$CXX"
         #KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DKokkos_CUDA_DIR=${CUDA}"
-        export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs"
         # Make sure KOKKOS and Legion use the same compiler for NVCC as for HOST
         # code and pass this into the -ccbin argument for nvcc
         export CUDAHOSTCXX="$CXX"
@@ -504,8 +524,6 @@ before_script:
 .p100_base: &p100_base
   IS_P100_JOB: "1"
   USE_CUDA: "1"
-  # cmake needs to know where to find libcuda.so
-  CUDA_LIB_PATH: "/usr/local/nvidia/lib64"
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
@@ -618,7 +636,19 @@ before_script:
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
         export TEST_PYTHON_EXE=`which python3 python | head -1`
       fi
-    - $TEST_PYTHON_EXE ./test.py
+    - |
+      if [[ "$USE_CCACHE" -eq 1 ]]; then
+          export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+      fi
+    - |
+      if [[ -n "$CXX_STANDARD" ]]; then
+        export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
+      fi
+    - $TEST_PYTHON_EXE ./test.py --tmp-dir ${CI_PROJECT_DIR}/tmp-build
+    - |
+      if [[ "$USE_CCACHE" -eq 1 ]]; then
+        ccache --show-stats
+      fi
   retry:
     max: 0
     when:
@@ -640,7 +670,7 @@ before_script:
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
         export TEST_PYTHON_EXE=`which python3 python | head -1`
       fi
-    - $TEST_PYTHON_EXE ./test.py $TEST_PY_ARGS
+    - $TEST_PYTHON_EXE ./test.py $TEST_PY_ARGS --tmp-dir ${CI_PROJECT_DIR}/tmp
   retry:
     max: 0
     when:
@@ -684,7 +714,7 @@ before_script:
     - git config --global user.email "legion-testing@googlegroups.com"
     - export PERF_MIN_NODES=1
     - export PERF_MAX_NODES=1
-    - $TEST_PYTHON_EXE ./test.py --test=perf
+    - $TEST_PYTHON_EXE ./test.py --test=perf --tmp-dir ${CI_PROJECT_DIR}/tmp
   retry:
     max: 0
     when:
@@ -713,7 +743,7 @@ gcc9_cxx11_release_legion_fortran:
 gcc9_cxx11_release_llvm_cmake_regent_pretty:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *cmake, *regent_pretty, *incremental, *short]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *llvm, *cmake, *regent_pretty, *incremental, *short, *shared]
 #   * Debug (Privilege and Bounds Checks)
 gcc9_cxx11_debug_checks_legion:
   <<: [*linux, *image_2004, *tests]
@@ -766,7 +796,7 @@ gcc9_cxx11_debug_python3_legion:
 gcc9_cxx11_debug_llvm_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *cmake, *legion, *ctest]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *llvm, *cmake, *legion, *ctest, *shared]
 gcc9_cxx11_debug_llvm_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -788,7 +818,7 @@ gcc9_cxx11_release_gasnet1_mpi_legion:
 gcc9_cxx11_debug_gasnet1_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnet1_mpi, *cmake, *legion, *ctest]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnet1_mpi, *cmake, *legion, *ctest, *shared]
 gcc9_cxx11_debug_gasnet1_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -797,19 +827,19 @@ gcc9_cxx11_debug_gasnet1_mpi_regent:
 gcc9_cxx11_release_gasnet1_mpi_embedlocal_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion, *shared]
 gcc9_cxx11_release_gasnet1_mpi_embedremote_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion, *shared]
 gcc9_cxx11_release_shared_gasnet1_mpi_embedlocal_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion]
+    <<: [*gcc9, *terra12, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_local, *cmake, *ctest, *legion, *shared]
 gcc9_cxx11_release_shared_gasnet1_mpi_embedremote_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion]
+    <<: [*gcc9, *terra12, *release, *shared, *cxx11_normal, *gasnet1_mpi, *gasnet_embed_remote, *cmake, *ctest, *legion, *shared]
 #   * GASNet-EX (native API, 2020.11.0+)
 gcc9_cxx11_release_gasnetex_mpi_legion:
   <<: [*linux, *image_2004, *tests]
@@ -818,7 +848,7 @@ gcc9_cxx11_release_gasnetex_mpi_legion:
 gcc9_cxx11_debug_gasnetex_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_mpi, *cmake, *legion, *ctest, *short, *shared]
 gcc9_cxx11_debug_gasnetex_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -839,7 +869,7 @@ gcc9_cxx11_release_gasnet1_ucx_legion:
 gcc9_cxx11_release_gasnet1_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *cmake, *legion, *ctest]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnet1_ucx, *cmake, *legion, *ctest, *shared]
 gcc9_cxx11_release_gasnet1_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -851,7 +881,7 @@ gcc9_cxx11_release_gasnetex_ucx_legion:
 gcc9_cxx11_debug_gasnetex_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_ucx, *cmake, *legion, *ctest]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *gasnetex_ucx, *cmake, *legion, *ctest, *shared]
 gcc9_cxx11_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -864,7 +894,7 @@ gcc9_cxx11_release_mpi_legion:
 gcc9_cxx11_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *short]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *short, *shared]
 gcc9_cxx11_debug_mpi_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
@@ -1223,51 +1253,51 @@ clang14_cxx20_debug_regent:
 p100_cuda80_gcc5_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc5, *release, *cxx11_normal, *p100_cuda80, *legion]
+    <<: [*gcc5, *release, *cxx11_normal, *p100_cuda80, *legion, *cmake, *ctest, *shared]
 p100_cuda90_gcc6_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc6, *release, *cxx11_normal, *p100_cuda90, *legion]
+    <<: [*gcc6, *release, *cxx11_normal, *p100_cuda90, *legion, *cmake, *ctest, *shared]
 p100_cuda92_gcc7_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc7, *release, *cxx11_normal, *p100_cuda92, *legion]
+    <<: [*gcc7, *release, *cxx11_normal, *p100_cuda92, *legion, *cmake, *ctest, *shared]
 p100_cuda102_gcc8_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *legion]
+    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *legion, *cmake, *ctest, *shared]
 p100_cuda102_gcc8_cxx11_debug_checks_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *debug, *cxx11_normal, *checks, *p100_cuda102, *legion, *short]
+    <<: [*gcc8, *debug, *cxx11_normal, *checks, *p100_cuda102, *legion, *short, *cmake, *ctest, *shared]
 p100_cuda102_gcc8_cxx11_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *cmake, *legion, *ctest]
+    <<: [*gcc8, *release, *cxx11_normal, *p100_cuda102, *cmake, *legion, *ctest, *shared]
 p100_cuda110_gcc9_cxx14_debug_cmake_cuda_dynamic_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda110, *cmake, *legion, *cuda_dynamic, *ctest, *short]
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda110, *cmake, *legion, *cuda_dynamic, *ctest, *short, *shared]
 p100_cuda110_gcc9_cxx14_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda110, *legion]
+    <<: [*gcc9, *release, *cxx14_normal, *p100_cuda110, *legion, *cmake, *ctest, *shared]
 p100_cuda112_gcc9_cxx17_debug_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *legion, *short]
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *legion, *short, *cmake, *ctest, *shared]
 p100_cuda112_gcc9_cxx17_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda112, *cmake, *legion, *ctest]
+    <<: [*gcc9, *release, *cxx17_normal, *p100_cuda112, *cmake, *legion, *ctest, *shared]
 p100_cuda102_clang7_cxx11_release_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *regent, *short]
+    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *regent, *cmake, *ctest, *short]
 p100_cuda102_clang7_cxx11_release_cmake_cuda_regent:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *cmake, *regent]
+    <<: [*clang7, *llvm7, *release, *cxx11_normal, *p100_cuda102, *cmake, *ctest, *regent, *shared]
 
 # CUDA+GASNet tests:
 p100_cuda112_gcc9_cxx14_debug_gasnetex_mpi_cmake_cuda_legion:
