@@ -25648,10 +25648,17 @@ namespace Legion {
       const Realm::ExternalMemoryResource resource(
           reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
           future_result_size, true/*read only*/);
-      const ApEvent src_ready(
+      ApEvent src_ready(
           PhysicalInstance::create_external_instance(
             source_instance, resource.suggested_memory(), ilg,
             resource, Realm::ProfilingRequestSet()));
+      if ((runtime->legion_spy_enabled || (runtime->profiler != NULL)) &&
+          !src_ready.exists())
+      {
+        ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, ready);
+        src_ready = ready;
+      }
       FutureInstance source(serdez_redop_buffer, future_result_size, 
           ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
           false/*own alloc*/, source_instance);
