@@ -25660,7 +25660,7 @@ namespace Legion {
         src_ready = ready;
       }
       FutureInstance source(serdez_redop_buffer, future_result_size, 
-          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
+          src_ready, runtime, false/*eager*/, false/*external*/,
           false/*own alloc*/, source_instance);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
