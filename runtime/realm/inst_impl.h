@@ -39,6 +39,8 @@ namespace Realm {
 
       virtual void *allocate_memory(size_t bytes);
 
+      virtual void commit_updates();
+
       void reset();
 
       void *program_base;

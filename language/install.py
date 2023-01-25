@@ -304,7 +304,8 @@ def install_bindings(regent_dir, legion_dir, bindings_dir, python_bindings_dir, 
             (['-DHIP_THRUST_ROOT_DIR=%s' % os.environ['THRUST_PATH']] if 'THRUST_PATH' in os.environ else []) +
             extra_flags +
             (['-DGASNet_ROOT_DIR=%s' % gasnet_dir] if gasnet_dir is not None else []) +
-            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []))
+            (['-DGASNet_CONDUIT=%s' % conduit] if conduit is not None else []) +
+            (['-DLegion_NETWORKS=%s' % os.environ['REALM_NETWORKS']] if 'REALM_NETWORKS' in os.environ else []))
         if llvm:
             # mess with a few things so that Realm uses terra's LLVM
             flags.append('-DLegion_ALLOW_MISSING_LLVM_LIBS=ON')

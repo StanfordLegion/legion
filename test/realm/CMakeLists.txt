@@ -50,7 +50,10 @@ list(APPEND REALM_TESTS
   sparse_construct
   extres_alias
   reservations
+  multiaffine
   )
+
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++${CMAKE_CXX_STANDARD})
 
 if(Legion_USE_CUDA)
   set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
@@ -58,6 +61,7 @@ if(Legion_USE_CUDA)
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
   set(CUDASRC_simple_reduce simple_reduce_gpu.cu)
+  set(CUDASRC_multiaffine multiaffine_gpu.cu)
 
   list(APPEND REALM_TESTS cuda_arrays)
   set(CUDASRC_cuda_arrays cuda_arrays_gpu.cu)

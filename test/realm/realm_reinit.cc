@@ -85,7 +85,7 @@ int main(int argc, const char **argv)
     }
 
     // TODO: Realm network modules do not generally support reinitialization
-#if defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_MPI) || defined(REALM_USE_KOKKOS)
+#if defined(REALM_USE_UCX) || defined(REALM_USE_GASNET1) || defined(REALM_USE_GASNETEX) || defined(REALM_USE_MPI) || defined(REALM_USE_KOKKOS)
     if(max_iterations > 1) {
       log_app.warning() << "network layers and/or kokkos do not support reinitialization - clamping iteration count to 1";
       max_iterations = 1;

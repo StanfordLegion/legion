@@ -1168,6 +1168,17 @@ namespace Realm {
                                  const void *data, size_t datalen);
     };
 
+    class GPUReplHeapListener : public ReplicatedHeap::Listener {
+    public:
+      GPUReplHeapListener(CudaModule *_module);
+
+      virtual void chunk_created(void *base, size_t bytes);
+      virtual void chunk_destroyed(void *base, size_t bytes);
+
+    protected:
+      CudaModule *module;
+    };
+
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
   // cuda driver and/or runtime entry points
