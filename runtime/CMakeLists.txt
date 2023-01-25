@@ -180,6 +180,26 @@ if(REALM_USE_NVTX)
   )
 endif()
 
+if(REALM_USE_UCX)
+  list(APPEND REALM_SRC
+    realm/ucx/ucp_utils.h
+    realm/ucx/ucp_module.h
+    realm/ucx/ucp_module.cc
+    realm/ucx/ucp_internal.h
+    realm/ucx/ucp_internal.cc
+    realm/ucx/ucp_context.h
+    realm/ucx/ucp_context.cc
+    realm/ucx/mpool.h
+    realm/ucx/mpool.cc
+    realm/ucx/bootstrap/bootstrap.h
+    realm/ucx/bootstrap/bootstrap.cc
+    realm/ucx/bootstrap/bootstrap_loader.h
+    realm/ucx/bootstrap/bootstrap_loader.cc
+    realm/ucx/bootstrap/bootstrap_internal.h
+    realm/ucx/bootstrap/bootstrap_util.h
+  )
+endif()
+
 list(APPEND REALM_SRC
   realm.h
   realm/activemsg.h realm/activemsg.cc
@@ -418,6 +438,20 @@ endif()
 
 if(REALM_USE_MPI)
   target_link_libraries(RealmRuntime PRIVATE MPI::MPI_CXX)
+endif()
+
+if(REALM_USE_UCX)
+  target_link_libraries(RealmRuntime PRIVATE UCX::UCP)
+  # build the MPI bootstrap plugin
+  add_library(realm_ucp_bootstrap_mpi MODULE
+    realm/ucx/bootstrap/bootstrap_mpi.c)
+  target_include_directories(realm_ucp_bootstrap_mpi PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}
+	${PROJECT_BINARY_DIR}/runtime)
+  target_link_libraries(realm_ucp_bootstrap_mpi PRIVATE MPI::MPI_C)
+  set_target_properties(realm_ucp_bootstrap_mpi PROPERTIES PREFIX "")
+  install(TARGETS realm_ucp_bootstrap_mpi LIBRARY
+    DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
 if(Legion_USE_LLVM)
@@ -814,13 +848,19 @@ if(LEGION_CUDA_SRC)
   else()
     set(CUDA_WARNINGS "")
   endif()
+
+  set(NVCC_EXTRA_FLAGS -Xcompiler -fPIC)
+
+  if (CMAKE_CXX_STANDARD)
+    list(APPEND NVCC_EXTRA_FLAGS "-std=c++${CMAKE_CXX_STANDARD}")
+  endif()
   cuda_compile(LEGION_CUDA_OBJS ${LEGION_CUDA_SRC} OPTIONS
     -Xcudafe "--diag_suppress=boolean_controlling_expr_is_constant"
     ${CUDA_WARNINGS}
     ${CUDA_GENCODE}
     -I ${CMAKE_CURRENT_SOURCE_DIR}
     -I ${PROJECT_BINARY_DIR}/runtime
-    -Xcompiler -fPIC
+    ${NVCC_EXTRA_FLAGS}
     DEBUG -g
     RELEASE -O2
     RELWITHDEBINFO -g -O2)

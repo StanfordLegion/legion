@@ -963,6 +963,7 @@ def run_tests(test_modules=None,
               launcher=None,
               thread_count=None,
               root_dir=None,
+              tmp_dir=None,
               check_ownership=False,
               keep_tmp_dir=False,
               timelimit=None,
@@ -1071,7 +1072,13 @@ def run_tests(test_modules=None,
                 use_shared_objects,
                 use_gcov, use_cmake, use_rdir, use_nvtx, cxx_standard)
 
-    tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    if not tmp_dir:
+        tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    else:
+        if os.path.exists(tmp_dir):
+            shutils.rmtree(tmp_dir)
+        os.mkdir(tmp_dir)
+
     if verbose:
         print('Using build directory: %s' % tmp_dir)
         print()
@@ -1280,6 +1287,10 @@ def driver():
     parser.add_argument(
         '-C', '--directory', dest='root_dir', metavar='DIR', action='store', required=False,
         help='Legion root directory.')
+
+    parser.add_argument(
+        '--tmp-dir', dest='tmp_dir', metavar='DIR', action='store', required=False,
+        help='Temporary directory path for out-of-source builds')
 
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
