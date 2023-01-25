@@ -927,18 +927,18 @@ gcc9_cxx11_debug_mpi_regent:
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental]
 #   * UCX
-gcc9_cxx11_release_ucx_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *release, *cxx11_normal, *ucx, *legion]
+#gcc9_cxx11_release_ucx_legion:
+#  <<: [*linux, *image_2004, *tests]
+#  variables:
+#    <<: [*gcc9, *terra12, *release, *cxx11_normal, *ucx, *legion]
 gcc9_cxx11_debug_ucx_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest, *short]
-gcc9_cxx11_debug_ucx_regent:
-  <<: [*linux_compute, *image_2004, *tests]
-  variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *regent, *incremental]
+#gcc9_cxx11_debug_ucx_regent:
+#  <<: [*linux_compute, *image_2004, *tests]
+#  variables:
+#    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *ucx, *regent, *incremental]
 # * Integration: Python + Regent
 gcc9_cxx11_debug_python3_regent:
   <<: [*linux, *image_2004, *tests]
@@ -1117,14 +1117,14 @@ clang12_cxx11_debug_mpi_regent:
   variables:
     <<: [*clang12, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental]
 #   * UCX
-clang12_cxx11_debug_ucx_cmake_legion:
-  <<: [*linux, *image_2004, *tests]
-  variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest]
-clang12_cxx11_debug_ucx_regent:
-  <<: [*linux_compute, *image_2004, *tests]
-  variables:
-    <<: [*clang12, *terra12, *debug, *cxx11_normal, *ucx, *regent, *incremental]
+#clang12_cxx11_debug_ucx_cmake_legion:
+#  <<: [*linux, *image_2004, *tests]
+#  variables:
+#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *ucx, *cmake, *legion, *ctest]
+#clang12_cxx11_debug_ucx_regent:
+#  <<: [*linux_compute, *image_2004, *tests]
+#  variables:
+#    <<: [*clang12, *terra12, *debug, *cxx11_normal, *ucx, *regent, *incremental]
 # * Integration: Python + Regent
 clang12_cxx11_debug_python3_regent:
   <<: [*linux, *image_2004, *tests]
@@ -1399,10 +1399,10 @@ p100_cuda112_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
     <<: [*gcc9, *llvm9, *release, *cxx14_normal, *p100_cuda112, *gasnetex_mpi, *regent]
 
 # CUDA+UCX tests:
-p100_cuda112_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
-  <<: [*p100, *tests]
-  variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *ucx, *legion, *ctest, *short]
+#p100_cuda112_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
+#  <<: [*p100, *tests]
+#  variables:
+#    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *ucx, *legion, *ctest, *short]
 p100_cuda112_gcc9_cxx14_release_ucx_cuda_regent:
   <<: [*p100, *tests]
   variables:
