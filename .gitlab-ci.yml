@@ -265,13 +265,6 @@ cache: &global_cache
 .external2: &external2
   TEST_PY_ARGS: "--test=external2 --test=private"
 
-.darwin_power9_scheduler: &darwin_power9_scheduler
-  CI_DEBUG_TRACE: "false"
-  SCHEDULER_PARAMETERS: "--nodes=1 --partition=power9"
-  FLEGION_USER: "gitlab-runner-flegion"
-  DARWIN_JOB_TYPE: "power9"
-  IS_DARWIN_JOB: "1"
-
 .tsan: &tsan
   SANITIZER_TYPE: "TSAN"
 .ubsan: &ubsan
@@ -380,30 +373,6 @@ before_script:
         # the mpicc used here must be consistent with launcher's mpirun.
         mpicc -shared -fPIC -o realm_ucp_bootstrap_mpi.so runtime/realm/ucx/bootstrap/bootstrap_mpi.c
         export REALM_UCP_BOOTSTRAP_PLUGIN=$PWD/realm_ucp_bootstrap_mpi.so
-      fi
-    fi
-  - |
-    if [[ "$DARWIN_JOB_TYPE" = power9 ]]; then
-      if [[ "$CXX" = "g++-6" ]]; then
-        module load openmpi/p9/3.1.4-gcc_6.5.0
-      elif [[ "$CXX" = "g++-7" ]]; then
-        module load openmpi/p9/3.1.4-gcc_7.4.0
-      elif [[ "$CXX" = "g++-8" ]]; then
-        module load openmpi/p9/3.1.4-gcc_8.3.0
-      elif [[ "$CXX" = "clang++-8" ]]; then
-        module load clang/8.0.0
-        export CXX=clang++
-        export CXXFLAGS="$CXXFLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
-        export LDFLAGS="$LDFLAGS --gcc-toolchain=/projects/opt/ppc64le/gcc/8.3.0"
-      else
-        echo "Failed to detect Darwin compiler version"
-        false
-      fi
-      module load cmake/3.12.4
-      export OMPI_CXX=${CXX}
-
-      if [[ "$REALM_NETWORKS" != "" ]]; then
-        export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       fi
     fi
   - |
@@ -520,10 +489,6 @@ before_script:
 .macos: &macos
   tags:
     - macos
-.darwin_power9: &darwin_power9
-  tags:
-    - darwin-slurm
-    - power9
 
 # For MSVC-in-wine tests:
 .msvc_wine: &msvc_wine
@@ -624,8 +589,6 @@ before_script:
     # some jobs are tagged and can only run on certain hardware - a CI variable
     #  is used to enable these jobs in case that hardware is offline
     - if: '$IS_P100_JOB == "1" && $RUN_P100_JOBS != "1"'
-      when: never
-    - if: '$IS_DARWIN_JOB == "1" && $RUN_DARWIN_JOBS != "1"'
       when: never
     # some scheduled runs are only looking at specific subsets of functionality
     - if: '$ONLY_KOKKOS_JOBS == "1" && $USE_KOKKOS != "1"'
@@ -1438,16 +1401,6 @@ p100_cuda102_gcc8_cxx14_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
     <<: [*gcc8, *debug, *shared, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
-
-# Darwin Power9 tests:
-darwin_power9_gcc8_cxx17_release_legion:
-  <<: [*darwin_power9, *tests]
-  variables:
-    <<: [*gcc8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
-darwin_power9_clang8_cxx17_debug_legion:
-  <<: [*darwin_power9, *tests]
-  variables:
-    <<: [*clang8, *debug, *cxx17_normal, *legion, *darwin_power9_scheduler]
 
 # HPCSDK (nvc++) tests:
 hpcsdk2211_cxx11_release_legion:
