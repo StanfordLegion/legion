@@ -5,18 +5,18 @@ Realm stores application data in `RegionInstances`. Each
 stored in this memory cannot be moved. Any data migration in Realm
 results in a copy operation.
 
-## Public Interface
-`RegionInstance` offers a public interface to create instance objects
-such as `create_instance`. The `create_instance` call returns a `Event`
-handle which can be used a precondition for any subsequent Realm
-operation. The `block_size` argument allows to specify an instance
+## Instance Layouts
+`RegionInstance` offers public interface to create instance objects.
+A `create_instance` call returns an `Event`
+handle which can be used as precondition for any subsequent Realm
+operation. A `block_size` argument allows to specify an instance
 layout which could `0` for structure of arrays `SOA`, `1` for arrays of
 structures `AOS` and `2` for hybrid layouts. We discuss layouts more in
 detail later in this section.
 
-We create a `RegionInstance` with a standard `AOS` layout (line 79) that
+At line 79 we create a region instance with an `AOS` physicall layout that
 encompasses two logical layouts `InstanceLogicalLayout1` and
-`InstanceLogicalLayout2`. The layouts are attributed by the `FieldID`
+`InstanceLogicalLayout2`. The layouts are referrenced by the `FieldID`
 and supplied to the instance interface as part of the `field_sizes` map
 (line 74).
 
@@ -24,7 +24,7 @@ The `AOS` layout means that a structure (InstanceLogicalLayout0/1) is
 stored sequentially in memory where all fields for an element 0 would
 preceed all fields for an element 1.
 
-TODO: field_sizes, memory
+TODO: Give more details, define what is affine..etc
 
 ```c++
   class REALM_PUBLIC_API RegionInstance {
@@ -42,17 +42,21 @@ TODO: field_sizes, memory
    }
 ```
 
-## Instance Layouts
-To represent dense data `RegionInstance` can use multi-dimensional
-rectangles and bitmasks for sparse unstructured data.
+## Accessors
+It may be necessary for a task to directly access data stored in a
+region instance. Realm offers a set of accessors such as
+`AffineAccessor`, `MultiAffineAccessor` and `GenericAccessor` that
+enable users to access individual elements. For example, `AffineAccessor` 
+works only for data with affine layouts and local to the node on which is the task is running.
+`MultiAffineAccessor` extends the previous accessor by handling
+instances with multiple affine pieces whereas `GenericAccessor` (as the name
+suggests) handles both local and remote data of any layout.
 
-### Accessors
-TODO: Discuss AffineAccessor, MultiAffineAccessor, GenericAccessor.
-
-## Example
+In this example, we use an `AffineAcceossor` inside the `top_level_task`
+to write/read (liness 38 and 50) our data since it's both local and affine.
 
 ```c++
-}  1 #include <realm.h>
+  1 #include <realm.h>
   2 #include <realm/cmdline.h>
   3 
   4 using namespace Realm;

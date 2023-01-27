@@ -16,9 +16,9 @@ examples.
 
 - [Hello World](/tutorial/realm_tutorial00.md)
 - [Machine Model](/tutorial/realm_tutorial01.md)
-- [Events](/tutorial/realm_tutorial02.md)
 - [Region Instances](/tutorial/realm_tutorial03.md)
-  - [Deferred Allocation](/tutorial/realm_tutorial04.md)
+- [Events](/tutorial/realm_tutorial02.md)
+  [Deferred Allocation](/tutorial/realm_tutorial04.md)
 - [Index Spaces](/tutorial/realm_tutorial05.md)
   - [Copies](/tutorial/realm_tutorial06.md)
   - [Fills](/tutorial/realm_tutorial07.md)
