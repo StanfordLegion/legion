@@ -1934,7 +1934,6 @@ namespace Legion {
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
-      virtual void send_node(AddressSpaceID target, bool recurse) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -2088,8 +2087,9 @@ namespace Legion {
     public:
       static void handle_disjointness_test(const void *args);
     public:
-      virtual void send_node(AddressSpaceID target, bool recurse);
-      void pack_node(Serializer &rez, AddressSpaceID target, bool recurse);
+      void send_node(AddressSpaceID target, bool recurse, bool valid = true);
+      void pack_node(Serializer &rez, AddressSpaceID target, 
+                     bool recurse, bool valid);
       bool invalidate_root(AddressSpaceID source,
                            std::set<RtEvent> &applied,
                            const CollectiveMapping *mapping);
@@ -3163,7 +3163,7 @@ namespace Legion {
                                                   RegionTreeForest *forest);
       static void handle_disjointness_test(const void *args);
     public:
-      virtual void send_node(AddressSpaceID target, bool recurse);
+      void send_node(AddressSpaceID target, bool recurse);
       void pack_node(Serializer &rez, AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
                                        Deserializer &derez, 

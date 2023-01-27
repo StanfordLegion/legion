@@ -8547,7 +8547,8 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::send_node(AddressSpaceID target, bool recurse)
+    void IndexSpaceNode::send_node(AddressSpaceID target,
+                                   bool recurse, bool valid)
     //--------------------------------------------------------------------------
     {
       // Quick out if we've already sent this
@@ -8566,7 +8567,7 @@ namespace Legion {
         if (!has_remote_instance(target))
         {
           Serializer rez;
-          pack_node(rez, target, recurse);
+          pack_node(rez, target, recurse, valid);
           context->runtime->send_index_space_response(target, rez);
           update_remote_instances(target);
         }
@@ -8574,8 +8575,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::pack_node(Serializer &rez,
-                                   AddressSpaceID target, bool recurse)
+    void IndexSpaceNode::pack_node(Serializer &rez, AddressSpaceID target,
+                                   bool recurse, bool valid)
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
@@ -8602,7 +8603,7 @@ namespace Legion {
         collective_mapping->pack(rez);
       else
         rez.serialize<size_t>(0); // total spaces
-      rez.serialize<bool>(recurse); // whether the tree is valid or not
+      rez.serialize<bool>(valid); // whether the tree is valid or not
       rez.serialize<size_t>(semantic_info.size());
       for (LegionMap<SemanticTag,SemanticInfo>::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
@@ -8752,6 +8753,7 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *target = forest->get_node(handle, NULL, true/*can fail*/);
+      bool valid = false;
       if (target != NULL)
       {
         // See if we're going to be sending the whole tree or not
@@ -8760,6 +8762,7 @@ namespace Legion {
         {
           if (target->check_valid_and_increment(REGION_TREE_REF))
           {
+            valid = true;
             target->pack_valid_ref();
             target->remove_base_valid_ref(REGION_TREE_REF);
           }
@@ -8775,23 +8778,33 @@ namespace Legion {
           // check on the partition since that keeps this tree valid
           if (target->parent->check_valid_and_increment(REGION_TREE_REF))
           {
+            valid = true;
             target->parent->pack_valid_ref();
             target->parent->remove_base_valid_ref(REGION_TREE_REF);
           }
           else
           {
-            target->pack_global_ref();
+            // We need the state to remain the same while we are in
+            // transit so see if this can still be made valid
+            if (target->check_valid_and_increment(REGION_TREE_REF))
+            {
+              valid = true;
+              target->pack_valid_ref();
+              target->remove_base_valid_ref(REGION_TREE_REF);
+            }
+            else
+              target->pack_global_ref();
             recurse = false;
           }
         }
-        target->send_node(source, recurse);
+        target->send_node(source, recurse, valid);
         // Now send back the results
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(to_trigger);
           rez.serialize(handle);
-          rez.serialize(recurse);
+          rez.serialize(valid);
         }
         forest->runtime->send_index_space_return(source, rez);
       }
@@ -8811,9 +8824,9 @@ namespace Legion {
       IndexSpace handle;
       derez.deserialize(handle);
       IndexSpaceNode *node = context->get_node(handle);
-      bool recurse;
-      derez.deserialize(recurse);
-      if (recurse)
+      bool valid;
+      derez.deserialize(valid);
+      if (valid)
       {
         if (node->parent == NULL)
           node->unpack_valid_ref();
