@@ -934,6 +934,8 @@ namespace Legion {
               delete local_tree;
             return (*it);
           }
+          else
+            continue;
         }
         if (!local_space.sparsity.exists() || !other_space.sparsity.exists())
         {
