@@ -92,11 +92,11 @@ namespace Legion {
       rez.serialize<size_t>(instances.size());
       for (unsigned idx = 0; idx < instances.size(); idx++)
         rez.serialize(instances[idx]);
-#ifdef LEGION_SPY
-      rez.serialize(index_space);
-      assert(instances.size() == instance_events.size());
+      rez.serialize<size_t>(instance_events.size());
       for (unsigned idx = 0; idx < instance_events.size(); idx++)
         rez.serialize(instance_events[idx]);
+#ifdef LEGION_SPY
+      rez.serialize(index_space);
 #endif
     }
 
@@ -111,11 +111,13 @@ namespace Legion {
       instances.resize(num_instances);
       for (unsigned idx = 0; idx < num_instances; idx++)
         derez.deserialize(instances[idx]);
+      size_t num_events;
+      derez.deserialize(num_events);
+      instance_events.resize(num_events);
+      for (unsigned idx = 0; idx < num_events; idx++)
+        derez.deserialize(instance_events[idx]);
 #ifdef LEGION_SPY
       derez.deserialize(index_space);
-      instance_events.resize(num_instances);
-      for (unsigned idx = 0; idx < num_instances; idx++)
-        derez.deserialize(instance_events[idx]);
 #endif
     }
 
