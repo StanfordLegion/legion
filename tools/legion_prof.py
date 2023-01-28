@@ -17,7 +17,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-# from __future__ import annotations
+from __future__ import annotations
 from locale import strcoll
 from pickletools import floatnl
 
@@ -540,8 +540,7 @@ class TimeRange(ABC):
         self.trimmed = False
         self.was_removed = False
 
-    # Fix in Python 3.8
-    def __cmp__(self, other: "TimeRange") -> int:
+    def __cmp__(self, other: TimeRange) -> int:
         # The order chosen here is critical for sort_range. Ranges are
         # sorted by start_event first, and then by *reversed*
         # end_event, so that each range will precede any ranges they
@@ -559,12 +558,10 @@ class TimeRange(ABC):
             return 1
         return 0
 
-    # Fix in Python 3.8
-    def __lt__(self, other: "TimeRange") -> bool:
+    def __lt__(self, other: TimeRange) -> bool:
         return self.__cmp__(other) < 0
 
-    # Fix in Python 3.8
-    def __gt__(self, other: "TimeRange") -> bool:
+    def __gt__(self, other: TimeRange) -> bool:
         return self.__cmp__(other) > 0
 
     @typecheck
@@ -582,19 +579,6 @@ class TimeRange(ABC):
     def queue_time(self) -> float:
         assert self.start is not None and self.ready is not None
         return self.start - self.ready
-
-    # The following must be overridden by subclasses that need them
-    def mapper_time(self) -> float:
-        pass
-
-    def active_time(self) -> float:
-        pass
-
-    def application_time(self) -> float:
-        pass
-
-    def meta_time(self) -> float:
-        pass
 
     @typecheck
     def is_trimmed(self) -> bool:
@@ -1339,10 +1323,9 @@ class ProcOperation(Base):
 
     def __init__(self) -> None:
         Base.__init__(self)
-        # FIXME: fix in python3.8
-        self.proc: Optional["Processor"] = None
+        self.proc: Optional[Processor] = None
 
-    def get_owner(self) -> "Processor":
+    def get_owner(self) -> Processor:
         assert self.proc is not None
         return self.proc
 
@@ -2004,10 +1987,9 @@ class ChanOperation(Base):
 
     def __init__(self) -> None:
         Base.__init__(self)
-        # FIXME: fix in python3.8
-        self.chan: Optional["Channel"] = None
+        self.chan: Optional[Channel] = None
 
-    def get_owner(self) -> "Channel":
+    def get_owner(self) -> Channel:
         assert self.chan is not None
         return self.chan
 
@@ -2026,8 +2008,8 @@ class CopyInstInfo(object):
     @typeassert(src_fid=int, dst_fid=int,
                 src_inst_uid=int, dst_inst_uid=int,
                 fevent=int, indirect=bool)
-    def __init__(self, src: Optional["Memory"], 
-                 dst: Optional["Memory"],
+    def __init__(self, src: Optional[Memory], 
+                 dst: Optional[Memory],
                  src_fid: int, dst_fid: int,
                  src_inst_uid: int, dst_inst_uid: int, 
                  fevent: int, indirect: bool
@@ -2096,7 +2078,6 @@ class CopyInstInfo(object):
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
     
-    # FIXME: fix for python 3.8
     @typecheck
     def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
@@ -2299,7 +2280,6 @@ class FillInstInfo(object):
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'fill_inst_infos']
 
-    # FIXME: fix for python 3.8
     @typecheck
     def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
@@ -2461,10 +2441,9 @@ class MemOperation(Base):
 
     def __init__(self) -> None:
         Base.__init__(self)
-        # FIXME: fix in python3.8
-        self.mem: Optional["Memory"] = None
+        self.mem: Optional[Memory] = None
 
-    def get_owner(self) -> "Memory":
+    def get_owner(self) -> Memory:
         assert self.mem is not None
         return self.mem
 
@@ -2700,8 +2679,7 @@ class TimePoint(object):
         # like the time field above.
         self.time_key = (time, 0 if first is True else 1, secondary_sort_key)
 
-    # Fix in Python 3.8
-    def __cmp__(a: "TimePoint", b: "TimePoint") -> int:
+    def __cmp__(a: TimePoint, b: TimePoint) -> int:
         if a.time_key < b.time_key:
             return -1
         elif a.time_key > b.time_key:
@@ -2709,12 +2687,10 @@ class TimePoint(object):
         else:
             return 0
     
-    # Fix in Python 3.8
-    def __lt__(self, other: "TimePoint") -> bool:
+    def __lt__(self, other: TimePoint) -> bool:
         return self.__cmp__(other) < 0
 
-    # Fix in Python 3.8
-    def __gt__(self, other: "TimePoint") -> bool:
+    def __gt__(self, other: TimePoint) -> bool:
         return self.__cmp__(other) > 0
 
 class Processor(object):
@@ -2945,10 +2921,9 @@ class Processor(object):
 class MemProcAffinity(object):
     __slots__ = ['mem', 'bandwidth', 'latency', 'best_proc_aff']
 
-    # Fix in Python 3.8
     @typeassert(bandwidth=int, latency=int)
     def __init__(self, 
-                 mem: "Memory", 
+                 mem: Memory, 
                  proc: Processor, 
                  bandwidth: int, 
                  latency: int
@@ -3141,16 +3116,13 @@ class Memory(object):
     def __repr__(self) -> str:
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
-    # FIXME in Python 3.8
-    def __cmp__(a: "Memory", b: "Memory") -> int:
+    def __cmp__(a: Memory, b: Memory) -> int:
         return a.mem_id - b.mem_id
 
-    # FIXME in Python 3.8
-    def __lt__(self, other: "Memory") -> bool:
+    def __lt__(self, other: Memory) -> bool:
         return self.__cmp__(other) < 0
 
-    # FIXME in Python 3.8
-    def __gt__(self, other: "Memory") -> bool:
+    def __gt__(self, other: Memory) -> bool:
         return self.__cmp__(other) > 0
 
 
@@ -3362,8 +3334,7 @@ class Channel(object):
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
-    # Fix in Python 3.8
-    def __cmp__(a: "Channel", b: "Channel") -> int:
+    def __cmp__(a: Channel, b: Channel) -> int:
         if a.src:
             if b.src:
                 x = a.src.__cmp__(b.src)
@@ -3396,12 +3367,10 @@ class Channel(object):
                     else:
                         return 0
 
-    # Fix in Python 3.8
-    def __lt__(self, other: "Channel") -> bool:
+    def __lt__(self, other: Channel) -> bool:
         return self.__cmp__(other) < 0
 
-    # Fix in Python 3.8
-    def __gt__(self, other: "Channel") -> bool:
+    def __gt__(self, other: Channel) -> bool:
         return self.__cmp__(other) > 0
 
 class LFSR(object):
@@ -4113,8 +4082,8 @@ class State(object):
 
     @typecheck
     def find_or_create_task(self, op_id: int, variant: Variant, 
-                            create: float =None, ready: float =None, 
-                            start: float =None, stop: float =None
+                            create: Optional[float] =None, ready: Optional[float] =None, 
+                            start: Optional[float] =None, stop: Optional[float] =None
     ) -> Task:
         task = self.find_or_create_op(op_id)
         # Upgrade this operation to a task if necessary
