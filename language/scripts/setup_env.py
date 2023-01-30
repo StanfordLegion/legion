@@ -375,7 +375,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             # this works on macos
             thread_count = multiprocessing.cpu_count()
 
-    gasnet_release_dir = None
+    gasnet_build_dir = None
     conduit = None
     if gasnet_enabled():
         gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
@@ -387,11 +387,12 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         if not cache:
             conduit = discover_conduit()
             conduit_short = short_conduit(conduit)
-            gasnet_release_dir = os.path.join(gasnet_dir, 'release')
+            gasnet_build_type = 'debug' if os.environ.get('GASNET_DEBUG') == '1' else 'release'
+            gasnet_build_dir = os.path.join(gasnet_dir, gasnet_build_type)
             gasnet_build_result = os.path.join(
-                gasnet_release_dir, '%s-conduit' % conduit_short,
+                gasnet_build_dir, '%s-conduit' % conduit_short,
                 'libgasnet-%s-par.a' % conduit_short)
-            if not os.path.exists(gasnet_release_dir):
+            if not os.path.exists(gasnet_build_dir):
                 try:
                     build_gasnet(gasnet_dir, conduit, gasnet_version)
                 except Exception as e:
@@ -491,7 +492,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
 
     if not cache:
         build_regent(root_dir, legion_use_cmake, cmake_exe, extra_flags,
-                     gasnet_release_dir, llvm_install_dir, terra_dir, hdf_install_dir,
+                     gasnet_build_dir, llvm_install_dir, terra_dir, hdf_install_dir,
                      conduit, thread_count)
 
 if __name__ == '__main__':
