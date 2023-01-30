@@ -1,29 +1,27 @@
 # Region Instances
 ## Introduction
-Realm stores application data in `RegionInstances`. Each
-region instance is associated with a particular `Memory`. The data
-stored in this memory can only be moved by means of a copy operation.
+Realm stores application data in `RegionInstances`, which are associated
+with a particular `Memory`. Any data migration involves a copy
+operation.
 
 ## Instance Layouts
-Realm offers a public interface such as `create_instance` to create
-instance objects.
-A `create_instance` call returns an event
-handle which can be used as a precondition for any subsequent Realm
-operation. A `block_size` argument allows to specify an instance
-layout which can be 0 for structure of arrays `SOA`, 1 for arrays of
-structures `AOS` and 2 for hybrid layouts.
+Realm provides a public API, `create_instance`, for creating instance
+objects. This call returns an event handle, which can be used as a
+precondition for any subsequent Realm operations. Additionally, the
+`block_size` arguments allows users to specify the instance layout;
+this can be set to 0 for a Structure of Arrays (SOA) layout, 1 for
+Array of Structures (AOS) layout, or 2 for a hybrid layout.
 
-At line 79 we create a region instance with `AOS` (physicall layout) that
-encompasses two logical layouts `InstanceLogicalLayout1` and
-`InstanceLogicalLayout2`. The layouts are referrenced by the `FieldID`
-and supplied to an instance interface as part of the `field_sizes` map
-(line 74).
+At line 79 we create a region instance with `AOS` as the physical
+layout. This region encompasses two logical layouts `InstanceLogicalLayout1`
+and `InstanceLogicalLayout2`. The `FieldID` of these layouts are supplied
+to an instance interface through the `field_sizes` map (line 74).
 
-The `AOS` defines that all fields of an element `i` for
-`InstanceLogicalLayout1`
-will be stored  before the fields of an element `i+1`. On the contrary,
-`SOA`defines that fields `x` of all elements of `InstanceLogicalLayout1`
-are stored consecutively before the fields `y`.
+The `AOS` layout defines that the fields of an element `i` for
+`InstanceLogicalLayout1` should be stored before those of elememt
+`i+1`. On the other hand, `SOA` (Structure of Arrays) defines that the
+fields `x` for all elements of `InstanceLayout1` are stored
+consecutively before the fields `y`.
 
 ```c++
   class REALM_PUBLIC_API RegionInstance {
@@ -45,17 +43,17 @@ are stored consecutively before the fields `y`.
 It may be necessary for a task to directly access data stored in a
 region instance. Realm offers a set of accessors such as
 `AffineAccessor`, `MultiAffineAccessor` and `GenericAccessor` that
-enable users to access individual elements. For example, `AffineAccessor` 
-works only for data with affine layouts and local to the node on which
-the the task is running.
-`MultiAffineAccessor` extends the previous accessor by handling
-instances with multiple affine pieces whereas `GenericAccessor` (as the name
-suggests) handles all layouts for both local and remote data.
+allow users to access individual elements. For example, `AffineAccessor` 
+is designed to work only for data with an affine layout and that is
+local to the node on which the task is running. `MultiAffineAccessor`
+extends the previous accessor by handling instances with multiple
+affine pieces, while `GenericAccessor` (as the name suggests) handles
+all layouts, both local and remote.
 
-In this example, the region instance is created with the affine layout and
+In this example, the region instance is created with an affine layout and
 stored locally to the `top_level_task`. Therefore, it is valid to
-access data with the `AffineAccessor` which is demonstrated at lines 38
-and 50 correspondingly.
+access data with the `AffineAccessor`, as demonstrated at lines 38
+and 50.
 
 TODO: Discuss hybrid layouts. \
 TODO: Discuss reduction instances. \
