@@ -39,6 +39,7 @@ import time
 import itertools
 import io
 import csv, _csv
+import statistics
 from functools import reduce
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -769,13 +770,16 @@ class StatObject(object):
                         total_calls: int, 
                         total_execution_time: float,
                         max_call: float, max_dev: float, 
-                        min_call: float, min_dev: float
+                        min_call: float, min_dev: float,
+                        median: float, stddev: float 
     ) -> None:
         avg = total_execution_time / float(total_calls) \
                 if total_calls > 0 else 0
         print('       Total Invocations: %d' % total_calls)
         print('       Total Time: %.2f us' % total_execution_time)
         print('       Average Time: %.2f us' % avg)
+        print('       Median Time: %.2f us' % median)
+        print('       Stdev: %.2f us' % stddev)
         print('       Maximum Time: %.2f us (%.3f sig)' % (max_call,max_dev))
         print('       Minimum Time: %.2f us (%.3f sig)' % (min_call,min_dev))
 
@@ -788,19 +792,22 @@ class StatObject(object):
         avg = float(total_execution_time) / float(total_calls)
         max_call = max(self.max_call.values())
         min_call = min(self.min_call.values())
+        alltimes = []
         stddev = 0.0
         for proc_calls in self.all_calls.values():
             for call in proc_calls:
+                alltimes.append(float(call))
                 diff = float(call) - avg
-                stddev += math.sqrt(diff * diff)
+                stddev += diff * diff
         stddev /= float(total_calls)
         stddev = math.sqrt(stddev)
+        median = statistics.median(alltimes)
         max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
         min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
 
         print('  '+repr(self))
         self.print_task_stat(total_calls, total_execution_time,
-                max_call, max_dev, min_call, min_dev)
+                max_call, max_dev, min_call, min_dev, median, stddev)
         print()
 
         if verbose and len(procs) > 1:
@@ -808,11 +815,14 @@ class StatObject(object):
                 avg = float(self.total_execution_time[proc]) / float(self.total_calls[proc]) \
                         if self.total_calls[proc] > 0 else 0
                 stddev = 0
+                alltimes = []
                 for call in self.all_calls[proc]:
+                    alltimes.append(float(call))
                     diff = float(call) - avg
-                    stddev += math.sqrt(diff * diff)
+                    stddev += diff * diff
                 stddev /= float(self.total_calls[proc])
                 stddev = math.sqrt(stddev)
+                median = statistics.median(alltimes)
                 max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
                 min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
 
@@ -820,7 +830,8 @@ class StatObject(object):
                 self.print_task_stat(self.total_calls[proc],
                         self.total_execution_time[proc],
                         self.max_call[proc], max_dev,
-                        self.min_call[proc], min_dev)
+                        self.min_call[proc], min_dev,
+                        median, stddev)
                 print()
 
 class Field(StatObject):
