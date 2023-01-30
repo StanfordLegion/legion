@@ -89,6 +89,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
                                   /*AOS=*/1, ProfilingRequestSet())
       .wait();
 
+  assert(inst.address_space() == p.address_space());
+
   update<InstanceLogicalLayout1, int, float>(inst, bounds, FID1, /*add=*/1);
   update<InstanceLogicalLayout2, long long, double>(inst, bounds, FID2,
                                                     /*add=*/2);

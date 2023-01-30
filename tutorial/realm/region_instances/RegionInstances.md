@@ -25,8 +25,6 @@ will be stored  before the fields of an element `i+1`. On the contrary,
 `SOA`defines that fields `x` of all elements of `InstanceLogicalLayout1`
 are stored consecutively before the fields `y`.
 
-TODO: Disucss hybrid.
-
 ```c++
   class REALM_PUBLIC_API RegionInstance {
   public:
@@ -59,7 +57,9 @@ stored locally to the `top_level_task`. Therefore, it is valid to
 access data with the `AffineAccessor` which is demonstrated at lines 38
 and 50 correspondingly.
 
-TODO: Discuss reduction instances.
+TODO: Discuss hybrid layouts. \
+TODO: Discuss reduction instances. \
+TODO: Discuss deferred allocation.
 
 
 ```c++
