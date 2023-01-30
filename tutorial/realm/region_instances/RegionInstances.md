@@ -1,20 +1,19 @@
 # Region Instances
 ## Introduction
 Realm stores application data in `RegionInstances`. Each
-`RegionInstance` is associated with a particular `Memory`. Data
-stored in this memory cannot be moved and data migration in Realm
-results in a copy operation.
+region instance is associated with a particular `Memory`. The data
+stored in this memory can only be moved by means of a copy operation.
 
 ## Instance Layouts
 Realm offers a public interface such as `create_instance` to create
 instance objects.
-A `create_instance` call returns an `Event`
+A `create_instance` call returns an event
 handle which can be used as a precondition for any subsequent Realm
 operation. A `block_size` argument allows to specify an instance
 layout which can be 0 for structure of arrays `SOA`, 1 for arrays of
 structures `AOS` and 2 for hybrid layouts.
 
-At line 79 we create a region instance with an `AOS` (physicall layout) that
+At line 79 we create a region instance with `AOS` (physicall layout) that
 encompasses two logical layouts `InstanceLogicalLayout1` and
 `InstanceLogicalLayout2`. The layouts are referrenced by the `FieldID`
 and supplied to an instance interface as part of the `field_sizes` map
@@ -22,9 +21,11 @@ and supplied to an instance interface as part of the `field_sizes` map
 
 The `AOS` defines that all fields of an element `i` for
 `InstanceLogicalLayout1`
-are stored  before fields of an element `i+1`. On the contrary
-`SOA`defines that fields `x` for all elements of `InstanceLogicalLayout1`
-are stored consecutively before the fields `y`. TODO: hybrid
+will be stored  before the fields of an element `i+1`. On the contrary,
+`SOA`defines that fields `x` of all elements of `InstanceLogicalLayout1`
+are stored consecutively before the fields `y`.
+
+TODO: Disucss hybrid.
 
 ```c++
   class REALM_PUBLIC_API RegionInstance {
