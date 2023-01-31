@@ -229,10 +229,12 @@ cache: &global_cache
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
-  KOKKOS_BRANCH: "master"
+  KOKKOS_BRANCH: "release-candidate-4.0.0"
+  KOKKOS_COMMIT: "14deae4036aa7165c55fc53bf8634f654ac6e257"
   KOKKOS_CUDA_ARCH: "PASCAL60"
   KKERNELS_REPO: "https://github.com/kokkos/kokkos-kernels.git"
-  KKERNELS_BRANCH: "master"
+  KKERNELS_BRANCH: "develop"
+  KKERNELS_COMMIT: "bce06df1aa1fc0634aecfb579eb41341db9c9bcf"
 
 .prof: &prof
   USE_PROF: "1"
@@ -398,11 +400,21 @@ before_script:
       tar -zxf cmake-3.16.7-Linux-x86_64.tar.gz
       PATH=`pwd`/cmake-3.16.7-Linux-x86_64/bin:$PATH
 
-      git clone --depth 1 -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
-      git -C kokkos log -n 1
+      # git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
+      # FIXME (Wei): since we are using the dev branch, pick a stable hash for now
+      #   remove it once the dev branch has been merged into master
+      # git -C kokkos checkout 14deae4036aa7165c55fc53bf8634f654ac6e257
+      # git -C kokkos log -n 1
+      mkdir kokkos
+      cd kokkos
+      git init
+      git remote add origin $KOKKOS_REPO
+      git fetch --depth 1 origin $KOKKOS_COMMIT
+      git checkout FETCH_HEAD
+      cd ..
       mkdir kokkos/build
       cd kokkos/build
-      KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DKokkos_CXX_STANDARD=${CXX_STANDARD}"
+      KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
       # the following line is a workaround for Kokkos issue #2652
       KOKKOS_CMAKE_OPTS="$KOKKOS_CMAKE_OPTS -DCMAKE_CXX_FLAGS=-DKOKKOS_IMPL_TURN_OFF_CUDA_HOST_INIT_CHECK"
       if [[ "$USE_OPENMP" -eq 1 ]]; then
@@ -445,27 +457,42 @@ before_script:
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
 
-      # now build kokkos-kernels - unless we've got cuda and clang (since
-      #  kokkos-kernels fails to build for clang7 at least)
-      if [[ "$CXX" != *clang* || "$USE_CUDA" -ne 1 ]]; then
-        git clone --depth 1 -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
-        git -C kokkos-kernels log -n 1
-        mkdir kokkos-kernels/build
-        cd kokkos-kernels/build
-        KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install"
-        KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER}"
-        if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
-          KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
-        fi
-        cmake $KKERNELS_CMAKE_OPTS ..
-        make -j$THREADS install
-        cd ../..
-        # tell cmake where to find the Kokkos install
-        export KokkosKernels_DIR=`pwd`/kokkos-kernels/install
-
-        # enable WAR for: https://github.com/kokkos/kokkos-kernels/issues/757
-        export REALM_DEFAULT_ARGS="-cuda:nongpusync 0"
+      # now build kokkos-kernels
+      # git clone -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
+      # FIXME (Wei): since we are using the dev branch, pick a stable hash for now
+      #   remove it once the dev branch has been merged into master
+      # git -C kokkos-kernels checkout bce06df1aa1fc0634aecfb579eb41341db9c9bcf
+      # git -C kokkos-kernels log -n 1
+      mkdir kokkos-kernels
+      cd kokkos-kernels
+      git init
+      git remote add origin $KKERNELS_REPO
+      git fetch --depth 1 origin $KKERNELS_COMMIT
+      git checkout FETCH_HEAD
+      cd ..
+      mkdir kokkos-kernels/build
+      cd kokkos-kernels/build
+      KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
+      # FIXME (Wei): disable sparse for now because it does not compile
+      KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER} -DKokkosKernels_ENABLE_ALL_COMPONENTS=OFF -DKokkosKernels_ENABLE_BLAS=ON -DKokkosKernels_ENABLE_SPARSE=OFF"
+      if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
+        KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
       fi
+      echo cmake $KKERNELS_CMAKE_OPTS ..
+      cmake $KKERNELS_CMAKE_OPTS ..
+      make -j$THREADS install
+      cd ../..
+      # tell cmake where to find the Kokkos install
+      export KokkosKernels_DIR=`pwd`/kokkos-kernels/install
+
+      # enable WAR for: https://github.com/kokkos/kokkos-kernels/issues/757
+      export REALM_DEFAULT_ARGS="-cuda:nongpusync 0"
+
+      if [[ "$USE_CUDA" -eq 1 ]]; then
+        # There are warnings when compiling kokkos_interop.cc, so disable WARN_AS_ERROR
+        export WARN_AS_ERROR=0
+      fi
+
     fi
   - |
     if [[ "$TEST_JUPYTER" -eq 1 ]]; then
@@ -1377,30 +1404,30 @@ clang12_cxx17_debug_kokkos_legion:
   variables:
     <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion]
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
-clang9_cxx17_debug_kokkos_openmp_legion:
+clang10_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_kokkos_openmp, *tests]
   variables:
-    <<: [*clang9, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+    <<: [*clang10, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
 # clang14_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
 #     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
-p100_cuda102_clang7_cxx14_debug_kokkos_cuda_legion:
+p100_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda102, *kokkos, *cmake, *legion]
-p100_cuda102_clang7_cxx14_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion]
+p100_cuda112_clang10_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang7, *debug, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
-p100_cuda102_gcc8_cxx14_debug_kokkos_cuda_openmp_legion:
+    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
+p100_cuda112_gcc9_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *debug, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest]
-p100_cuda102_gcc8_cxx14_debug_shared_kokkos_cuda_openmp_legion:
+    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest]
+p100_cuda112_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc8, *debug, *shared, *cxx14_normal, *p100_cuda102, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
+    <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 
 # HPCSDK (nvc++) tests:
 hpcsdk2211_cxx11_release_legion:
