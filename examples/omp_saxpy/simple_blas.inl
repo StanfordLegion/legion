@@ -121,7 +121,7 @@ inline void BlasTaskImplementations<T>::preregister_tasks(void)
 #else
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
 #endif
-    Runtime::preregister_task_variant<T, BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
+    Runtime::preregister_task_variant<T, &BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
   }
 }
 

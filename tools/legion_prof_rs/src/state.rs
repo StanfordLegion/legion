@@ -9,6 +9,7 @@ use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
 
+use crate::num_util::Postincrement;
 use crate::serialize::Record;
 use crate::spy;
 
@@ -371,8 +372,7 @@ impl Proc {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
                 } else {
-                    self.max_levels += 1;
-                    self.max_levels
+                    self.max_levels.postincrement()
                 };
                 self.entry_mut(point.entry).base.set_level(level);
             } else {
@@ -390,8 +390,7 @@ impl Proc {
                 let level = if let Some(level) = free_levels_ready.pop() {
                     level.0
                 } else {
-                    self.max_levels_ready += 1;
-                    self.max_levels_ready
+                    self.max_levels_ready.postincrement()
                 };
                 self.entry_mut(point.entry).base.set_level_ready(level);
             } else {
@@ -733,8 +732,7 @@ impl Chan {
                 let level = if let Some(level) = free_levels.pop() {
                     level.0
                 } else {
-                    self.max_levels += 1;
-                    self.max_levels
+                    self.max_levels.postincrement()
                 };
                 self.entry_mut(point.entry).base().set_level(level);
             } else {

@@ -607,6 +607,16 @@ if(Legion_USE_Kokkos)
     list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
   endif()
 
+  if(Legion_USE_OpenMP)
+    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
+    #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
+    if(Legion_USE_CUDA)
+      list(APPEND kokkos_compile_options "-Xcompiler")
+      message(STATUS "Looking ${kokkos_compile_options}")
+    endif()
+    list(APPEND kokkos_compile_options "${OpenMP_CXX_FLAGS}")
+  endif()
+
   # and then finally, tell clang (if it is clang) where to find CUDA
   if(Legion_USE_CUDA AND (KOKKOS_CXX_COMPILER MATCHES ".*clang.*"))
     list(APPEND kokkos_compile_options "--cuda-path=${CUDA_TOOLKIT_ROOT_DIR}")
