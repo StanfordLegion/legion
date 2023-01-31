@@ -1,10 +1,17 @@
 # Region Instances
 ## Introduction
-Realm stores application data in `RegionInstances`, which are associated
-with a particular `Memory`. Any data migration involves a copy
-operation.
+In this example, we will show you how to manage application data
+inside Realm programs. We will create a single `top_level_task` that
+will write, read and verify some simple application data stored in an
+entity called `RegionInstance`.
 
-## Instance Layouts
+## Creating Instance
+`RegionInstances` are used to store application
+are allocated in a specific memory location. Once a `RegionInstance` is
+created, it cannot be moved. If an application requires the data to be
+migrated or replicated, then a new RegionInstance must be created and a
+`copy` operation must be initiated to move the data between them.
+
 Realm provides a public API, `create_instance`, for creating instance
 objects. This call returns an event handle, which can be used as a
 precondition for any subsequent Realm operations. Additionally, the
@@ -12,10 +19,10 @@ precondition for any subsequent Realm operations. Additionally, the
 this can be set to 0 for a Structure of Arrays (SOA) layout, 1 for
 Array of Structures (AOS) layout, or 2 for a hybrid layout.
 
-At line 79 we create a region instance with `AOS` as the physical
+At line:79 we create a region instance with `AOS` as the physical
 layout. This region encompasses two logical layouts `InstanceLogicalLayout1`
 and `InstanceLogicalLayout2`. The `FieldID` of these layouts are supplied
-to an instance interface through the `field_sizes` map (line 74).
+to an instance interface through the `field_sizes` map (line:74).
 
 The `AOS` layout defines that the fields of an element `i` for
 `InstanceLogicalLayout1` should be stored before those of elememt
@@ -39,7 +46,7 @@ consecutively before the fields `y`.
    }
 ```
 
-## Accessors
+## Accessing Data
 It may be necessary for a task to directly access data stored in a
 region instance. Realm offers a set of accessors such as
 `AffineAccessor`, `MultiAffineAccessor` and `GenericAccessor` that
@@ -48,12 +55,10 @@ is designed to work only for data with an affine layout and that is
 local to the node on which the task is running. `MultiAffineAccessor`
 extends the previous accessor by handling instances with multiple
 affine pieces, while `GenericAccessor` (as the name suggests) handles
-all layouts, both local and remote.
-
-In this example, the region instance is created with an affine layout and
-stored locally to the `top_level_task`. Therefore, it is valid to
-access data with the `AffineAccessor`, as demonstrated at lines 38
-and 50.
+all layouts, both local and remote. In this example, the region instance is created
+with an affine layout and stored locally to the `top_level_task`.
+Therefore, it is valid to access data with the `AffineAccessor`, as
+demonstrated at lines 38 and 50.
 
 TODO: Discuss hybrid layouts. \
 TODO: Discuss reduction instances. \
