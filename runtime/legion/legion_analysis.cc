@@ -18706,7 +18706,7 @@ namespace Legion {
         {
           anticondition_updates->merge(*tracing_anticonditions);
           if (unpack_references)
-            precondition_updates->unpack_references();
+            anticondition_updates->unpack_references();
         }
       }
       if (postcondition_updates != NULL)
@@ -18723,7 +18723,7 @@ namespace Legion {
         {
           postcondition_updates->merge(*tracing_postconditions);
           if (unpack_references)
-            precondition_updates->unpack_references();
+            postcondition_updates->unpack_references();
         }
       }
     }
