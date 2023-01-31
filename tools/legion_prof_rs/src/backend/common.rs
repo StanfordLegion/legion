@@ -66,14 +66,20 @@ pub trait StatePostprocess {
         owners: BTreeSet<ChanID>,
     ) -> Vec<(Timestamp, f64)>;
 
+    fn op_provenance(&self, op_id: OpID) -> Option<String>;
+
     fn proc_entry_name(&self, entry: &ProcEntry) -> String;
     fn proc_entry_color(&self, entry: &ProcEntry) -> Color;
+    fn proc_entry_provenance(&self, entry: &ProcEntry) -> Option<String>;
 
     fn mem_inst_name(&self, entry: &Inst) -> String;
     fn mem_inst_color(&self, entry: &Inst) -> Color;
+    fn mem_inst_provenance(&self, entry: &Inst) -> Option<String>;
 
+    fn chan_entry_initiation(&self, entry: ChanEntryRef) -> OpID;
     fn chan_entry_name(&self, entry: ChanEntryRef) -> String;
     fn chan_entry_color(&self, entry: ChanEntryRef) -> Color;
+    fn chan_entry_provenance(&self, entry: ChanEntryRef) -> Option<String>;
 }
 
 impl StatePostprocess for State {
@@ -500,6 +506,17 @@ impl StatePostprocess for State {
         }
     }
 
+    fn op_provenance(&self, op_id: OpID) -> Option<String> {
+        self.find_op(op_id).and_then(|op| op.provenance.clone())
+    }
+
+    fn proc_entry_provenance(&self, entry: &ProcEntry) -> Option<String> {
+        if let Some(op_id) = entry.op_id {
+            return self.op_provenance(op_id);
+        }
+        None
+    }
+
     fn mem_inst_name(&self, inst: &Inst) -> String {
         format!("{}", InstPretty(inst, self))
     }
@@ -507,6 +524,21 @@ impl StatePostprocess for State {
     fn mem_inst_color(&self, inst: &Inst) -> Color {
         let initiation = inst.op_id;
         self.get_op_color(initiation.unwrap())
+    }
+
+    fn mem_inst_provenance(&self, inst: &Inst) -> Option<String> {
+        if let Some(initiation) = inst.op_id {
+            return self.op_provenance(initiation);
+        }
+        None
+    }
+
+    fn chan_entry_initiation(&self, entry: ChanEntryRef) -> OpID {
+        match entry {
+            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
+            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
+            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
+        }
     }
 
     fn chan_entry_name(&self, entry: ChanEntryRef) -> String {
@@ -546,12 +578,13 @@ impl StatePostprocess for State {
     }
 
     fn chan_entry_color(&self, entry: ChanEntryRef) -> Color {
-        let initiation = match entry {
-            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
-            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
-            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
-        };
+        let initiation = self.chan_entry_initiation(entry);
         self.get_op_color(initiation)
+    }
+
+    fn chan_entry_provenance(&self, entry: ChanEntryRef) -> Option<String> {
+        let initiation = self.chan_entry_initiation(entry);
+        self.op_provenance(initiation)
     }
 }
 

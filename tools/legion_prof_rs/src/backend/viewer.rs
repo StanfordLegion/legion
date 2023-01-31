@@ -319,11 +319,22 @@ impl StateDataSource {
             let color = self.state.proc_entry_color(entry);
             let color: Color32 = color.into();
 
+            let provenance = self.state.proc_entry_provenance(entry);
+
             let mut fields = Vec::new();
             if expand {
                 fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
+            if let Some(op_id) = entry.op_id {
+                fields.push(("Operation".to_owned(), Field::U64(op_id.0)));
+            }
+            if let Some(initiation_op) = entry.initiation_op {
+                fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
+            }
+            if let Some(provenance) = provenance {
+                fields.push(("Provenance".to_owned(), Field::String(provenance)));
+            }
             let item = Item {
                 interval: view_interval,
                 color,
@@ -373,11 +384,19 @@ impl StateDataSource {
             let color = self.state.mem_inst_color(inst);
             let color: Color32 = color.into();
 
+            let provenance = self.state.mem_inst_provenance(inst);
+
             let mut fields = Vec::new();
             if expand {
                 fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
+            if let Some(initiation_op) = inst.op_id {
+                fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
+            }
+            if let Some(provenance) = provenance {
+                fields.push(("Provenance".to_owned(), Field::String(provenance)));
+            }
             let item = Item {
                 interval: view_interval,
                 color,
@@ -427,11 +446,18 @@ impl StateDataSource {
             let color = self.state.chan_entry_color(entry);
             let color: Color32 = color.into();
 
+            let initiation_op = self.state.chan_entry_initiation(entry);
+            let provenance = self.state.chan_entry_provenance(entry);
+
             let mut fields = Vec::new();
             if expand {
                 fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
+            fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
+            if let Some(provenance) = provenance {
+                fields.push(("Provenance".to_owned(), Field::String(provenance)));
+            }
             let item = Item {
                 interval: view_interval,
                 color,
