@@ -2,15 +2,15 @@ use std::io;
 
 use rayon::prelude::*;
 
-use legion_prof::analyze::print_statistics;
+#[cfg(feature = "viewer")]
+use legion_prof::backend::viewer;
+use legion_prof::backend::{analyze, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
 use legion_prof::spy;
 use legion_prof::state::{Records, SpyState, State, Timestamp};
-use legion_prof::trace_viewer::emit_trace;
-use legion_prof::visualize::emit_interactive_visualization;
 
 fn main() -> io::Result<()> {
-    let matches = clap::App::new("Integrity Checker")
+    let matches = clap::App::new("Legion Prof")
         .about("Legion Prof: application profiler")
         .arg(
             clap::Arg::with_name("filenames")
@@ -68,6 +68,11 @@ fn main() -> io::Result<()> {
                 .long("trace-viewer")
                 .help("emit JSON for Google Trace Viewer"),
         )
+        .arg(
+            clap::Arg::with_name("view")
+                .long("view")
+                .help("start interactive profile viewer"),
+        )
         .get_matches();
 
     let filenames = matches.values_of_os("filenames").unwrap();
@@ -75,6 +80,7 @@ fn main() -> io::Result<()> {
     let force = matches.is_present("force");
     let statistics = matches.is_present("stats");
     let trace = matches.is_present("trace");
+    let view = matches.is_present("view");
     let start_trim = matches
         .value_of("start-trim")
         .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
@@ -87,6 +93,14 @@ fn main() -> io::Result<()> {
     let message_percentage = matches
         .value_of("message-percentage")
         .map_or(5.0, |x| x.parse::<f64>().unwrap());
+
+    #[cfg(not(feature = "viewer"))]
+    if view {
+        panic!(
+            "Legion Prof was not build with the \"viewer\" feature. \
+                Rebuild with --features=viewer to enable."
+        );
+    }
 
     let filenames: Vec<_> = filenames.collect();
     let records: Result<Vec<Records>, _> = filenames
@@ -126,12 +140,18 @@ fn main() -> io::Result<()> {
     state.sort_time_range();
     state.check_message_latencies(message_threshold, message_percentage);
     if statistics {
-        print_statistics(&state);
+        analyze::print_statistics(&state);
     } else if trace {
-        emit_trace(&state, output, force)?;
+        trace_viewer::emit_trace(&state, output, force)?;
+    } else if view {
+        #[cfg(feature = "viewer")]
+        {
+            state.assign_colors();
+            viewer::start(state);
+        }
     } else {
         state.assign_colors();
-        emit_interactive_visualization(&state, &spy_state, output, force)?;
+        visualize::emit_interactive_visualization(&state, &spy_state, output, force)?;
     }
 
     Ok(())

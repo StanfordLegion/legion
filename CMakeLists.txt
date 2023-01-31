@@ -972,7 +972,7 @@ if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
 
   corrosion_import_crate(
     MANIFEST_PATH tools/legion_prof_rs/Cargo.toml
-    PROFILE $<IF:$<BOOL:$<$<CONFIG:Debug>:1>>,dev,release>
+    PROFILE release
   )
 
   install(
