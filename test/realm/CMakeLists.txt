@@ -53,8 +53,6 @@ list(APPEND REALM_TESTS
   multiaffine
   )
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++${CMAKE_CXX_STANDARD})
-
 if(Legion_USE_CUDA)
   set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 

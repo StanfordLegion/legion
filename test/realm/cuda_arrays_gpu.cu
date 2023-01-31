@@ -6,19 +6,19 @@ __device__ float read_surface(cudaSurfaceObject_t s, int x, int y, int z);
 template <>
 __device__ float read_surface<1>(cudaSurfaceObject_t s, int x, int y, int z)
 {
-  return surf1Dread<float>(s, x * sizeof(float), cudaBoundaryModeClamp);
+  return surf1Dread<float>(s, x * (int)sizeof(float), cudaBoundaryModeClamp);
 }
 
 template <>
 __device__ float read_surface<2>(cudaSurfaceObject_t s, int x, int y, int z)
 {
-  return surf2Dread<float>(s, x * sizeof(float), y, cudaBoundaryModeClamp);
+  return surf2Dread<float>(s, x * (int)sizeof(float), y, cudaBoundaryModeClamp);
 }
 
 template <>
 __device__ float read_surface<3>(cudaSurfaceObject_t s, int x, int y, int z)
 {
-  return surf3Dread<float>(s, x * sizeof(float), y, z, cudaBoundaryModeClamp);
+  return surf3Dread<float>(s, x * (int)sizeof(float), y, z, cudaBoundaryModeClamp);
 }
 
 template <int N>
@@ -29,21 +29,33 @@ template <>
 __device__ void write_surface<1>(float f, cudaSurfaceObject_t s,
                                  int x, int y, int z)
 {
+#if CUDART_VERSION <= 8000
+  surf1Dwrite(f, s, x * sizeof(float));
+#else
   surf1Dwrite<float>(f, s, x * sizeof(float));
+#endif
 }
 
 template <>
 __device__ void write_surface<2>(float f, cudaSurfaceObject_t s,
                                  int x, int y, int z)
 {
+#if CUDART_VERSION <= 8000
+  surf2Dwrite(f, s, x * sizeof(float), y);
+#else
   surf2Dwrite<float>(f, s, x * sizeof(float), y);
+#endif
 }
 
 template <>
 __device__ void write_surface<3>(float f, cudaSurfaceObject_t s,
                                  int x, int y, int z)
 {
+#if CUDART_VERSION <= 8000
+  surf3Dwrite(f, s, x * sizeof(float), y, z);
+#else
   surf3Dwrite<float>(f, s, x * sizeof(float), y, z);
+#endif
 }
 
 template <int N, typename T>
