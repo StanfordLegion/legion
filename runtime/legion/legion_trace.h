@@ -540,8 +540,10 @@ namespace Legion {
     /**
      * \class TraceViewSet
      * The trace view set stores a temporary collection of instance views
-     * with valid expressions and fields for each instance. Note that we
-     * use private inheritance with LegionHeapify to ensure that 
+     * with valid expressions and fields for each instance. We maintain 
+     * the important invariant here in this class that each physical
+     * instance has at most one view representing it, which requires
+     * anti-aliasing collective views.
      */
     class TraceViewSet {
     public:
@@ -553,25 +555,27 @@ namespace Legion {
         std::string to_string(TaskContext *ctx) const;
       };
     public:
-      TraceViewSet(RegionTreeForest *forest, DistributedID owner_did,
+      TraceViewSet(InnerContext *context, DistributedID owner_did,
                    RegionNode *region);
-      TraceViewSet(RegionTreeForest *forest, TraceViewSet &source,
+      TraceViewSet(InnerContext *context, TraceViewSet &source,
                    DistributedID owner_did, RegionNode *region);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
                   IndexSpaceExpression *expr,
-                  const FieldMask &mask);
+                  const FieldMask &mask, bool antialiased = false);
       void invalidate(LogicalView *view,
                       IndexSpaceExpression *expr,
                       const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
-           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
-      void invalidate_all_but(LogicalView*except,
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL, 
+                      bool antialiased = false);
+      void invalidate_all_but(LogicalView *except,
                               IndexSpaceExpression *expr,
                               const FieldMask &mask,
            std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove = NULL,
-           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL);
+           std::map<LogicalView*,unsigned> *view_refs_to_remove = NULL,
+                              bool antialiased = false);
     public:
       bool dominates(LogicalView *view, IndexSpaceExpression *expr, 
                      FieldMask &non_dominated) const;
@@ -584,7 +588,7 @@ namespace Legion {
       bool subsumed_by(const TraceViewSet &set, bool allow_independent,
                        FailedPrecondition *condition = NULL) const;
       bool independent_of(const TraceViewSet &set,
-                       FailedPrecondition *condition = NULL) const;
+                       FailedPrecondition *condition = NULL) const; 
       void record_first_failed(FailedPrecondition *condition = NULL) const;
       void transpose_uniquely(LegionMap<IndexSpaceExpression*,
                                         FieldMaskSet<LogicalView> > &target,
@@ -601,16 +605,28 @@ namespace Legion {
       void unpack_references(void) const;
     public:
       void dump(void) const;
+    public:
+      InstanceView *find_instance_view(const std::vector<DistributedID> &dids);
+    protected:
+      bool has_overlapping_expressions(LogicalView *view,
+                       const FieldMaskSet<IndexSpaceExpression> &left_exprs,
+                       const FieldMaskSet<IndexSpaceExpression> &right_exprs,
+                       FailedPrecondition *condition) const;
+      void antialias_individual_view(IndividualView *view, FieldMask mask);
+      void antialias_collective_view(CollectiveView *view,
+                                     const FieldMask &mask,
+                                     FieldMaskSet<InstanceView> &altviews);
     protected:
       typedef LegionMap<LogicalView*,
                         FieldMaskSet<IndexSpaceExpression> > ViewExprs;
     protected:
-      RegionTreeForest *const forest;
+      InnerContext *const context;
       RegionNode *const region;
       const DistributedID owner_did;
     protected:
       // At most one expression per field
       ViewExprs conditions;
+      bool has_collective_views;
     };
 
     /**

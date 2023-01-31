@@ -9619,25 +9619,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<typename T> template<typename... Args>
-    void CollectiveRefinementTree<T>::visit_leaves(const FieldMask &mask,
-                                                   Args&&... args)
-    //--------------------------------------------------------------------------
-    {
-      for (typename FieldMaskSet<T>::const_iterator it = 
-            refinements.begin(); it != refinements.end(); it++)
-      {
-        const FieldMask &overlap = mask & it->second;
-        if (!overlap)
-          continue;
-        it->first->visit_leaves(overlap, args...);
-      }
-      const FieldMask local_mask = mask - refinements.get_valid_mask();
-      if (!!local_mask)
-        static_cast<T*>(this)->visit_leaf(local_mask, args...);
-    }
-
-    //--------------------------------------------------------------------------
     template<typename T>
     InstanceView* CollectiveRefinementTree<T>::get_instance_view(
                                   InnerContext *context, RegionTreeID tid) const
@@ -9665,6 +9646,8 @@ namespace Legion {
           result->ready_event.wait();
         InstanceView *view = static_cast<InstanceView*>(
           runtime->find_or_request_logical_view(result->collective_did, ready));
+        if (result->remove_reference())
+          delete result;
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
         return view;
@@ -9828,37 +9811,37 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // MakeCollectiveValid
+    // CollectiveAntiAlias
     /////////////////////////////////////////////////////////////
     
     //--------------------------------------------------------------------------
-    FindCollectiveInvalid::FindCollectiveInvalid(CollectiveView *v)
-      : CollectiveRefinementTree<FindCollectiveInvalid>(v)
+    CollectiveAntiAlias::CollectiveAntiAlias(CollectiveView *v)
+      : CollectiveRefinementTree<CollectiveAntiAlias>(v)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    FindCollectiveInvalid::FindCollectiveInvalid(
+    CollectiveAntiAlias::CollectiveAntiAlias(
                                 std::vector<DistributedID> &&insts,
                                 const FieldMaskSet<IndexSpaceExpression> &valid,
                                 const FieldMask &mask)
-      : CollectiveRefinementTree<FindCollectiveInvalid>(std::move(insts))
+      : CollectiveRefinementTree<CollectiveAntiAlias>(std::move(insts))
     //--------------------------------------------------------------------------
     {
       analyze((InstanceView*)NULL, mask, valid);
     }
 
     //--------------------------------------------------------------------------
-    FindCollectiveInvalid* FindCollectiveInvalid::clone(InstanceView *view,
+    CollectiveAntiAlias* CollectiveAntiAlias::clone(InstanceView *view,
                 const FieldMask &mask, std::vector<DistributedID> &&insts) const
     //--------------------------------------------------------------------------
     {
-      return new FindCollectiveInvalid(std::move(insts), valid_exprs, mask);
+      return new CollectiveAntiAlias(std::move(insts), valid_exprs, mask);
     }
 
     //--------------------------------------------------------------------------
-    void FindCollectiveInvalid::analyze(InstanceView *view, 
+    void CollectiveAntiAlias::analyze(InstanceView *view, 
                               const FieldMask &mask, IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
     {
@@ -9866,7 +9849,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FindCollectiveInvalid::analyze(InstanceView *view, 
+    void CollectiveAntiAlias::analyze(InstanceView *view, 
          const FieldMask &mask, const FieldMaskSet<IndexSpaceExpression> &exprs)
     //--------------------------------------------------------------------------
     {
@@ -9890,7 +9873,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FindCollectiveInvalid::visit_leaf(const FieldMask &mask,
+    void CollectiveAntiAlias::visit_leaf(const FieldMask &mask,
                   FieldMask &allvalid_mask,
                   IndexSpaceExpression *expr, RegionTreeForest *forest,
                   const FieldMaskSet<IndexSpaceExpression> &partial_valid_exprs)
@@ -9928,6 +9911,60 @@ namespace Legion {
       }
       else
         allvalid_mask.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveAntiAlias::visit_leaf(const FieldMask &mask, 
+                                           FieldMask &allvalid_mask,
+                           FieldMaskSet<IndexSpaceExpression> &non_dominated,
+                           IndexSpaceExpression *expr, RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      if (!valid_exprs.empty())
+      {
+        // Sort into field sets, union, and then compare to the expression
+        LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
+        valid_exprs.compute_field_sets(allvalid_mask, field_sets);
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator it =
+              field_sets.begin(); it != field_sets.end(); it++)
+        {
+          if (!it->elements.empty())
+          {
+            IndexSpaceExpression *valid_expr =
+                (it->elements.size() == 1) ? *(it->elements.begin()) :
+                forest->union_index_spaces(it->elements);
+            IndexSpaceExpression *diff_expr =
+                forest->subtract_index_spaces(expr, valid_expr);
+            if (!diff_expr->is_empty())
+            {
+              non_dominated.insert(diff_expr, it->set_mask);
+              allvalid_mask -= it->set_mask;
+            }
+          }
+          else
+            allvalid_mask -= it->set_mask;
+        }
+      }
+      else
+        allvalid_mask.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveAntiAlias::visit_leaf(const FieldMask &mask, 
+                                         FieldMask &allvalid_mask,
+                                         TraceViewSet &view_set,
+                                         FieldMaskSet<InstanceView> &alt_views)
+    //--------------------------------------------------------------------------
+    {
+      if (valid_exprs.empty())
+        return;
+#ifdef DEBUG_LEGION
+      assert(valid_exprs.size() == 1); // should just have one null entry
+#endif
+      const FieldMask &local_mask = valid_exprs.get_valid_mask();
+      allvalid_mask -= local_mask;
+      InstanceView *view = view_set.find_instance_view(inst_dids);
+      alt_views.insert(view, local_mask);
     }
 
     /////////////////////////////////////////////////////////////
@@ -10635,7 +10672,7 @@ namespace Legion {
             // intances in the collective reduction view are covered
             if (!(invalid_mask - reduction_fields))
             {
-              FindCollectiveInvalid alias_analysis(
+              CollectiveAntiAlias alias_analysis(
                   reduction_view->as_collective_view());
               int fidx = invalid_mask.find_first_set();
               while (fidx >= 0)
@@ -10795,7 +10832,7 @@ namespace Legion {
             // need do an alias analysis with all the valid views on 
             // their instances to see if they cover what we're looking for
             CollectiveView *view = vit->first->as_collective_view();
-            FindCollectiveInvalid alias_analysis(view);
+            CollectiveAntiAlias alias_analysis(view);
             alias_analysis.traverse_total(invalid_mask, set_expr, 
                                           total_valid_instances);
             if (!(invalid_mask * partial_valid_fields))
@@ -11527,8 +11564,7 @@ namespace Legion {
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
-          tracing_postconditions = 
-            new TraceViewSet(runtime->forest, did, region_node);
+          tracing_postconditions = new TraceViewSet(context, did, region_node);
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
           for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -16232,8 +16268,7 @@ namespace Legion {
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
-          tracing_postconditions = 
-            new TraceViewSet(runtime->forest, did, region_node);
+          tracing_postconditions = new TraceViewSet(context, did, region_node);
         const RegionUsage usage(LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, 0);
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
@@ -16921,8 +16956,7 @@ namespace Legion {
         else
           not_dominated.insert(expr, user_mask);
         if (tracing_preconditions == NULL)
-          tracing_preconditions = 
-            new TraceViewSet(runtime->forest, did, region_node);
+          tracing_preconditions = new TraceViewSet(context, did, region_node);
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second);
@@ -16946,8 +16980,7 @@ namespace Legion {
           tracing_postconditions->invalidate_all_but(view, expr, user_mask);
       }
       else
-        tracing_postconditions = 
-          new TraceViewSet(runtime->forest, did, region_node);
+        tracing_postconditions = new TraceViewSet(context, did, region_node);
       tracing_postconditions->insert(view, expr, user_mask);
     }
 
@@ -16958,8 +16991,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (tracing_anticonditions == NULL)
-        tracing_anticonditions =
-          new TraceViewSet(runtime->forest, did, region_node);
+        tracing_anticonditions = new TraceViewSet(context, did, region_node);
       tracing_anticonditions->insert(view, expr, mask);
     }
 
@@ -16997,22 +17029,19 @@ namespace Legion {
       // Compute the views to send back
       if (tracing_preconditions != NULL)
       {
-        previews = 
-          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        previews = new TraceViewSet(context, 0/*no owner*/, region_node);
         tracing_preconditions->find_overlaps(*previews, expr, 
                                              (expr == set_expr), mask);
       }
       if (tracing_anticonditions != NULL)
       {
-        antiviews =
-          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        antiviews = new TraceViewSet(context, 0/*no owner*/, region_node);
         tracing_anticonditions->find_overlaps(*antiviews, expr,
                                              (expr == set_expr), mask);
       }
       if (tracing_postconditions != NULL)
       {
-        postviews =
-          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        postviews = new TraceViewSet(context, 0/*no owner*/, region_node);
         tracing_postconditions->find_overlaps(*postviews, expr,
                                              (expr == set_expr), mask);
       }
@@ -17808,8 +17837,7 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       if (num_preconditions > 0)
       {
-        precondition_updates = 
-          new TraceViewSet(runtime->forest, 0/*did*/, region_node); 
+        precondition_updates = new TraceViewSet(context, 0/*did*/, region_node);
         precondition_updates->unpack(derez, num_preconditions, 
                                      source, ready_events);
       }
@@ -17818,8 +17846,7 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       if (num_anticonditions > 0)
       {
-        anticondition_updates = 
-          new TraceViewSet(runtime->forest, 0/*did*/, region_node); 
+        anticondition_updates = new TraceViewSet(context,0/*did*/,region_node); 
         anticondition_updates->unpack(derez, num_anticonditions, 
                                      source, ready_events);
       }
@@ -17828,8 +17855,7 @@ namespace Legion {
       TraceViewSet *postcondition_updates = NULL;
       if (num_postconditions > 0)
       {
-        postcondition_updates = 
-          new TraceViewSet(runtime->forest, 0/*did*/, region_node); 
+        postcondition_updates = new TraceViewSet(context,0/*did*/,region_node);
         postcondition_updates->unpack(derez, num_postconditions, 
                                      source, ready_events);
       }
@@ -18460,8 +18486,7 @@ namespace Legion {
       {
         if (precondition_updates == NULL)
         {
-          precondition_updates = 
-            new TraceViewSet(runtime->forest, 0/*did*/, region_node);
+          precondition_updates = new TraceViewSet(context,0/*did*/,region_node);
           tracing_preconditions->find_overlaps(*precondition_updates,
                                  overlap_expr, overlap_covers, mask);
           if (precondition_updates->empty())
@@ -18478,8 +18503,8 @@ namespace Legion {
       {
         if (anticondition_updates == NULL)
         {
-          anticondition_updates = 
-            new TraceViewSet(runtime->forest, 0/*did*/, region_node);
+          anticondition_updates =
+            new TraceViewSet(context, 0/*did*/, region_node);
           tracing_anticonditions->find_overlaps(*anticondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (anticondition_updates->empty())
@@ -18497,7 +18522,7 @@ namespace Legion {
         if (postcondition_updates == NULL)
         {
           postcondition_updates = 
-            new TraceViewSet(runtime->forest, 0/*did*/, region_node);
+            new TraceViewSet(context, 0/*did*/, region_node);
           tracing_postconditions->find_overlaps(*postcondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (postcondition_updates->empty())
@@ -18680,7 +18705,7 @@ namespace Legion {
         if (tracing_preconditions == NULL)
         {
           tracing_preconditions =
-            new TraceViewSet(runtime->forest, *precondition_updates, did,
+            new TraceViewSet(context, *precondition_updates, did,
                              region_node);
           if (unpack_references)
             tracing_preconditions->unpack_references();
@@ -18697,7 +18722,7 @@ namespace Legion {
         if (tracing_anticonditions == NULL)
         {
           tracing_anticonditions =
-            new TraceViewSet(runtime->forest, *anticondition_updates, did,
+            new TraceViewSet(context, *anticondition_updates, did,
                              region_node);
           if (unpack_references)
             tracing_anticonditions->unpack_references();
@@ -18714,7 +18739,7 @@ namespace Legion {
         if (tracing_postconditions == NULL)
         {
           tracing_postconditions =
-            new TraceViewSet(runtime->forest, *postcondition_updates, did,
+            new TraceViewSet(context, *postcondition_updates, did,
                              region_node);
           if (unpack_references)
             tracing_postconditions->unpack_references();
@@ -18855,8 +18880,7 @@ namespace Legion {
       {
         if (region_node == NULL)
           region_node = runtime->forest->get_node(handle);
-        previews = 
-          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        previews = new TraceViewSet(target->context, 0/*no owner*/,region_node);
         previews->unpack(derez, num_previews, source, ready_events); 
       }
       size_t num_antiviews;
@@ -18865,8 +18889,7 @@ namespace Legion {
       {
         if (region_node == NULL)
           region_node = runtime->forest->get_node(handle);
-        antiviews =
-          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        antiviews = new TraceViewSet(target->context,0/*no owner*/,region_node);
         antiviews->unpack(derez, num_antiviews, source, ready_events);
       }
       size_t num_postviews;
@@ -18875,8 +18898,7 @@ namespace Legion {
       {
         if (region_node == NULL)
           region_node = runtime->forest->get_node(handle);
-        postviews =
-          new TraceViewSet(runtime->forest, 0/*no owner*/, region_node);
+        postviews = new TraceViewSet(target->context,0/*no owner*/,region_node);
         postviews->unpack(derez, num_postviews, source, ready_events);
       }
       RtUserEvent done_event;

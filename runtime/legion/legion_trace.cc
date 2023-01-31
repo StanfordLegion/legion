@@ -2163,32 +2163,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f, DistributedID own_did, 
+    TraceViewSet::TraceViewSet(InnerContext *ctx, DistributedID own_did, 
                                RegionNode *r)
-      : forest(f), region(r), owner_did(own_did)
+      : context(ctx), region(r), owner_did(
+          (own_did > 0) ? own_did : ctx->did), has_collective_views(false)
     //--------------------------------------------------------------------------
     {
       region->add_nested_resource_ref(owner_did);
+      if (owner_did == ctx->did)
+        context->add_base_resource_ref(TRACE_REF);
+      else
+        context->add_nested_resource_ref(owner_did);
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f, TraceViewSet &source,
+    TraceViewSet::TraceViewSet(InnerContext *ctx, TraceViewSet &source,
                                DistributedID own_did, RegionNode *r)
-      : forest(f), region(r), owner_did(own_did)
+      : context(ctx), region(r), owner_did(
+          (own_did > 0) ? own_did : ctx->did), has_collective_views(false)
     //--------------------------------------------------------------------------
     {
       region->add_nested_resource_ref(owner_did);
+      if (owner_did == ctx->did)
+        context->add_base_resource_ref(TRACE_REF);
+      else
+        context->add_nested_resource_ref(owner_did);
       conditions.swap(source.conditions);
-      if (owner_did > 0)
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); ++vit)
       {
-        for (ViewExprs::const_iterator vit = 
-              conditions.begin(); vit != conditions.end(); ++vit)
-        {
-          vit->first->add_nested_valid_ref(owner_did);
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); ++it)
-            it->first->add_nested_expression_reference(owner_did);
-        }
+        vit->first->add_nested_valid_ref(owner_did);
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); ++it)
+          it->first->add_nested_expression_reference(owner_did);
       }
     }
 
@@ -2196,18 +2203,25 @@ namespace Legion {
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {
-      if (owner_did > 0)
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); vit++)
       {
-        for (ViewExprs::const_iterator vit = 
-              conditions.begin(); vit != conditions.end(); vit++)
-        {
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); it++)
-            if (it->first->remove_nested_expression_reference(owner_did))
-              delete it->first;
-          if (vit->first->remove_nested_valid_ref(owner_did))
-            delete vit->first;
-        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+          if (it->first->remove_nested_expression_reference(owner_did))
+            delete it->first;
+        if (vit->first->remove_nested_valid_ref(owner_did))
+          delete vit->first;
+      }
+      if (owner_did == context->did)
+      {
+        if (context->remove_base_resource_ref(TRACE_REF))
+          delete context;
+      }
+      else
+      {
+        if (context->remove_nested_resource_ref(owner_did))
+          delete context;
       }
       if (region->remove_nested_resource_ref(owner_did))
         delete region;
@@ -2216,7 +2230,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::insert(LogicalView *view, IndexSpaceExpression *expr, 
-                              const FieldMask &mask)
+                              const FieldMask &mask, bool antialiased)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
@@ -2244,11 +2258,12 @@ namespace Legion {
           {
             // Handle the difference fields first before we mutate set_overlap
             FieldMask diff = mask - set_overlap;
-            if (finder->second.insert(expr, mask) && (owner_did > 0))
+            if (finder->second.insert(expr, mask))
               expr->add_nested_expression_reference(owner_did);
           }
           FieldMaskSet<IndexSpaceExpression> to_add;
           std::vector<IndexSpaceExpression*> to_delete;
+          RegionTreeForest *forest = context->runtime->forest;
           for (FieldMaskSet<IndexSpaceExpression>::iterator it =
                 finder->second.begin(); it != finder->second.end(); it++)
           {
@@ -2285,8 +2300,7 @@ namespace Legion {
           }
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
-            if (finder->second.insert(it->first, it->second) && 
-                (owner_did > 0))
+            if (finder->second.insert(it->first, it->second))
               it->first->add_nested_expression_reference(owner_did);
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
@@ -2294,22 +2308,36 @@ namespace Legion {
             if (to_add.find(*it) != to_add.end())
               continue;
             finder->second.erase(*it);
-            if ((owner_did > 0) &&
-                (*it)->remove_nested_expression_reference(owner_did))
+            if ((*it)->remove_nested_expression_reference(owner_did))
               delete (*it);
           }
         }
-        else if (finder->second.insert(expr, mask) && (owner_did > 0))
+        else if (finder->second.insert(expr, mask))
           expr->add_nested_expression_reference(owner_did);
       }
       else
       {
-        if (owner_did > 0)
+        if (!antialiased)
         {
-          view->add_nested_valid_ref(owner_did);
-          expr->add_nested_expression_reference(owner_did);
+          if (view->is_collective_view())
+          {
+            FieldMaskSet<InstanceView> antialiased_views;
+            antialias_collective_view(view->as_collective_view(), mask, 
+                                      antialiased_views);
+            // Now we can insert all the antialiased 
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                 antialiased_views.begin(); it != antialiased_views.end(); it++)
+              insert(it->first, expr, it->second, true/*antialiased*/);
+            return;
+          }
+          else if (has_collective_views && view->is_instance_view())
+            antialias_individual_view(view->as_individual_view(), mask);
         }
+        view->add_nested_valid_ref(owner_did);
+        expr->add_nested_expression_reference(owner_did);
         conditions[view].insert(expr, mask);
+        if (view->is_collective_view())
+          has_collective_views = true;
       }
     }
 
@@ -2317,14 +2345,35 @@ namespace Legion {
     void TraceViewSet::invalidate(
        LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask,
        std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
-       std::map<LogicalView*,unsigned> *view_refs_to_remove)
+       std::map<LogicalView*,unsigned> *view_refs_to_remove, bool antialiased)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
       if ((finder == conditions.end()) || 
           (finder->second.get_valid_mask() * mask))
+      {
+        if (!antialiased)
+        {
+          if (view->is_collective_view())
+          {
+            FieldMaskSet<InstanceView> antialiased_views;
+            antialias_collective_view(view->as_collective_view(), mask, 
+                                      antialiased_views);
+            // Now we can insert all the antialiased 
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                 antialiased_views.begin(); it != antialiased_views.end(); it++)
+              invalidate(it->first, expr, it->second, expr_refs_to_remove,
+                  view_refs_to_remove, true/*antialiased*/);
+          }
+          else if (has_collective_views && view->is_instance_view())
+          {
+            antialias_individual_view(view->as_individual_view(), mask);
+            invalidate(view, expr, mask, expr_refs_to_remove, 
+                view_refs_to_remove, true/*antialiased*/);
+          }
+        }
         return;
-      
+      }
       const size_t expr_volume = expr->get_volume();
       IndexSpaceExpression *const total_expr = region->row_source; 
 #ifdef DEBUG_LEGION
@@ -2338,35 +2387,32 @@ namespace Legion {
         if (!(finder->second.get_valid_mask() - mask))
         {
           // Dominate all fields so just filter everything
-          if (owner_did > 0)
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
           {
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  finder->second.begin(); it != finder->second.end(); it++)
+            if (expr_refs_to_remove != NULL)
             {
-              if (expr_refs_to_remove != NULL)
-              {
-                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
-                  expr_refs_to_remove->find(it->first);
-                if (finder == expr_refs_to_remove->end())
-                  (*expr_refs_to_remove)[it->first] = 1;
-                else
-                  finder->second += 1;
-              }
-              else if (it->first->remove_nested_expression_reference(owner_did))
-                delete it->first;
-            }
-            if (view_refs_to_remove != NULL)
-            {
-              std::map<LogicalView*,unsigned>::iterator finder = 
-                view_refs_to_remove->find(view);
-              if (finder == view_refs_to_remove->end())
-                (*view_refs_to_remove)[view] = 1;
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(it->first);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[it->first] = 1;
               else
                 finder->second += 1;
             }
-            else if (view->remove_nested_valid_ref(owner_did))
-              delete view;
+            else if (it->first->remove_nested_expression_reference(owner_did))
+              delete it->first;
           }
+          if (view_refs_to_remove != NULL)
+          {
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              view_refs_to_remove->find(view);
+            if (finder == view_refs_to_remove->end())
+              (*view_refs_to_remove)[view] = 1;
+            else
+              finder->second += 1;
+          }
+          else if (view->remove_nested_valid_ref(owner_did))
+            delete view;
           conditions.erase(finder);
         }
         else
@@ -2384,37 +2430,31 @@ namespace Legion {
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             finder->second.erase(*it);
-            if (owner_did > 0)
+            if (expr_refs_to_remove != NULL)
             {
-              if (expr_refs_to_remove != NULL)
-              {
-                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
-                  expr_refs_to_remove->find(*it);
-                if (finder == expr_refs_to_remove->end())
-                  (*expr_refs_to_remove)[*it] = 1;
-                else
-                  finder->second += 1;
-              }
-              else if ((*it)->remove_nested_expression_reference(owner_did))
-                delete (*it);
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(*it);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
             }
+            else if ((*it)->remove_nested_expression_reference(owner_did))
+              delete (*it);
           }
           if (finder->second.empty())
           {
-            if (owner_did > 0)
+            if (view_refs_to_remove != NULL)
             {
-              if (view_refs_to_remove != NULL)
-              {
-                std::map<LogicalView*,unsigned>::iterator finder = 
-                  view_refs_to_remove->find(view);
-                if (finder == view_refs_to_remove->end())
-                  (*view_refs_to_remove)[view] = 1;
-                else
-                  finder->second += 1;
-              }
-              else if (view->remove_nested_valid_ref(owner_did))
-                delete view;
+              std::map<LogicalView*,unsigned>::iterator finder = 
+                view_refs_to_remove->find(view);
+              if (finder == view_refs_to_remove->end())
+                (*view_refs_to_remove)[view] = 1;
+              else
+                finder->second += 1;
             }
+            else if (view->remove_nested_valid_ref(owner_did))
+              delete view;
             conditions.erase(finder);
           }
           else
@@ -2426,6 +2466,7 @@ namespace Legion {
         // We need intersection tests as part of filtering
         FieldMaskSet<IndexSpaceExpression> to_add;
         std::vector<IndexSpaceExpression*> to_delete;
+        RegionTreeForest *forest = context->runtime->forest;
         for (FieldMaskSet<IndexSpaceExpression>::iterator it =
               finder->second.begin(); it != finder->second.end(); it++)
         {
@@ -2458,7 +2499,7 @@ namespace Legion {
         }
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               to_add.begin(); it != to_add.end(); it++)
-          if (finder->second.insert(it->first, it->second) && (owner_did > 0))
+          if (finder->second.insert(it->first, it->second))
             it->first->add_nested_expression_reference(owner_did);
         for (std::vector<IndexSpaceExpression*>::const_iterator it =
               to_delete.begin(); it != to_delete.end(); it++)
@@ -2466,37 +2507,31 @@ namespace Legion {
           if (to_add.find(*it) != to_add.end())
             continue;
           finder->second.erase(*it);
-          if (owner_did > 0)
+          if (expr_refs_to_remove != NULL)
           {
-            if (expr_refs_to_remove != NULL)
-            {
-              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
-                expr_refs_to_remove->find(*it);
-              if (finder == expr_refs_to_remove->end())
-                (*expr_refs_to_remove)[*it] = 1;
-              else
-                finder->second += 1;
-            }
-            else if ((*it)->remove_nested_expression_reference(owner_did))
-              delete (*it);
+            std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+              expr_refs_to_remove->find(*it);
+            if (finder == expr_refs_to_remove->end())
+              (*expr_refs_to_remove)[*it] = 1;
+            else
+              finder->second += 1;
           }
+          else if ((*it)->remove_nested_expression_reference(owner_did))
+            delete (*it);
         }
         if (finder->second.empty())
         {
-          if (owner_did > 0)
+          if (view_refs_to_remove != NULL)
           {
-            if (view_refs_to_remove != NULL)
-            {
-              std::map<LogicalView*,unsigned>::iterator finder = 
-                view_refs_to_remove->find(view);
-              if (finder == view_refs_to_remove->end())
-                (*view_refs_to_remove)[view] = 1;
-              else
-                finder->second += 1;
-            }
-            else if (view->remove_nested_valid_ref(owner_did))
-              delete view;
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              view_refs_to_remove->find(view);
+            if (finder == view_refs_to_remove->end())
+              (*view_refs_to_remove)[view] = 1;
+            else
+              finder->second += 1;
           }
+          else if (view->remove_nested_valid_ref(owner_did))
+            delete view;
           conditions.erase(finder);
         }
         else
@@ -2505,12 +2540,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceViewSet::invalidate_all_but(LogicalView*except,
+    void TraceViewSet::invalidate_all_but(LogicalView *except,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
-                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
+         std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+         std::map<LogicalView*,unsigned> *view_refs_to_remove, bool antialiased)
     //--------------------------------------------------------------------------
     {
+      if (!antialiased)
+      {
+        if (except->is_collective_view())
+        {
+          FieldMaskSet<InstanceView> antialiased_views;
+          antialias_collective_view(except->as_collective_view(), mask, 
+                                    antialiased_views);
+          // Now we can insert all the antialiased 
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+               antialiased_views.begin(); it != antialiased_views.end(); it++)
+            invalidate_all_but(it->first, expr, it->second, expr_refs_to_remove,
+                view_refs_to_remove, true/*antialiased*/);
+          return;
+        }
+        else if (has_collective_views && except->is_instance_view())
+          antialias_individual_view(except->as_individual_view(), mask);
+      }
       std::vector<LogicalView*> to_invalidate;
       for (ViewExprs::const_iterator it = 
             conditions.begin(); it != conditions.end(); it++)
@@ -2523,7 +2575,8 @@ namespace Legion {
       }
       for (std::vector<LogicalView*>::const_iterator it = 
             to_invalidate.begin(); it != to_invalidate.end(); it++)
-        invalidate(*it, expr, mask, expr_refs_to_remove, view_refs_to_remove);
+        invalidate(*it, expr, mask, expr_refs_to_remove, 
+                   view_refs_to_remove, true/*antialiased*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2534,10 +2587,6 @@ namespace Legion {
       // If this is for an empty equivalence set then it doesn't matter
       if (expr->is_empty())
         return true;
-      ViewExprs::const_iterator finder = conditions.find(view);
-      if (finder == conditions.end())
-        return false;
-
       const size_t expr_volume = expr->get_volume();
       IndexSpaceExpression *const total_expr = region->row_source;
 #ifdef DEBUG_LEGION
@@ -2545,41 +2594,115 @@ namespace Legion {
       // If we need to we can put in the full intersection test later
       assert(expr_volume <= total_expr->get_volume());
 #endif
-      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+      if (expr_volume == total_expr->get_volume())
+        expr = total_expr;
+      RegionTreeForest *forest = context->runtime->forest;
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder == conditions.end())
       {
-        // Expression is for the whole view, so will only be dominated
-        // by the expression for the full view
-        FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
-          finder->second.find(total_expr);
-        if (expr_finder != finder->second.end())
+        // If we couldn't find it directly then we need to deal with aliasing
+        if (view->is_collective_view())
         {
-          non_dominated -= expr_finder->second;
+          CollectiveAntiAlias alias_analysis(view->as_collective_view());
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
+          {
+            if (!vit->first->is_instance_view())
+              continue;
+            if (vit->second.get_valid_mask() * non_dominated)
+              continue;
+            InstanceView *inst_view = vit->first->as_instance_view();
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = it->second & non_dominated;
+              if (!overlap)
+                continue;
+              alias_analysis.traverse(inst_view, overlap, it->first);
+            }
+          }
+          FieldMask dominated = non_dominated;
+          FieldMaskSet<IndexSpaceExpression> empty_exprs;
+          alias_analysis.visit_leaves(non_dominated, dominated,
+                                      expr, forest, empty_exprs);
+          if (!!dominated)
+            non_dominated -= dominated;
+        }
+        else if (has_collective_views && view->is_instance_view())
+        {
+          IndividualView *individual_view = view->as_individual_view();
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
+          {
+            if (!vit->first->is_collective_view())
+              continue;
+            if (vit->second.get_valid_mask() * non_dominated)
+              continue;
+            if (!individual_view->aliases(vit->first->as_collective_view()))
+              continue;
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = non_dominated & it->second;
+              if (!overlap)
+                continue;
+              if ((it->first != total_expr) && (it->first != expr))
+              {
+                IndexSpaceExpression *intersection = 
+                  forest->intersect_index_spaces(it->first, expr);
+                const size_t volume = intersection->get_volume();
+                if (volume == 0)
+                  continue;
+                // Can only dominate if we have enough points
+                if (volume < expr->get_volume())
+                  continue;
+              }
+              // If we get here we were dominated
+              non_dominated -= overlap;
+              if (!non_dominated)
+                break;
+            }
+          }
+        }
+      } 
+      else
+      {
+        if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+        {
+          // Expression is for the whole view, so will only be dominated
+          // by the expression for the full view
+          FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+            finder->second.find(total_expr);
+          if (expr_finder != finder->second.end())
+          {
+            non_dominated -= expr_finder->second;
+            if (!non_dominated)
+              return true;
+          }
+        }
+        // There is at most one expression per field so just iterate and compare
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          const FieldMask overlap = non_dominated & it->second;
+          if (!overlap)
+            continue;
+          if ((it->first != total_expr) && (it->first != expr))
+          {
+            IndexSpaceExpression *intersection = 
+              forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // Can only dominate if we have enough points
+            if (volume < expr->get_volume())
+              continue;
+          }
+          // If we get here we were dominated
+          non_dominated -= overlap;
           if (!non_dominated)
-            return true;
+            break;
         }
-      }
-      // There is at most one expression per field so just iterate and compare
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        const FieldMask overlap = non_dominated & it->second;
-        if (!overlap)
-          continue;
-        if ((it->first != total_expr) && (it->first != expr))
-        {
-          IndexSpaceExpression *intersection = 
-            forest->intersect_index_spaces(it->first, expr);
-          const size_t volume = intersection->get_volume();
-          if (volume == 0)
-            continue;
-          // Can only dominate if we have enough points
-          if (volume < expr->get_volume())
-            continue;
-        }
-        // If we get here we were dominated
-        non_dominated -= overlap;
-        if (!non_dominated)
-          break;
       }
       // If there are no fields left then we dominated
       return !non_dominated;
@@ -2592,6 +2715,9 @@ namespace Legion {
                             FieldMaskSet<IndexSpaceExpression> *dominated) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(non_dominated.empty());
+#endif
       // If this is for an empty equivalence set then it doesn't matter
       if (expr->is_empty())
       {
@@ -2599,14 +2725,6 @@ namespace Legion {
           dominated->insert(expr, mask);
         return;
       }
-      ViewExprs::const_iterator finder = conditions.find(view);
-      if (finder == conditions.end() ||
-          (finder->second.get_valid_mask() * mask))
-      {
-        non_dominated.insert(expr, mask);
-        return;
-      }
-
       const size_t expr_volume = expr->get_volume();
       IndexSpaceExpression *const total_expr = region->row_source;
 #ifdef DEBUG_LEGION
@@ -2614,62 +2732,157 @@ namespace Legion {
       // If we need to we can put in the full intersection test later
       assert(expr_volume <= total_expr->get_volume());
 #endif
-      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+      if (expr_volume == total_expr->get_volume())
+        expr = total_expr;
+      RegionTreeForest *forest = context->runtime->forest;
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder == conditions.end())
       {
-        // Expression is for the whole view, so will only be dominated
-        // for the full view
-        FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
-          finder->second.find(total_expr);
-        if (expr_finder != finder->second.end())
+        if (view->is_collective_view())
         {
-          const FieldMask overlap = mask & expr_finder->second;
-          if (!!overlap)
+          CollectiveAntiAlias alias_analysis(view->as_collective_view());
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
           {
-            if (dominated != NULL)
-              dominated->insert(expr, overlap); 
-            mask -= overlap;
-            if (!mask)
-              return;
+            if (!vit->first->is_instance_view())
+              continue;
+            if (vit->second.get_valid_mask() * mask)
+              continue;
+            InstanceView *inst_view = vit->first->as_instance_view();
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = it->second & mask;
+              if (!overlap)
+                continue;
+              alias_analysis.traverse(inst_view, overlap, it->first);
+            }
+          } 
+          FieldMask dominated_mask = mask;
+          alias_analysis.visit_leaves(mask, dominated_mask,
+                                      non_dominated, expr, forest);
+          // Group the expressions across fields so there is exactly
+          // one non-dominated expression for each field
+          if (!non_dominated.empty())
+          {
+            LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
+            non_dominated.compute_field_sets(FieldMask(), field_sets);
+            non_dominated.clear();
+            for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator 
+                  it = field_sets.begin(); it != field_sets.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(!it->elements.empty());
+#endif
+              IndexSpaceExpression *non_dominated_expr =
+                (it->elements.size() == 1) ? *(it->elements.begin()) :
+                forest->union_index_spaces(it->elements);
+              non_dominated.insert(non_dominated_expr, it->set_mask);
+            }
+          }
+          if (!!dominated_mask && (dominated != NULL))
+            dominated->insert(expr, dominated_mask);
+        }
+        else if (has_collective_views && view->is_instance_view())
+        {
+          IndividualView *individual_view = view->as_individual_view();
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
+          {
+            if (!vit->first->is_collective_view())
+              continue;
+            if (vit->second.get_valid_mask() * mask)
+              continue;
+            if (!individual_view->aliases(vit->first->as_collective_view()))
+              continue;
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              if ((it->first != total_expr) && (it->first != expr))
+              {
+                IndexSpaceExpression *difference = 
+                  forest->subtract_index_spaces(expr, it->first);
+                if (!difference->is_empty())
+                  non_dominated.insert(difference, overlap);
+                else if (dominated != NULL)
+                  dominated->insert(expr, overlap);
+              }
+              // If we get here we were dominated
+              else if (dominated != NULL)
+                dominated->insert(expr, overlap);
+            }
           }
         }
+        // If we get here then these fields are definitely not dominated
+#ifdef DEBUG_LEGION
+        assert(!!mask);
+#endif
+        non_dominated.insert(expr, mask);
       }
-      // There is at most one expression per field so just iterate and compare
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-            finder->second.begin(); it != finder->second.end(); it++)
+      else if (finder->second.get_valid_mask() * mask)
+        non_dominated.insert(expr, mask);
+      else
       {
-        const FieldMask overlap = mask & it->second;
-        if (!overlap)
-          continue;
-        if ((it->first != total_expr) && (it->first != expr))
+        if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
         {
-          IndexSpaceExpression *intersection = 
-            forest->intersect_index_spaces(it->first, expr);
-          const size_t volume = intersection->get_volume();
-          if (volume == 0)
-            continue;
-          // Can only dominate if we have enough points
-          if (volume < expr->get_volume())
+          // Expression is for the whole view, so will only be dominated
+          // for the full view
+          FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+            finder->second.find(total_expr);
+          if (expr_finder != finder->second.end())
           {
-            if (dominated != NULL)
-              dominated->insert(intersection, overlap);
-            IndexSpaceExpression *diff = 
-              forest->subtract_index_spaces(expr, intersection);
-            non_dominated.insert(diff, overlap);
+            const FieldMask overlap = mask & expr_finder->second;
+            if (!!overlap)
+            {
+              if (dominated != NULL)
+                dominated->insert(expr, overlap); 
+              mask -= overlap;
+              if (!mask)
+                return;
+            }
           }
+        }
+        // There is at most one expression per field so just iterate and compare
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          if ((it->first != total_expr) && (it->first != expr))
+          {
+            IndexSpaceExpression *intersection = 
+              forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // Can only dominate if we have enough points
+            if (volume < expr->get_volume())
+            {
+              if (dominated != NULL)
+                dominated->insert(intersection, overlap);
+              IndexSpaceExpression *diff = 
+                forest->subtract_index_spaces(expr, intersection);
+              non_dominated.insert(diff, overlap);
+            }
+            else if (dominated != NULL)
+              dominated->insert(expr, overlap);
+          } // total expr dominates everything
           else if (dominated != NULL)
             dominated->insert(expr, overlap);
-        } // total expr dominates everything
-        else if (dominated != NULL)
-          dominated->insert(expr, overlap);
-        mask -= overlap;
-        if (!mask)
-          return;
-      }
-      // If we get here then these fields are definitely not dominated
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+        // If we get here then these fields are definitely not dominated
 #ifdef DEBUG_LEGION
-      assert(!!mask);
+        assert(!!mask);
 #endif
-      non_dominated.insert(expr, mask);
+        non_dominated.insert(expr, mask);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2678,6 +2891,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldMask independent = mask;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit =
             conditions.begin(); vit != conditions.end(); vit++)
       {
@@ -2775,31 +2989,81 @@ namespace Legion {
       {
         ViewExprs::const_iterator finder = set.conditions.find(vit->first);
         if (finder == set.conditions.end())
+        {
+          if (vit->first->is_collective_view())
+          {
+            CollectiveView *collective = vit->first->as_collective_view();
+            for (ViewExprs::const_iterator sit = 
+                  set.conditions.begin(); sit != set.conditions.end(); sit++)
+            {
+              if (!sit->first->is_instance_view())
+                continue;
+              if (vit->second.get_valid_mask() * sit->second.get_valid_mask())
+                continue;
+              if (!collective->aliases(sit->first->as_instance_view()))
+                continue;
+              if (has_overlapping_expressions(collective, vit->second, 
+                                              sit->second, condition))
+                return false;
+            }
+          }
+          else if (set.has_collective_views && vit->first->is_instance_view())
+          {
+            IndividualView *view = vit->first->as_individual_view();
+            for (ViewExprs::const_iterator sit =
+                  set.conditions.begin(); sit != set.conditions.end(); sit++)
+            {
+              if (!sit->first->is_collective_view())
+                continue;
+              if (vit->second.get_valid_mask() * sit->second.get_valid_mask())
+                continue;
+              if (!view->aliases(sit->first->as_collective_view()))
+                continue;
+              if (has_overlapping_expressions(view, vit->second, 
+                                              sit->second, condition))
+                return false;
+            }
+          }
           continue;
+        }
         if (vit->second.get_valid_mask() * finder->second.get_valid_mask())
           continue;
-        LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                  FieldMask> overlaps;
-        unique_join_on_field_mask_sets(vit->second, finder->second, overlaps);
-        for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                       FieldMask>::const_iterator it = 
-              overlaps.begin(); it != overlaps.end(); it++)
-        {
-          IndexSpaceExpression *overlap = 
-            forest->intersect_index_spaces(it->first.first, it->first.second);
-          if (!overlap->is_empty())
-          {
-            if (condition != NULL)
-            {
-              condition->view = vit->first;
-              condition->expr = overlap;
-              condition->mask = it->second;
-            }
-            return false;
-          }
-        }
+        if (has_overlapping_expressions(vit->first, vit->second, 
+                                        finder->second, condition))
+          return false;
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceViewSet::has_overlapping_expressions(LogicalView *view,
+        const FieldMaskSet<IndexSpaceExpression> &left_exprs,
+        const FieldMaskSet<IndexSpaceExpression> &right_exprs,
+        FailedPrecondition *condition) const
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+                FieldMask> overlaps;
+      unique_join_on_field_mask_sets(left_exprs, right_exprs, overlaps);
+      RegionTreeForest *forest = context->runtime->forest;
+      for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+                     FieldMask>::const_iterator it = 
+            overlaps.begin(); it != overlaps.end(); it++)
+      {
+        IndexSpaceExpression *overlap = 
+          forest->intersect_index_spaces(it->first.first, it->first.second);
+        if (!overlap->is_empty())
+        {
+          if (condition != NULL)
+          {
+            condition->view = view;
+            condition->expr = overlap;
+            condition->mask = it->second;
+          }
+          return true;
+        }
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2881,6 +3145,7 @@ namespace Legion {
             dst_views.swap(src_views);
           continue;
         }
+        RegionTreeForest *forest = context->runtime->forest;
         // Do pair-wise intersection tests for overlapping of the expressions
         std::vector<IndexSpaceExpression*> disjoint_expressions;
         std::vector<std::vector<IndexSpaceExpression*> > disjoint_components;
@@ -3020,6 +3285,7 @@ namespace Legion {
       }
       else
       {
+        RegionTreeForest *forest = context->runtime->forest;
         for (ViewExprs::const_iterator vit = 
               conditions.begin(); vit != conditions.end(); vit++)
         {
@@ -3100,6 +3366,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(owner_did == 0); // should only be unpacking without refs
 #endif
+      RegionTreeForest *forest = context->runtime->forest;
       for (unsigned idx1 = 0; idx1 < num_views; idx1++)
       {
         DistributedID did;
@@ -3120,6 +3387,8 @@ namespace Legion {
         }
         if (ready.exists() && !ready.has_triggered())
           ready_events.insert(ready);
+        if (LogicalView::is_collective_did(did))
+          has_collective_views = true;
       }
     }
 
@@ -3137,6 +3406,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const LogicalRegion lr = region->handle;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
       {
@@ -3180,6 +3450,334 @@ namespace Legion {
           }
           free(mask);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::antialias_individual_view(IndividualView *view,
+                                                 FieldMask mask)
+    //--------------------------------------------------------------------------
+    {
+      if (!has_collective_views)
+        return;
+      // See if we can find it in which case we know that it doesn't alias
+      // with anything else so there is nothing to split
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder != conditions.end())
+      {
+        mask -= finder->second.get_valid_mask();
+        if (!mask)
+          return;
+      }
+      FieldMaskSet<CollectiveView> to_refine;
+      for (ViewExprs::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+      {
+        if (!it->first->is_collective_view())
+          continue;
+        const FieldMask overlap = mask & it->second.get_valid_mask();
+        if (!overlap)
+          continue;
+        CollectiveView *collective = it->first->as_collective_view();
+        if (!collective->aliases(view))
+          continue;
+        to_refine.insert(collective, overlap);  
+        mask -= overlap;
+        if (!mask)
+          break;
+      }
+      // We've got the names of any collective views that need to be
+      // refined to not include this individual view, so go ahead and
+      // ask the context to make that collective view for us
+      std::vector<RtEvent> views_ready;
+      std::map<CollectiveView*,InnerContext::CollectiveResult*> results;
+      for (FieldMaskSet<CollectiveView>::const_iterator it = 
+            to_refine.begin(); it != to_refine.end(); it++)
+      {
+        std::vector<DistributedID> dids = it->first->instances;
+        std::vector<DistributedID>::iterator finder = 
+          std::find(dids.begin(), dids.end(), view->manager->did);
+#ifdef DEBUG_LEGION
+        assert(finder != dids.end());
+#endif
+        dids.erase(finder);
+        RtEvent ready;
+        InnerContext::CollectiveResult *result =
+          context->find_or_create_collective_view(region->handle.get_tree_id(),
+              dids, ready);
+        results[it->first] = result;
+        if (ready.exists())
+          views_ready.push_back(ready);
+      }
+      if (!views_ready.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(views_ready);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      for (FieldMaskSet<CollectiveView>::const_iterator rit =
+            to_refine.begin(); rit != to_refine.end(); rit++)
+      {
+        InnerContext::CollectiveResult *result = results[rit->first];
+        // Then wait for the collective view to be registered
+        if (result->ready_event.exists() && 
+            !result->ready_event.has_triggered())
+          result->ready_event.wait();
+        RtEvent ready;
+        InstanceView *view = static_cast<InstanceView*>(
+          context->runtime->find_or_request_logical_view(
+            result->collective_did, ready));
+        if (result->remove_reference())
+          delete result;
+        ViewExprs::iterator finder = conditions.find(rit->first);
+        if (finder->second.get_valid_mask() == rit->second)
+        {
+          // Can just swap expressions over in this particular case
+          conditions[view].swap(finder->second);
+          // Remove the reference if we have one
+          if (finder->first->remove_nested_valid_ref(owner_did))
+            delete finder->first;
+          conditions.erase(finder);
+        }
+        else
+        {
+          // Need to filter over specific expression in this case
+          FieldMaskSet<IndexSpaceExpression> &to_add = conditions[view];
+          std::vector<IndexSpaceExpression*> to_delete; 
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            const FieldMask overlap = rit->second & it->second;
+            if (!overlap)
+              continue;
+            to_add.insert(it->first, overlap);
+            it.filter(overlap);
+            if (!it->second) // reference flows back
+              to_delete.push_back(it->first);
+            else
+              it->first->add_nested_expression_reference(owner_did);
+          }
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            finder->second.erase(*it);
+          finder->second.tighten_valid_mask();
+        }
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        view->add_nested_valid_ref(owner_did);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::antialias_collective_view(CollectiveView *collective,
+           const FieldMask &mask, FieldMaskSet<InstanceView> &alternative_views)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(conditions.find(collective) == conditions.end());
+#endif
+      ViewExprs to_add;
+      CollectiveAntiAlias alias_analysis(collective);
+      for (ViewExprs::iterator vit = conditions.begin(); 
+            vit != conditions.end(); /*nothing*/)
+      {
+        if (!vit->first->is_instance_view())
+        {
+          vit++;
+          continue;
+        }
+        const FieldMask view_overlap = mask & vit->second.get_valid_mask();
+        if (!view_overlap)
+        {
+          vit++;
+          continue;
+        }
+        if (vit->first->is_collective_view())
+        {
+          CollectiveView *current = vit->first->as_collective_view();
+          // See how the instances overlap
+          // First get the intersection
+          std::vector<DistributedID> intersection;
+          if (current->instances.size() < collective->instances.size())
+          {
+            for (std::vector<DistributedID>::const_iterator it =
+                  current->instances.begin(); it !=
+                  current->instances.end(); it++)
+              if (std::binary_search(collective->instances.begin(),
+                    collective->instances.end(), *it))
+                intersection.push_back(*it);
+          }
+          else
+          {
+            for (std::vector<DistributedID>::const_iterator it =
+                  collective->instances.begin(); it !=
+                  collective->instances.end(); it++)
+              if (std::binary_search(current->instances.begin(),
+                    current->instances.end(), *it))
+                intersection.push_back(*it);
+          }
+          // If they don't overlap at all then there's nothing to do
+          if (intersection.empty())
+          {
+            vit++;
+            continue;
+          }
+          // Don't care about expressions for this analysis
+          // but we're reusing an exisint alias so we have to
+          // conform to get the linker to work
+          IndexSpaceExpression *null_expr = NULL;
+          alias_analysis.traverse(current, view_overlap, null_expr);
+          if (intersection.size() == current->instances.size())
+          {
+#ifdef DEBUG_LEGION
+            assert(intersection.size() < collective->instances.size());
+#endif
+            vit++;
+          }
+          else
+          {
+            // Otherwise, if vit->first is not covered by the intersection
+            // then we need to do two things
+            // 1. Create a new instance for the difference and record
+            //    any overlapping expressions for that in to_add
+            std::vector<DistributedID> difference;
+            for (std::vector<DistributedID>::const_iterator it =
+                  current->instances.begin(); it != 
+                  current->instances.end(); it++)
+              if (!std::binary_search(collective->instances.begin(),
+                    collective->instances.end(), *it))
+                difference.push_back(*it);
+            InstanceView *diff_view = find_instance_view(difference);
+            if (to_add.find(diff_view) == to_add.end())
+              diff_view->add_nested_valid_ref(owner_did);
+            // 2. Make a new instance for the intersection, analyze it
+            //    and record any overlapping expressions in to_add
+            InstanceView *inter_view = 
+              (intersection.size() == collective->instances.size()) ?
+              collective : find_instance_view(intersection);
+            if (to_add.find(inter_view) == to_add.end())
+              inter_view->add_nested_valid_ref(owner_did);
+            std::vector<IndexSpaceExpression*> to_delete;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = view_overlap & it->second;
+              if (!overlap)
+                continue;
+              if (to_add[diff_view].insert(it->first, overlap))
+                it->first->add_nested_expression_reference(owner_did);
+              to_add[inter_view].insert(it->first, overlap);
+              it.filter(overlap);
+              if (!it->second) // reference flows back
+                to_delete.push_back(it->first);
+              else
+                it->first->add_nested_expression_reference(owner_did);
+            }
+            if (to_delete.size() < vit->second.size())
+            {
+              for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                vit->second.erase(*it);
+              vit->second.tighten_valid_mask();
+              vit++;
+            }
+            else
+            {
+              vit->second.clear();
+              if (vit->first->remove_nested_valid_ref(owner_did))
+                delete vit->first;
+              ViewExprs::iterator to_delete = vit++;
+              conditions.erase(to_delete);
+            }
+          }
+        }
+        else // just an individual view, so we can just traverse it
+        {
+          IndividualView *individual = vit->first->as_individual_view();
+          // Check to see if it they alias
+          if (!std::binary_search(collective->instances.begin(),
+                collective->instances.end(), individual->manager->did))
+            continue;
+          // Don't care about expressions for this analysis
+          // but we're reusing an exisint alias so we have to
+          // conform to get the linker to work
+          IndexSpaceExpression *null_expr = NULL;
+          alias_analysis.traverse(individual, view_overlap, null_expr);
+          vit++;
+        }
+      }
+      // Now traverse the alias analysis and record the alternate views
+      // and their index space expressions in to_add
+      FieldMask allvalid_mask = mask;
+      alias_analysis.visit_leaves(mask, allvalid_mask, 
+                                  *this, alternative_views);
+      if (!!allvalid_mask)
+        alternative_views.insert(collective, allvalid_mask);
+      if (!to_add.empty())
+      {
+        for (ViewExprs::iterator vit = to_add.begin(); 
+              vit != to_add.end(); vit++)
+        {
+          ViewExprs::iterator finder = conditions.find(vit->first);
+          if (finder != conditions.end())
+          {
+            // Remove duplicate view reference
+            vit->first->remove_nested_valid_ref(owner_did);
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+              // Remove duplicate references
+              if (!finder->second.insert(it->first, it->second))
+                it->first->remove_nested_expression_reference(owner_did);
+          }
+          else
+          {
+            // Already have a reference to the view so pass it here
+            // Also have references on the expression so the swap is enough
+            conditions[vit->first].swap(vit->second);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* TraceViewSet::find_instance_view(
+                                        const std::vector<DistributedID> &dids)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!dids.empty());
+#endif
+      if (dids.size() > 1)
+      {
+        RtEvent ready;
+        InnerContext::CollectiveResult *result =
+          context->find_or_create_collective_view(
+              region->handle.get_tree_id(), dids, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        // Then wait for the collective view to be registered
+        if (result->ready_event.exists() && 
+            !result->ready_event.has_triggered())
+          result->ready_event.wait();
+        InstanceView *view = static_cast<InstanceView*>(
+          context->runtime->find_or_request_logical_view(
+            result->collective_did, ready));
+        if (result->remove_reference())
+          delete result;
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        return view;
+      }
+      else
+      {
+        RtEvent ready;
+        PhysicalManager *manager =
+          context->runtime->find_or_request_instance_manager(
+              dids.back(), ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        return context->create_instance_top_view(manager,
+                        context->runtime->address_space);
       }
     }
 
@@ -3503,7 +4101,7 @@ namespace Legion {
     void TraceConditionSet::dump_preconditions(void) const
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+      TraceViewSet dump_view_set(context, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
@@ -3517,7 +4115,7 @@ namespace Legion {
     void TraceConditionSet::dump_anticonditions(void) const
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+      TraceViewSet dump_view_set(context, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
@@ -3531,7 +4129,7 @@ namespace Legion {
     void TraceConditionSet::dump_postconditions(void) const
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+      TraceViewSet dump_view_set(context, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)

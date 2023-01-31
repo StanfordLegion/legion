@@ -2673,7 +2673,20 @@ namespace Legion {
       void traverse(InstanceView *view, const FieldMask &mask, Args&&... args);
       // Visit just the leaves of the analysis
       template<typename... Args>
-      void visit_leaves(const FieldMask &mask, Args&&... args);
+      void visit_leaves(const FieldMask &mask, Args&&... args)
+      {
+        for (typename FieldMaskSet<T>::const_iterator it = 
+              refinements.begin(); it != refinements.end(); it++)
+        {
+          const FieldMask &overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          it->first->visit_leaves(overlap, args...);
+        }
+        const FieldMask local_mask = mask - refinements.get_valid_mask();
+        if (!!local_mask)
+          static_cast<T*>(this)->visit_leaf(local_mask, args...);
+      }
       InstanceView* get_instance_view(InnerContext *context, 
                                       RegionTreeID tid) const;
     public:
@@ -2727,20 +2740,23 @@ namespace Legion {
     };
 
     /**
-     * \class FindCollectiveInvalid
+     * \class CollectiveAntiAlias 
      * This class helps with the alias analysis when performing a check
      * to see which collective instances are not considered valid
+     * It is also used by TraceViewSet::dominates to test for dominance
+     * of collective views which is the same as testing that the
+     * collective view 
      */
-    class FindCollectiveInvalid : 
-      public CollectiveRefinementTree<FindCollectiveInvalid>,
-      public LegionHeapify<FindCollectiveInvalid> {
+    class CollectiveAntiAlias : 
+      public CollectiveRefinementTree<CollectiveAntiAlias>,
+      public LegionHeapify<CollectiveAntiAlias> {
     public:
-      FindCollectiveInvalid(CollectiveView *view);
-      FindCollectiveInvalid(std::vector<DistributedID> &&insts,
+      CollectiveAntiAlias(CollectiveView *view);
+      CollectiveAntiAlias(std::vector<DistributedID> &&insts,
           const FieldMaskSet<IndexSpaceExpression> &valid_expr,
           const FieldMask &mask);
     public:
-      FindCollectiveInvalid* clone(InstanceView *view, const FieldMask &mask,
+      CollectiveAntiAlias* clone(InstanceView *view, const FieldMask &mask,
                                    std::vector<DistributedID> &&insts) const;
       void analyze(InstanceView *view, const FieldMask &mask,
                    IndexSpaceExpression *expr);
@@ -2749,6 +2765,15 @@ namespace Legion {
       void visit_leaf(const FieldMask &mask, FieldMask &allvalid_mask,
           IndexSpaceExpression *expr, RegionTreeForest *forest,
           const FieldMaskSet<IndexSpaceExpression> &partial_valid_exprs);
+      // This version used by TraceViewSet::dominates to find
+      // non-dominating overlaps
+      void visit_leaf(const FieldMask &mask, FieldMask &allvalid_mask,
+          FieldMaskSet<IndexSpaceExpression> &non_dominated,
+          IndexSpaceExpression *expr, RegionTreeForest *forest);
+      // This version used by TraceViewSet::antialias_collective_view
+      // to get the names of the new views to use for instances
+      void visit_leaf(const FieldMask &mask, FieldMask &allvalid_mask,
+          TraceViewSet &view_set, FieldMaskSet<InstanceView> &alt_views);
     protected:
       // Expression fields that are valid for these instances
       FieldMaskSet<IndexSpaceExpression> valid_exprs;
