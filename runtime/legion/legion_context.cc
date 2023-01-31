@@ -2633,8 +2633,7 @@ namespace Legion {
         {
           const Memory target = runtime->find_local_memory(executing_processor,
                                                       canonical->memory.kind());
-          for (Domain::DomainPointIterator itr(launcher.launch_domain);
-                itr; itr++)
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
           {
             Future f = result->get_future(itr.p, true/*internal*/);
             f.impl->set_result(ApEvent::NO_AP_EVENT, 
@@ -2643,8 +2642,7 @@ namespace Legion {
         }
         else
         {
-          for (Domain::DomainPointIterator itr(launcher.launch_domain);
-                itr; itr++)
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
           {
             Future f = result->get_future(itr.p, true/*internal*/);
             f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
@@ -2655,8 +2653,7 @@ namespace Legion {
       if (launcher.predicate_false_result.get_size() == 0)
       {
         // Just initialize all the futures
-        for (Domain::DomainPointIterator itr(launcher.launch_domain);
-              itr; itr++)
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
           f.impl->set_result(ApEvent::NO_AP_EVENT, NULL);
@@ -2666,8 +2663,7 @@ namespace Legion {
       {
         const void *ptr = launcher.predicate_false_result.get_ptr();
         size_t ptr_size = launcher.predicate_false_result.get_size();
-        for (Domain::DomainPointIterator itr(launcher.launch_domain);
-              itr; itr++)
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
         {
           Future f = result->get_future(itr.p, true/*internal*/);
           f.impl->set_local(ptr, ptr_size, false/*own*/);
