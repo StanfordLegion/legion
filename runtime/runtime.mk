@@ -824,7 +824,7 @@ ifeq ($(strip $(DEBUG)),1)
     CC_FLAGS	+= -O0 -g # --display_error_number
     FC_FLAGS	+= -O0 -g
   else
-    CFLAGS	+= -0O -ggdb
+    CFLAGS	+= -O0 -ggdb
     CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
     FC_FLAGS	+= -O0 -ggdb
   endif
