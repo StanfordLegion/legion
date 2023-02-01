@@ -14,7 +14,7 @@ automatically by the runtime system and typically occur in response to an operat
 User events, on the other hand, can be manually triggered from application code, as demonstrated at line 31 and 37.
 These events are generally similar in nature to internal runtime events, but allow for greater control over when and how events are triggered.
 
-## Createing Control Dependencies
+### Createing Control Dependencies
 In this program, we launch several `reader_tasks` that are responsible for printing an integer value `x`. Each task launch is a
 non-blocking call and the reader task will not start running until the user event is triggered (line: 34).
 Since the launches are asynchronous, they return an internal event handle which can be used to guarantee that the task has completed (line: 37).
