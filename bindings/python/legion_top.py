@@ -31,6 +31,7 @@ import warnings
 
 from legion_cffi import ffi, lib as c
 
+from legion_info import __version__
 
 #################################################################
 ### Shared between Legion builtin Python and canonical Python ###
