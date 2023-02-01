@@ -24,6 +24,7 @@ RUN dpkg --add-architecture i386 && \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev \
       libssl-dev \
+      libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev \
       gdb vim && \
     apt-get clean
 
