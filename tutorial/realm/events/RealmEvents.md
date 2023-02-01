@@ -1,74 +1,25 @@
 ## Realm Events
 
 ### Introduction
-Events are the foundation of Realm's programming model. They are used to
-describe explicit dependencies between operations.
+In this tutorial, we examine the concept of Realm events and provide 
+clear example on how to express control dependencies between operations effectively.
 
-### General Events
-Events are the foundation of Realm's programming model where
-they describe dependencies between operations. An event is typically created by
-the runtime and can be used as either a pre or post condition for any
-Realm operation. Events offer an interface which enables the runtime to
-effictively manage a program execution.
+Events form the backbone of Realm's programming model, describing the dependencies between operations.
+They are created by the runtime and can be used as a pre or post condition for any Realm operation.
+Events provide an interface that allows the runtime to effectively manage program execution, ensuring efficient and safe operation.
 
-### Events Interface
-TODO: Update line numbers and describe an interface.
-```c++
- 1 namespace Realm {
- 2     ...
- 3     class REALM_PUBLIC_API Event {
- 4     public:
- 5       ...
- 8       bool has_triggered(void) const;
- 9       ...
-10       void wait(void) const;
-15       ...
-16       void subscribe(void) const;
-18       ...
-20       static Event merge_events(const std::vector<Event>& wait_for);
-21       ...
-22     };
-23 }
+### Creating Events
+There are two types of events: internal runtime events and user events. Internal runtime events are generated
+automatically by the runtime system and typically occur in response to an operation such as a `task launch` at line 34.
+User events, on the other hand, can be manually triggered from application code, as demonstrated at line 31 and 37.
+These events are generally similar in nature to internal runtime events, but allow for greater control over when and how events are triggered.
 
-```
-
-### User Events
-General events cannot be triggered by a user and therefore runtime
-offers a separate event type `UserEvent`. A user event has all the
-properties of a general event and it (unlike to a general event ) can be 
-triggered by the application code via the following interface:
-
-```c++
-23  namespace Realm {
-24     class REALM_PUBLIC_API UserEvent : public Event {
-25     public:
-26       static UserEvent create_user_event(void);
-27       ...
-28       void trigger(Event wait_on = Event::NO_EVENT,
-29                    bool ignore_faults = false) const;
-30       ...
-31     };
-32    ...
-33 }
-
-```
-
-### Generational Events
-TODO
-
-### Example
-TODO: Update this example with the latest code.
-
-In the following example we demonstrate how events can be used in order
-to create a control dependency. The application creates several reader
-tasks `reader_task` at `line:68` that do nothing more but read an
-input argument `x`. We create a user event `event1` at `line:32` which
-used as a precondition for any reader task launch which means that before
-`event1` is triggered `(line:37)` none of the reader tasks will start the
-execution. Each task returns an internal event `(line:34)` that is
-stored in the event pool `line:36`. The `top_level_task` waits
-until all the events in the event pool have been triggered by calling
-`Event::merge_events(events).wait()` at `line:40`.
+## Createing Control Dependencies
+In this program, we launch several `reader_tasks` that are responsible for printing an integer value `x`. Each task launch is a
+non-blocking call and the reader task will not start running until the user event is triggered (line: 34).
+Since the launches are asynchronous, they return an internal event handle which can be used to guarantee that the task has completed (line: 37).
+To simplify the process, we can merge all the events together and use a single `wait` call (line: 40).
+This will cause the calling thread to block until all the events have finished.
 
 ```c++
  1 #include <realm.h>
@@ -102,12 +53,12 @@ until all the events in the event pool have been triggered by calling
 29 
 30   std::vector<Event> events;
 31   for(size_t i = 0; i < ProgramConfig::num_tasks; i++) {
-32     UserEvent event1 = UserEvent::create_user_event();
+32     UserEvent user_event = UserEvent::create_user_event();
 33 
-34     Event task_event = p.spawn(READER_TASK, &x, sizeof(int), event1);
+34     Event task_event = p.spawn(READER_TASK, &x, sizeof(int), user_event);
 35 
 36     events.push_back(task_event);
-37     event1.trigger();
+37     user_event.trigger();
 38   }
 39 
 40   Event::merge_events(events).wait();
