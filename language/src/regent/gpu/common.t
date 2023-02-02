@@ -54,7 +54,9 @@ function common.generate_atomic_update(op, typ)
   local opname
   if op == "+" then
     if typ:isfloat() then
-      opname = "fadd"
+      if terralib.llvmversion >= 90 then
+        opname = "fadd"
+      end
     else
       opname = "add"
     end
