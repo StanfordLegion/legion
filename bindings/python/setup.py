@@ -5,6 +5,8 @@ import os, sys, platform
 
 import legion_cffi_build
 
+import legion_info_build
+
 # Hack: I can't get initialize/finalize_option to work, so just parse
 # the arguments here...
 parser = argparse.ArgumentParser()
@@ -28,6 +30,7 @@ class my_build_py(build_py):
             self.mkpath(self.build_lib)
             legion_cffi_build.build_cffi(None, args.cmake_build_dir, self.build_lib, ['legion.h'], ['runtime'], 'legion_builtin_cffi.py')
             legion_cffi_build.build_cffi(args.prefix + '/lib/' + canonical_python_lib, args.cmake_build_dir, self.build_lib, ['canonical_python.h', 'legion.h'], [os.path.join('bindings', 'python'), 'runtime'], 'legion_canonical_cffi.py')
+            legion_info_build.build_legion_info()
         build_py.run(self)
 
 setup(name='legion',
@@ -35,6 +38,7 @@ setup(name='legion',
       py_modules=[
           'legion_top',
           'legion_cffi',
+          'legion_info',
           'pygion',
       ],
       cmdclass={'build_py': my_build_py})
