@@ -4903,14 +4903,14 @@ local function write_header(header_filename, registration_name, task_whitelist, 
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist, need_launcher)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist, need_launcher, main_task)
   assert(header_filename and filename)
   if need_launcher == nil then
     need_launcher = true
   end
   local task_wrappers = make_task_wrappers()
   local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist, need_launcher)
-  local _, names = std.setup(nil, nil, task_wrappers, registration_name)
+  local _, names = std.setup(main_task, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then
