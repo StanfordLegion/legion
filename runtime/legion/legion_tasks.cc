@@ -1008,46 +1008,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent TaskOp::compute_sync_precondition(const TraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      ApEvent result;
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        std::set<ApEvent> sync_preconditions;
-        if (!wait_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
-            sync_preconditions.insert(e);
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-          }
-        }
-        if (!grants.empty())
-        {
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            ApEvent e = it->impl->acquire_grant();
-            sync_preconditions.insert(e);
-          }
-        }
-        result = Runtime::merge_events(NULL, sync_preconditions);
-        if (!result.exists() ||
-            sync_preconditions.find(result) != sync_preconditions.end())
-        {
-          ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename, result);
-          result = rename;
-        }
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     std::map<PhysicalManager*,unsigned>* 
                                         TaskOp::get_acquired_instances_ref(void)
     //--------------------------------------------------------------------------

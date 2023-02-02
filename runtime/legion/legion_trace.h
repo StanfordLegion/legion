@@ -1388,8 +1388,6 @@ namespace Legion {
                              ApEvent src_indirect_precondition,
                              ApEvent dst_indirect_precondition,
                              CopyAcrossExecutor *executor);
-      virtual void record_set_op_sync_event(ApEvent &lhs, 
-                             const TraceLocalID &tlid);
     public:
       virtual void record_owner_shard(unsigned trace_local_id, ShardID owner);
       virtual void record_local_space(unsigned trace_local_id, IndexSpace sp);

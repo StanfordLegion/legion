@@ -1775,7 +1775,6 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(const TraceInfo &info) const;
       virtual void complete_replay(ApEvent pre, ApEvent copy_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -2678,8 +2677,6 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(
-                                             const TraceInfo &trace_info) const;
       virtual void complete_replay(ApEvent pre, ApEvent acquire_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -2799,7 +2796,6 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       // From Memoizable
-      virtual ApEvent compute_sync_precondition(const TraceInfo &info) const;
       virtual void complete_replay(ApEvent pre, ApEvent release_complete_event);
       virtual const VersionInfo& get_version_info(unsigned idx) const;
       virtual const RegionRequirement& get_requirement(unsigned idx) const;
@@ -4112,7 +4108,6 @@ namespace Legion {
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
-      ApEvent compute_sync_precondition(const TraceInfo &trace_info) const;
       void log_fill_requirement(void) const;
       // This call only happens from control replication when we had to 
       // make a new view because not everyone agreed on which view to use

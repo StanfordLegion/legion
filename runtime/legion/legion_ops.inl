@@ -118,18 +118,32 @@ namespace Legion {
                                               const TraceInfo &trace_info) const
     //--------------------------------------------------------------------------
     {
-      ApEvent sync_precondition = OP::compute_sync_precondition(trace_info);
-      if (this->is_recording())
-        trace_info.record_op_sync_event(sync_precondition);
-      if (sync_precondition.exists())
+      if (!this->wait_barriers.empty() || !this->grants.empty())
       {
+        std::vector<ApEvent> sync_preconditions;
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              this->wait_barriers.begin(); it != 
+              this->wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.push_back(e);
+          if (this->runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(this->unique_op_id, e);
+        }
+        for (std::vector<Grant>::const_iterator it =
+              this->grants.begin(); it != this->grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.push_back(e);
+        }
         if (this->execution_fence_event.exists())
-          return Runtime::merge_events(&trace_info, sync_precondition,
-                                       this->execution_fence_event);
-        else
-          return sync_precondition;
+          sync_preconditions.push_back(this->execution_fence_event);
+        ApEvent result = Runtime::merge_events(NULL, sync_preconditions);
+        if (this->is_recording())
+          trace_info.record_op_sync_event(result);
+        return result;
       }
-      else
+      else // nothing to record since we just depend on the fence
         return this->execution_fence_event;
     }
 

@@ -31,7 +31,7 @@
 #define IS_READ_ONLY(req) \
   (((req).privilege & LEGION_READ_WRITE) == LEGION_READ_PRIV)
 #define HAS_READ(req) \
-  ((req).privilege & LEGION_READ_PRIV)
+  ((req).privilege & (LEGION_READ_PRIV | LEGION_REDUCE))
 #define HAS_WRITE(req) \
   ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
 #define IS_WRITE(req) \

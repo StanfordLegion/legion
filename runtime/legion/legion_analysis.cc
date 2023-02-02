@@ -16951,11 +16951,23 @@ namespace Legion {
       if (HAS_READ(usage) && !IS_DISCARD(usage))
       {
         FieldMaskSet<IndexSpaceExpression> not_dominated;
-        if (tracing_postconditions != NULL)
-          tracing_postconditions->dominates(view,expr,user_mask,not_dominated);
+        if (view->is_reduction_kind())
+        {
+          if (tracing_anticonditions != NULL)
+            tracing_anticonditions->dominates(view, expr,
+                                              user_mask, not_dominated);
+          else
+            not_dominated.insert(expr, user_mask);
+        }
         else
-          not_dominated.insert(expr, user_mask);
-        if (tracing_preconditions == NULL)
+        {
+          if (tracing_postconditions != NULL)
+            tracing_postconditions->dominates(view, expr,
+                                              user_mask, not_dominated);
+          else
+            not_dominated.insert(expr, user_mask);
+        }
+        if ((tracing_preconditions == NULL) && !not_dominated.empty())
           tracing_preconditions = new TraceViewSet(context, did, region_node);
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)

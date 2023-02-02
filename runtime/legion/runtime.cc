@@ -27265,6 +27265,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<FenceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
     FenceOp* Runtime::get_available_fence_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27326,6 +27335,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return get_available(advisement_op_lock, available_advisement_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<DynamicCollectiveOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
     }
 
     //--------------------------------------------------------------------------
@@ -27652,6 +27670,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return get_available(all_reduce_op_lock, available_repl_all_reduce_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    ApEvent Memoizable<ReplFenceOp>::compute_sync_precondition(
+                                              const TraceInfo &trace_info) const
+    //--------------------------------------------------------------------------
+    {
+      return this->execution_fence_event;
     }
 
     //--------------------------------------------------------------------------

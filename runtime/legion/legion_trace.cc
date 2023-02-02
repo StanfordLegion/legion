@@ -2546,7 +2546,7 @@ namespace Legion {
          std::map<LogicalView*,unsigned> *view_refs_to_remove, bool antialiased)
     //--------------------------------------------------------------------------
     {
-      if (!antialiased)
+      if (!antialiased && (except != NULL))
       {
         if (except->is_collective_view())
         {
@@ -3254,9 +3254,6 @@ namespace Legion {
                                      const FieldMask &mask) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(target.owner_did == 0);
-#endif
       if (expr_covers)
       {
         for (ViewExprs::const_iterator vit = 
@@ -3363,9 +3360,6 @@ namespace Legion {
                          AddressSpaceID source, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(owner_did == 0); // should only be unpacking without refs
-#endif
       RegionTreeForest *forest = context->runtime->forest;
       for (unsigned idx1 = 0; idx1 < num_views; idx1++)
       {
@@ -3695,14 +3689,15 @@ namespace Legion {
         {
           IndividualView *individual = vit->first->as_individual_view();
           // Check to see if it they alias
-          if (!std::binary_search(collective->instances.begin(),
+          if (std::binary_search(collective->instances.begin(),
                 collective->instances.end(), individual->manager->did))
-            continue;
-          // Don't care about expressions for this analysis
-          // but we're reusing an exisint alias so we have to
-          // conform to get the linker to work
-          IndexSpaceExpression *null_expr = NULL;
-          alias_analysis.traverse(individual, view_overlap, null_expr);
+          {
+            // Don't care about expressions for this analysis
+            // but we're reusing an exisint alias so we have to
+            // conform to get the linker to work
+            IndexSpaceExpression *null_expr = NULL;
+            alias_analysis.traverse(individual, view_overlap, null_expr);
+          }
           vit++;
         }
       }
@@ -5301,6 +5296,10 @@ namespace Legion {
             }
         }
       }
+      for (std::map<unsigned,unsigned>::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+        used[it->first] = true;
+
       std::vector<unsigned> inv_gen(instructions.size(), -1U);
       for (unsigned idx = 0; idx < gen.size(); ++idx)
       {
@@ -6073,7 +6072,7 @@ namespace Legion {
     void PhysicalTemplate::propagate_copies(std::vector<unsigned> *gen)
     //--------------------------------------------------------------------------
     {
-      std::vector<int> substs(events.size(), -1);
+      std::map<unsigned,unsigned> substitutions;
       std::vector<Instruction*> new_instructions;
       new_instructions.reserve(instructions.size());
       std::set<Instruction*> to_prune;
@@ -6088,9 +6087,9 @@ namespace Legion {
 #endif
           if (merge->rhs.size() == 1)
           {
-            substs[merge->lhs] = *merge->rhs.begin();
+            substitutions[merge->lhs] = *merge->rhs.begin();
 #ifdef DEBUG_LEGION
-            assert(merge->lhs != (unsigned)substs[merge->lhs]);
+            assert(merge->lhs != substitutions[merge->lhs]);
 #endif
             if (gen == NULL)
               to_prune.insert(inst);
@@ -6106,6 +6105,27 @@ namespace Legion {
 
       if (instructions.size() == new_instructions.size()) return;
 
+      // Rewrite the frontiers first
+      std::vector<std::pair<unsigned,unsigned> > to_add;
+      for (std::map<unsigned,unsigned>::iterator it =
+            frontiers.begin(); it != frontiers.end(); /*nothing*/)
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          substitutions.find(it->first);
+        if (finder != substitutions.end())
+        {
+          to_add.emplace_back(std::make_pair(finder->second,it->second));
+          std::map<unsigned,unsigned>::iterator to_delete = it++;
+          frontiers.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
+            to_add.begin(); it != to_add.end(); it++)
+        frontiers.insert(*it);
+
+      // Then rewrite the instructions
       instructions.swap(new_instructions);
 
       std::vector<unsigned> new_gen((gen == NULL) ? 0 : gen->size(), -1U);
@@ -6139,15 +6159,19 @@ namespace Legion {
           case TRIGGER_EVENT:
             {
               TriggerEvent *trigger = inst->as_trigger_event();
-              int subst = substs[trigger->rhs];
-              if (subst >= 0) trigger->rhs = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(trigger->rhs);
+              if (finder != substitutions.end())
+                trigger->rhs = finder->second;
               break;
             }
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              int subst = substs[arrival->rhs];
-              if (subst >= 0) arrival->rhs = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(arrival->rhs);
+              if (finder != substitutions.end())
+                arrival->rhs = finder->second;
               break;
             }
           case MERGE_EVENT:
@@ -6157,9 +6181,12 @@ namespace Legion {
               for (std::set<unsigned>::iterator it = merge->rhs.begin();
                    it != merge->rhs.end(); ++it)
               {
-                int subst = substs[*it];
-                if (subst >= 0) new_rhs.insert((unsigned)subst);
-                else new_rhs.insert(*it);
+                std::map<unsigned,unsigned>::const_iterator finder =
+                  substitutions.find(*it);
+                if (finder != substitutions.end())
+                  new_rhs.insert(finder->second);
+                else
+                  new_rhs.insert(*it);
               }
               merge->rhs.swap(new_rhs);
               lhs = merge->lhs;
@@ -6168,41 +6195,47 @@ namespace Legion {
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              int subst = substs[copy->precondition_idx];
-              if (subst >= 0) copy->precondition_idx = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(copy->precondition_idx);
+              if (finder != substitutions.end())
+                copy->precondition_idx = finder->second;
               lhs = copy->lhs;
               break;
             }
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              int subst = substs[fill->precondition_idx];
-              if (subst >= 0) fill->precondition_idx = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(fill->precondition_idx);
+              if (finder != substitutions.end())
+                fill->precondition_idx = finder->second;
               lhs = fill->lhs;
               break;
             }
           case ISSUE_ACROSS:
             {
               IssueAcross *across = inst->as_issue_across();
-              int subst = substs[across->copy_precondition];
-              if (subst >= 0) across->copy_precondition= (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(across->copy_precondition);
+              if (finder != substitutions.end())
+                across->copy_precondition = finder->second;
               if (across->collective_precondition != 0)
               {
-                int subst = substs[across->collective_precondition];
-                if (subst >= 0) 
-                  across->collective_precondition = (unsigned)subst;
+                finder = substitutions.find(across->collective_precondition);
+                if (finder != substitutions.end())
+                  across->collective_precondition = finder->second;
               }
               if (across->src_indirect_precondition != 0)
               {
-                int subst = substs[across->src_indirect_precondition];
-                if (subst >= 0) 
-                  across->src_indirect_precondition = (unsigned)subst;
+                finder = substitutions.find(across->src_indirect_precondition);
+                if (finder != substitutions.end())
+                  across->src_indirect_precondition = finder->second;
               }
               if (across->dst_indirect_precondition != 0)
               {
-                int subst = substs[across->dst_indirect_precondition];
-                if (subst >= 0) 
-                  across->dst_indirect_precondition = (unsigned)subst;
+                finder = substitutions.find(across->dst_indirect_precondition);
+                if (finder != substitutions.end())
+                  across->dst_indirect_precondition = finder->second;
               }
               lhs = across->lhs;
               break;
@@ -6227,10 +6260,13 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
-              int subst = substs[replay->pre];
-              if (subst >= 0) replay->pre = (unsigned)subst;
-              subst = substs[replay->post];
-              if (subst >= 0) replay->post = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(replay->pre);
+              if (finder != substitutions.end())
+                replay->pre = finder->second;
+              finder = substitutions.find(replay->post);
+              if (finder != substitutions.end())
+                replay->post = finder->second;
               break;
             }
           default:
@@ -7216,12 +7252,10 @@ namespace Legion {
                                                     const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-      if (!lhs.exists())
-      {
-        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename);
-        lhs = rename;
-      }
+      // Always make a fresh event here for these
+      ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+      Runtime::trigger_event(NULL, rename, lhs);
+      lhs = rename;
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -8132,26 +8166,6 @@ namespace Legion {
                                             dst_indirect_precondition,
                                             executor);
     }
-
-    //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, 
-                                                       const TraceLocalID &tlid)
-    //--------------------------------------------------------------------------
-    {
-      // Make sure the lhs event is local to our shard
-      if (lhs.exists())
-      {
-        const AddressSpaceID event_space = find_event_space(lhs);
-        if (event_space != repl_ctx->runtime->address_space)
-        {
-          ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename, lhs);
-          lhs = rename;
-        }
-      }
-      // Then do the base call
-      PhysicalTemplate::record_set_op_sync_event(lhs, tlid);
-    } 
 
     //--------------------------------------------------------------------------
     ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,

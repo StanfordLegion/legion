@@ -1785,6 +1785,11 @@ namespace Legion {
     class RemotePartitionOp;
     class RemoteReplayOp;
     class RemoteSummaryOp;
+    template<typename OP>
+    class Memoizable;
+    template<typename OP>
+    class Predicated;
+
 
     // legion_tasks.h
     class ExternalTask;
@@ -2125,6 +2130,8 @@ namespace Legion {
     friend class Internal::ReplDetachOp;                    \
     friend class Internal::ReplAcquireOp;                   \
     friend class Internal::ReplReleaseOp;                   \
+    template<typename OP>                                   \
+    friend class Internal::Memoizable;                      \
     friend class Internal::ShardManager;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
