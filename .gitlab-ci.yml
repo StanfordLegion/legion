@@ -556,9 +556,9 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:230131
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:230203
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:230131
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:230203
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
