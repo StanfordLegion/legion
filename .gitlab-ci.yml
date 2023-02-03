@@ -511,27 +511,6 @@ before_script:
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
-.p100_cuda80: &p100_cuda80
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-8.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-8.0"
-  # cuda 8.0 does not come with thrust
-  USE_COMPLEX: "0"
-  # have to tell cudafe to expect c++11 stuff
-  NVCC_FLAGS: "-std=c++11"
-
-.p100_cuda90: &p100_cuda90
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-9.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.0"
-
-.p100_cuda92: &p100_cuda92
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-9.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.2"
-  # cuda 9.2 has bugs in thrust that break complex reduction ops
-  USE_COMPLEX: "0"
-
 .p100_cuda102: &p100_cuda102
   <<: *p100_base
   CUDA: "/usr/local/cuda-10.2"
