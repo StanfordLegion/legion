@@ -4321,6 +4321,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local argc = terralib.newsymbol(int, "argc")
   local argv = terralib.newsymbol(&rawstring, "argv")
+  local main_args = terralib.newlist()
 
   local main_setup = quote end
   if main_task then
@@ -4329,9 +4330,11 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       c.legion_runtime_initialize(&[argc], &[argv], true)
       return c.legion_runtime_start([argc], [argv], false)
     end
+    main_args:insert(argc)
+    main_args:insert(argv)
   end
 
-  local terra main([argc], [argv])
+  local terra main([main_args])
     [reduction_registrations];
     [layout_registrations];
     [projection_functor_registrations];
@@ -4839,7 +4842,7 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
   return task_c_iface:concat("\n\n"), task_cxx_iface:concat("\n\n"), task_impl
 end
 
-local function generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface)
+local function generate_header(header_filename, registration_name, has_main_task, task_c_iface, task_cxx_iface)
   local header_basename = std.normalize_name(header_filename)
   return string.format(
 [[
@@ -4861,7 +4864,7 @@ local function generate_header(header_filename, registration_name, task_c_iface,
 extern "C" {
 #endif
 
-void %s(void);
+void %s(%s);
 
 %s
 
@@ -4882,12 +4885,13 @@ void %s(void);
   header_basename,
   header_basename,
   registration_name,
+  (has_main_task and "int argc, char **argv" or ""),
   task_c_iface,
   task_cxx_iface,
   header_basename)
 end
 
-local function write_header(header_filename, registration_name, task_whitelist, need_launcher)
+local function write_header(header_filename, registration_name, has_main_task, task_whitelist, need_launcher)
   if not registration_name then
     registration_name = std.normalize_name(header_filename) .. "_register"
   end
@@ -4897,7 +4901,7 @@ local function write_header(header_filename, registration_name, task_whitelist, 
 
   local header = io.open(header_filename, "w")
   assert(header)
-  header:write(generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface))
+  header:write(generate_header(header_filename, registration_name, has_main_task, task_c_iface, task_cxx_iface))
   header:close()
 
   return registration_name, task_impl
@@ -4909,7 +4913,7 @@ function std.save_tasks(header_filename, filename, filetype, link_flags, registr
     need_launcher = true
   end
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist, need_launcher)
+  local registration_name, task_impl = write_header(header_filename, registration_name, main_task or false, task_whitelist, need_launcher)
   local _, names = std.setup(main_task, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
