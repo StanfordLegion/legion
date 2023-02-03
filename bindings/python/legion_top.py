@@ -111,6 +111,9 @@ class LegionOutputStream(object):
 
     def print_local_shard(self):
         return c.legion_runtime_local_shard_without_context() == 0
+        
+    def set_parent(self, parent):
+        self.stream.set_parent(parent)
 
 # Replace the output stream with one that will deduplicate
 # printing for any control-replicated tasks
