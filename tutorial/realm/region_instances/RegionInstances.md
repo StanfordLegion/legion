@@ -1,34 +1,30 @@
 # Region Instances
 ## Introduction
-In this example, we will show you how to manage application data
-inside Realm programs. We will create a single `top_level_task` that
-will write, read and verify some simple application data stored in an
-entity called `RegionInstance`.
+Realm stores application data in `RegionInstances`. Each
+`RegionInstance` is associated with a particular `Memory` and data
+stored in this memory cannot be moved. Any data migration in Realm
+results in a copy operation.
 
-## Creating Instance
-`RegionInstances` are used to store application
-are allocated in a specific memory location. Once a `RegionInstance` is
-created, it cannot be moved. If an application requires the data to be
-migrated or replicated, then a new RegionInstance must be created and a
-`copy` operation must be initiated to move the data between them.
+## Public Interface
+`RegionInstance` offers a public interface to create instance objects
+such as `create_instance`. The `create_instance` call returns a `Event`
+handle which can be used a precondition for any subsequent Realm
+operation. The `block_size` argument allows to specify an instance
+layout which could `0` for structure of arrays `SOA`, `1` for arrays of
+structures `AOS` and `2` for hybrid layouts. We discuss layouts more in
+detail later in this section.
 
-Realm provides a public API, `create_instance`, for creating instance
-objects. This call returns an event handle, which can be used as a
-precondition for any subsequent Realm operations. Additionally, the
-`block_size` arguments allows users to specify the instance layout;
-this can be set to 0 for a Structure of Arrays (SOA) layout, 1 for
-Array of Structures (AOS) layout, or 2 for a hybrid layout.
+We create a `RegionInstance` with a standard `AOS` layout (line 79) that
+encompasses two logical layouts `InstanceLogicalLayout1` and
+`InstanceLogicalLayout2`. The layouts are attributed by the `FieldID`
+and supplied to the instance interface as part of the `field_sizes` map
+(line 74).
 
-At line:79 we create a region instance with `AOS` as the physical
-layout. This region encompasses two logical layouts `InstanceLogicalLayout1`
-and `InstanceLogicalLayout2`. The `FieldID` of these layouts are supplied
-to an instance interface through the `field_sizes` map (line:74).
+The `AOS` layout means that a structure (InstanceLogicalLayout0/1) is
+stored sequentially in memory where all fields for an element 0 would
+preceed all fields for an element 1.
 
-The `AOS` layout defines that the fields of an element `i` for
-`InstanceLogicalLayout1` should be stored before those of elememt
-`i+1`. On the other hand, `SOA` (Structure of Arrays) defines that the
-fields `x` for all elements of `InstanceLayout1` are stored
-consecutively before the fields `y`.
+TODO: field_sizes, memory
 
 ```c++
   class REALM_PUBLIC_API RegionInstance {
@@ -46,27 +42,17 @@ consecutively before the fields `y`.
    }
 ```
 
-## Accessing Data
-It may be necessary for a task to directly access data stored in a
-region instance. Realm offers a set of accessors such as
-`AffineAccessor`, `MultiAffineAccessor` and `GenericAccessor` that
-allow users to access individual elements. For example, `AffineAccessor` 
-is designed to work only for data with an affine layout and that is
-local to the node on which the task is running. `MultiAffineAccessor`
-extends the previous accessor by handling instances with multiple
-affine pieces, while `GenericAccessor` (as the name suggests) handles
-all layouts, both local and remote. In this example, the region instance is created
-with an affine layout and stored locally to the `top_level_task`.
-Therefore, it is valid to access data with the `AffineAccessor`, as
-demonstrated at lines 38 and 50.
+## Instance Layouts
+To represent dense data `RegionInstance` can use multi-dimensional
+rectangles and bitmasks for sparse unstructured data.
 
-TODO: Discuss hybrid layouts. \
-TODO: Discuss reduction instances. \
-TODO: Discuss deferred allocation.
+### Accessors
+TODO: Discuss AffineAccessor, MultiAffineAccessor, GenericAccessor.
 
+## Example
 
 ```c++
-  1 #include <realm.h>
+}  1 #include <realm.h>
   2 #include <realm/cmdline.h>
   3 
   4 using namespace Realm;

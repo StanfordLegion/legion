@@ -86,10 +86,8 @@ void top_level_task(const void *args, size_t arglen, const void *userdata,
 
   RegionInstance inst = RegionInstance::NO_INST;
   RegionInstance::create_instance(inst, *memories.begin(), bounds, field_sizes,
-                                  /*AOS=*/1, ProfilingRequestSet())
+                                  /*SOA=*/1, ProfilingRequestSet())
       .wait();
-
-  assert(inst.address_space() == p.address_space());
 
   update<InstanceLogicalLayout1, int, float>(inst, bounds, FID1, /*add=*/1);
   update<InstanceLogicalLayout2, long long, double>(inst, bounds, FID2,
