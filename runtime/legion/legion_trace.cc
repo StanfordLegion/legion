@@ -3377,7 +3377,8 @@ namespace Legion {
             IndexSpaceExpression::unpack_expression(derez, forest, source);
           FieldMask mask;
           derez.deserialize(mask);
-          exprs.insert(expr, mask);
+          if (exprs.insert(expr, mask))
+            expr->add_nested_expression_reference(owner_did);
         }
         if (ready.exists() && !ready.has_triggered())
           ready_events.insert(ready);
@@ -3392,7 +3393,10 @@ namespace Legion {
     {
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); vit++)
+      {
+        vit->first->add_nested_valid_ref(owner_did);
         vit->first->unpack_valid_ref();
+      }
     }
 
     //--------------------------------------------------------------------------

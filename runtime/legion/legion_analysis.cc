@@ -6331,15 +6331,10 @@ namespace Legion {
       }
       if (!inst_ready_events.empty())
       {
-        if ((inst_ready_events.size() > 1) || init_precondition.exists())
-        {
-          if (init_precondition.exists())
-            inst_ready_events.push_back(init_precondition);
-          instances_ready = 
-            Runtime::merge_events(&trace_info, inst_ready_events);
-        }
-        else
-          instances_ready = inst_ready_events.back();
+        if (init_precondition.exists())
+          inst_ready_events.push_back(init_precondition);
+        instances_ready = 
+          Runtime::merge_events(&trace_info, inst_ready_events);
       }
       else
         instances_ready = init_precondition;
