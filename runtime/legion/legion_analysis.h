@@ -1612,8 +1612,8 @@ namespace Legion {
                        const bool restricted_output,
                        std::vector<ApEvent> *dst_events);
       void issue_copies(InstanceView *target, 
-                        const std::map<InstanceView*,
-                                       std::vector<CopyUpdate*> > &copies,
+                        std::map<InstanceView*,
+                                 std::vector<CopyUpdate*> > &copies,
                         std::set<RtEvent> &recorded_events,
                         const ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info,
