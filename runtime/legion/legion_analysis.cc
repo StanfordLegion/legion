@@ -5428,6 +5428,16 @@ namespace Legion {
           std::map<std::pair<InstanceView*,PhysicalManager*>,
                    std::set<IndexSpaceExpression*> > fused_exprs;
           const ReductionOpID redop = cit->second[0]->redop;
+          // We'll also look for an interesting optimization case here 
+          // that was identified by cuNumeric tensor contractions, in 
+          // some cases we'll have a group of individual views in the
+          // source that are all going to be copied into the same 
+          // collective destination view. In this case, what we can 
+          // copy all the sources to one instance in the collective
+          // view and then we can fuse the broadcast result.
+          const bool check_collective_gather = 
+            (redop == 0) && target->is_collective_view();
+          std::map<IndividualView*,IndexSpaceExpression*> collective_gather;
           for (std::vector<CopyUpdate*>::const_iterator it = 
                 cit->second.begin(); it != cit->second.end(); it++)
           {
@@ -5439,9 +5449,53 @@ namespace Legion {
             // Should also have the same across helper as the first one
             assert(cit->second[0]->across_helper == (*it)->across_helper);
 #endif
-            const std::pair<InstanceView*,PhysicalManager*>
-              key((*it)->source, (*it)->src_man);
-            fused_exprs[key].insert((*it)->expr);
+            if (check_collective_gather && (*it)->source->is_individual_view() 
+                && ((*it)->src_mask == src_mask))
+            {
+              collective_gather.insert(std::make_pair(
+                    (*it)->source->as_individual_view(), (*it)->expr));
+            }
+            else
+            {
+              const std::pair<InstanceView*,PhysicalManager*>
+                key((*it)->source, (*it)->src_man);
+              fused_exprs[key].insert((*it)->expr);
+            }
+          }
+          if (!collective_gather.empty())
+          {
+            // Handle the special collective gather case
+            if (collective_gather.size() > 1)
+            {
+#ifdef DEBUG_LEGION
+              assert(manage_dst_events);
+              assert(cit->second[0]->across_helper == NULL);
+#endif
+              CollectiveView *target_collective = target->as_collective_view();
+              const ApEvent result = target_collective->collective_fuse_gather(
+                                      collective_gather, precondition,
+                                      predicate_guard, analysis->op,
+                                      manage_dst_events ? dst_index : src_index,
+                                      match_space, copy_mask, trace_info,
+                                      recorded_events, effects,
+                                      restricted_output, track_events);
+              if (result.exists())
+              {
+                if (track_events)
+                  events.push_back(result);
+                if (dst_events != NULL)
+                  dst_events->push_back(result);
+              }
+            }
+            else 
+            {
+              // Only one entry so nothing to fuse, add back to fused_exprs
+              std::map<IndividualView*,IndexSpaceExpression*>::const_iterator
+                first = collective_gather.begin();
+              const std::pair<InstanceView*,PhysicalManager*>
+                key(first->first, first->first->get_manager());
+              fused_exprs[key].insert(first->second);
+            }
           }
           for (std::map<std::pair<InstanceView*,PhysicalManager*>,
                         std::set<IndexSpaceExpression*> >::const_iterator it =

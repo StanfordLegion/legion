@@ -12214,6 +12214,12 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
+          case SEND_COLLECTIVE_FUSE_GATHER:
+            {
+              runtime->handle_collective_fuse_gather(derez,
+                                                     remote_address_space);
+              break;
+            }
           case SEND_COLLECTIVE_USER_REQUEST:
             {
               runtime->handle_collective_user_request(derez);
@@ -21862,6 +21868,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_collective_fuse_gather(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_COLLECTIVE_FUSE_GATHER>(
+                                                      rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_collective_register_user_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24132,6 +24147,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AllreduceView::handle_hammer_reduction(this, source, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_collective_fuse_gather(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      CollectiveView::handle_fuse_gather(this, source, derez); 
     }
 
     //--------------------------------------------------------------------------

@@ -3179,6 +3179,7 @@ namespace Legion {
                                                 Serializer &rez);
       void send_collective_hammer_reduction(AddressSpaceID target,
                                             Serializer &rez);
+      void send_collective_fuse_gather(AddressSpaceID target, Serializer &rez);
       void send_collective_register_user_request(AddressSpaceID target,
                                                  Serializer &rez);
       void send_collective_register_user_response(AddressSpaceID target,
@@ -3567,6 +3568,8 @@ namespace Legion {
                                                   AddressSpaceID source);
       void handle_collective_hammer_reduction(Deserializer &derez,
                                               AddressSpaceID source);
+      void handle_collective_fuse_gather(Deserializer &derez,
+                                         AddressSpaceID source);
       void handle_collective_user_request(Deserializer &derez);
       void handle_collective_user_response(Deserializer &derez);
       void handle_collective_user_registration(Deserializer &derez);
@@ -5808,6 +5811,8 @@ namespace Legion {
           break; // no views involved so effectively read-only
         case SEND_COLLECTIVE_HAMMER_REDUCTION:
           break; // read-only
+        case SEND_COLLECTIVE_FUSE_GATHER:
+          return COLLECTIVE_VIRTUAL_CHANNEL;
         case SEND_COLLECTIVE_USER_REQUEST:
           break;
         case SEND_COLLECTIVE_USER_RESPONSE:

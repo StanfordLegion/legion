@@ -813,6 +813,7 @@ namespace Legion {
       SEND_COLLECTIVE_DISTRIBUTE_HOURGLASS,
       SEND_COLLECTIVE_DISTRIBUTE_ALLREDUCE,
       SEND_COLLECTIVE_HAMMER_REDUCTION,
+      SEND_COLLECTIVE_FUSE_GATHER,
       SEND_COLLECTIVE_USER_REQUEST,
       SEND_COLLECTIVE_USER_RESPONSE,
       SEND_COLLECTIVE_REGISTER_USER,
@@ -1073,6 +1074,7 @@ namespace Legion {
         "Send Collective Distribute Hourglass",                       \
         "Send Collective Distribute Allreduce",                       \
         "Send Collective Hammer Reduction",                           \
+        "Send Collective Fuse Gather",                                \
         "Send Collective User Request",                               \
         "Send Collective User Response",                              \
         "Send Collective Individual Register User",                   \

@@ -531,6 +531,23 @@ namespace Legion {
                                     const PhysicalTraceInfo &trace_info,
                                     const AddressSpaceID source,
                                     const bool symbolic = false);
+      // This is a special entry point variation copy_from only for
+      // collective view (not it is not virtual) that will handle the 
+      // special case where we have a bunch of individual views that
+      // we'll be copying to this collective view, so we can do all
+      // the individual copies to a local instance, and then fuse the
+      // resulting broadcast or reduce out to everywhere
+      ApEvent collective_fuse_gather(
+                const std::map<IndividualView*,IndexSpaceExpression*> &sources,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool copy_restricted,
+                                const bool need_valid_return);
     public:
       void perform_collective_fill(FillView *fill_view,
                                 ApEvent precondition, PredEvent predicate_guard,
@@ -704,6 +721,25 @@ namespace Legion {
                                     std::vector<std::vector<ApEvent> > &terms,
                                     const PhysicalTraceInfo *trace_info,
                                     const bool symbolic);
+      void perform_local_broadcast(IndividualView *local_view,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                const std::vector<AddressSpaceID> &children,
+                                CollectiveAnalysis *first_local_analysis,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const size_t op_ctx_index,
+                                const FieldMask &copy_mask,
+                                const UniqueInst &src_inst,
+                                const LgEvent src_unique_event,
+                                const PhysicalTraceInfo &local_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent all_done,
+                                ApBarrier all_bar, ShardID owner_shard,
+                                AddressSpaceID origin,
+                                const bool copy_restricted);
     protected:
       void make_valid(bool need_lock);
       bool make_invalid(bool need_lock);
@@ -740,6 +776,8 @@ namespace Legion {
       static void handle_distribute_hourglass(Runtime *runtime, 
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_distribute_pointwise(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_fuse_gather(Runtime *runtime,
                                     AddressSpaceID source, Deserializer &derez);
       static void handle_make_valid(Runtime *runtime, Deserializer &derez);
       static void handle_make_invalid(Runtime *runtime, Deserializer &derez);
