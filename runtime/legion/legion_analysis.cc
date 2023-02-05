@@ -5450,7 +5450,7 @@ namespace Legion {
             assert(cit->second[0]->across_helper == (*it)->across_helper);
 #endif
             if (check_collective_gather && (*it)->source->is_individual_view() 
-                && ((*it)->src_mask == src_mask))
+                && ((*it)->src_mask == copy_mask))
             {
               collective_gather.insert(std::make_pair(
                     (*it)->source->as_individual_view(), (*it)->expr));
