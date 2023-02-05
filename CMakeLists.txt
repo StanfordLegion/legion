@@ -324,6 +324,85 @@ if(Legion_USE_Kokkos)
 endif()
 
 #------------------------------------------------------------------------------#
+# network interface configuration
+#------------------------------------------------------------------------------#
+set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
+separate_arguments(Legion_NETWORKS)
+
+# compatibility mode - Legion_USE_GASNet==ON -> Legion_NETWORKS=gasnet1
+option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
+if(Legion_USE_GASNet)
+  list(APPEND Legion_NETWORKS gasnet1)
+endif()
+
+#------------------------------------------------------------------------------#
+# GASNet configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
+  option(Legion_EMBED_GASNet "Embed a custom GASNet build in Realm library" OFF)
+  if(Legion_EMBED_GASNet)
+    if(NOT GASNet_CONDUIT)
+      message(FATAL_ERROR "GASNet_CONDUIT must be set when using an embedded GASNet build")
+    endif()
+    # an embedded GASNet uses the stanfordlegion/gasnet helper repository for
+    #  a build wrapper and curated-for-Legion GASNet configurations - it can
+    #  be fetched from github directly (the default) or use a local (and
+    #  perhaps modified) clone of the repository
+    set(Legion_EMBED_GASNet_GITREPO
+      "https://github.com/StanfordLegion/gasnet.git"
+      CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
+    set(Legion_EMBED_GASNet_GITREF
+      "master"
+      CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
+    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
+    set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
+    set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
+  else()
+    set(GASNet_THREADING par)
+    set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
+    find_package(GASNet REQUIRED)
+    if(NOT GASNet_THREADING STREQUAL "par")
+      message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
+    endif()
+  endif()
+
+  # define variable for realm_defines.h
+  if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
+    set(REALM_USE_GASNETEX ON)
+  else()
+    set(REALM_USE_GASNET1 ON)
+  endif()
+  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
+  set(GASNET_CONDUIT_${CONDUIT} ON)
+  # conduits other than udp support MPI interop
+  if(NOT ${GASNet_CONDUIT} STREQUAL "udp")
+    set(Legion_MPI_INTEROP ON)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# MPI configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*mpi.*)
+  cmake_minimum_required(VERSION 3.9)
+  find_package(MPI REQUIRED)
+  # define variable for realm_defines.h
+  set(REALM_USE_MPI ON)
+  set(Legion_MPI_INTEROP ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# UCX configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*ucx.*)
+  find_package(UCX REQUIRED)
+  find_package(MPI REQUIRED) # for MPI bootstrap plugin
+  # define variable for realm_defines.h
+  set(REALM_USE_UCX ON)
+  set(Legion_MPI_INTEROP ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # CUDA configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
@@ -360,8 +439,8 @@ if(Legion_USE_CUDA)
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
 
-  # default is to use hijack unless Kokkos interop is enabled
-  if(Legion_USE_Kokkos)
+  # default is to use hijack unless Kokkos interop is enabled or network is UCX
+  if(Legion_USE_Kokkos OR "${Legion_NETWORKS}" MATCHES .*ucx.*)
     option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
   else()
     option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
@@ -441,75 +520,6 @@ if(Legion_USE_HIP)
     set(REALM_USE_HIP_HIJACK ON)
   endif()
 
-endif()
-
-
-#------------------------------------------------------------------------------#
-# network interface configuration
-#------------------------------------------------------------------------------#
-set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
-separate_arguments(Legion_NETWORKS)
-
-# compatibility mode - Legion_USE_GASNet==ON -> Legion_NETWORKS=gasnet1
-option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
-if(Legion_USE_GASNet)
-  list(APPEND Legion_NETWORKS gasnet1)
-endif()
-
-#------------------------------------------------------------------------------#
-# GASNet configuration
-#------------------------------------------------------------------------------#
-if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
-  option(Legion_EMBED_GASNet "Embed a custom GASNet build in Realm library" OFF)
-  if(Legion_EMBED_GASNet)
-    if(NOT GASNet_CONDUIT)
-      message(FATAL_ERROR "GASNet_CONDUIT must be set when using an embedded GASNet build")
-    endif()
-    # an embedded GASNet uses the stanfordlegion/gasnet helper repository for
-    #  a build wrapper and curated-for-Legion GASNet configurations - it can
-    #  be fetched from github directly (the default) or use a local (and
-    #  perhaps modified) clone of the repository
-    set(Legion_EMBED_GASNet_GITREPO
-      "https://github.com/StanfordLegion/gasnet.git"
-      CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
-    set(Legion_EMBED_GASNet_GITREF
-      "master"
-      CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
-    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
-    set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
-    set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
-  else()
-    set(GASNet_THREADING par)
-    set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
-    find_package(GASNet REQUIRED)
-    if(NOT GASNet_THREADING STREQUAL "par")
-      message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
-    endif()
-  endif()
-
-  # define variable for realm_defines.h
-  if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
-    set(REALM_USE_GASNETEX ON)
-  else()
-    set(REALM_USE_GASNET1 ON)
-  endif()
-  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
-  set(GASNET_CONDUIT_${CONDUIT} ON)
-  # conduits other than udp support MPI interop
-  if(NOT ${GASNet_CONDUIT} STREQUAL "udp")
-    set(Legion_MPI_INTEROP ON)
-  endif()
-endif()
-
-#------------------------------------------------------------------------------#
-# MPI configuration
-#------------------------------------------------------------------------------#
-if("${Legion_NETWORKS}" MATCHES .*mpi.*)
-  cmake_minimum_required(VERSION 3.9)
-  find_package(MPI REQUIRED)
-  # define variable for realm_defines.h
-  set(REALM_USE_MPI ON)
-  set(Legion_MPI_INTEROP ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -962,7 +972,7 @@ if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
 
   corrosion_import_crate(
     MANIFEST_PATH tools/legion_prof_rs/Cargo.toml
-    PROFILE $<IF:$<BOOL:$<$<CONFIG:Debug>:1>>,dev,release>
+    PROFILE release
   )
 
   install(

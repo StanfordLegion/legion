@@ -566,6 +566,10 @@ endif
 ifdef USE_CUDART_HIJACK
 REALM_USE_CUDART_HIJACK = $(USE_CUDART_HIJACK)
 endif
+# Disable hijack if network is UCX
+ifeq ($(strip $(REALM_NETWORKS)),ucx)
+REALM_USE_CUDART_HIJACK := 0
+endif
 ifeq ($(strip $(REALM_USE_CUDART_HIJACK)),1)
 REALM_CC_FLAGS        += -DREALM_USE_CUDART_HIJACK
 endif
@@ -683,7 +687,7 @@ ifeq ($(findstring gasnet,$(REALM_NETWORKS)),gasnet)
     ifeq ($(strip $(REALM_NETWORKS)),gasnet1)
       REALM_CC_FLAGS	+= -DREALM_USE_GASNET1
     else
-      $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, or mpi)
+      $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, mpi, or ucx)
     endif
   endif
   ifeq ($(GASNET),)
@@ -723,8 +727,19 @@ else # Not GASNet network
 ifeq ($(strip $(REALM_NETWORKS)),mpi)
     REALM_CC_FLAGS        += -DREALM_USE_MPI
     USE_MPI = 1
+else # Not GASNet, Not MPI network
+# Realm uses UCX if requested
+ifeq ($(strip $(REALM_NETWORKS)),ucx)
+  REALM_CC_FLAGS  += -DREALM_USE_UCX
+  UCX_LIBS        := -lucp
+  LEGION_LD_FLAGS += $(UCX_LIBS)
+  ifdef UCX_ROOT
+    CC_FLAGS        += -I$(UCX_ROOT)/include
+    LEGION_LD_FLAGS += -L$(UCX_ROOT)/lib
+  endif
 else
-  $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, or mpi)
+  $(error Illegal value for REALM_NETWORKS: $(REALM_NETWORKS), needs to be either gasnet1, gasnetex, mpi, or ucx)
+endif # Test for UCX
 endif # Test for MPI
 endif # Test for GASNet
 endif # Only turn on networks if USE_NETWORK=1
@@ -809,7 +824,7 @@ ifeq ($(strip $(DEBUG)),1)
     CC_FLAGS	+= -O0 -g # --display_error_number
     FC_FLAGS	+= -O0 -g
   else
-    CFLAGS	+= -0O -ggdb
+    CFLAGS	+= -O0 -ggdb
     CC_FLAGS	+= -O0 -ggdb #-ggdb -Wall
     FC_FLAGS	+= -O0 -ggdb
   endif
@@ -927,6 +942,7 @@ REALM_SRC 	+= $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \
+	           $(LG_RT_DIR)/realm/repl_heap.cc \
 	           $(LG_RT_DIR)/realm/deppart/partitions.cc \
 	           $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
 	           $(LG_RT_DIR)/realm/deppart/image.cc \
@@ -963,6 +979,14 @@ endif
 ifeq ($(findstring mpi,$(REALM_NETWORKS)),mpi)
 REALM_SRC 	+= $(LG_RT_DIR)/realm/mpi/mpi_module.cc \
                    $(LG_RT_DIR)/realm/mpi/am_mpi.cc
+endif
+ifeq ($(findstring ucx,$(REALM_NETWORKS)),ucx)
+REALM_SRC 	+= $(LG_RT_DIR)/realm/ucx/ucp_module.cc \
+			   $(LG_RT_DIR)/realm/ucx/ucp_internal.cc \
+			   $(LG_RT_DIR)/realm/ucx/ucp_context.cc \
+			   $(LG_RT_DIR)/realm/ucx/mpool.cc \
+			   $(LG_RT_DIR)/realm/ucx/bootstrap/bootstrap.cc \
+			   $(LG_RT_DIR)/realm/ucx/bootstrap/bootstrap_loader.cc
 endif
 endif
 ifeq ($(strip $(USE_OPENMP)),1)

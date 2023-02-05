@@ -17,7 +17,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-# from __future__ import annotations
+from __future__ import annotations
 from locale import strcoll
 from pickletools import floatnl
 
@@ -39,6 +39,7 @@ import time
 import itertools
 import io
 import csv, _csv
+import statistics
 from functools import reduce
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -540,8 +541,7 @@ class TimeRange(ABC):
         self.trimmed = False
         self.was_removed = False
 
-    # Fix in Python 3.8
-    def __cmp__(self, other: "TimeRange") -> int:
+    def __cmp__(self, other: TimeRange) -> int:
         # The order chosen here is critical for sort_range. Ranges are
         # sorted by start_event first, and then by *reversed*
         # end_event, so that each range will precede any ranges they
@@ -559,12 +559,10 @@ class TimeRange(ABC):
             return 1
         return 0
 
-    # Fix in Python 3.8
-    def __lt__(self, other: "TimeRange") -> bool:
+    def __lt__(self, other: TimeRange) -> bool:
         return self.__cmp__(other) < 0
 
-    # Fix in Python 3.8
-    def __gt__(self, other: "TimeRange") -> bool:
+    def __gt__(self, other: TimeRange) -> bool:
         return self.__cmp__(other) > 0
 
     @typecheck
@@ -582,19 +580,6 @@ class TimeRange(ABC):
     def queue_time(self) -> float:
         assert self.start is not None and self.ready is not None
         return self.start - self.ready
-
-    # The following must be overridden by subclasses that need them
-    def mapper_time(self) -> float:
-        pass
-
-    def active_time(self) -> float:
-        pass
-
-    def application_time(self) -> float:
-        pass
-
-    def meta_time(self) -> float:
-        pass
 
     @typecheck
     def is_trimmed(self) -> bool:
@@ -785,13 +770,16 @@ class StatObject(object):
                         total_calls: int, 
                         total_execution_time: float,
                         max_call: float, max_dev: float, 
-                        min_call: float, min_dev: float
+                        min_call: float, min_dev: float,
+                        median: float, stddev: float 
     ) -> None:
         avg = total_execution_time / float(total_calls) \
                 if total_calls > 0 else 0
         print('       Total Invocations: %d' % total_calls)
         print('       Total Time: %.2f us' % total_execution_time)
         print('       Average Time: %.2f us' % avg)
+        print('       Median Time: %.2f us' % median)
+        print('       Stdev: %.2f us' % stddev)
         print('       Maximum Time: %.2f us (%.3f sig)' % (max_call,max_dev))
         print('       Minimum Time: %.2f us (%.3f sig)' % (min_call,min_dev))
 
@@ -804,19 +792,22 @@ class StatObject(object):
         avg = float(total_execution_time) / float(total_calls)
         max_call = max(self.max_call.values())
         min_call = min(self.min_call.values())
+        alltimes = []
         stddev = 0.0
         for proc_calls in self.all_calls.values():
             for call in proc_calls:
+                alltimes.append(float(call))
                 diff = float(call) - avg
-                stddev += math.sqrt(diff * diff)
+                stddev += diff * diff
         stddev /= float(total_calls)
         stddev = math.sqrt(stddev)
+        median = statistics.median(alltimes)
         max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
         min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
 
         print('  '+repr(self))
         self.print_task_stat(total_calls, total_execution_time,
-                max_call, max_dev, min_call, min_dev)
+                max_call, max_dev, min_call, min_dev, median, stddev)
         print()
 
         if verbose and len(procs) > 1:
@@ -824,11 +815,14 @@ class StatObject(object):
                 avg = float(self.total_execution_time[proc]) / float(self.total_calls[proc]) \
                         if self.total_calls[proc] > 0 else 0
                 stddev = 0
+                alltimes = []
                 for call in self.all_calls[proc]:
+                    alltimes.append(float(call))
                     diff = float(call) - avg
-                    stddev += math.sqrt(diff * diff)
+                    stddev += diff * diff
                 stddev /= float(self.total_calls[proc])
                 stddev = math.sqrt(stddev)
+                median = statistics.median(alltimes)
                 max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
                 min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
 
@@ -836,7 +830,8 @@ class StatObject(object):
                 self.print_task_stat(self.total_calls[proc],
                         self.total_execution_time[proc],
                         self.max_call[proc], max_dev,
-                        self.min_call[proc], min_dev)
+                        self.min_call[proc], min_dev,
+                        median, stddev)
                 print()
 
 class Field(StatObject):
@@ -1339,10 +1334,9 @@ class ProcOperation(Base):
 
     def __init__(self) -> None:
         Base.__init__(self)
-        # FIXME: fix in python3.8
-        self.proc: Optional["Processor"] = None
+        self.proc: Optional[Processor] = None
 
-    def get_owner(self) -> "Processor":
+    def get_owner(self) -> Processor:
         assert self.proc is not None
         return self.proc
 
@@ -2004,10 +1998,9 @@ class ChanOperation(Base):
 
     def __init__(self) -> None:
         Base.__init__(self)
-        # FIXME: fix in python3.8
-        self.chan: Optional["Channel"] = None
+        self.chan: Optional[Channel] = None
 
-    def get_owner(self) -> "Channel":
+    def get_owner(self) -> Channel:
         assert self.chan is not None
         return self.chan
 
@@ -2026,8 +2019,8 @@ class CopyInstInfo(object):
     @typeassert(src_fid=int, dst_fid=int,
                 src_inst_uid=int, dst_inst_uid=int,
                 fevent=int, indirect=bool)
-    def __init__(self, src: Optional["Memory"], 
-                 dst: Optional["Memory"],
+    def __init__(self, src: Optional[Memory], 
+                 dst: Optional[Memory],
                  src_fid: int, dst_fid: int,
                  src_inst_uid: int, dst_inst_uid: int, 
                  fevent: int, indirect: bool
@@ -2096,7 +2089,6 @@ class CopyInstInfo(object):
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
     
-    # FIXME: fix for python 3.8
     @typecheck
     def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
@@ -2299,7 +2291,6 @@ class FillInstInfo(object):
 class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'fill_inst_infos']
 
-    # FIXME: fix for python 3.8
     @typecheck
     def __init__(self, fevent: int) -> None:
         ChanOperation.__init__(self)
@@ -2461,10 +2452,9 @@ class MemOperation(Base):
 
     def __init__(self) -> None:
         Base.__init__(self)
-        # FIXME: fix in python3.8
-        self.mem: Optional["Memory"] = None
+        self.mem: Optional[Memory] = None
 
-    def get_owner(self) -> "Memory":
+    def get_owner(self) -> Memory:
         assert self.mem is not None
         return self.mem
 
@@ -2700,8 +2690,7 @@ class TimePoint(object):
         # like the time field above.
         self.time_key = (time, 0 if first is True else 1, secondary_sort_key)
 
-    # Fix in Python 3.8
-    def __cmp__(a: "TimePoint", b: "TimePoint") -> int:
+    def __cmp__(a: TimePoint, b: TimePoint) -> int:
         if a.time_key < b.time_key:
             return -1
         elif a.time_key > b.time_key:
@@ -2709,12 +2698,10 @@ class TimePoint(object):
         else:
             return 0
     
-    # Fix in Python 3.8
-    def __lt__(self, other: "TimePoint") -> bool:
+    def __lt__(self, other: TimePoint) -> bool:
         return self.__cmp__(other) < 0
 
-    # Fix in Python 3.8
-    def __gt__(self, other: "TimePoint") -> bool:
+    def __gt__(self, other: TimePoint) -> bool:
         return self.__cmp__(other) > 0
 
 class Processor(object):
@@ -2945,10 +2932,9 @@ class Processor(object):
 class MemProcAffinity(object):
     __slots__ = ['mem', 'bandwidth', 'latency', 'best_proc_aff']
 
-    # Fix in Python 3.8
     @typeassert(bandwidth=int, latency=int)
     def __init__(self, 
-                 mem: "Memory", 
+                 mem: Memory, 
                  proc: Processor, 
                  bandwidth: int, 
                  latency: int
@@ -3141,16 +3127,13 @@ class Memory(object):
     def __repr__(self) -> str:
         return '%s Memory %s' % (self.kind, hex(self.mem_id))
 
-    # FIXME in Python 3.8
-    def __cmp__(a: "Memory", b: "Memory") -> int:
+    def __cmp__(a: Memory, b: Memory) -> int:
         return a.mem_id - b.mem_id
 
-    # FIXME in Python 3.8
-    def __lt__(self, other: "Memory") -> bool:
+    def __lt__(self, other: Memory) -> bool:
         return self.__cmp__(other) < 0
 
-    # FIXME in Python 3.8
-    def __gt__(self, other: "Memory") -> bool:
+    def __gt__(self, other: Memory) -> bool:
         return self.__cmp__(other) > 0
 
 
@@ -3362,8 +3345,7 @@ class Channel(object):
         else:
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
-    # Fix in Python 3.8
-    def __cmp__(a: "Channel", b: "Channel") -> int:
+    def __cmp__(a: Channel, b: Channel) -> int:
         if a.src:
             if b.src:
                 x = a.src.__cmp__(b.src)
@@ -3396,12 +3378,10 @@ class Channel(object):
                     else:
                         return 0
 
-    # Fix in Python 3.8
-    def __lt__(self, other: "Channel") -> bool:
+    def __lt__(self, other: Channel) -> bool:
         return self.__cmp__(other) < 0
 
-    # Fix in Python 3.8
-    def __gt__(self, other: "Channel") -> bool:
+    def __gt__(self, other: Channel) -> bool:
         return self.__cmp__(other) > 0
 
 class LFSR(object):
@@ -4113,8 +4093,8 @@ class State(object):
 
     @typecheck
     def find_or_create_task(self, op_id: int, variant: Variant, 
-                            create: float =None, ready: float =None, 
-                            start: float =None, stop: float =None
+                            create: Optional[float] =None, ready: Optional[float] =None, 
+                            start: Optional[float] =None, stop: Optional[float] =None
     ) -> Task:
         task = self.find_or_create_op(op_id)
         # Upgrade this operation to a task if necessary
@@ -4583,6 +4563,18 @@ class State(object):
                 return potential_dir
             i += 1
 
+    def calculate_dynamic_memory_size(self, timepoints: List[TimePoint]) -> int:
+        max_count = 0
+        count = 0
+        for point in timepoints:
+            if point.first:
+                count += point.thing.size #type: ignore
+            else:
+                count -= point.thing.size #type: ignore
+            if count > max_count:
+                max_count = count
+        return max_count
+
     @typeassert(timepoints=list, owners=list, count=int)
     def calculate_utilization_data(self, timepoints: List[TimePoint], 
                                    owners: Union[List[Processor], List[Memory], List[Channel]], 
@@ -4610,10 +4602,13 @@ class State(object):
 
         max_count = float(max_count) #type: ignore
 
+        if max_count == 0:
+            assert isMemory
+            max_count = self.calculate_dynamic_memory_size(timepoints)
+
         utilization: List[Tuple[float, float]] = list()
         count = 0
         last_time = None
-        increment = 1.0 / max_count
         for point in timepoints:
             if isMemory:
                 if point.first:
@@ -4625,7 +4620,6 @@ class State(object):
                     count += 1
                 else:
                     count -= 1
-
 
             if point.time == last_time:
                 if isChannel and count > 0:
@@ -4798,9 +4792,9 @@ class State(object):
             else:
                 count = 0
                 if tp_group in proc_count:
-                    count = proc_count[tp_group];
+                    count = proc_count[tp_group]
                 else:
-                    count = len(owners);
+                    count = len(owners)
                 utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), owners, count)
 
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")

@@ -234,7 +234,17 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, cmake_ex
     assert(os.path.isdir(llvm_dir))
 
     mirror = 'https://github.com/llvm/llvm-project/releases/download'
-    if llvm_version == '110':
+    if llvm_version == '60':
+        mirror = 'https://releases.llvm.org'
+        if not os.environ.get('SETUP_ENV_ENABLE_LLVM_60') == '1':
+            raise Exception('LLVM 6.0 is deprecated in Terra. If you still rely on this version is it VERY IMPORANT that you contact the Legion team IMMEDIATELY so that your use case can be addressed. If you want to TEMPORARILY work around this warning, you can set the environment variable SETUP_ENV_ENABLE_LLVM_60=1')
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-6.0.1.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-6.0.1.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-6.0.1.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-6.0.1.src')
+        download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
+        download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
+    elif llvm_version == '110':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-11.1.0.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-11.1.0.src')
         clang_tarball = os.path.join(llvm_dir, 'clang-11.1.0.src.tar.xz')
@@ -365,7 +375,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             # this works on macos
             thread_count = multiprocessing.cpu_count()
 
-    gasnet_release_dir = None
+    gasnet_build_dir = None
     conduit = None
     if gasnet_enabled():
         gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
@@ -377,11 +387,12 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         if not cache:
             conduit = discover_conduit()
             conduit_short = short_conduit(conduit)
-            gasnet_release_dir = os.path.join(gasnet_dir, 'release')
+            gasnet_build_type = 'debug' if os.environ.get('GASNET_DEBUG') == '1' else 'release'
+            gasnet_build_dir = os.path.join(gasnet_dir, gasnet_build_type)
             gasnet_build_result = os.path.join(
-                gasnet_release_dir, '%s-conduit' % conduit_short,
+                gasnet_build_dir, '%s-conduit' % conduit_short,
                 'libgasnet-%s-par.a' % conduit_short)
-            if not os.path.exists(gasnet_release_dir):
+            if not os.path.exists(gasnet_build_dir):
                 try:
                     build_gasnet(gasnet_dir, conduit, gasnet_version)
                 except Exception as e:
@@ -481,7 +492,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
 
     if not cache:
         build_regent(root_dir, legion_use_cmake, cmake_exe, extra_flags,
-                     gasnet_release_dir, llvm_install_dir, terra_dir, hdf_install_dir,
+                     gasnet_build_dir, llvm_install_dir, terra_dir, hdf_install_dir,
                      conduit, thread_count)
 
 if __name__ == '__main__':
@@ -509,7 +520,7 @@ if __name__ == '__main__':
         default=[],
         help='Extra flags for Make/CMake command.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('110', '130'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('60', '110', '130'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(
@@ -536,7 +547,7 @@ if __name__ == '__main__':
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='3ae65271b8bf0425767bc074a551e233ae553b9d',
+        default='8f1d445a20daac802a53e92cb69afb085e38f6bd',
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,

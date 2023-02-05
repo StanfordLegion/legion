@@ -1565,6 +1565,8 @@ function base.task:set_name(name)
   self.unique_task_identifier = make_unique_task_identifier(name)
   if base.config["separate"] then
     self.taskid:setname("__regent_task_" .. self.unique_task_identifier .. "_task_id")
+    self.mapper_id:setname("__regent_task_" .. self.unique_task_identifier .. "_mapper_id")
+    self.mapping_tag_id:setname("__regent_task_" .. self.unique_task_identifier .. "_mapping_tag_id")
   end
 end
 

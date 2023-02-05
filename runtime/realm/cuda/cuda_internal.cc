@@ -23,6 +23,7 @@ namespace Realm {
 
   namespace Cuda {
 
+    extern Logger log_gpu;
     extern Logger log_stream;
     extern Logger log_gpudma;
 
@@ -2040,6 +2041,54 @@ namespace Realm {
                                     src_serdez_id, dst_serdez_id, redop_id,
                                     total_bytes, src_frags, dst_frags,
                                     kind_ret, bw_ret, lat_ret);
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUReplHeapListener
+    //
+
+    GPUReplHeapListener::GPUReplHeapListener(CudaModule *_module)
+      : module(_module)
+    {}
+
+    void GPUReplHeapListener::chunk_created(void *base, size_t bytes)
+    {
+      if(!module->gpus.empty()) {
+	log_gpu.info() << "registering replicated heap chunk: base=" << base
+                       << " size=" << bytes;
+
+	CUresult ret;
+	{
+	  AutoGPUContext agc(module->gpus[0]);
+	  ret = CUDA_DRIVER_FNPTR(cuMemHostRegister)(base, bytes,
+						     CU_MEMHOSTREGISTER_PORTABLE |
+						     CU_MEMHOSTREGISTER_DEVICEMAP);
+	}
+	if(ret != CUDA_SUCCESS) {
+	  log_gpu.fatal() << "failed to register replicated heap chunk: base=" << base
+			  << " size=" << bytes << " ret=" << ret;
+	  abort();
+	}
+      }
+    }
+
+    void GPUReplHeapListener::chunk_destroyed(void *base, size_t bytes)
+    {
+      if(!module->gpus.empty()) {
+	log_gpu.info() << "unregistering replicated heap chunk: base=" << base
+                       << " size=" << bytes;
+
+	CUresult ret;
+	{
+	  AutoGPUContext agc(module->gpus[0]);
+	  ret = CUDA_DRIVER_FNPTR(cuMemHostUnregister)(base);
+	}
+	if(ret != CUDA_SUCCESS)
+	  log_gpu.warning() << "failed to unregister replicated heap chunk: base=" << base
+			    << " size=" << bytes << " ret=" << ret;
+      }
     }
 
 
