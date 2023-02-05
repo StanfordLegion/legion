@@ -5392,8 +5392,7 @@ namespace Legion {
             {
               const FieldMask overlap = (*it)->src_mask & copy_mask;
               fused_gather_copies.insert(*it, overlap);
-              std::vector<CopyUpdate*>::iterator to_delete = it++;
-              cit->second.erase(to_delete);
+              it = cit->second.erase(it);
             }
             else
               it++;
