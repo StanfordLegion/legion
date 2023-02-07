@@ -7847,7 +7847,7 @@ namespace Legion {
       RtUserEvent done;
       derez.deserialize(done);
 
-      if (ready_events.empty())
+      if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
