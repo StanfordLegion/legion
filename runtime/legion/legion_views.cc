@@ -8199,6 +8199,13 @@ namespace Legion {
           else if (finder->second == best)
             results.push_back(manager);
         }
+        if (results.empty())
+        {
+          // If none of them have affinity then they are all
+          // equally bad so we can just pass in all of them
+          for (unsigned idx = 0; idx < local_views.size(); idx++)
+            results.push_back(local_views[idx]->get_manager());
+        }
       }
       else
         best = bandwidth ? size_max-1 : 1;
