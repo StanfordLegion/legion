@@ -8294,6 +8294,7 @@ namespace Legion {
       }
       RtUserEvent done;
       derez.deserialize(done);
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
