@@ -306,6 +306,8 @@ if(Legion_USE_Kokkos)
   #  the 'separable_compilation' component
   find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
 
+  message(STATUS "Kokkos version: ${Kokkos_VERSION}")
+
   # in order to build using Kokkos' exported compile options, we need to use
   #  the same compiler - newer versions of Kokkos will tell us, but for older
   #  versions, we need it from the configuration or the environment

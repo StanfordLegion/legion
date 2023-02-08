@@ -607,7 +607,7 @@ if(Legion_USE_Kokkos)
     list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
   endif()
 
-  if(Legion_USE_OpenMP)
+  if(Legion_USE_OpenMP AND (Kokkos_VERSION_MAJOR GREATER_EQUAL 4))
     # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
     #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
     if(Legion_USE_CUDA)
