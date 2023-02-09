@@ -14,9 +14,9 @@ use crate::backend::common::{
     CopyInstInfoDumpInstVec, FillInstInfoDumpInstVec, MemGroup, ProcGroup, StatePostprocess,
 };
 use crate::state::{
-    Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Mem, MemID, MemKind, MemPoint,
-    MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint, ProfUID,
-    SpyState, State, Timestamp,
+    Chan, ChanEntryKind, ChanEntryRef, ChanID, ChanPoint, Container, ContainerEntry, Mem, MemID,
+    MemKind, MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID,
+    ProcPoint, ProfUID, SpyState, State, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/index.html");
@@ -164,9 +164,9 @@ impl Proc {
         let entry = self.entry(point.entry);
         let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
         let (base, time_range, waiters) = (&entry.base, &entry.time_range, &entry.waiters);
-        let name = state.proc_entry_name(entry);
+        let name = entry.name(state);
 
-        let color = state.proc_entry_color(entry);
+        let color = entry.color(state);
         let color = format!("#{:06x}", color);
 
         let initiation = match entry.kind {
@@ -434,9 +434,9 @@ impl Chan {
         let (base, time_range) = (entry.base(), entry.time_range());
         let name = state.chan_entry_name(entry);
         let ready_timestamp = match point.entry {
-            ChanEntry::Copy(_) => time_range.ready,
-            ChanEntry::Fill(_) => time_range.ready,
-            ChanEntry::DepPart(_, _) => None,
+            ChanEntryKind::Copy(_) => time_range.ready,
+            ChanEntryKind::Fill(_) => time_range.ready,
+            ChanEntryKind::DepPart(_, _) => None,
         };
 
         let initiation = match entry {
@@ -617,11 +617,11 @@ impl Mem {
     ) -> io::Result<()> {
         let inst = self.insts.get(&point.entry).unwrap();
         let (base, time_range) = (&inst.base, &inst.time_range);
-        let name = state.mem_inst_name(inst);
+        let name = inst.name(state);
 
         let initiation = inst.op_id;
 
-        let color = format!("#{:06x}", state.mem_inst_color(inst));
+        let color = format!("#{:06x}", inst.color(state));
 
         let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
 

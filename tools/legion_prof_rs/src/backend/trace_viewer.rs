@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json;
 
-use crate::state::{ProcEntryKind, State, Timestamp};
+use crate::state::{Container, ProcEntryKind, State, Timestamp};
 
 #[derive(Serialize, Copy, Clone)]
 struct Event<'a> {

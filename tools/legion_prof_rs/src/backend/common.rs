@@ -4,8 +4,8 @@ use std::fmt;
 
 use crate::state::{
     Bounds, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace, FieldID,
-    FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, OpID, ProcEntry,
-    ProcEntryKind, ProcID, ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, OpID, ProcID,
+    ProcKind, ProcPoint, State, TimePoint, Timestamp,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -15,8 +15,6 @@ pub struct ProcGroup(pub Option<NodeID>, pub ProcKind);
 pub struct MemGroup(pub Option<NodeID>, pub MemKind);
 
 pub trait StatePostprocess {
-    fn get_op_color(&self, op_id: OpID) -> Color;
-
     fn has_multiple_nodes(&self) -> bool;
 
     fn group_procs(&self) -> BTreeMap<ProcGroup, Vec<ProcID>>;
@@ -71,14 +69,6 @@ pub trait StatePostprocess {
 
     fn op_provenance(&self, op_id: OpID) -> Option<String>;
 
-    fn proc_entry_name(&self, entry: &ProcEntry) -> String;
-    fn proc_entry_color(&self, entry: &ProcEntry) -> Color;
-    fn proc_entry_provenance(&self, entry: &ProcEntry) -> Option<String>;
-
-    fn mem_inst_name(&self, entry: &Inst) -> String;
-    fn mem_inst_color(&self, entry: &Inst) -> Color;
-    fn mem_inst_provenance(&self, entry: &Inst) -> Option<String>;
-
     fn chan_entry_initiation(&self, entry: ChanEntryRef) -> OpID;
     fn chan_entry_name(&self, entry: ChanEntryRef) -> String;
     fn chan_entry_color(&self, entry: ChanEntryRef) -> Color;
@@ -86,30 +76,6 @@ pub trait StatePostprocess {
 }
 
 impl StatePostprocess for State {
-    fn get_op_color(&self, op_id: OpID) -> Color {
-        if let Some(task) = self.find_task(op_id) {
-            match task.kind {
-                ProcEntryKind::Task(task_id, variant_id) => {
-                    return self
-                        .variants
-                        .get(&(task_id, variant_id))
-                        .unwrap()
-                        .color
-                        .unwrap()
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        if let Some(op) = self.find_op(op_id) {
-            if let Some(kind) = op.kind {
-                return self.op_kinds.get(&kind).unwrap().color.unwrap();
-            }
-        }
-
-        Color(0x000000)
-    }
-
     fn has_multiple_nodes(&self) -> bool {
         let mut node = None;
         for proc in self.procs.values() {
@@ -454,93 +420,8 @@ impl StatePostprocess for State {
         utilization
     }
 
-    fn proc_entry_name(&self, entry: &ProcEntry) -> String {
-        let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
-
-        match entry.kind {
-            ProcEntryKind::Task(task_id, variant_id) => {
-                let task_name = &self.task_kinds.get(&task_id).unwrap().name;
-                let variant_name = &self.variants.get(&(task_id, variant_id)).unwrap().name;
-                match task_name {
-                    Some(task_name) => {
-                        if task_name != variant_name {
-                            format!("{} [{}] <{}>", task_name, variant_name, op_id.unwrap().0)
-                        } else {
-                            format!("{} <{}>", task_name, op_id.unwrap().0)
-                        }
-                    }
-                    None => variant_name.clone(),
-                }
-            }
-            ProcEntryKind::MetaTask(variant_id) => {
-                self.meta_variants.get(&variant_id).unwrap().name.clone()
-            }
-            ProcEntryKind::MapperCall(kind) => {
-                let name = &self.mapper_call_kinds.get(&kind).unwrap().name;
-                if let Some(initiation_op_id) = initiation_op {
-                    format!("Mapper Call {} for {}", name, initiation_op_id.0)
-                } else {
-                    format!("Mapper Call {}", name)
-                }
-            }
-            ProcEntryKind::RuntimeCall(kind) => {
-                self.runtime_call_kinds.get(&kind).unwrap().name.clone()
-            }
-            ProcEntryKind::ProfTask => {
-                format!("ProfTask <{:?}>", initiation_op.unwrap().0)
-            }
-        }
-    }
-
-    fn proc_entry_color(&self, entry: &ProcEntry) -> Color {
-        match entry.kind {
-            ProcEntryKind::Task(task_id, variant_id) => self
-                .variants
-                .get(&(task_id, variant_id))
-                .unwrap()
-                .color
-                .unwrap(),
-            ProcEntryKind::MetaTask(variant_id) => {
-                self.meta_variants.get(&variant_id).unwrap().color.unwrap()
-            }
-            ProcEntryKind::MapperCall(kind) => {
-                self.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
-            }
-            ProcEntryKind::RuntimeCall(kind) => {
-                self.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
-            }
-            ProcEntryKind::ProfTask => {
-                // FIXME don't hardcode this here
-                Color(0xFFC0CB)
-            }
-        }
-    }
-
     fn op_provenance(&self, op_id: OpID) -> Option<String> {
         self.find_op(op_id).and_then(|op| op.provenance.clone())
-    }
-
-    fn proc_entry_provenance(&self, entry: &ProcEntry) -> Option<String> {
-        if let Some(op_id) = entry.op_id {
-            return self.op_provenance(op_id);
-        }
-        None
-    }
-
-    fn mem_inst_name(&self, inst: &Inst) -> String {
-        format!("{}", InstPretty(inst, self))
-    }
-
-    fn mem_inst_color(&self, inst: &Inst) -> Color {
-        let initiation = inst.op_id;
-        self.get_op_color(initiation.unwrap())
-    }
-
-    fn mem_inst_provenance(&self, inst: &Inst) -> Option<String> {
-        if let Some(initiation) = inst.op_id {
-            return self.op_provenance(initiation);
-        }
-        None
     }
 
     fn chan_entry_initiation(&self, entry: ChanEntryRef) -> OpID {
