@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::state::{
-    Bounds, ChanEntryRef, ChanID, ChanPoint, Color, CopyInstInfo, DimKind, FSpace, FieldID,
-    FillInstInfo, ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, OpID, ProcID,
-    ProcKind, ProcPoint, State, TimePoint, Timestamp,
+    Bounds, ChanID, ChanPoint, CopyInstInfo, DimKind, FSpace, FieldID, FillInstInfo, ISpaceID,
+    Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint,
+    Timestamp,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -66,13 +66,6 @@ pub trait StatePostprocess {
         points: Vec<ChanPoint>,
         owners: BTreeSet<ChanID>,
     ) -> Vec<(Timestamp, f64)>;
-
-    fn op_provenance(&self, op_id: OpID) -> Option<String>;
-
-    fn chan_entry_initiation(&self, entry: ChanEntryRef) -> OpID;
-    fn chan_entry_name(&self, entry: ChanEntryRef) -> String;
-    fn chan_entry_color(&self, entry: ChanEntryRef) -> Color;
-    fn chan_entry_provenance(&self, entry: ChanEntryRef) -> Option<String>;
 }
 
 impl StatePostprocess for State {
@@ -418,64 +411,6 @@ impl StatePostprocess for State {
         }
 
         utilization
-    }
-
-    fn op_provenance(&self, op_id: OpID) -> Option<String> {
-        self.find_op(op_id).and_then(|op| op.provenance.clone())
-    }
-
-    fn chan_entry_initiation(&self, entry: ChanEntryRef) -> OpID {
-        match entry {
-            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
-            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
-            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
-        }
-    }
-
-    fn chan_entry_name(&self, entry: ChanEntryRef) -> String {
-        match entry {
-            ChanEntryRef::Copy(_, copy) => {
-                let nreqs = copy.copy_inst_infos.len();
-                if nreqs > 0 {
-                    format!(
-                        "{}: size={}, num reqs={}{}",
-                        copy.copy_kind.unwrap(),
-                        SizePretty(copy.size.unwrap()),
-                        nreqs,
-                        CopyInstInfoVec(&copy.copy_inst_infos, self)
-                    )
-                } else {
-                    format!(
-                        "Copy: size={}, num reqs={}",
-                        SizePretty(copy.size.unwrap()),
-                        nreqs
-                    )
-                }
-            }
-            ChanEntryRef::Fill(_, fill) => {
-                let nreqs = fill.fill_inst_infos.len();
-                if nreqs > 0 {
-                    format!(
-                        "Fill: num reqs={}{}",
-                        nreqs,
-                        FillInstInfoVec(&fill.fill_inst_infos, self)
-                    )
-                } else {
-                    format!("Fill: num reqs={}", nreqs)
-                }
-            }
-            ChanEntryRef::DepPart(_, deppart) => format!("{}", deppart.part_op),
-        }
-    }
-
-    fn chan_entry_color(&self, entry: ChanEntryRef) -> Color {
-        let initiation = self.chan_entry_initiation(entry);
-        self.get_op_color(initiation)
-    }
-
-    fn chan_entry_provenance(&self, entry: ChanEntryRef) -> Option<String> {
-        let initiation = self.chan_entry_initiation(entry);
-        self.op_provenance(initiation)
     }
 }
 

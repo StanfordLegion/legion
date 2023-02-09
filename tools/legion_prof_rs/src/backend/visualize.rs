@@ -14,9 +14,9 @@ use crate::backend::common::{
     CopyInstInfoDumpInstVec, FillInstInfoDumpInstVec, MemGroup, ProcGroup, StatePostprocess,
 };
 use crate::state::{
-    Chan, ChanEntryKind, ChanEntryRef, ChanID, ChanPoint, Container, ContainerEntry, Mem, MemID,
-    MemKind, MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID,
-    ProcPoint, ProfUID, SpyState, State, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Container, ContainerEntry, Mem, MemID, MemKind, MemPoint,
+    MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint, ProfUID,
+    SpyState, State, Timestamp,
 };
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/index.html");
@@ -432,31 +432,27 @@ impl Chan {
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
         let (base, time_range) = (entry.base(), entry.time_range());
-        let name = state.chan_entry_name(entry);
-        let ready_timestamp = match point.entry {
-            ChanEntryKind::Copy(_) => time_range.ready,
-            ChanEntryKind::Fill(_) => time_range.ready,
-            ChanEntryKind::DepPart(_, _) => None,
+        let name = entry.name(state);
+        let ready_timestamp = match entry {
+            ChanEntry::Copy(_) => time_range.ready,
+            ChanEntry::Fill(_) => time_range.ready,
+            ChanEntry::DepPart(_) => None,
         };
 
-        let initiation = match entry {
-            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
-            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
-            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
-        };
+        let initiation = entry.initiation();
 
-        let color = format!("#{:06x}", state.chan_entry_color(entry));
+        let color = format!("#{:06x}", entry.color(state));
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap() - 1;
 
         let instances = match entry {
-            ChanEntryRef::Copy(_, copy) => {
+            ChanEntry::Copy(copy) => {
                 format!("{}", CopyInstInfoDumpInstVec(&copy.copy_inst_infos, state))
             }
-            ChanEntryRef::Fill(_, fill) => {
+            ChanEntry::Fill(fill) => {
                 format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, state))
             }
-            ChanEntryRef::DepPart(_, _deppart) => "".to_owned(),
+            ChanEntry::DepPart(_deppart) => "".to_owned(),
         };
 
         f.serialize(DataRecord {
@@ -468,7 +464,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.0),
+            initiation: Some(initiation.unwrap().0),
             in_: "",
             out: "",
             children: "",

@@ -215,7 +215,9 @@ pub trait Container {
 // Common methods that apply to ProcEntry, MemEntry, ChanEntry
 pub trait ContainerEntry {
     fn base(&self) -> &Base;
+    fn base_mut(&mut self) -> &mut Base;
     fn time_range(&self) -> &TimeRange;
+    fn time_range_mut(&mut self) -> &mut TimeRange;
     fn waiters(&self) -> Option<&Waiters>;
     fn initiation(&self) -> Option<OpID>;
 
@@ -271,8 +273,16 @@ impl ContainerEntry for ProcEntry {
         &self.base
     }
 
+    fn base_mut(&mut self) -> &mut Base {
+        &mut self.base
+    }
+
     fn time_range(&self) -> &TimeRange {
         &self.time_range
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        &mut self.time_range
     }
 
     fn waiters(&self) -> Option<&Waiters> {
@@ -739,51 +749,9 @@ pub enum ChanEntry {
     DepPart(DepPart),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum ChanEntryRef<'a> {
-    Copy(EventID, &'a Copy),
-    Fill(EventID, &'a Fill),
-    DepPart((OpID, usize), &'a DepPart),
-}
-
-impl<'a> ChanEntryRef<'a> {
-    pub fn base(self) -> &'a Base {
-        match self {
-            ChanEntryRef::Copy(_, copy) => &copy.base,
-            ChanEntryRef::Fill(_, fill) => &fill.base,
-            ChanEntryRef::DepPart(_, deppart) => &deppart.base,
-        }
-    }
-    pub fn time_range(self) -> &'a TimeRange {
-        match self {
-            ChanEntryRef::Copy(_, copy) => &copy.time_range,
-            ChanEntryRef::Fill(_, fill) => &fill.time_range,
-            ChanEntryRef::DepPart(_, deppart) => &deppart.time_range,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ChanEntryRefMut<'a> {
-    Copy(EventID, &'a mut Copy),
-    Fill(EventID, &'a mut Fill),
-    DepPart((OpID, usize), &'a mut DepPart),
-}
-
-impl<'a> ChanEntryRefMut<'a> {
-    pub fn base(self) -> &'a mut Base {
-        match self {
-            ChanEntryRefMut::Copy(_, copy) => &mut copy.base,
-            ChanEntryRefMut::Fill(_, fill) => &mut fill.base,
-            ChanEntryRefMut::DepPart(_, deppart) => &mut deppart.base,
-        }
-    }
-    pub fn time_range(self) -> &'a mut TimeRange {
-        match self {
-            ChanEntryRefMut::Copy(_, copy) => &mut copy.time_range,
-            ChanEntryRefMut::Fill(_, fill) => &mut fill.time_range,
-            ChanEntryRefMut::DepPart(_, deppart) => &mut deppart.time_range,
-        }
+impl ChanEntry {
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range_mut().trim_time_range(start, stop)
     }
 }
 
@@ -796,11 +764,27 @@ impl ContainerEntry for ChanEntry {
         }
     }
 
+    fn base_mut(&mut self) -> &mut Base {
+        match self {
+            ChanEntry::Copy(copy) => &mut copy.base,
+            ChanEntry::Fill(fill) => &mut fill.base,
+            ChanEntry::DepPart(deppart) => &mut deppart.base,
+        }
+    }
+
     fn time_range(&self) -> &TimeRange {
         match self {
             ChanEntry::Copy(copy) => &copy.time_range,
             ChanEntry::Fill(fill) => &fill.time_range,
             ChanEntry::DepPart(deppart) => &deppart.time_range,
+        }
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        match self {
+            ChanEntry::Copy(copy) => &mut copy.time_range,
+            ChanEntry::Fill(fill) => &mut fill.time_range,
+            ChanEntry::DepPart(deppart) => &mut deppart.time_range,
         }
     }
 
@@ -863,7 +847,7 @@ impl ContainerEntry for ChanEntry {
     }
 }
 
-pub type ChanPoint = TimePoint<ChanEntryKind, ()>;
+pub type ChanPoint = TimePoint<ProfUID, ()>;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
@@ -937,9 +921,10 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub chan_id: ChanID,
-    pub copies: BTreeMap<EventID, Copy>,
-    pub fills: BTreeMap<EventID, Fill>,
-    pub depparts: BTreeMap<OpID, Vec<DepPart>>,
+    entries: BTreeMap<ProfUID, ChanEntry>,
+    pub copies: BTreeMap<EventID, ProfUID>,
+    pub fills: BTreeMap<EventID, ProfUID>,
+    pub depparts: BTreeMap<OpID, Vec<ProfUID>>,
     pub time_points: Vec<ChanPoint>,
     pub max_levels: u32,
 }
@@ -948,6 +933,7 @@ impl Chan {
     fn new(chan_id: ChanID) -> Self {
         Chan {
             chan_id,
+            entries: BTreeMap::new(),
             copies: BTreeMap::new(),
             fills: BTreeMap::new(),
             depparts: BTreeMap::new(),
@@ -956,44 +942,51 @@ impl Chan {
         }
     }
 
+    pub fn add_copy(&mut self, copy: Copy) {
+        self.copies.insert(copy.fevent, copy.base.prof_uid);
+        self.entries
+            .entry(copy.base.prof_uid)
+            .or_insert(ChanEntry::Copy(copy));
+    }
+
+    pub fn add_fill(&mut self, fill: Fill) {
+        self.fills.insert(fill.fevent, fill.base.prof_uid);
+        self.entries
+            .entry(fill.base.prof_uid)
+            .or_insert(ChanEntry::Fill(fill));
+    }
+
+    pub fn add_deppart(&mut self, deppart: DepPart) {
+        self.depparts
+            .entry(deppart.op_id)
+            .or_insert_with(Vec::new)
+            .push(deppart.base.prof_uid);
+        self.entries
+            .entry(deppart.base.prof_uid)
+            .or_insert(ChanEntry::DepPart(deppart));
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.copies.is_empty() && self.fills.is_empty() && self.depparts.is_empty()
+        self.entries.is_empty()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.copies.retain(|_, c| !c.trim_time_range(start, stop));
-        self.fills.retain(|_, f| !f.trim_time_range(start, stop));
-        for depparts in self.depparts.values_mut() {
-            depparts.retain_mut(|t| !t.trim_time_range(start, stop));
-        }
+        self.entries.retain(|_, e| !e.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
-        fn add(time: &TimeRange, entry: ChanEntryKind, points: &mut Vec<ChanPoint>) {
+        fn add(time: &TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(start, entry, true, ()));
-            points.push(ChanPoint::new(stop, entry, false, ()));
+            points.push(ChanPoint::new(start, prof_uid, true, ()));
+            points.push(ChanPoint::new(stop, prof_uid, false, ()));
         }
 
         let mut points = Vec::new();
 
-        for (fevent, copy) in &self.copies {
-            let time = &copy.time_range;
-            let entry = ChanEntryKind::Copy(*fevent);
-            add(time, entry, &mut points);
-        }
-        for (fevent, fill) in &self.fills {
-            let time = &fill.time_range;
-            let entry = ChanEntryKind::Fill(*fevent);
-            add(time, entry, &mut points);
-        }
-        for (op_id, depparts) in &self.depparts {
-            for (idx, deppart) in depparts.iter().enumerate() {
-                let time = &deppart.time_range;
-                let entry = ChanEntryKind::DepPart(*op_id, idx);
-                add(time, entry, &mut points);
-            }
+        for (prof_uid, entry) in &self.entries {
+            let time = entry.time_range();
+            add(time, *prof_uid, &mut points);
         }
 
         points.sort_by_key(|a| a.time_key());
@@ -1007,7 +1000,7 @@ impl Chan {
                 } else {
                     self.max_levels.postincrement()
                 };
-                self.entry_mut(point.entry).base().set_level(level);
+                self.entry_mut(point.entry).base_mut().set_level(level);
             } else {
                 let level = self.entry(point.entry).base().level.unwrap();
                 free_levels.push(Reverse(level));
@@ -1016,42 +1009,10 @@ impl Chan {
 
         self.time_points = points;
     }
-
-    pub fn entry(&self, entry: ChanEntryKind) -> ChanEntryRef {
-        match entry {
-            ChanEntryKind::Copy(fevent) => {
-                let copy = &self.copies.get(&fevent).unwrap();
-                ChanEntryRef::Copy(fevent, copy)
-            }
-            ChanEntryKind::Fill(fevent) => {
-                let fill = &self.fills.get(&fevent).unwrap();
-                ChanEntryRef::Fill(fevent, fill)
-            }
-            ChanEntryKind::DepPart(op_id, idx) => {
-                let deppart = &self.depparts.get(&op_id).unwrap()[idx];
-                ChanEntryRef::DepPart((op_id, idx), deppart)
-            }
-        }
-    }
-
-    pub fn entry_mut(&mut self, entry: ChanEntryKind) -> ChanEntryRefMut {
-        match entry {
-            ChanEntryKind::Copy(fevent) => {
-                ChanEntryRefMut::Copy(fevent, self.copies.get_mut(&fevent).unwrap())
-            }
-            ChanEntryKind::Fill(fevent) => {
-                ChanEntryRefMut::Fill(fevent, self.fills.get_mut(&fevent).unwrap())
-            }
-            ChanEntryKind::DepPart(op_id, idx) => {
-                let deppart = &mut self.depparts.get_mut(&op_id).unwrap()[idx];
-                ChanEntryRefMut::DepPart((op_id, idx), deppart)
-            }
-        }
-    }
 }
 
 impl Container for Chan {
-    type E = ChanEntryKind;
+    type E = ProfUID;
     type S = ();
     type Entry = ChanEntry;
 
@@ -1063,14 +1024,12 @@ impl Container for Chan {
         &self.time_points
     }
 
-    fn entry(&self, entry: ChanEntryKind) -> &ChanEntry {
-        unimplemented!()
-        // self.entries.get(&prof_uid).unwrap()
+    fn entry(&self, prof_uid: ProfUID) -> &ChanEntry {
+        self.entries.get(&prof_uid).unwrap()
     }
 
-    fn entry_mut(&mut self, entry: ChanEntryKind) -> &mut ChanEntry {
-        unimplemented!()
-        // self.entries.get_mut(&prof_uid).unwrap()
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ChanEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
     }
 }
 
@@ -1479,8 +1438,16 @@ impl ContainerEntry for Inst {
         &self.base
     }
 
+    fn base_mut(&mut self) -> &mut Base {
+        &mut self.base
+    }
+
     fn time_range(&self) -> &TimeRange {
         &self.time_range
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        &mut self.time_range
     }
 
     fn waiters(&self) -> Option<&Waiters> {
@@ -1907,7 +1874,7 @@ impl CopyInstInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    _fevent: EventID,
+    fevent: EventID,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: Option<OpID>,
@@ -1922,7 +1889,7 @@ impl Copy {
     fn new(base: Base, fevent: EventID) -> Self {
         Copy {
             base,
-            _fevent: fevent,
+            fevent,
             time_range: TimeRange::new_empty(),
             chan_id: None,
             op_id: None,
@@ -1933,6 +1900,7 @@ impl Copy {
             copy_inst_infos: Vec::new(),
         }
     }
+
     fn add_copy_info(
         &mut self,
         time_range: TimeRange,
@@ -1949,9 +1917,11 @@ impl Copy {
         self.num_hops = Some(num_hops);
         self.request_type = Some(request_type);
     }
+
     fn add_copy_inst_info(&mut self, copy_inst_info: CopyInstInfo) {
         self.copy_inst_infos.push(copy_inst_info);
     }
+
     fn add_channel(&mut self) {
         // sanity check
         assert_eq!(self.chan_id, None);
@@ -2001,9 +1971,6 @@ impl Copy {
             };
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -2028,7 +1995,7 @@ impl FillInstInfo {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    _fevent: EventID,
+    fevent: EventID,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: Option<OpID>,
@@ -2040,7 +2007,7 @@ impl Fill {
     fn new(base: Base, fevent: EventID) -> Self {
         Fill {
             base,
-            _fevent: fevent,
+            fevent,
             time_range: TimeRange::new_empty(),
             chan_id: None,
             op_id: None,
@@ -2048,6 +2015,7 @@ impl Fill {
             fill_inst_infos: Vec::new(),
         }
     }
+
     fn add_fill_info(&mut self, time_range: TimeRange, op_id: OpID, size: u64) {
         // sanity check
         assert_eq!(self.op_id, None);
@@ -2055,9 +2023,11 @@ impl Fill {
         self.op_id = Some(op_id);
         self.size = Some(size);
     }
+
     fn add_fill_inst_info(&mut self, fill_inst_info: FillInstInfo) {
         self.fill_inst_infos.push(fill_inst_info);
     }
+
     fn add_channel(&mut self) {
         // sanity check
         assert_eq!(self.chan_id, None);
@@ -2068,9 +2038,6 @@ impl Fill {
         }
         let chan_id = ChanID::new_fill(chan_dst);
         self.chan_id = Some(chan_id);
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -2090,9 +2057,6 @@ impl DepPart {
             time_range,
             op_id,
         }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -2423,10 +2387,7 @@ impl State {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan = self.find_deppart_chan_mut();
-        chan.depparts
-            .entry(op_id)
-            .or_insert_with(Vec::new)
-            .push(DepPart::new(base, part_op, time_range, op_id));
+        chan.add_deppart(DepPart::new(base, part_op, time_range, op_id));
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
@@ -2502,21 +2463,21 @@ impl State {
             }
         }
         // put fills into channels
-        for (key, mut fill) in fills {
+        for mut fill in fills.into_values() {
             fill.add_channel();
             if let Some(chan_id) = fill.chan_id {
                 let chan = self.find_chan_mut(chan_id);
-                chan.fills.insert(key, fill);
+                chan.add_fill(fill);
             } else {
                 unreachable!();
             }
         }
         // put copies into channels
-        for (key, mut copy) in copies {
+        for mut copy in copies.into_values() {
             copy.add_channel();
             if let Some(chan_id) = copy.chan_id {
                 let chan = self.find_chan_mut(chan_id);
-                chan.copies.insert(key, copy);
+                chan.add_copy(copy);
             } else {
                 unreachable!();
             }
