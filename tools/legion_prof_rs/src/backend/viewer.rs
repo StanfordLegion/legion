@@ -310,6 +310,9 @@ impl StateDataSource {
         let mut items: Vec<Vec<Item>> = Vec::new();
         let mut merged = Vec::new();
         items.resize_with(cont.max_levels() + 1, Vec::new);
+        if let Some(ref mut item_metas) = item_metas {
+            item_metas.resize_with(cont.max_levels() + 1, Vec::new);
+        }
         merged.resize(cont.max_levels() + 1, 0u64);
         for point in cont.time_points() {
             if !point.first {
@@ -382,7 +385,6 @@ impl StateDataSource {
     fn generate_proc_slot_meta_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotMetaTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        item_metas.resize_with(proc.max_levels() + 1, Vec::new);
         let items = self.build_items(proc, tile_id, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
                 point_interval,
@@ -433,7 +435,6 @@ impl StateDataSource {
     fn generate_mem_slot_meta_tile(&self, mem_id: MemID, tile_id: TileID) -> SlotMetaTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        item_metas.resize_with(mem.max_levels() + 1, Vec::new);
         let items = self.build_items(mem, tile_id, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
                 point_interval,
@@ -481,7 +482,6 @@ impl StateDataSource {
     fn generate_chan_slot_meta_tile(&self, chan_id: ChanID, tile_id: TileID) -> SlotMetaTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
-        item_metas.resize_with(chan.max_levels() + 1, Vec::new);
         let items = self.build_items(chan, tile_id, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
                 point_interval,
