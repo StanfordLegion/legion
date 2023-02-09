@@ -47,7 +47,6 @@ enum EntryKind {
 }
 
 struct ItemInfo {
-    level: usize,
     point_interval: ts::Interval,
     expand: bool,
 }
@@ -267,6 +266,7 @@ impl StateDataSource {
         interval: ts::Interval,
         tile_id: TileID,
         last: &mut Item,
+        last_meta: Option<&mut ItemMeta>,
         merged: &mut u64,
     ) -> bool {
         // Check for overlap with previous task. If so, either one or the
@@ -281,6 +281,14 @@ impl StateDataSource {
             } else {
                 last.interval.stop = interval.stop;
                 last.color = Color(0x808080).into();
+                if let Some(last_meta) = last_meta {
+                    if let Some((_, Field::U64(value))) = last_meta.fields.get_mut(0) {
+                        *value += 1;
+                    } else {
+                        last_meta.title = "Merged Tasks".to_owned();
+                        last_meta.fields = vec![("Number of Tasks".to_owned(), Field::U64(2))];
+                    }
+                }
                 *merged += 1;
                 return true;
             }
@@ -293,7 +301,8 @@ impl StateDataSource {
         &self,
         cont: &C,
         tile_id: TileID,
-        mut more_processing: impl FnMut(&C::Entry, ItemInfo),
+        mut item_metas: Option<&mut Vec<Vec<ItemMeta>>>,
+        get_meta: impl Fn(&C::Entry, ItemInfo) -> ItemMeta,
     ) -> Vec<Vec<Item>>
     where
         C: Container,
@@ -330,7 +339,12 @@ impl StateDataSource {
             );
 
             if let Some(last) = items[level].last_mut() {
-                if Self::merge_items(view_interval, tile_id, last, &mut merged[level]) {
+                let last_meta = if let Some(ref mut item_metas) = item_metas {
+                    item_metas[level].last_mut()
+                } else {
+                    None
+                };
+                if Self::merge_items(view_interval, tile_id, last, last_meta, &mut merged[level]) {
                     continue;
                 }
             }
@@ -345,21 +359,23 @@ impl StateDataSource {
 
             items[level].push(item);
 
-            more_processing(
-                entry,
-                ItemInfo {
-                    level,
-                    point_interval,
-                    expand,
-                },
-            );
+            if let Some(ref mut item_metas) = item_metas {
+                let item_meta = get_meta(
+                    entry,
+                    ItemInfo {
+                        point_interval,
+                        expand,
+                    },
+                );
+                item_metas[level].push(item_meta);
+            }
         }
         items
     }
 
     fn generate_proc_slot_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotTile {
         let proc = self.state.procs.get(&proc_id).unwrap();
-        let items = self.build_items(proc, tile_id, |_, _| {});
+        let items = self.build_items(proc, tile_id, None, |_, _| unreachable!());
         SlotTile { tile_id, items }
     }
 
@@ -367,9 +383,8 @@ impl StateDataSource {
         let proc = self.state.procs.get(&proc_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
         item_metas.resize_with(proc.max_levels() + 1, Vec::new);
-        let items = self.build_items(proc, tile_id, |entry, info| {
+        let items = self.build_items(proc, tile_id, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
-                level,
                 point_interval,
                 expand,
             } = info;
@@ -394,12 +409,10 @@ impl StateDataSource {
                     Field::String(provenance.to_string()),
                 ));
             }
-            let item_meta = ItemMeta {
+            ItemMeta {
                 title: name,
                 fields,
-            };
-
-            item_metas[level].push(item_meta);
+            }
         });
         assert_eq!(items.len(), item_metas.len());
         for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
@@ -413,7 +426,7 @@ impl StateDataSource {
 
     fn generate_mem_slot_tile(&self, mem_id: MemID, tile_id: TileID) -> SlotTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let items = self.build_items(mem, tile_id, |_, _| {});
+        let items = self.build_items(mem, tile_id, None, |_, _| unreachable!());
         SlotTile { tile_id, items }
     }
 
@@ -421,9 +434,8 @@ impl StateDataSource {
         let mem = self.state.mems.get(&mem_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
         item_metas.resize_with(mem.max_levels() + 1, Vec::new);
-        let items = self.build_items(mem, tile_id, |entry, info| {
+        let items = self.build_items(mem, tile_id, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
-                level,
                 point_interval,
                 expand,
             } = info;
@@ -445,12 +457,10 @@ impl StateDataSource {
                     Field::String(provenance.to_string()),
                 ));
             }
-            let item_meta = ItemMeta {
+            ItemMeta {
                 title: name,
                 fields,
-            };
-
-            item_metas[level].push(item_meta);
+            }
         });
         assert_eq!(items.len(), item_metas.len());
         for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
@@ -464,7 +474,7 @@ impl StateDataSource {
 
     fn generate_chan_slot_tile(&self, chan_id: ChanID, tile_id: TileID) -> SlotTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let items = self.build_items(chan, tile_id, |_, _| {});
+        let items = self.build_items(chan, tile_id, None, |_, _| unreachable!());
         SlotTile { tile_id, items }
     }
 
@@ -472,9 +482,8 @@ impl StateDataSource {
         let chan = self.state.chans.get(&chan_id).unwrap();
         let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
         item_metas.resize_with(chan.max_levels() + 1, Vec::new);
-        let items = self.build_items(chan, tile_id, |entry, info| {
+        let items = self.build_items(chan, tile_id, Some(&mut item_metas), |entry, info| {
             let ItemInfo {
-                level,
                 point_interval,
                 expand,
             } = info;
@@ -496,12 +505,10 @@ impl StateDataSource {
                     Field::String(provenance.to_string()),
                 ));
             }
-            let item_meta = ItemMeta {
+            ItemMeta {
                 title: name,
                 fields,
-            };
-
-            item_metas[level].push(item_meta);
+            }
         });
         assert_eq!(items.len(), item_metas.len());
         for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
