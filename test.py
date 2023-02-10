@@ -1066,7 +1066,7 @@ def run_tests(test_modules=None,
         tmp_dir = tempfile.mkdtemp(dir=root_dir)
     else:
         if os.path.exists(tmp_dir):
-            shutils.rmtree(tmp_dir)
+            shutil.rmtree(tmp_dir)
         os.mkdir(tmp_dir)
 
     if verbose:
