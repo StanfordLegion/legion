@@ -839,11 +839,12 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
     cmd(['cargo', 'install',
+         '--all-features',
          '--locked',
          '--path', legion_prof_dir,
          '--root', tmp_dir],
         env=env)
-    cmd(['cargo', 'test'], env=env, cwd=legion_prof_dir)
+    cmd(['cargo', 'test', '--all-features'], env=env, cwd=legion_prof_dir)
     cmd(['cargo', 'fmt', '--all', '--', '--check'], env=env, cwd=legion_prof_dir)
 
 def build_regent(root_dir, env):

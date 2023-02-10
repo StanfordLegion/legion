@@ -286,7 +286,9 @@ namespace Realm {
     
     void kokkos_finalize(const std::vector<ProcessorImpl *>& local_procs)
     {
+#if KOKKOS_VERSION >= 40000
       Kokkos::Impl::pre_finalize();
+#endif
       // per processor finalization on the correct threads
 #ifdef KOKKOS_ENABLE_OPENMP
       for(std::vector<ProcessorImpl *>::const_iterator it = kokkos_omp_procs.begin();
@@ -311,7 +313,11 @@ namespace Realm {
 #endif
       
       log_kokkos.info() << "doing general finalization";
+#if KOKKOS_VERSION >= 40000
       Kokkos::Impl::post_finalize();
+#else
+      Kokkos::finalize();
+#endif
     }
 
   };
