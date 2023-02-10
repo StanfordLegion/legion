@@ -2378,7 +2378,11 @@ impl SpyState {
     fn create_spy_op(&mut self, op: OpID, pre: EventID, post: EventID) {
         let old = self.spy_ops.insert(op, SpyOp::new(pre, post));
         // Apparently we can end up with duplicate logging containing NO_EVENTs
-        if let Some(SpyOp { precondition, postcondition }) = old {
+        if let Some(SpyOp {
+            precondition,
+            postcondition,
+        }) = old
+        {
             assert!(precondition == pre || precondition.0 == 0);
             assert!(postcondition == post || postcondition.0 == 0);
         }

@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -53,6 +54,8 @@ pub trait StatePostprocess {
         owners: BTreeSet<ProcID>,
         max_count: u64,
     ) -> Vec<(Timestamp, f64)>;
+
+    fn calculate_dynamic_memory_size(&self, points: &Vec<&MemPoint>) -> u64;
 
     fn calculate_mem_utilization_data(
         &self,
@@ -343,6 +346,25 @@ impl StatePostprocess for State {
         utilization
     }
 
+    fn calculate_dynamic_memory_size(&self, points: &Vec<&MemPoint>) -> u64 {
+        let mut max_count = 0;
+        let mut count = 0;
+
+        for point in points {
+            let inst = self.find_inst(point.entry).unwrap();
+            if point.first {
+                count += inst.size.unwrap();
+            } else {
+                count -= inst.size.unwrap();
+            }
+            if count > max_count {
+                max_count = count;
+            }
+        }
+
+        max(max_count, 1)
+    }
+
     fn calculate_mem_utilization_data(
         &self,
         points: Vec<&MemPoint>,
@@ -358,27 +380,15 @@ impl StatePostprocess for State {
             max_count += mem.capacity;
         }
 
-        let mut count = 0;
-
         if max_count == 0 {
             // we are in external memory, so we need to calculate the max capacity
-            for point in &points {
-                let inst = self.find_inst(point.entry).unwrap();
-                if point.first {
-                    count += inst.size.unwrap();
-                } else {
-                    count -= inst.size.unwrap();
-                }
-                if count > max_count {
-                    max_count = count;
-                }
-            }
-            count = 0;
+            max_count = self.calculate_dynamic_memory_size(&points);
         }
 
         let max_count = max_count as f64;
         let mut last_time = None;
 
+        let mut count = 0;
         for point in &points {
             let inst = self.find_inst(point.entry).unwrap();
             if point.first {

@@ -4573,7 +4573,7 @@ class State(object):
                 count -= point.thing.size #type: ignore
             if count > max_count:
                 max_count = count
-        return max_count
+        return max(max_count, 1)
 
     @typeassert(timepoints=list, owners=list, count=int)
     def calculate_utilization_data(self, timepoints: List[TimePoint], 
