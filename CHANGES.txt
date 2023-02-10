@@ -1,6 +1,19 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 23.03.0 (????? ??, ????)
+  * Build
+    - Minimum supported CMake version is now 3.16. (Some optional features may
+       continue to require even newer versions.)
+    - Minimum supported GCC version is now 8.
+    - Minimum supported CUDA version is now 10.
+  * Realm
+    - An experimental UCX network backend has been added.
+  * Tools
+    - Legion Prof now supports a native viewer UI. Enable it with the `viewer`
+       feature (e.g., `cargo run --features=viewer`) and use the flag
+       `--view`.
+
 Version 22.12.0 (December 30, 2022)
   * Regent
     - Support for nested predication of `if` and `while` statements
