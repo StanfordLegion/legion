@@ -368,8 +368,6 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 	  "${Legion_EMBED_GASNet_LOCALSRC}"
 	  ABSOLUTE BASE_DIR ${PROJECT_BINARY_DIR})
       else()
-	# fetchcontent requires cmake 3.11+
-	cmake_minimum_required(VERSION 3.11)
 	include(FetchContent)
 	FetchContent_Declare(embed-gasnet
 	  GIT_REPOSITORY ${Legion_EMBED_GASNet_GITREPO}
