@@ -2354,6 +2354,10 @@ namespace Legion {
 #endif
       // Make a dependence tracker
       mapping_tracker = new MappingDependenceTracker();
+      // Register ourselves with our trace if there is one
+      // This will also add any necessary dependences
+      if ((trace != NULL) && !is_tracing_fence())
+        trace_local_id = trace->register_operation(this, gen);
       // TODO: this is a hack until we can properly move tracing 
       // into the mapping stage from the dependence analysis stage
       MemoizableOp *memo = get_memoizable();
@@ -2363,10 +2367,6 @@ namespace Legion {
         if (memo->is_replaying())
           return;
       }
-      // Register ourselves with our trace if there is one
-      // This will also add any necessary dependences
-      if ((trace != NULL) && !is_tracing_fence())
-        trace_local_id = trace->register_operation(this, gen);
       parent_ctx->invalidate_trace_cache(trace, this);
       // See if we have any fence dependences
       execution_fence_event = parent_ctx->register_implicit_dependences(this);
