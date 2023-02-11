@@ -5372,7 +5372,7 @@ namespace Legion {
       // view and then we can fuse the broadcast result.
       if (target->is_collective_view())
       {
-        FieldMaskSet<CopyUpdate> fused_gather_copies;
+        std::map<IndividualView*,std::vector<CopyUpdate*> > fused_gather_copies;
         for (std::map<InstanceView*,std::vector<CopyUpdate*> >::iterator
               cit = copies.begin(); cit != copies.end(); /*nothing*/)
         {
@@ -5381,6 +5381,7 @@ namespace Legion {
             cit++;
             continue;
           }
+          IndividualView *source = cit->first->as_individual_view();
           for (std::vector<CopyUpdate*>::iterator it =
                 cit->second.begin(); it != cit->second.end(); /*nothing*/)
           {
@@ -5390,8 +5391,7 @@ namespace Legion {
 #endif
             if ((*it)->redop == 0)
             {
-              const FieldMask overlap = (*it)->src_mask & copy_mask;
-              fused_gather_copies.insert(*it, overlap);
+              fused_gather_copies[source].push_back(*it);
               it = cit->second.erase(it);
             }
             else
@@ -5406,45 +5406,51 @@ namespace Legion {
           else
             cit++;
         }
-        if (!fused_gather_copies.empty())
+        if (fused_gather_copies.size() > 1)
         {
 #ifdef DEBUG_LEGION
           assert(manage_dst_events);
 #endif
           CollectiveView *target_collective = target->as_collective_view();
-          // Sort into field sets
-          LegionList<FieldSet<CopyUpdate*> > field_sets;
-          fused_gather_copies.compute_field_sets(FieldMask(), field_sets);
-          for (LegionList<FieldSet<CopyUpdate*> >::const_iterator fit =
-                field_sets.begin(); fit != field_sets.end(); fit++)
+          std::map<IndividualView*,IndexSpaceExpression*> view_exprs;
+          for (std::map<IndividualView*,std::vector<CopyUpdate*> >::iterator
+                cit = fused_gather_copies.begin(); 
+                cit != fused_gather_copies.end(); cit++)
           {
-#ifdef DEBUG_LEGION
-            assert(!fit->elements.empty());
-#endif
-            if (fit->elements.size() > 1)
+            if (cit->second.size() > 1)
             {
-              std::map<IndividualView*,IndexSpaceExpression*> view_exprs;
-              for (std::set<CopyUpdate*>::const_iterator it =
-                    fit->elements.begin(); it != fit->elements.end(); it++)
-                view_exprs[(*it)->source->as_individual_view()] = (*it)->expr;
-              const ApEvent result = target_collective->collective_fuse_gather(
-                  view_exprs, precondition, predicate_guard, analysis->op,
-                  dst_index, match_space, fit->set_mask, trace_info,
-                  recorded_events, effects, restricted_output, track_events);
-              if (result.exists())
-              {
-                if (track_events)
-                  events.push_back(result);
-                if (dst_events != NULL)
-                  dst_events->push_back(result);
-              }
+              std::set<IndexSpaceExpression*> union_exprs;
+              for (std::vector<CopyUpdate*>::const_iterator it =
+                    cit->second.begin(); it != cit->second.end(); it++)
+                union_exprs.insert((*it)->expr);
+              view_exprs[cit->first] = forest->union_index_spaces(union_exprs); 
             }
-            else // just put it back in the original set
-            {
-              CopyUpdate *update = *(fit->elements.begin());
-              copies[update->source].push_back(update);
-            }
+            else
+              view_exprs[cit->first] = (*(cit->second.begin()))->expr;
           }
+          const ApEvent result = target_collective->collective_fuse_gather(
+              view_exprs, precondition, predicate_guard, analysis->op,
+              dst_index, match_space, copy_mask, trace_info, recorded_events,
+              effects, restricted_output, track_events);
+          if (result.exists())
+          {
+            if (track_events)
+              events.push_back(result);
+            if (dst_events != NULL)
+              dst_events->push_back(result);
+          }
+        }
+        else if (!fused_gather_copies.empty())
+        {
+          // Only one view so we can put them back onto the original set
+          // of copies since we're just going to perform a normal fusion
+          std::map<IndividualView*,std::vector<CopyUpdate*> >::iterator next =
+            fused_gather_copies.begin();
+          std::vector<CopyUpdate*> &original = copies[next->first];
+          if (original.empty())
+            original.swap(next->second);
+          else
+            original.insert(original.end(), next->second.begin(), next->second.end());
         }
       }
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
