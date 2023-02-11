@@ -96,7 +96,6 @@ namespace Legion {
     void Memoizable<OP>::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      initialize_memoizable();
       if (!this->is_replaying())
         OP::trigger_dependence_analysis();
     }
@@ -177,8 +176,6 @@ namespace Legion {
     void Predicated<OP>::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Initialize the memoizable
-      this->initialize_memoizable();
       if (!this->is_replaying())
       {
         // Record a mapping dependence on our predicate

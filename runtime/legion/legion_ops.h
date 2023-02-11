@@ -1371,6 +1371,8 @@ namespace Legion {
         { return memo_state; }
     public:
       virtual void trigger_replay(void) = 0;
+      virtual void initialize_memoizable(void) 
+        { /* do nothing unless override by a base class */ }
       virtual TraceLocalID get_trace_local_id(void) const
         { return TraceLocalID(trace_local_id, DomainPoint()); }
       virtual ApEvent compute_sync_precondition(const TraceInfo &info) const
@@ -1410,8 +1412,7 @@ namespace Legion {
       virtual void trigger_ready(void) override;
       virtual ApEvent compute_sync_precondition(
                         const TraceInfo &info) const override;
-    protected:
-      void initialize_memoizable(void);
+      virtual void initialize_memoizable(void) override;
     };
 
     /**
