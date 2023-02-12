@@ -12538,7 +12538,7 @@ namespace Legion {
         broadcast_post = Runtime::merge_events(&trace_info, instance_events);
       const UniqueID op_id = op->get_unique_op_id();
       if (broadcast_post.exists())
-        local_views[final_index]->add_copy_user(false/*reading*/, 0/*redop*/, 
+        local_views[final_index]->add_copy_user(true/*reading*/, 0/*redop*/, 
             broadcast_post, copy_mask, copy_expression, op_id, index,
             recorded_events, trace_info.recording, runtime->address_space);
     }
