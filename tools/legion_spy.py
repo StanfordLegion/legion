@@ -4768,45 +4768,45 @@ class DataflowTraverser(object):
         # Across is either different fields or same field in different trees
         self.across = self.src_field.fid != self.dst_field.fid or \
                         self.src_tree != self.dst_tree
-        # In order for this to be considered valid, we need to find one of two things:
-        # 1. A dataflow path to a valid instance
-        # 2. A dataflow path to a prevous valid instances and path to each of the
-        #    reductions in the currently set of pending reductions
+        self.failed_analysis = False
+        # In order for this to be considered valid, we need to find a dataflow
+        # path to the instance which has no other writes to it upstream
+        self.found_dataflow_path = False 
+        self.found_previous_dataflow_path = False
         self.dataflow_stack = list()
-        self.dataflow_copy = list()
         self.dataflow_stack.append(dst_inst)
-        self.reduction_stack = list()
+        # Keep track of whether we traverse this node for dataflow or not
+        self.dataflow_traversal = list()
+        # For tracking the reduction dataflow and accumulated reductions
         # IDs of the reduction epochs in order applied
         self.reduction_epochs = list()
-        # dicts[src,copy] of the applied reductions for each epoch
-        self.observed_reductions = list()
-        # For hierarchical reductions we group them by target to accumulate
-        # them before applying them into the observed reductions
-        self.hierarchical_reductions = dict()
-        self.found_dataflow_path = False
-        self.failed_analysis = False
+        # list[dicts[src,copy]] of the applied reductions for each epoch
+        self.dataflow_reductions = list()
+        # list[list[inst]]
+        self.reduction_stack = list()
+        # Mapping of accumulated reduction instances from source
+        # sets stored in each reduction instance
+        # list[dict[inst,dict[inst,copy]]]
+        self.accumulated_reductions = list() 
+        # Keep track of whether we traversed this fill on a dataflow path
+        self.dataflow_fill = list()
 
     def visit_node(self, node, eq_key): 
-        if isinstance(node, Operation):
-            pass 
-        elif isinstance(node, RealmCopy):
-            if not self.visit_copy(node, eq_key):
-                return False
+        if isinstance(node, RealmCopy):
+            return self.visit_copy(node, eq_key)
         elif isinstance(node, RealmFill):
-            if not self.visit_fill(node, eq_key):
-                return False
-        elif isinstance(node, RealmDeppart):
-            pass
-        else:
-            assert False # should never get here
+            return self.visit_fill(node, eq_key)
         return True
 
     def post_visit_node(self, node, eq_key):
         if isinstance(node, RealmCopy):
             self.post_visit_copy(node, eq_key)
+        elif isinstance(node, RealmFill):
+            self.post_visit_fill(node, eq_key)
 
     def run(self, first, eq_key):
         # Do this with DFS since we care about paths
+        # Use a stack instead of recursion to avoid stack overflow
         nodes = list()
         nodes.append((first,True))
         while nodes:
@@ -4851,12 +4851,15 @@ class DataflowTraverser(object):
             # Skip any nodes that we finished early for
             if first_pass:
                 continue
-            # Run the post visit method for any ndoes on the stack
+            # Run the post visit method for any nodes on the stack
             self.post_visit_node(node, eq_key)
 
     def visit_copy(self, copy, eq_key):
         # We should never traverse through indirection copies here
         if copy.indirections is not None:
+            return False
+        # Do not traverse through across copies if we're not across
+        if not self.across and copy.is_across():
             return False
         # See if all the fields make sense for what we're looking for
         if self.dst_field not in copy.dst_fields:
@@ -4865,119 +4868,147 @@ class DataflowTraverser(object):
         if self.src_field is not copy.src_fields[dst_index]:
             return False
         src = copy.srcs[dst_index]
-        # Fields are all good, see if this is part of the dataflow path
-        if copy.redops[dst_index] == 0:
-            # Normal copy case
-            # Check to see if this is part of the dataflow path
-            if copy.dsts[dst_index] is not self.dataflow_stack[-1]:
+        if src.redop == 0:
+            # Copy from a normal instance
+            # A little sanity check that we're never reducing from normal instances
+            assert copy.redops[dst_index] == 0
+            dst = copy.dsts[dst_index]
+            # Check to see if this part of the dataflow path
+            if dst is not self.dataflow_stack[-1]:
                 # Traverse through non-dataflow copies as they might
                 # be an additional copy to another read-only region
                 # requirement for our same task
                 # See a multi-node run of region_reduce_aliased.rg for example
-                self.dataflow_copy.append(False)
-                return True
-            # Check to see if we reached the end of the dataflow path
-            if self.reduction_stack:
-                # If we have reductions, then we need to check to see if the src
-                # is in the set of previous valid instances to know we've got a
-                # successful dataflow path
-                if src in self.state.previous_instances:
-                    self.found_dataflow_path = True
-                    # If we just finished finding it do the analysis now
-                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1], eq_key)
-                    return False
+                self.dataflow_traversal.append(False)
             else:
-                # If we don't have any reductions yet, we can see if the
-                # src is in the set of valid instances to see if we're done
                 if src in self.state.valid_instances:
+                    # We found the dataflow path
                     self.found_dataflow_path = True
-                    # If we just finished finding it do the analysis now
-                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1], eq_key)
+                    # No need to continue traverse after we found the dataflow path
+                    self.perform_copy_analysis(copy, src, dst, eq_key)
                     return False
-            # Not done with the dataflow path yet
-            self.dataflow_stack.append(src)
-            self.dataflow_copy.append(True)
-            return True
+                elif src in self.state.previous_instances:
+                    # Still need to traverse to find pending reductions
+                    self.found_previous_dataflow_path = True
+                self.dataflow_stack.append(src)
+                self.dataflow_traversal.append(True)
         else:
-            # Reduction copy case
-            # Check to see if this is reducing to an instance that we know about
-            if copy.dsts[dst_index] is self.dataflow_stack[-1]:
-                # Reducing to an instance on the dataflow path
-                if not self.found_dataflow_path:
-                    # Check to see if the current entry in the dataflow stack is
-                    # in the set of previously valid instances or not
-                    if copy.dsts[dst_index] in self.state.previous_instances:
-                        self.found_dataflow_path = True
-                self.reduction_stack.append(src)
-                self.dataflow_copy.append(True)
-                return True
-            elif self.reduction_stack and copy.dsts[dst_index] is self.reduction_stack[-1]:
-                # Hierarchical reduction case: we're traversing backwards
-                # through the tree or butterfly network, append it and keep going
-                self.reduction_stack.append(src)
-                self.dataflow_copy.append(True)
-                return True
+            # Copy from a reduction instance
+            dst = copy.dsts[dst_index]
+            if dst is self.dataflow_stack[-1]:
+                # We're branching off the dataflow path
+                self.dataflow_traversal.append(True)
+                # See if we found the dataflow path
+                if dst in self.state.previous_instances:
+                    self.found_previous_dataflow_path = True
+                # Should be the right kind of reduction copy
+                assert copy.redops[dst_index] == src.redop
+                # Start a new reduction stack
+                new_stack = list()
+                new_stack.append(src)
+                self.reduction_stack.append(new_stack)
+                self.accumulated_reductions.append(dict())
+            elif self.reduction_stack and len(self.reduction_stack[-1]) > 0 and \
+                    dst is self.reduction_stack[-1][-1]:
+                # Part of the reduction path
+                self.dataflow_traversal.append(True)
+                self.reduction_stack[-1].append(src)
+                # Record that any downstream reduction fills are valid
+                if self.dataflow_fill:
+                    self.dataflow_fill[-1] = True
             else:
-                # This is a new reduction that isn't reducing to the reduction
-                # target or to an existing hierarchical reduction tree that we
-                # know about and therefore we can't use it
-                return False
+                # Not part of the reduction dataflow path
+                self.dataflow_traversal.append(False)
+        return True 
 
     def post_visit_copy(self, copy, eq_key):
-        if not self.dataflow_copy.pop():
-            return
         dst_index = copy.dst_fields.index(self.dst_field)
-        if not self.failed_analysis:
-            src = copy.srcs[dst_index]
-            dst = copy.dsts[dst_index]
-            self.perform_copy_analysis(copy, src, dst, eq_key)
-        redop = copy.redops[dst_index]
-        if redop == 0:
-            self.dataflow_stack.pop()
+        src = copy.srcs[dst_index]
+        dst = copy.dsts[dst_index]
+        # Always analyze the copy
+        self.perform_copy_analysis(copy, src, dst, eq_key)
+        if src.redop == 0:
+            # Easy just need to pop ourselves off the dataflow stack
+            if self.dataflow_traversal.pop():
+                self.dataflow_stack.pop()
         else:
-            self.reduction_stack.pop()
-            if not self.failed_analysis:
-                # See if this is a hierarchical reduction or one along the dataflow path
-                if dst is self.dataflow_stack[-1]:
-                    # Reduction on the dataflow path
-                    # Append it and any hierarchical reductions into the reduction epoch
-                    if not self.reduction_epochs or self.reduction_epochs[-1] != redop:
-                        self.reduction_epochs.append(redop)
-                        self.observed_reductions.append(dict())
-                    target = self.observed_reductions[-1]
-                    if src in target:
-                        print("ERROR: Duplicate application of reductions by copies "+
-                                str(copy)+" and "+str(target[src])+" from reduction "+
-                                "instance "+str(src)+ " for op "+self.error_str)
-                    target[src] = copy
-                    if src in self.hierarchical_reductions:
-                        for source,cpy in iteritems(self.hierarchical_reductions[src]):
-                            if source in target:
-                                print("ERROR: Duplicate application of reductions by copies "+
-                                    str(cpy)+" and "+str(target[source])+" from reduction "+
-                                    "instance "+str(source)+ " for op "+self.error_str)
-                            target[source] = cpy
-                        del self.hierarchical_reductions[src]
+            # Check to see if we're a fold copy or an apply copy
+            if dst is self.dataflow_stack[-1]:
+                # This is an applied reduction
+                assert src.redop == copy.redops[dst_index]
+                # Start a new reduction epoch if we're a different redop
+                if len(self.reduction_epochs) == 0 or self.reduction_epochs[-1] != src.redop:
+                    self.reduction_epochs.append(src.redop)
+                    self.dataflow_reductions.append(dict())
+                # TODO: One thing we're not checking here is the case where
+                # we have multiple reduction operators being applied to the
+                # same destination instance in the right order. Depending on
+                # the order in which we traverse the nodes, we might by chance
+                # do them in the right order to look like things were ordered
+                # but we're not actually checking that the "earlier"
+                # reduction copy post-dominated the "later" reduction copy.
+                # We might just have happened to apply them in the right order.
+                # This might be non-deterministic depending on Python hashing :(
+                
+                # Now we can record any observed reductions to the dataflow path
+                if src in self.accumulated_reductions[-1]:
+                    for inst,reduction in iteritems(self.accumulated_reductions[-1][src]):
+                        if inst in self.dataflow_reductions[-1]:
+                            self.failed_analysis = True
+                            print("ERROR: Duplicate application of reduction data from "+
+                                str(inst)+"via copies "+str(self.dataflow_reductions[-1][inst])+
+                                " and "+str(reduction)+" for op "+self.error_str)
+                            if self.op.state.eq_graph_on_error:
+                                self.op.state.dump_eq_graph(eq_key)
+                            if self.op.state.assert_on_error:
+                                assert False
+                            break
+                        else:
+                            self.dataflow_reductions[-1][inst] = reduction
                 else:
-                    assert dst is self.reduction_stack[-1]
-                    # Hierarchical reduction case
-                    # Aggregate hierarchical reductions
-                    if dst not in self.hierarchical_reductions:
-                        self.hierarchical_reductions[dst] = dict()
-                    target = self.hierarchical_reductions[dst]
-                    if src in target:
-                        print("ERROR: Duplicate application of reductions by copies "+
-                                str(copy)+" and "+str(target[src])+" from reduction "+
-                                "instance "+str(src)+ " for op "+self.error_str)
-                    target[src] = copy
-                    if src in self.hierarchical_reductions:
-                        for source,cpy in iteritems(self.hierarchical_reductions[src]):
-                            if source in target:
-                                print("ERROR: Duplicate application of reductions by copies "+
-                                    str(cpy)+" and "+str(target[source])+" from reduction "+
-                                    "instance "+str(source)+ " for op "+self.error_str)
-                            target[source] = cpy
-                        del self.hierarchical_reductions[src]
+                    # We just read from this source instance so record it
+                    self.dataflow_reductions[-1][src] = copy
+                # Pop our entries off the stacks
+                self.reduction_stack.pop()
+                self.accumulated_reductions.pop()
+            elif self.dataflow_traversal.pop():
+                # This is a copy between reduction instances
+                # Check to see if this is reduction or a write
+                if copy.redops[dst_index] == 0:
+                    # Write copy, so overwrite the accumulated reductions
+                    self.accumulated_reductions[-1][dst] = self.accumulated_reductions[-1][src].copy()
+                else:
+                    # Reduction, see if this is an initial read
+                    if src not in self.accumulated_reductions[-1]:
+                        # Initial read so we can record it
+                        source = dict()
+                        source[src] = copy
+                        self.accumulated_reductions[-1][src] = source
+                    elif self.accumulated_reductions[-1][src][src] is None:
+                        # Fill in that this is the first copy for this instance
+                        self.accumulated_reductions[-1][src][src] = copy
+                    # Now we can propagate the reductions
+                    if dst in self.accumulated_reductions[-1]:
+                        # Merge them and check for duplicates
+                        target = self.accumulated_reductions[-1][dst]
+                        for inst,reduction in iteritems(self.accumulated_reductions[-1][src]):
+                            if inst in target:
+                                self.failed_analysis = True
+                                print("ERROR: Duplicate application of reduction data from "+
+                                    str(inst)+"via copies "+str(target[inst])+" and "+
+                                    str(reduction)+" for op "+self.error_str)
+                                if self.op.state.eq_graph_on_error:
+                                    self.op.state.dump_eq_graph(eq_key)
+                                if self.op.state.assert_on_error:
+                                    assert False
+                                break
+                            else:
+                                target[inst] = reduction
+                    else:
+                        self.accumulated_reductions[-1][dst] = self.accumulated_reductions[-1][src].copy()
+                        # Record that we need a pending copy from this instance
+                        self.accumulated_reductions[-1][dst][dst] = None
+                self.reduction_stack[-1].pop()
 
     def perform_copy_analysis(self, copy, src, dst, eq_key):
         # If we've already traversed this then we can skip the verification
@@ -4991,12 +5022,12 @@ class DataflowTraverser(object):
                                         self.src_req.index, True, 0, self.src_version)
         bad = check_preconditions(src_preconditions, copy)
         if bad is not None:
+            self.failed_analysis = True
             print("ERROR: Missing source precondition for "+str(copy)+
                 " on field "+str(self.src_field)+" for op "+self.error_str+
                 " on "+str(bad))
             if self.op.state.eq_graph_on_error:
                 self.op.state.dump_eq_graph(eq_key)
-            self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -5005,12 +5036,12 @@ class DataflowTraverser(object):
                             False, src.redop, self.dst_version)
         bad = check_preconditions(dst_preconditions, copy)
         if bad is not None:
+            self.failed_analysis = True
             print("ERROR: Missing destination precondition for "+str(copy)+
                 " on field "+str(self.dst_field)+" for op "+self.error_str+
                 " on "+str(bad))
             if self.op.state.eq_graph_on_error:
                 self.op.state.dump_eq_graph(eq_key)
-            self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -5020,80 +5051,120 @@ class DataflowTraverser(object):
                        copy, self.dst_req.index, False, src.redop, self.dst_version)
 
     def visit_fill(self, fill, eq_key):
-        # See if this fill is for the current target
-        if not self.found_dataflow_path and self.dataflow_stack and \
-              self.dst_field in fill.fields and \
-              fill.dsts[fill.fields.index(self.dst_field)] is self.dataflow_stack[-1]:
-            # If we don't have a pending fill, then this isn't right
-            if not self.state.pending_fill:
-                return False
-            self.found_dataflow_path = True
-            # If we've already traversed this then we can skip the verification
-            if fill.record_version_number(self.state):
-                return False
-            if fill.fill_op not in self.state.fill_ops and not self.op.replayed and \
-                    fill.fill_op.index_owner not in self.state.fill_ops:
-                # There is one last check we can do here which is whether 
-                # these are fill operations in a control replicated context
-                # and therefore they just need to be the same operation in
-                # their respective contexts
-                same_fill = False
-                if fill.fill_op.index_owner is None:
-                    context = fill.fill_op.context
-                    if context.shard is not None:
-                        index = context.operations.index(fill.fill_op)
-                        for op in self.state.fill_ops:
-                            assert op.context.shard is not None
-                            op_index = op.context.operations.index(op)
-                            if op_index == index:
-                                same_fill = True
-                                break
+        if self.dst_field not in fill.fields:
+            return False
+        dst_index = fill.fields.index(self.dst_field)
+        dst = fill.dsts[dst_index]
+        if dst.redop == 0:
+            # Fill to a normal instance
+            # Never do dataflow traversals through normal fills
+            self.dataflow_traversal.append(False)
+            if self.state.pending_fill:
+                if self.state.pending_reductions:
+                    self.found_previous_dataflow_path = True
                 else:
-                    context = fill.fill_op.index_owner.context
-                    if context.shard is not None:
-                        index = context.operations.index(fill.fill_op.index_owner)
-                        for op in self.state.fill_ops:
-                            assert op.context.shard is not None
-                            op_index = op.context.operations.index(op)
-                            if op_index == index:
-                                same_fill = True
-                                break
-                if not same_fill:
-                    print("ERROR: Not using same fill operation for "+
-                            str(fill)+" on field "+str(self.dst_field)+
-                            " for op "+self.error_str)
-                    self.failed_analysis = True
-                    if self.op.state.eq_graph_on_error:
-                        self.op.state.dump_eq_graph(eq_key)
-                    if self.op.state.assert_on_error:
-                        assert False
-                    return False
-            if self.across:
-                fill.record_across_version_number(self.point, self.dst_field,
-                                                  self.dst_tree, self.dst_version)
-            dst = fill.dsts[fill.fields.index(self.dst_field)]
-            preconditions = dst.find_verification_copy_dependences(self.dst_depth,
-                            self.dst_field, self.point, self.op, self.dst_req.index, 
-                            False, 0, self.dst_version)
-            bad = check_preconditions(preconditions, fill)
-            if bad is not None:
-                print("ERROR: Missing destination precondition for "+
-                    str(fill)+" on field "+str(self.dst_field)+" for op "+
-                    self.error_str+" on "+str(bad))
+                    self.found_dataflow_path = True
+                # No need to traverse after we found the dataflow path
+                self.perform_fill_analysis(fill, dst, eq_key)
+                return False
+        else:
+            # Fill to a reduction instance
+            # Check to see if it is on the dataflow path
+            # Intermediate fills to reduction instances should always
+            # occur on the second entry in the reduction stack back
+            # because we will have already traversed through the 
+            # next copy that is going to be writing to it
+            if len(self.reduction_stack[-1]) >= 2 and  \
+                    dst is self.reduction_stack[-1][-2]:
+                self.dataflow_traversal.append(True)
+                self.dataflow_fill.append(False)
+            else:
+                self.dataflow_traversal.append(False)
+        return True
+
+    def post_visit_fill(self, fill, eq_key):
+        dst_index = fill.fields.index(self.dst_field)
+        dst = fill.dsts[dst_index]
+        self.perform_fill_analysis(fill, dst, eq_key)
+        if self.dataflow_traversal.pop() and self.dataflow_fill.pop():
+            # This has to be a fill to a reduction instance
+            assert dst.redop != 0
+            # Overwrite the accumulated reductions for this instances
+            if dst in self.accumulated_reductions[-1]:
+                self.accumulated_reductions[-1][dst].clear()
+
+    def perform_fill_analysis(self, fill, dst, eq_key):
+        # If we've already traversed this then we can skip the verification
+        if fill.record_version_number(self.state):
+            return
+        if self.across:
+            fill.record_across_version_number(self.point, self.dst_field,
+                                              self.dst_tree, self.dst_version)
+        if dst.redop == 0 and fill.fill_op not in self.state.fill_ops and \
+                not self.op.replayed and fill.fill_op.index_owner not in self.state.fill_ops:
+            # There is one last check we can do here which is whether 
+            # these are fill operations in a control replicated context
+            # and therefore they just need to be the same operation in
+            # their respective contexts
+            same_fill = False
+            if fill.fill_op.index_owner is None:
+                context = fill.fill_op.context
+                if context.shard is not None:
+                    index = context.operations.index(fill.fill_op)
+                    for op in self.state.fill_ops:
+                        assert op.context.shard is not None
+                        op_index = op.context.operations.index(op)
+                        if op_index == index:
+                            same_fill = True
+                            break
+            else:
+                context = fill.fill_op.index_owner.context
+                if context.shard is not None:
+                    index = context.operations.index(fill.fill_op.index_owner)
+                    for op in self.state.fill_ops:
+                        assert op.context.shard is not None
+                        op_index = op.context.operations.index(op)
+                        if op_index == index:
+                            same_fill = True
+                            break
+            if not same_fill:
                 self.failed_analysis = True
+                print("ERROR: Not using same fill operation for "+
+                        str(fill)+" on field "+str(self.dst_field)+
+                        " for op "+self.error_str)
                 if self.op.state.eq_graph_on_error:
                     self.op.state.dump_eq_graph(eq_key)
                 if self.op.state.assert_on_error:
                     assert False
-                return False
-            dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
-                                 fill, self.dst_req.index, False, 0, self.dst_version)
-        # We should never traverse backwards through a fill
-        return False
+        if self.across:
+            fill.record_across_version_number(self.point, self.dst_field,
+                                              self.dst_tree, self.dst_version)
+        preconditions = dst.find_verification_copy_dependences(self.dst_depth,
+                        self.dst_field, self.point, self.op, self.dst_req.index, 
+                        False, 0, self.dst_version)
+        bad = check_preconditions(preconditions, fill)
+        if bad is not None:
+            self.failed_analysis = True
+            print("ERROR: Missing destination precondition for "+
+                str(fill)+" on field "+str(self.dst_field)+" for op "+
+                self.error_str+" on "+str(bad))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(eq_key)
+            if self.op.state.assert_on_error:
+                assert False
+            return
+        dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
+                             fill, self.dst_req.index, False, 0, self.dst_version)
 
     def verify(self, op, restricted = False):
         src_key = (self.point, self.src_field, self.src_tree)
         dst_key = (self.point, self.dst_field, self.dst_tree)
+        ################################################################
+        # Step 1: Traverse backwards through the graph looking for a
+        #         dataflow path to the previous valid instances for 
+        #         destination as well as any reductions that need to
+        #         to be applied to destination instance.
+        ################################################################
         # The verification key is the src_key unless otherwise specified
         ver_key = src_key
         # Copies are a little weird in that they don't actually
@@ -5195,10 +5266,13 @@ class DataflowTraverser(object):
         else:
             # Traverse the node and then see if we satisfied everything
             self.run(op, src_key)
-        # Now check to see if we succeeded in the verification
         if self.failed_analysis:
             return False
-        if not self.found_dataflow_path:
+        ################################################################
+        # Step 2: Check that we found the dataflow path and all the 
+        #         reductions have been applied in the right order
+        ################################################################
+        if not self.found_dataflow_path and not self.found_previous_dataflow_path:
             print("ERROR: No dataflow path found to update field "+
                     str(self.dst_field)+" of instance "+str(self.target)+
                     " of region requirement "+str(self.dst_req.index)+
@@ -5210,33 +5284,36 @@ class DataflowTraverser(object):
             return False
         # If we needed reduction as part of the dataflow path, then
         # check that they align with the pending reductions
-        if self.observed_reductions:
-            for src in self.state.pending_reductions:
-                if not self.reduction_epochs or src not in self.observed_reductions[0]:
+        if self.state.pending_reductions and not self.found_dataflow_path:
+            # We can check these either front-to-back or back-to-front
+            # We do back-to-front for efficiency
+            for src in reversed(self.state.pending_reductions):
+                if not self.reduction_epochs or src not in self.dataflow_reductions[-1]:
                     print("ERROR: Missing reduction from field "+str(self.dst_field)+
                             " of instance "+str(src)+" of region requirement "+
                             str(self.dst_req.index)+" of " +str(self.op))
                     if self.op.state.eq_graph_on_error:
-                        self.op.state.dump_eq_graph(eq_key)
+                        self.op.state.dump_eq_graph(ver_key)
                     if self.op.state.assert_on_error:
                         assert False
                     return False
                 # Remove this instance from the list
-                del self.observed_reductions[0][src]
+                del self.dataflow_reductions[-1][src]
                 # Once the epoch is empty then pop it off the list
-                if not self.observed_reductions[0]:
-                    self.observed_reductions.pop(0)
-                    self.reduction_epochs.pop(0)
-            if self.observed_reductions:
-                # Superfluous reductions were applied
-                printf("ERROR: Superfluous reductions were applied for reduction "+
-                        str(self.reduction_epochs[0])+" by region requirement "+
-                        str(self.dst_req.index)+" of "+str(self.op))
-                if self.op.state.eq_graph_on_error:
-                    self.op.state.dump_eq_graph(eq_key)
-                if self.op.state.assert_on_error:
-                    assert False
-                return False
+                if not self.dataflow_reductions[-1]:
+                    self.dataflow_reductions.pop()
+                    self.reduction_epochs.pop()
+        # This should be empty by the time that we get here
+        if self.dataflow_reductions:
+            # Superfluous reductions were applied
+            printf("ERROR: Superfluous reductions were applied for reduction "+
+                    str(self.reduction_epochs[0])+" by region requirement "+
+                    str(self.dst_req.index)+" of "+str(self.op))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(ver_key)
+            if self.op.state.assert_on_error:
+                assert False
+            return False
         return True
 
 
@@ -11035,11 +11112,16 @@ class RealmFill(RealmBase):
         if self.eq_privileges is None:
             self.eq_privileges = dict()
             point_set = self.index_expr.get_point_set()
+            # If the fills are to normal instances then they
+            # are for writes, but if they are to reduction
+            # instance then they are just initialization so
+            # we only count that as "reading"
+            privilege = WRITE_ONLY if self.dsts[0].redop == 0 else READ_ONLY
             for point in point_set.iterator():
                 for field in self.fields:
                     key = (point,field,self.dst_tree_id)
                     assert key not in self.eq_privileges
-                    self.eq_privileges[key] = WRITE_ONLY
+                    self.eq_privileges[key] = privilege
         return self.eq_privileges
 
 class RealmDeppart(RealmBase):
