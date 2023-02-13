@@ -623,6 +623,10 @@ impl Mem {
         }
     }
 
+    fn add_inst(&mut self, inst: Inst) {
+        self.insts.insert(inst.inst_uid, inst);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.insts.is_empty()
     }
@@ -942,21 +946,21 @@ impl Chan {
         }
     }
 
-    pub fn add_copy(&mut self, copy: Copy) {
+    fn add_copy(&mut self, copy: Copy) {
         self.copies.insert(copy.fevent, copy.base.prof_uid);
         self.entries
             .entry(copy.base.prof_uid)
             .or_insert(ChanEntry::Copy(copy));
     }
 
-    pub fn add_fill(&mut self, fill: Fill) {
+    fn add_fill(&mut self, fill: Fill) {
         self.fills.insert(fill.fevent, fill.base.prof_uid);
         self.entries
             .entry(fill.base.prof_uid)
             .or_insert(ChanEntry::Fill(fill));
     }
 
-    pub fn add_deppart(&mut self, deppart: DepPart) {
+    fn add_deppart(&mut self, deppart: DepPart) {
         self.depparts
             .entry(deppart.op_id)
             .or_insert_with(Vec::new)
@@ -2454,10 +2458,10 @@ impl State {
             process_record(record, self, &mut insts, &mut copies, &mut fills);
         }
         // put inst into memories
-        for (key, inst) in insts {
+        for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
                 let mem = self.mems.get_mut(&mem_id).unwrap();
-                mem.insts.insert(key, inst);
+                mem.add_inst(inst);
             } else {
                 unreachable!();
             }
