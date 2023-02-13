@@ -449,12 +449,6 @@ pub enum Record {
     Mem { mid: MemID, capacity: u64, kind: u64 },
 
     // Patterns for things rust is too stupid to understand
-    #[serde(rename = "Replicate Task")]
-    ReplTask { uid: UniqueID, repl: u32, cr: bool }, 
-    #[serde(rename = "Replicate Shard")]
-    ReplShard { repl: u32, sid: u32, uid: UniqueID },
-    #[serde(rename = "Owner Shard")]
-    OwnerShard { uid: UniqueID, sid: u32 },
     #[serde(rename = "Collective Rendezvous")]
     CollectiveRendezvous { uid: UniqueID, req: u32, index: u32 },
 }
