@@ -2394,12 +2394,10 @@ namespace Legion {
         deferred_complete_mapping = RtUserEvent::NO_RT_USER_EVENT;
         rez.serialize(single_task_termination);
         single_task_termination = ApUserEvent::NO_AP_USER_EVENT;
-#ifdef DEBUG_LEGION
-        assert(physical_instances.size() == region_preconditions.size());
-#endif
         rez.serialize<size_t>(physical_instances.size());
         for (unsigned idx = 0; idx < physical_instances.size(); idx++)
           physical_instances[idx].pack_references(rez);
+        rez.serialize<size_t>(region_preconditions.size());
         for (unsigned idx = 0; idx < region_preconditions.size(); idx++)
           rez.serialize(region_preconditions[idx]);
         rez.serialize<size_t>(future_memories.size());
@@ -2486,8 +2484,10 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_phy; idx++)
           physical_instances[idx].unpack_references(runtime,
                                                     derez, ready_events);
-        region_preconditions.resize(num_phy);
-        for (unsigned idx = 0; idx < num_phy; idx++)
+        size_t num_pre;
+        derez.deserialize(num_pre);
+        region_preconditions.resize(num_pre);
+        for (unsigned idx = 0; idx < num_pre; idx++)
           derez.deserialize(region_preconditions[idx]);
         size_t num_future_memories;
         derez.deserialize(num_future_memories);
@@ -3653,7 +3653,7 @@ namespace Legion {
         InstanceSet &instances = physical_instances[idx];
         if (IS_NO_ACCESS(regions[idx]))
           continue;
-        if (IS_ATOMIC(regions[idx]))
+        if (IS_ATOMIC(regions[idx]) || IS_REDUCE(regions[idx]))
           needs_reservations = true;
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
@@ -4347,6 +4347,11 @@ namespace Legion {
         RtEvent record_replay_precondition;
         if (!map_applied_conditions.empty())
         {
+          // If we have a remote trace recorder, make sure we don't
+          // accidentally include ourselves in the preconditions for
+          // ourself which will cause a recording deadlock
+          if (remote_trace_recorder != NULL)
+            map_applied_conditions.erase(remote_trace_recorder->applied_event);
           record_replay_precondition =
             Runtime::merge_events(map_applied_conditions);
           map_applied_conditions.clear();

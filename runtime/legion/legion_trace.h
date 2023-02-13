@@ -922,6 +922,10 @@ namespace Legion {
       virtual void initialize_transitive_reduction_frontiers(
                           std::vector<unsigned> &topo_order,
                           std::vector<unsigned> &inv_topo_order);
+      virtual void record_used_frontiers(std::vector<bool> &used,
+                      const std::vector<unsigned> &gen) const;
+      virtual void rewrite_frontiers(
+                      const std::map<unsigned,unsigned> &substitutions);
     public:
       // Variants for normal traces
       bool check_preconditions(TraceReplayOp *op,
@@ -1445,6 +1449,10 @@ namespace Legion {
       virtual void initialize_transitive_reduction_frontiers(
                           std::vector<unsigned> &topo_order,
                           std::vector<unsigned> &inv_topo_order);
+      virtual void record_used_frontiers(std::vector<bool> &used,
+                      const std::vector<unsigned> &gen) const;
+      virtual void rewrite_frontiers(
+                      const std::map<unsigned,unsigned> &substitutions);
     public:
       ReplicateContext *const repl_ctx;
       const ShardID local_shard;

@@ -5209,7 +5209,6 @@ namespace Legion {
     void PhysicalTemplate::propagate_merges(std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
     {
-      std::vector<Instruction*> new_instructions;
       std::vector<bool> used(instructions.size(), false);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
@@ -5300,9 +5299,7 @@ namespace Legion {
             }
         }
       }
-      for (std::map<unsigned,unsigned>::const_iterator it =
-            frontiers.begin(); it != frontiers.end(); it++)
-        used[it->first] = true;
+      record_used_frontiers(used, gen); 
 
       std::vector<unsigned> inv_gen(instructions.size(), -1U);
       for (unsigned idx = 0; idx < gen.size(); ++idx)
@@ -5317,6 +5314,7 @@ namespace Legion {
       std::vector<Instruction*> to_delete;
       std::vector<unsigned> new_gen(gen.size(), -1U);
       initialize_generators(new_gen);
+      std::vector<Instruction*> new_instructions;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
         {
@@ -5344,6 +5342,16 @@ namespace Legion {
       gen.swap(new_gen);
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_used_frontiers(std::vector<bool> &used,
+                                         const std::vector<unsigned> &gen) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned,unsigned>::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+        used[gen[it->first]] = true;
     }
 
     //--------------------------------------------------------------------------
@@ -6110,24 +6118,7 @@ namespace Legion {
       if (instructions.size() == new_instructions.size()) return;
 
       // Rewrite the frontiers first
-      std::vector<std::pair<unsigned,unsigned> > to_add;
-      for (std::map<unsigned,unsigned>::iterator it =
-            frontiers.begin(); it != frontiers.end(); /*nothing*/)
-      {
-        std::map<unsigned,unsigned>::const_iterator finder =
-          substitutions.find(it->first);
-        if (finder != substitutions.end())
-        {
-          to_add.emplace_back(std::make_pair(finder->second,it->second));
-          std::map<unsigned,unsigned>::iterator to_delete = it++;
-          frontiers.erase(to_delete);
-        }
-        else
-          it++;
-      }
-      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
-            to_add.begin(); it != to_add.end(); it++)
-        frontiers.insert(*it);
+      rewrite_frontiers(substitutions); 
 
       // Then rewrite the instructions
       instructions.swap(new_instructions);
@@ -6315,6 +6306,31 @@ namespace Legion {
         assert(to_prune.empty());
 #endif
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::rewrite_frontiers(
+                               const std::map<unsigned,unsigned> &substitutions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<unsigned,unsigned> > to_add;
+      for (std::map<unsigned,unsigned>::iterator it =
+            frontiers.begin(); it != frontiers.end(); /*nothing*/)
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          substitutions.find(it->first);
+        if (finder != substitutions.end())
+        {
+          to_add.emplace_back(std::make_pair(finder->second,it->second));
+          std::map<unsigned,unsigned>::iterator to_delete = it++;
+          frontiers.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
+            to_add.begin(); it != to_add.end(); it++)
+        frontiers.insert(*it);
     }
 
     //--------------------------------------------------------------------------
@@ -9476,6 +9492,53 @@ namespace Legion {
         inv_topo_order[it->second] = topo_order.size();
         topo_order.push_back(it->second);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_used_frontiers(std::vector<bool> &used,
+                                         const std::vector<unsigned> &gen) const
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::record_used_frontiers(used, gen);  
+      for (std::map<unsigned,ApBarrier>::const_iterator it =
+            local_frontiers.begin(); it != local_frontiers.end(); it++)
+        used[gen[it->first]] = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::rewrite_frontiers(
+                               const std::map<unsigned,unsigned> &substitutions)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::rewrite_frontiers(substitutions);
+      std::vector<std::pair<unsigned,ApBarrier> > to_add;
+      for (std::map<unsigned,ApBarrier>::iterator it =
+            local_frontiers.begin(); it != local_frontiers.end(); /*nothing*/)
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          substitutions.find(it->first);
+        if (finder != substitutions.end())
+        {
+          to_add.emplace_back(std::make_pair(finder->second,it->second));
+          // Also need to update the local subscriptions data structure
+          std::map<unsigned,std::set<ShardID> >::iterator subscription_finder =
+            local_subscriptions.find(it->first);
+#ifdef DEBUG_LEGION
+          assert(subscription_finder != local_subscriptions.end());
+          assert(local_subscriptions.find(finder->second) == 
+                  local_subscriptions.end());
+#endif
+          local_subscriptions[finder->second].swap(subscription_finder->second);
+          local_subscriptions.erase(subscription_finder);
+          std::map<unsigned,ApBarrier>::iterator to_delete = it++;
+          local_frontiers.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      for (std::vector<std::pair<unsigned,ApBarrier> >::const_iterator it =
+            to_add.begin(); it != to_add.end(); it++)
+        local_frontiers.insert(*it);
     }
 
     /////////////////////////////////////////////////////////////

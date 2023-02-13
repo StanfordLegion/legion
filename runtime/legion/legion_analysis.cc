@@ -6332,12 +6332,17 @@ namespace Legion {
       // needing to be atomic since we don't have a semantics for
       // what exclusive reductions mean today
       // Note this needs to be done eagerly and cannot be deferred!
-      if ((usage != NULL) && 
-          (IS_ATOMIC(*usage) || (IS_REDUCE(*usage) && IS_EXCLUSIVE(*usage))))
+      // All reductions need to get an atomic lock since they can race
+      // with copy reductions to the same instance as the task
+      if ((usage != NULL) && (IS_ATOMIC(*usage) || IS_REDUCE(*usage)))
       {
         std::vector<IndividualView*> individual_views;
         context->convert_individual_views(target_instances, individual_views);
-        const bool exclusive = HAS_WRITE(*usage);
+        // If we're doing a reduction, we need exclusive coherence for any
+        // exclusive or atomic coherence, otherwise non-exclusive is fine 
+        // since that will still prevent races with reduction copies
+        const bool exclusive = IS_REDUCE(*usage) ?
+          (IS_EXCLUSIVE(*usage) || IS_ATOMIC(*usage)) : HAS_WRITE(*usage);
         for (unsigned idx = 0; idx < individual_views.size(); idx++)
           individual_views[idx]->find_atomic_reservations(
               targets[idx].get_valid_fields(), op, index, exclusive);

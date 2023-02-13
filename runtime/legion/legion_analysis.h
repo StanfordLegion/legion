@@ -489,12 +489,13 @@ namespace Legion {
     protected:
       static void pack_src_dst_field(Serializer &rez, const CopySrcDstField &f);
       static void unpack_src_dst_field(Deserializer &derez, CopySrcDstField &f);
-    protected:
+    public:
       Runtime *const runtime;
       const AddressSpaceID origin_space;
       const AddressSpaceID local_space;
       PhysicalTemplate *const remote_tpl;
       const RtUserEvent applied_event;
+    protected:
       mutable LocalLock applied_lock;
       std::set<RtEvent> applied_events;
     };
