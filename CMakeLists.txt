@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 #------------------------------------------------------------------------------#
 # Version information
@@ -295,16 +295,14 @@ set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
 if(Legion_USE_Kokkos)
-  # the kokkos interop stuff uses target_link_options, which doesn't show up
-  #  until cmake 3.13
-  cmake_minimum_required(VERSION 3.13)
-
   # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
   #
   # starting with Kokkos 3.3.0, including a cuda-enabled Kokkos will mess with
   #  the global compilation settings unless you ask it not to by requesting
   #  the 'separable_compilation' component
   find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
+
+  message(STATUS "Kokkos version: ${Kokkos_VERSION}")
 
   # in order to build using Kokkos' exported compile options, we need to use
   #  the same compiler - newer versions of Kokkos will tell us, but for older
@@ -384,7 +382,6 @@ endif()
 # MPI configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES .*mpi.*)
-  cmake_minimum_required(VERSION 3.9)
   find_package(MPI REQUIRED)
   # define variable for realm_defines.h
   set(REALM_USE_MPI ON)

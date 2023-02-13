@@ -204,6 +204,7 @@ local supported_archs = {
   ["maxwell"] = 52,
   ["pascal"]  = 60,
   ["volta"]   = 70,
+  ["turing"]  = 75,
   ["ampere"]  = 80,
 }
 

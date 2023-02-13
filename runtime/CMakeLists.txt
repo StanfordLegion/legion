@@ -368,8 +368,6 @@ if(REALM_USE_GASNET1 OR REALM_USE_GASNETEX)
 	  "${Legion_EMBED_GASNet_LOCALSRC}"
 	  ABSOLUTE BASE_DIR ${PROJECT_BINARY_DIR})
       else()
-	# fetchcontent requires cmake 3.11+
-	cmake_minimum_required(VERSION 3.11)
 	include(FetchContent)
 	FetchContent_Declare(embed-gasnet
 	  GIT_REPOSITORY ${Legion_EMBED_GASNet_GITREPO}
@@ -607,7 +605,7 @@ if(Legion_USE_Kokkos)
     list(APPEND kokkos_compile_options "-fvisibility=hidden" "-fvisibility-inlines-hidden")
   endif()
 
-  if(Legion_USE_OpenMP)
+  if(Legion_USE_OpenMP AND (Kokkos_VERSION_MAJOR GREATER_EQUAL 4))
     # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
     #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
     if(Legion_USE_CUDA)

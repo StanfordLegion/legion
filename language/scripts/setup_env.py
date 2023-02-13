@@ -547,7 +547,7 @@ if __name__ == '__main__':
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='8f1d445a20daac802a53e92cb69afb085e38f6bd',
+        default='10c55f5d53d803f5305e6983a0cf581b8e467aed',
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
