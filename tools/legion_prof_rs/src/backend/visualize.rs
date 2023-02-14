@@ -14,7 +14,7 @@ use crate::backend::common::{
     CopyInstInfoDumpInstVec, FillInstInfoDumpInstVec, MemGroup, ProcGroup, StatePostprocess,
 };
 use crate::state::{
-    Chan, ChanEntry, ChanEntryRef, ChanID, ChanPoint, Mem, MemID, MemKind, MemPoint,
+    Chan, ChanEntry, ChanID, ChanPoint, Container, ContainerEntry, Mem, MemID, MemKind, MemPoint,
     MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint, ProfUID,
     SpyState, State, Timestamp,
 };
@@ -164,9 +164,9 @@ impl Proc {
         let entry = self.entry(point.entry);
         let (op_id, initiation_op) = (entry.op_id, entry.initiation_op);
         let (base, time_range, waiters) = (&entry.base, &entry.time_range, &entry.waiters);
-        let name = state.proc_entry_name(entry);
+        let name = entry.name(state);
 
-        let color = state.proc_entry_color(entry);
+        let color = entry.color(state);
         let color = format!("#{:06x}", color);
 
         let initiation = match entry.kind {
@@ -432,31 +432,27 @@ impl Chan {
     ) -> io::Result<()> {
         let entry = self.entry(point.entry);
         let (base, time_range) = (entry.base(), entry.time_range());
-        let name = state.chan_entry_name(entry);
-        let ready_timestamp = match point.entry {
+        let name = entry.name(state);
+        let ready_timestamp = match entry {
             ChanEntry::Copy(_) => time_range.ready,
             ChanEntry::Fill(_) => time_range.ready,
-            ChanEntry::DepPart(_, _) => None,
+            ChanEntry::DepPart(_) => None,
         };
 
-        let initiation = match entry {
-            ChanEntryRef::Copy(_, copy) => copy.op_id.unwrap(),
-            ChanEntryRef::Fill(_, fill) => fill.op_id.unwrap(),
-            ChanEntryRef::DepPart(_, deppart) => deppart.op_id,
-        };
+        let initiation = entry.initiation();
 
-        let color = format!("#{:06x}", state.chan_entry_color(entry));
+        let color = format!("#{:06x}", entry.color(state));
 
         let level = max(self.max_levels + 1, 4) - base.level.unwrap() - 1;
 
         let instances = match entry {
-            ChanEntryRef::Copy(_, copy) => {
+            ChanEntry::Copy(copy) => {
                 format!("{}", CopyInstInfoDumpInstVec(&copy.copy_inst_infos, state))
             }
-            ChanEntryRef::Fill(_, fill) => {
+            ChanEntry::Fill(fill) => {
                 format!("{}", FillInstInfoDumpInstVec(&fill.fill_inst_infos, state))
             }
-            ChanEntryRef::DepPart(_, _deppart) => "".to_owned(),
+            ChanEntry::DepPart(_deppart) => "".to_owned(),
         };
 
         f.serialize(DataRecord {
@@ -468,7 +464,7 @@ impl Chan {
             color: &color,
             opacity: 1.0,
             title: &name,
-            initiation: Some(initiation.0),
+            initiation: Some(initiation.unwrap().0),
             in_: "",
             out: "",
             children: "",
@@ -617,11 +613,11 @@ impl Mem {
     ) -> io::Result<()> {
         let inst = self.insts.get(&point.entry).unwrap();
         let (base, time_range) = (&inst.base, &inst.time_range);
-        let name = state.mem_inst_name(inst);
+        let name = inst.name(state);
 
         let initiation = inst.op_id;
 
-        let color = format!("#{:06x}", state.mem_inst_color(inst));
+        let color = format!("#{:06x}", inst.color(state));
 
         let level = max(self.max_live_insts + 1, 4) - base.level.unwrap();
 

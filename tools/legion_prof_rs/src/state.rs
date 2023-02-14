@@ -9,6 +9,7 @@ use num_enum::TryFromPrimitive;
 
 use rayon::prelude::*;
 
+use crate::backend::common::{CopyInstInfoVec, FillInstInfoVec, InstPretty, SizePretty};
 use crate::num_util::Postincrement;
 use crate::serialize::Record;
 use crate::spy;
@@ -199,6 +200,169 @@ where
     }
 }
 
+// Common methods that apply to Proc, Mem, Chan
+pub trait Container {
+    type E: std::marker::Copy;
+    type S: std::marker::Copy;
+    type Entry: ContainerEntry;
+
+    fn max_levels(&self) -> usize;
+    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>>;
+    fn entry(&self, entry: Self::E) -> &Self::Entry;
+    fn entry_mut(&mut self, entry: Self::E) -> &mut Self::Entry;
+}
+
+// Common methods that apply to ProcEntry, MemEntry, ChanEntry
+pub trait ContainerEntry {
+    fn base(&self) -> &Base;
+    fn base_mut(&mut self) -> &mut Base;
+    fn time_range(&self) -> &TimeRange;
+    fn time_range_mut(&mut self) -> &mut TimeRange;
+    fn waiters(&self) -> Option<&Waiters>;
+    fn initiation(&self) -> Option<OpID>;
+
+    // Methods that require State access
+    fn name(&self, state: &State) -> String;
+    fn color(&self, state: &State) -> Color;
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str>;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ProcEntryKind {
+    Task(TaskID, VariantID),
+    MetaTask(VariantID),
+    MapperCall(MapperCallKindID),
+    RuntimeCall(RuntimeCallKindID),
+    ProfTask,
+}
+
+#[derive(Debug)]
+pub struct ProcEntry {
+    pub base: Base,
+    pub op_id: Option<OpID>,
+    pub initiation_op: Option<OpID>,
+    pub kind: ProcEntryKind,
+    pub time_range: TimeRange,
+    pub waiters: Waiters,
+}
+
+impl ProcEntry {
+    fn new(
+        base: Base,
+        op_id: Option<OpID>,
+        initiation_op: Option<OpID>,
+        kind: ProcEntryKind,
+        time_range: TimeRange,
+    ) -> Self {
+        ProcEntry {
+            base,
+            op_id,
+            initiation_op,
+            kind,
+            time_range,
+            waiters: Waiters::new(),
+        }
+    }
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range.trim_time_range(start, stop)
+    }
+}
+
+impl ContainerEntry for ProcEntry {
+    fn base(&self) -> &Base {
+        &self.base
+    }
+
+    fn base_mut(&mut self) -> &mut Base {
+        &mut self.base
+    }
+
+    fn time_range(&self) -> &TimeRange {
+        &self.time_range
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        &mut self.time_range
+    }
+
+    fn waiters(&self) -> Option<&Waiters> {
+        Some(&self.waiters)
+    }
+
+    fn initiation(&self) -> Option<OpID> {
+        self.initiation_op
+    }
+
+    fn name(&self, state: &State) -> String {
+        let (op_id, initiation_op) = (self.op_id, self.initiation_op);
+
+        match self.kind {
+            ProcEntryKind::Task(task_id, variant_id) => {
+                let task_name = &state.task_kinds.get(&task_id).unwrap().name;
+                let variant_name = &state.variants.get(&(task_id, variant_id)).unwrap().name;
+                match task_name {
+                    Some(task_name) => {
+                        if task_name != variant_name {
+                            format!("{} [{}] <{}>", task_name, variant_name, op_id.unwrap().0)
+                        } else {
+                            format!("{} <{}>", task_name, op_id.unwrap().0)
+                        }
+                    }
+                    None => variant_name.clone(),
+                }
+            }
+            ProcEntryKind::MetaTask(variant_id) => {
+                state.meta_variants.get(&variant_id).unwrap().name.clone()
+            }
+            ProcEntryKind::MapperCall(kind) => {
+                let name = &state.mapper_call_kinds.get(&kind).unwrap().name;
+                if let Some(initiation_op_id) = initiation_op {
+                    format!("Mapper Call {} for {}", name, initiation_op_id.0)
+                } else {
+                    format!("Mapper Call {}", name)
+                }
+            }
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().name.clone()
+            }
+            ProcEntryKind::ProfTask => {
+                format!("ProfTask <{:?}>", initiation_op.unwrap().0)
+            }
+        }
+    }
+
+    fn color(&self, state: &State) -> Color {
+        match self.kind {
+            ProcEntryKind::Task(task_id, variant_id) => state
+                .variants
+                .get(&(task_id, variant_id))
+                .unwrap()
+                .color
+                .unwrap(),
+            ProcEntryKind::MetaTask(variant_id) => {
+                state.meta_variants.get(&variant_id).unwrap().color.unwrap()
+            }
+            ProcEntryKind::MapperCall(kind) => {
+                state.mapper_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::RuntimeCall(kind) => {
+                state.runtime_call_kinds.get(&kind).unwrap().color.unwrap()
+            }
+            ProcEntryKind::ProfTask => {
+                // FIXME don't hardcode this here
+                Color(0xFFC0CB)
+            }
+        }
+    }
+
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
+        if let Some(op_id) = self.op_id {
+            return state.find_op_provenance(op_id);
+        }
+        None
+    }
+}
+
 pub type ProcPoint = TimePoint<ProfUID, u64>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
@@ -308,14 +472,6 @@ impl Proc {
         self.entries.is_empty()
     }
 
-    pub fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
-        self.entries.get(&prof_uid).unwrap()
-    }
-
-    pub fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ProcEntry {
-        self.entries.get_mut(&prof_uid).unwrap()
-    }
-
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
         self.entries.retain(|_, t| !t.trim_time_range(start, stop));
     }
@@ -404,9 +560,31 @@ impl Proc {
     }
 }
 
-pub type MemEntry = InstUID; // this is the unique id (inst_uid) of Inst
+impl Container for Proc {
+    type E = ProfUID;
+    type S = u64;
+    type Entry = ProcEntry;
 
-pub type MemPoint = TimePoint<MemEntry, ()>;
+    fn max_levels(&self) -> usize {
+        self.max_levels as usize
+    }
+
+    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+        &self.time_points
+    }
+
+    fn entry(&self, prof_uid: ProfUID) -> &ProcEntry {
+        self.entries.get(&prof_uid).unwrap()
+    }
+
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ProcEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
+    }
+}
+
+pub type MemEntry = Inst;
+
+pub type MemPoint = TimePoint<InstUID, ()>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct MemID(pub u64);
@@ -443,6 +621,10 @@ impl Mem {
             time_points: Vec::new(),
             max_live_insts: 0,
         }
+    }
+
+    fn add_inst(&mut self, inst: Inst) {
+        self.insts.insert(inst.inst_uid, inst);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -509,6 +691,28 @@ impl Mem {
     }
 }
 
+impl Container for Mem {
+    type E = InstUID;
+    type S = ();
+    type Entry = Inst;
+
+    fn max_levels(&self) -> usize {
+        self.max_live_insts as usize
+    }
+
+    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+        &self.time_points
+    }
+
+    fn entry(&self, inst_uid: InstUID) -> &Inst {
+        self.insts.get(&inst_uid).unwrap()
+    }
+
+    fn entry_mut(&mut self, inst_uid: InstUID) -> &mut Inst {
+        self.insts.get_mut(&inst_uid).unwrap()
+    }
+}
+
 #[derive(Debug)]
 pub struct MemProcAffinity {
     _mem_id: MemID,
@@ -536,61 +740,118 @@ impl MemProcAffinity {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum ChanEntry {
+pub enum ChanEntryKind {
     Copy(EventID),
     Fill(EventID),
     DepPart(OpID, usize),
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum ChanEntryRef<'a> {
-    Copy(EventID, &'a Copy),
-    Fill(EventID, &'a Fill),
-    DepPart((OpID, usize), &'a DepPart),
-}
-
-impl<'a> ChanEntryRef<'a> {
-    pub fn base(self) -> &'a Base {
-        match self {
-            ChanEntryRef::Copy(_, copy) => &copy.base,
-            ChanEntryRef::Fill(_, fill) => &fill.base,
-            ChanEntryRef::DepPart(_, deppart) => &deppart.base,
-        }
-    }
-    pub fn time_range(self) -> &'a TimeRange {
-        match self {
-            ChanEntryRef::Copy(_, copy) => &copy.time_range,
-            ChanEntryRef::Fill(_, fill) => &fill.time_range,
-            ChanEntryRef::DepPart(_, deppart) => &deppart.time_range,
-        }
-    }
-}
-
 #[derive(Debug)]
-pub enum ChanEntryRefMut<'a> {
-    Copy(EventID, &'a mut Copy),
-    Fill(EventID, &'a mut Fill),
-    DepPart((OpID, usize), &'a mut DepPart),
+pub enum ChanEntry {
+    Copy(Copy),
+    Fill(Fill),
+    DepPart(DepPart),
 }
 
-impl<'a> ChanEntryRefMut<'a> {
-    pub fn base(self) -> &'a mut Base {
-        match self {
-            ChanEntryRefMut::Copy(_, copy) => &mut copy.base,
-            ChanEntryRefMut::Fill(_, fill) => &mut fill.base,
-            ChanEntryRefMut::DepPart(_, deppart) => &mut deppart.base,
-        }
-    }
-    pub fn time_range(self) -> &'a mut TimeRange {
-        match self {
-            ChanEntryRefMut::Copy(_, copy) => &mut copy.time_range,
-            ChanEntryRefMut::Fill(_, fill) => &mut fill.time_range,
-            ChanEntryRefMut::DepPart(_, deppart) => &mut deppart.time_range,
-        }
+impl ChanEntry {
+    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
+        self.time_range_mut().trim_time_range(start, stop)
     }
 }
 
-pub type ChanPoint = TimePoint<ChanEntry, ()>;
+impl ContainerEntry for ChanEntry {
+    fn base(&self) -> &Base {
+        match self {
+            ChanEntry::Copy(copy) => &copy.base,
+            ChanEntry::Fill(fill) => &fill.base,
+            ChanEntry::DepPart(deppart) => &deppart.base,
+        }
+    }
+
+    fn base_mut(&mut self) -> &mut Base {
+        match self {
+            ChanEntry::Copy(copy) => &mut copy.base,
+            ChanEntry::Fill(fill) => &mut fill.base,
+            ChanEntry::DepPart(deppart) => &mut deppart.base,
+        }
+    }
+
+    fn time_range(&self) -> &TimeRange {
+        match self {
+            ChanEntry::Copy(copy) => &copy.time_range,
+            ChanEntry::Fill(fill) => &fill.time_range,
+            ChanEntry::DepPart(deppart) => &deppart.time_range,
+        }
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        match self {
+            ChanEntry::Copy(copy) => &mut copy.time_range,
+            ChanEntry::Fill(fill) => &mut fill.time_range,
+            ChanEntry::DepPart(deppart) => &mut deppart.time_range,
+        }
+    }
+
+    fn waiters(&self) -> Option<&Waiters> {
+        None
+    }
+
+    fn initiation(&self) -> Option<OpID> {
+        match self {
+            ChanEntry::Copy(copy) => copy.op_id,
+            ChanEntry::Fill(fill) => fill.op_id,
+            ChanEntry::DepPart(deppart) => Some(deppart.op_id),
+        }
+    }
+
+    fn name(&self, state: &State) -> String {
+        match self {
+            ChanEntry::Copy(copy) => {
+                let nreqs = copy.copy_inst_infos.len();
+                if nreqs > 0 {
+                    format!(
+                        "{}: size={}, num reqs={}{}",
+                        copy.copy_kind.unwrap(),
+                        SizePretty(copy.size.unwrap()),
+                        nreqs,
+                        CopyInstInfoVec(&copy.copy_inst_infos, state)
+                    )
+                } else {
+                    format!(
+                        "Copy: size={}, num reqs={}",
+                        SizePretty(copy.size.unwrap()),
+                        nreqs
+                    )
+                }
+            }
+            ChanEntry::Fill(fill) => {
+                let nreqs = fill.fill_inst_infos.len();
+                if nreqs > 0 {
+                    format!(
+                        "Fill: num reqs={}{}",
+                        nreqs,
+                        FillInstInfoVec(&fill.fill_inst_infos, state)
+                    )
+                } else {
+                    format!("Fill: num reqs={}", nreqs)
+                }
+            }
+            ChanEntry::DepPart(deppart) => format!("{}", deppart.part_op),
+        }
+    }
+
+    fn color(&self, state: &State) -> Color {
+        let initiation = self.initiation().unwrap();
+        state.get_op_color(initiation)
+    }
+
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
+        let initiation = self.initiation().unwrap();
+        state.find_op_provenance(initiation)
+    }
+}
+
+pub type ChanPoint = TimePoint<ProfUID, ()>;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
@@ -664,9 +925,10 @@ impl ChanID {
 #[derive(Debug)]
 pub struct Chan {
     pub chan_id: ChanID,
-    pub copies: BTreeMap<EventID, Copy>,
-    pub fills: BTreeMap<EventID, Fill>,
-    pub depparts: BTreeMap<OpID, Vec<DepPart>>,
+    entries: BTreeMap<ProfUID, ChanEntry>,
+    pub copies: BTreeMap<EventID, ProfUID>,
+    pub fills: BTreeMap<EventID, ProfUID>,
+    pub depparts: BTreeMap<OpID, Vec<ProfUID>>,
     pub time_points: Vec<ChanPoint>,
     pub max_levels: u32,
 }
@@ -675,6 +937,7 @@ impl Chan {
     fn new(chan_id: ChanID) -> Self {
         Chan {
             chan_id,
+            entries: BTreeMap::new(),
             copies: BTreeMap::new(),
             fills: BTreeMap::new(),
             depparts: BTreeMap::new(),
@@ -683,44 +946,51 @@ impl Chan {
         }
     }
 
+    fn add_copy(&mut self, copy: Copy) {
+        self.copies.insert(copy.fevent, copy.base.prof_uid);
+        self.entries
+            .entry(copy.base.prof_uid)
+            .or_insert(ChanEntry::Copy(copy));
+    }
+
+    fn add_fill(&mut self, fill: Fill) {
+        self.fills.insert(fill.fevent, fill.base.prof_uid);
+        self.entries
+            .entry(fill.base.prof_uid)
+            .or_insert(ChanEntry::Fill(fill));
+    }
+
+    fn add_deppart(&mut self, deppart: DepPart) {
+        self.depparts
+            .entry(deppart.op_id)
+            .or_insert_with(Vec::new)
+            .push(deppart.base.prof_uid);
+        self.entries
+            .entry(deppart.base.prof_uid)
+            .or_insert(ChanEntry::DepPart(deppart));
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.copies.is_empty() && self.fills.is_empty() && self.depparts.is_empty()
+        self.entries.is_empty()
     }
 
     fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) {
-        self.copies.retain(|_, c| !c.trim_time_range(start, stop));
-        self.fills.retain(|_, f| !f.trim_time_range(start, stop));
-        for depparts in self.depparts.values_mut() {
-            depparts.retain_mut(|t| !t.trim_time_range(start, stop));
-        }
+        self.entries.retain(|_, e| !e.trim_time_range(start, stop));
     }
 
     fn sort_time_range(&mut self) {
-        fn add(time: &TimeRange, entry: ChanEntry, points: &mut Vec<ChanPoint>) {
+        fn add(time: &TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(start, entry, true, ()));
-            points.push(ChanPoint::new(stop, entry, false, ()));
+            points.push(ChanPoint::new(start, prof_uid, true, ()));
+            points.push(ChanPoint::new(stop, prof_uid, false, ()));
         }
 
         let mut points = Vec::new();
 
-        for (fevent, copy) in &self.copies {
-            let time = &copy.time_range;
-            let entry = ChanEntry::Copy(*fevent);
-            add(time, entry, &mut points);
-        }
-        for (fevent, fill) in &self.fills {
-            let time = &fill.time_range;
-            let entry = ChanEntry::Fill(*fevent);
-            add(time, entry, &mut points);
-        }
-        for (op_id, depparts) in &self.depparts {
-            for (idx, deppart) in depparts.iter().enumerate() {
-                let time = &deppart.time_range;
-                let entry = ChanEntry::DepPart(*op_id, idx);
-                add(time, entry, &mut points);
-            }
+        for (prof_uid, entry) in &self.entries {
+            let time = entry.time_range();
+            add(time, *prof_uid, &mut points);
         }
 
         points.sort_by_key(|a| a.time_key());
@@ -734,7 +1004,7 @@ impl Chan {
                 } else {
                     self.max_levels.postincrement()
                 };
-                self.entry_mut(point.entry).base().set_level(level);
+                self.entry_mut(point.entry).base_mut().set_level(level);
             } else {
                 let level = self.entry(point.entry).base().level.unwrap();
                 free_levels.push(Reverse(level));
@@ -743,37 +1013,27 @@ impl Chan {
 
         self.time_points = points;
     }
+}
 
-    pub fn entry(&self, entry: ChanEntry) -> ChanEntryRef {
-        match entry {
-            ChanEntry::Copy(fevent) => {
-                let copy = &self.copies.get(&fevent).unwrap();
-                ChanEntryRef::Copy(fevent, copy)
-            }
-            ChanEntry::Fill(fevent) => {
-                let fill = &self.fills.get(&fevent).unwrap();
-                ChanEntryRef::Fill(fevent, fill)
-            }
-            ChanEntry::DepPart(op_id, idx) => {
-                let deppart = &self.depparts.get(&op_id).unwrap()[idx];
-                ChanEntryRef::DepPart((op_id, idx), deppart)
-            }
-        }
+impl Container for Chan {
+    type E = ProfUID;
+    type S = ();
+    type Entry = ChanEntry;
+
+    fn max_levels(&self) -> usize {
+        self.max_levels as usize
     }
 
-    pub fn entry_mut(&mut self, entry: ChanEntry) -> ChanEntryRefMut {
-        match entry {
-            ChanEntry::Copy(fevent) => {
-                ChanEntryRefMut::Copy(fevent, self.copies.get_mut(&fevent).unwrap())
-            }
-            ChanEntry::Fill(fevent) => {
-                ChanEntryRefMut::Fill(fevent, self.fills.get_mut(&fevent).unwrap())
-            }
-            ChanEntry::DepPart(op_id, idx) => {
-                let deppart = &mut self.depparts.get_mut(&op_id).unwrap()[idx];
-                ChanEntryRefMut::DepPart((op_id, idx), deppart)
-            }
-        }
+    fn time_points(&self) -> &Vec<TimePoint<Self::E, Self::S>> {
+        &self.time_points
+    }
+
+    fn entry(&self, prof_uid: ProfUID) -> &ChanEntry {
+        self.entries.get(&prof_uid).unwrap()
+    }
+
+    fn entry_mut(&mut self, prof_uid: ProfUID) -> &mut ChanEntry {
+        self.entries.get_mut(&prof_uid).unwrap()
     }
 }
 
@@ -1177,6 +1437,48 @@ impl PartialEq for Inst {
 
 impl Eq for Inst {}
 
+impl ContainerEntry for Inst {
+    fn base(&self) -> &Base {
+        &self.base
+    }
+
+    fn base_mut(&mut self) -> &mut Base {
+        &mut self.base
+    }
+
+    fn time_range(&self) -> &TimeRange {
+        &self.time_range
+    }
+
+    fn time_range_mut(&mut self) -> &mut TimeRange {
+        &mut self.time_range
+    }
+
+    fn waiters(&self) -> Option<&Waiters> {
+        None
+    }
+
+    fn initiation(&self) -> Option<OpID> {
+        self.op_id
+    }
+
+    fn name(&self, state: &State) -> String {
+        format!("{}", InstPretty(self, state))
+    }
+
+    fn color(&self, state: &State) -> Color {
+        let initiation = self.op_id;
+        state.get_op_color(initiation.unwrap())
+    }
+
+    fn provenance<'a, 'b>(&'a self, state: &'b State) -> Option<&'b str> {
+        if let Some(initiation) = self.op_id {
+            return state.find_op_provenance(initiation);
+        }
+        None
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct Color(pub u32);
 
@@ -1424,47 +1726,6 @@ impl From<spy::serialize::ContextID> for OpID {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum ProcEntryKind {
-    Task(TaskID, VariantID),
-    MetaTask(VariantID),
-    MapperCall(MapperCallKindID),
-    RuntimeCall(RuntimeCallKindID),
-    ProfTask,
-}
-
-#[derive(Debug)]
-pub struct ProcEntry {
-    pub base: Base,
-    pub op_id: Option<OpID>,
-    pub initiation_op: Option<OpID>,
-    pub kind: ProcEntryKind,
-    pub time_range: TimeRange,
-    pub waiters: Waiters,
-}
-
-impl ProcEntry {
-    fn new(
-        base: Base,
-        op_id: Option<OpID>,
-        initiation_op: Option<OpID>,
-        kind: ProcEntryKind,
-        time_range: TimeRange,
-    ) -> Self {
-        ProcEntry {
-            base,
-            op_id,
-            initiation_op,
-            kind,
-            time_range,
-            waiters: Waiters::new(),
-        }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
-    }
-}
-
 #[derive(Debug)]
 pub struct MultiTask {
     pub op_id: OpID,
@@ -1617,7 +1878,7 @@ impl CopyInstInfo {
 #[derive(Debug)]
 pub struct Copy {
     base: Base,
-    _fevent: EventID,
+    fevent: EventID,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: Option<OpID>,
@@ -1632,7 +1893,7 @@ impl Copy {
     fn new(base: Base, fevent: EventID) -> Self {
         Copy {
             base,
-            _fevent: fevent,
+            fevent,
             time_range: TimeRange::new_empty(),
             chan_id: None,
             op_id: None,
@@ -1643,6 +1904,7 @@ impl Copy {
             copy_inst_infos: Vec::new(),
         }
     }
+
     fn add_copy_info(
         &mut self,
         time_range: TimeRange,
@@ -1659,9 +1921,11 @@ impl Copy {
         self.num_hops = Some(num_hops);
         self.request_type = Some(request_type);
     }
+
     fn add_copy_inst_info(&mut self, copy_inst_info: CopyInstInfo) {
         self.copy_inst_infos.push(copy_inst_info);
     }
+
     fn add_channel(&mut self) {
         // sanity check
         assert_eq!(self.chan_id, None);
@@ -1711,9 +1975,6 @@ impl Copy {
             };
         }
     }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
-    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1738,7 +1999,7 @@ impl FillInstInfo {
 #[derive(Debug)]
 pub struct Fill {
     base: Base,
-    _fevent: EventID,
+    fevent: EventID,
     time_range: TimeRange,
     chan_id: Option<ChanID>,
     pub op_id: Option<OpID>,
@@ -1750,7 +2011,7 @@ impl Fill {
     fn new(base: Base, fevent: EventID) -> Self {
         Fill {
             base,
-            _fevent: fevent,
+            fevent,
             time_range: TimeRange::new_empty(),
             chan_id: None,
             op_id: None,
@@ -1758,6 +2019,7 @@ impl Fill {
             fill_inst_infos: Vec::new(),
         }
     }
+
     fn add_fill_info(&mut self, time_range: TimeRange, op_id: OpID, size: u64) {
         // sanity check
         assert_eq!(self.op_id, None);
@@ -1765,9 +2027,11 @@ impl Fill {
         self.op_id = Some(op_id);
         self.size = Some(size);
     }
+
     fn add_fill_inst_info(&mut self, fill_inst_info: FillInstInfo) {
         self.fill_inst_infos.push(fill_inst_info);
     }
+
     fn add_channel(&mut self) {
         // sanity check
         assert_eq!(self.chan_id, None);
@@ -1778,9 +2042,6 @@ impl Fill {
         }
         let chan_id = ChanID::new_fill(chan_dst);
         self.chan_id = Some(chan_id);
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1800,9 +2061,6 @@ impl DepPart {
             time_range,
             op_id,
         }
-    }
-    fn trim_time_range(&mut self, start: Timestamp, stop: Timestamp) -> bool {
-        self.time_range.trim_time_range(start, stop)
     }
 }
 
@@ -1952,6 +2210,34 @@ impl State {
 
     fn find_op_mut(&mut self, op_id: OpID) -> Option<&mut Operation> {
         self.operations.get_mut(&op_id)
+    }
+
+    fn find_op_provenance(&self, op_id: OpID) -> Option<&str> {
+        self.find_op(op_id).and_then(|op| op.provenance.as_deref())
+    }
+
+    pub fn get_op_color(&self, op_id: OpID) -> Color {
+        if let Some(task) = self.find_task(op_id) {
+            match task.kind {
+                ProcEntryKind::Task(task_id, variant_id) => {
+                    return self
+                        .variants
+                        .get(&(task_id, variant_id))
+                        .unwrap()
+                        .color
+                        .unwrap()
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        if let Some(op) = self.find_op(op_id) {
+            if let Some(kind) = op.kind {
+                return self.op_kinds.get(&kind).unwrap().color.unwrap();
+            }
+        }
+
+        Color(0x000000)
     }
 
     fn create_task(
@@ -2105,10 +2391,7 @@ impl State {
         self.create_op(op_id);
         let base = Base::new(&mut self.prof_uid_allocator); // FIXME: construct here to avoid mutability conflict
         let chan = self.find_deppart_chan_mut();
-        chan.depparts
-            .entry(op_id)
-            .or_insert_with(Vec::new)
-            .push(DepPart::new(base, part_op, time_range, op_id));
+        chan.add_deppart(DepPart::new(base, part_op, time_range, op_id));
     }
 
     fn find_chan_mut(&mut self, chan_id: ChanID) -> &mut Chan {
@@ -2175,30 +2458,30 @@ impl State {
             process_record(record, self, &mut insts, &mut copies, &mut fills);
         }
         // put inst into memories
-        for (key, inst) in insts {
+        for inst in insts.into_values() {
             if let Some(mem_id) = inst.mem_id {
                 let mem = self.mems.get_mut(&mem_id).unwrap();
-                mem.insts.insert(key, inst);
+                mem.add_inst(inst);
             } else {
                 unreachable!();
             }
         }
         // put fills into channels
-        for (key, mut fill) in fills {
+        for mut fill in fills.into_values() {
             fill.add_channel();
             if let Some(chan_id) = fill.chan_id {
                 let chan = self.find_chan_mut(chan_id);
-                chan.fills.insert(key, fill);
+                chan.add_fill(fill);
             } else {
                 unreachable!();
             }
         }
         // put copies into channels
-        for (key, mut copy) in copies {
+        for mut copy in copies.into_values() {
             copy.add_channel();
             if let Some(chan_id) = copy.chan_id {
                 let chan = self.find_chan_mut(chan_id);
-                chan.copies.insert(key, copy);
+                chan.add_copy(copy);
             } else {
                 unreachable!();
             }
