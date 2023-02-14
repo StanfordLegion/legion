@@ -1051,6 +1051,10 @@ function value:get_index(cx, node, index, result_type)
     result = expr.just(
       as_quote(actions),
       `([value_type:data(value_expr.value)][ [index.value] ]))
+  elseif std.is_regent_array(value_type) then
+    result = expr.just(
+      as_quote(actions),
+      `([value_expr.value].impl[ [index.value] ]))
   else
     result = expr.just(
       as_quote(actions),
