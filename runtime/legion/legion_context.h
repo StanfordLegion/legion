@@ -3064,15 +3064,6 @@ namespace Legion {
           std::vector<size_t> &shard_sizes, Provenance *provenance);
       static void register_universal_sharding_functor(Runtime *runtime);
       ShardingFunction* get_universal_sharding_function(void);
-#ifdef NO_EXPLICIT_COLLECTIVES
-    public:
-      void register_collective_instance_handler(size_t context_index,
-                                      ReplCollectiveInstanceHandler *handler);
-      void unregister_collective_instance_handler(size_t context_index);
-      void handle_collective_instance_message(Deserializer &derez);
-      ReplCollectiveInstanceHandler* find_collective_instance_handler(
-                                                  size_t context_index);
-#endif
     public:
       void hash_future(Murmur3Hasher &hasher, const unsigned safe_level, 
                        const Future &future, const char *description) const;
@@ -3228,30 +3219,6 @@ namespace Legion {
       std::map<size_t/*template index*/,
         std::vector<PendingTemplateUpdate> > pending_template_updates;
       size_t next_physical_template_index;
-#ifdef NO_EXPLICIT_COLLECTIVES
-    protected:
-      struct PendingCollectiveInstanceMessage :
-        public LgTaskArgs<PendingCollectiveInstanceMessage> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID;
-      public:
-        PendingCollectiveInstanceMessage(void)
-          : LgTaskArgs<PendingCollectiveInstanceMessage>(0),
-            context(NULL), context_index(0), ptr(NULL), size(0) { }
-        PendingCollectiveInstanceMessage(ReplicateContext *c, size_t index,
-                                         void *p, size_t s)
-          : LgTaskArgs<PendingCollectiveInstanceMessage>(implicit_provenance),
-            context(c), context_index(index), ptr(p), size(s) { }
-      public:
-        ReplicateContext *const context;
-        const size_t context_index;
-        void *const ptr;
-        const size_t size;
-      };
-      std::map<size_t,std::vector<PendingCollectiveInstanceMessage> > 
-                                          pending_collective_instance_messages;
-      std::map<size_t,ReplCollectiveInstanceHandler*> collective_inst_handlers;
-#endif
     protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;

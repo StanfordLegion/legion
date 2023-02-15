@@ -1407,157 +1407,6 @@ namespace Legion {
                CollectiveViewRendezvous*> collective_view_rendezvous;
     };
 
-#ifdef NO_EXPLICIT_COLLECTIVES
-    /**
-     * \class ReplCollectiveInstanceHandler
-     * This is a pure virtual class that handles incoming messages
-     * for the creation of collective instances with control replication
-     */
-    class ReplCollectiveInstanceHandler {
-    public:
-      virtual void handle_collective_instance_message(Deserializer &derez) = 0;
-    };
-
-    /**
-     * \class ReplCollectiveInstanceCreator
-     * This provides a special implementation of the 
-     * CollectiveInstanceCreator class for operations that are being
-     * execute in control replicated contexts
-     */
-    template<typename OP>
-    class ReplCollectiveInstanceCreator : public OP,
-            public ReplCollectiveInstanceHandler {
-    public:
-      typedef std::map<
-        std::pair<LogicalRegion,DistributedID>,size_t> RegionInstanceCounts;
-    private:
-      enum ReplCollectiveInstanceMessageKind {
-        REPL_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE,
-        REPL_COLLECTIVE_RELEASE_ALLOCATION_PRIVILEGE,
-        REPL_COLLECTIVE_CREATE_PENDING_MANAGERS,
-        REPL_COLLECTIVE_MATCH_INSTANCES,
-        REPL_COLLECTIVE_FINALIZE_COLLECTIVE_INSTANCE,
-        REPL_COLLECTIVE_VERIFY_TOTAL_CALLS,
-        REPL_COLLECTIVE_COUNT_REGION_OCCURRENCES,
-      }; 
-    public:
-      ReplCollectiveInstanceCreator(Runtime *rt);
-      ReplCollectiveInstanceCreator(
-          const ReplCollectiveInstanceCreator<OP> &rhs);
-    public:
-      void activate_repl_collective_instance_creator(void);
-      void deactivate_repl_collective_instance_creator(void);
-    public:
-      // We use this method as our hook to get ourselves registered
-      // with the replicated context as a handler of messages coming
-      // from other shards in the broadcast and reduction trees of
-      // the sharded mapping
-      virtual size_t get_total_collective_instance_points(void);
-      virtual void handle_collective_instance_message(Deserializer &derez);
-      // Hook the commit method for all these operations to handle the
-      // case where we might have outstanding collective operations in
-      // flight even though all our point operations are done
-      virtual void trigger_commit(void);
-    protected:
-      virtual ShardedMapping* get_collective_instance_sharded_mapping(void) = 0;
-      // Shard ownership for each operation based on its context
-      // index in the order of operations which should yield a 
-      // relatively balanced load across the shards that this operation
-      // maps onto (hopefully)
-      ShardID get_collective_instance_origin_shard(void);
-      void register_handler(void);
-      void finalize_collective(void);
-      class AutoCheck {
-      public:
-        AutoCheck(ReplCollectiveInstanceCreator<OP> *o)
-          : op(o) { op->register_handler(); }
-        ~AutoCheck(void) { op->finalize_collective(); }
-      private:
-        ReplCollectiveInstanceCreator<OP> *const op;
-      };
-    public:
-      // hook all entry points so we can register ourselves on the first call 
-      virtual RtEvent acquire_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  Memory target);
-      virtual RtEvent acquire_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const std::set<Memory> &targets,
-                                  size_t points = 1);
-      virtual void release_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  size_t points = 1);
-      virtual PendingCollectiveManager* create_pending_collective_manager(
-                                  MappingCallKind mapper_call,
-                                  unsigned index, size_t collective_tag,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  AddressSpaceID memory_space,
-                                  LayoutConstraintKind &bad_constraint,
-                                  size_t &bad_index, bool &bad_regions);
-      virtual void create_pending_collective_managers(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const std::map<size_t,
-                                   typename OP::PendingCollective> &instances,
-                                  std::map<size_t,PendingCollectiveManager*> 
-                                    &collectives, size_t points,
-                                  LayoutConstraintKind &bad_constraint,
-                                  size_t &bad_index, bool &bad_regions);
-      virtual void match_collective_instances(
-                                  MappingCallKind mapper_call,
-                                  unsigned index, size_t collective_tag,
-                                  std::vector<MappingInstance> &instances);
-      virtual void match_collective_instances(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  std::map<size_t,
-                                     std::vector<DistributedID> > &instances,
-                                  size_t points);
-      virtual bool finalize_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  bool success, size_t points = 1);
-      virtual unsigned verify_total_collective_instance_calls(
-                                  MappingCallKind call, unsigned total_calls,
-                                  size_t points = 1);
-      virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region,
-                                  DistributedID inst_did);
-      virtual void count_collective_region_occurrences(unsigned index,
-                                  RegionInstanceCounts &counts,
-                                  size_t points);
-      // invoked when all the local points have been seen
-      virtual void perform_acquire_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const std::set<Memory> &targets,
-                                  RtUserEvent to_trigger);
-      virtual void perform_release_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const std::set<Memory> &targets);
-      virtual void perform_create_pending_collective_managers(
-                                  MappingCallKind mapper_call, unsigned index, 
-                                  const std::map<size_t,
-                                    typename OP::PendingCollective> &instances,
-                                  LayoutConstraintKind bad_kind,
-                                  size_t bad_index, bool bad_regions);
-      virtual void perform_match_collective_instances(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  std::map<size_t,
-                                    std::vector<DistributedID> > &instances);
-      virtual void perform_finalize_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  bool success);
-      virtual void perform_verify_total_collective_instance_calls(
-                                  MappingCallKind mapper_call,
-                                  unsigned total_calls);
-      virtual void perform_count_collective_region_occurrences(unsigned index,
-                                  std::map<std::pair<LogicalRegion,
-                                           DistributedID>,size_t> &counts);
-    protected:
-      std::atomic<ShardedMapping*> shard_mapping;
-      std::atomic<bool> first_entry;
-      RtUserEvent collectives_done;
-    };
-#endif // NO_EXPLICIT_COLLECTIVES
-
     /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
@@ -2951,11 +2800,6 @@ namespace Legion {
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
-#ifdef NO_EXPLICIT_COLLECTIVES
-    public:
-      void send_collective_instance_message(ShardID target, Serializer &rez);
-      void handle_collective_instance_message(Deserializer &derez);
-#endif
     public:
       void broadcast_resource_update(ShardTask *source, Serializer &rez,
                                      std::set<RtEvent> &applied_events);
@@ -3014,10 +2858,6 @@ namespace Legion {
       static void handle_trace_update(Deserializer &derez, Runtime *rt,
                                       AddressSpaceID source);
       static void handle_find_collective_view(Deserializer &derez, Runtime *rt);
-#ifdef NO_EXPLICIT_COLLECTIVES
-      static void handle_collective_instance_message(Deserializer &derez,
-                                                     Runtime *runtime);
-#endif
     public:
       ShardingFunction* find_sharding_function(ShardingID sid, 
                                                bool skip_check = false);

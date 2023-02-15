@@ -932,40 +932,6 @@ namespace Legion {
                        CollectiveMapping *&analysis_mapping, bool &first_local,
                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
                        std::map<InstanceView*,size_t> &collective_arrivals);
-#ifdef NO_EXPLICIT_COLLECTIVES
-    public:
-      // For collective instance creation
-      virtual bool supports_collective_instances(void) const;
-      virtual DomainPoint get_collective_instance_point(void) const;
-      virtual RtEvent acquire_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  Memory target);
-      virtual void release_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  size_t points = 1);
-      virtual PendingCollectiveManager* create_pending_collective_manager(
-                                  MappingCallKind mapper_call,
-                                  unsigned index, size_t collective_tag,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  AddressSpaceID memory_space,
-                                  LayoutConstraintKind &bad_constraint,
-                                  size_t &bad_constraint_index,
-                                  bool &bad_regions);
-      virtual void match_collective_instances(
-                                  MappingCallKind mapper_call,
-                                  unsigned index, size_t collective_tag,
-                                  std::vector<MappingInstance> &instances);
-      virtual bool finalize_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  bool success, size_t points = 1);
-      virtual unsigned verify_total_collective_instance_calls(
-                                  MappingCallKind call,
-                                  unsigned total_calls, size_t points = 1);
-      virtual size_t count_collective_region_occurrences(
-                                  unsigned index, LogicalRegion region,
-                                  DistributedID inst_did);
-#endif
     public:
       virtual void record_completion_effect(ApEvent effect);
       virtual void record_completion_effect(ApEvent effect,
@@ -1327,18 +1293,6 @@ namespace Legion {
                       public LegionHeapify<SliceTask> {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
-#ifdef NO_EXPLICIT_COLLECTIVES
-    public:
-      enum CollectiveInstMessage {
-        SLICE_COLLECTIVE_ACQUIRE_ALLOCATION_PRIVILEGE,
-        SLICE_COLLECTIVE_RELEASE_ALLOCATION_PRIVILEGE,
-        SLICE_COLLECTIVE_CREATE_PENDING_INSTANCE,
-        SLICE_COLLECTIVE_MATCH_INSTANCES,
-        SLICE_COLLECTIVE_FINALIZE,
-        SLICE_COLLECTIVE_VERIFY,
-        SLICE_COLLECTIVE_COUNT_REGIONS,
-      };
-#endif
     public:
       SliceTask(Runtime *rt);
       SliceTask(const SliceTask &rhs);
@@ -1471,45 +1425,6 @@ namespace Legion {
       static void handle_collective_rendezvous(Deserializer &derez,
                                        Runtime *runtime, AddressSpaceID source);
       static void handle_verify_concurrent_execution(Deserializer &derez);
-#ifdef NO_EXPLICIT_COLLECTIVES
-    public:
-      // For collective instance creation
-      virtual Domain get_collective_dense_points(void) const;
-      virtual size_t get_total_collective_instance_points(void)
-        { return points.size(); }
-      // Special invocations of these methods to forward on the
-      // results to the index owner
-      virtual void perform_acquire_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const std::set<Memory> &targets,
-                                  RtUserEvent to_trigger);
-      virtual void perform_release_collective_allocation_privileges(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const std::set<Memory> &targets);
-      virtual void perform_create_pending_collective_managers(
-                                  MappingCallKind mapper_call, unsigned index, 
-                                  const std::map<size_t,
-                                                 PendingCollective> &instances,
-                                  LayoutConstraintKind bad_kind,
-                                  size_t bad_index, bool bad_regions);
-      virtual void perform_match_collective_instances(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  std::map<size_t,
-                                    std::vector<DistributedID> > &instances);
-      virtual void perform_finalize_pending_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  bool success);
-      virtual void perform_verify_total_collective_instance_calls(
-                                  MappingCallKind mapper_call,
-                                  unsigned total_calls);
-      virtual void perform_count_collective_region_occurrences(unsigned index,
-                                  std::map<std::pair<LogicalRegion,
-                                           DistributedID>,size_t> &counts);
-      static void handle_collective_instance_request(Deserializer &derez,
-                                AddressSpaceID source, Runtime *runtime);
-      static void handle_collective_instance_response(Deserializer &derez,
-                                                      Runtime *runtime);
-#endif
     protected:
       friend class IndexTask;
       friend class PointTask;

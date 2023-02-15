@@ -24060,23 +24060,6 @@ namespace Legion {
       PhysicalManager::handle_send_manager_update(this, source, derez);
     }
 
-#ifdef NO_EXPLICIT_COLLECTIVES
-    //--------------------------------------------------------------------------
-    void Runtime::handle_collective_instance_manager(Deserializer &derez,
-                                                     AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveManager::handle_send_manager(this, source, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_collective_instance_creation(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      CollectiveManager::handle_instance_creation(this, derez);
-    }
-#endif // NO_EXPLICIT_COLLECTIVES
-
     //--------------------------------------------------------------------------
     void Runtime::handle_collective_distribute_fill(Deserializer &derez,
                                                     AddressSpaceID source)
@@ -32073,13 +32056,6 @@ namespace Legion {
                                                                       args);
             break;
           }
-#ifdef NO_EXPLICIT_COLLECTIVES
-        case LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID:
-          {
-            ReplicateContext::handle_defer_collective_message(args);
-            break;
-          }
-#endif
         case LG_DEFER_FINALIZE_PENDING_SET_TASK_ID:
           {
             PendingEquivalenceSet::handle_defer_finalize(args);
