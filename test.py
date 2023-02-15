@@ -68,6 +68,8 @@ legion_cxx_tests = [
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
     ['examples/inline_tasks/inline_tasks', []],
+    ['examples/allreduce/allreduce', []],
+    ['examples/tree_collectives/tree_collectives', []],
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
     ['examples/future_map_transforms/future_map_transforms', []],

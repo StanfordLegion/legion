@@ -1266,9 +1266,6 @@ namespace Legion {
         if (inst.is_external_instance()) {
           ss << "EXTERNAL,";
         }
-        if (inst.is_collective_instance()) {
-          ss << "COLLECTIVE,";
-        }
         ss << "region=(" << inst.get_tree_id() << ",*,"
            << inst.get_field_space().get_id() << ")";
         ss << ",memory=" << inst.get_location();

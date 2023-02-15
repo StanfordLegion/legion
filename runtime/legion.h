@@ -2262,12 +2262,10 @@ namespace Legion {
     public:
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
-                              LegionFileMode mode,
-                              bool local_file = false);
+                              LegionFileMode mode);
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
-                              LegionFileMode mode,
-                              bool local_files = false);
+                              LegionFileMode mode);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
       inline void attach_array_aos(void *base, bool column_major,
@@ -2286,6 +2284,18 @@ namespace Legion {
       bool                                          restricted /*= true*/;
       // Whether this region should be mapped by the calling task
       bool                                          mapped; /*= true*/
+      // Only matters for control replicated parent tasks 
+      // Indicate whether all the shards are providing the same data
+      // or whether they are each providing different data
+      // Collective means that each shard provides its own copy of the
+      // data and non-collective means every shard provides the same data
+      // Defaults to 'true' for external instances and 'false' for files
+      bool                                          collective;
+      // For collective cases, indicate whether the runtime should 
+      // deduplicate data across shards in the same process
+      // This is useful for cases where there is one file or external
+      // instance per process but multiple shards per process
+      bool                                          deduplicate_across_shards;
     public:
       // Provenance string for the runtime and tools to use
       std::string                                   provenance;
@@ -2295,7 +2305,6 @@ namespace Legion {
       LegionFileMode                                mode;
       std::vector<FieldID>                          file_fields; // normal files
       std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
-      bool                                          local_files;
     public:
       // Data for external instances
       LayoutConstraintSet                           constraints;
@@ -2347,9 +2356,9 @@ namespace Legion {
       LogicalRegion                                 parent;
       // Whether these instances will be restricted when attached
       bool                                          restricted /*= true*/;
-      // Whether the runtime should check for duplicate resources across the 
-      // shards in a control replicated context, it is illegal to pass in the
-      // same resource to different shards if this is set to false
+      // Whether the runtime should check for duplicate resources across 
+      // the shards in a control replicated context, it is illegal to pass
+      // in the same resource to different shards if this is set to false
       bool                                          deduplicate_across_shards;
     public:
       // Provenance string for the runtime and tools to use
@@ -3998,7 +4007,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
-      // This field is now optional
+      // This field is now optional (but required with control replication)
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -4046,7 +4055,7 @@ namespace Legion {
       LogicalRegion                   parent_region;
       std::set<FieldID>               fields;
     public:
-      // This field is now optional
+      // This field is now optional (but required with control replication)
       PhysicalRegion                  physical_region;
     public:
       std::vector<Grant>              grants;
@@ -4415,6 +4424,7 @@ namespace Legion {
       virtual MappableType get_mappable_type(void) const 
         { return LEGION_INLINE_MAPPABLE; }
       virtual const InlineMapping* as_inline(void) const { return this; }
+      virtual ShardID get_parent_shard(void) const { return 0; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;

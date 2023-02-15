@@ -3444,20 +3444,21 @@ class LogicalRegion(object):
                 state = self.get_verification_state(depth, field, point)
                 op.record_current_version(point, field, tree, state.version_number)
 
-    def perform_fill_verification(self, depth, field, op, req, perform_checks, replicated, point_set=None):
+    def perform_fill_verification(self, depth, field, op, req, perform_checks, 
+                                  register, replicated, point_set=None):
         if point_set is None:
             # First get the point set
             return self.perform_fill_verification(depth, field, op, req, perform_checks,
-                                                  replicated, self.get_point_set())
+                                                  register, replicated, self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
             return self.parent.parent.perform_fill_verification(depth, field, op, req,
-                                                perform_checks, replicated, point_set)
+                                            perform_checks, register, replicated, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                if not state.perform_fill_verification(op, req, perform_checks, replicated):
+                if not state.perform_fill_verification(op, req, perform_checks, register, replicated):
                     return False
             return True
 
@@ -3496,20 +3497,22 @@ class LogicalRegion(object):
             return True
 
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks, 
-                                      replicated = False, point_set = None, version_numbers = None):
+                                      version_numbers=None, register_now=False, point_set=None):
         if point_set is None:
             # First get the point set
             return self.perform_physical_verification(depth, field, op, req, inst,
-              perform_checks, replicated, self.get_point_set(), version_numbers)
+              perform_checks, version_numbers=version_numbers, register_now=register_now,
+              point_set=self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
             return self.parent.parent.perform_physical_verification(depth, field, op, req,
-                   inst, perform_checks, replicated, point_set, version_numbers)
+                   inst, perform_checks, version_numbers=version_numbers,
+                   register_now=register_now, point_set=point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                if not state.perform_physical_verification(op, req, inst, perform_checks, replicated):
+                if not state.perform_physical_verification(op, req, inst, perform_checks, register_now):
                     return False
                 # Record the version numbers if necessary
                 if version_numbers is not None:
@@ -3517,20 +3520,20 @@ class LogicalRegion(object):
             return True
 
     def perform_registration_verification(self, depth, field, op, req, inst, 
-                                          perform_checks, point_set=None): 
+                                          perform_checks, replicated=False, point_set=None):
         if point_set is None:
             # First get the point set
             return self.perform_registration_verification(depth, field, op, req, inst,
-                    perform_checks, self.get_point_set())
+                    perform_checks, replicated, self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
             return self.parent.parent.perform_registration_verification(depth, field, 
-                    op, req, inst, perform_checks, point_set)
+                    op, req, inst, perform_checks, replicated, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                if not state.perform_registration_verification(op, req, inst, perform_checks):
+                if not state.perform_registration_verification(op, req, inst, perform_checks, replicated):
                     return False
             return True
 
@@ -3821,11 +3824,6 @@ class LogicalPartition(object):
     def compute_current_version_numbers(self, depth, field, op, tree):
         self.parent.compute_current_version_numbers(depth, field, op, 
                                                     tree, self.get_point_set())
-
-    def perform_physical_verification(self, depth, field, op, req, inst, 
-                                      perform_checks, replicated = False):
-        return self.parent.perform_physical_verification(depth, field, op, req, inst,
-                                    perform_checks, replicated, self.get_point_set())
 
     def mark_named_children(self):
         if self.name is not None:
@@ -4770,56 +4768,45 @@ class DataflowTraverser(object):
         # Across is either different fields or same field in different trees
         self.across = self.src_field.fid != self.dst_field.fid or \
                         self.src_tree != self.dst_tree
-        # There is an implicit assumption here that if we did a close
-        # to flush a bunch of reductions then copies will always come
-        # from the newly created instance and not from an composite
-        # instance that also buffered the reductions
-        if state.pending_reductions and state.is_initialized():
-            # If it's already in the set of valid instances we don't need reductions
-            if dst_inst in state.valid_instances:
-                self.found_dataflow_path = True
-                self.needs_reductions = False
-            elif dst_inst in state.previous_instances:
-                self.found_dataflow_path = True
-                self.needs_reductions = True
-            else:
-                self.found_dataflow_path = False
-                self.needs_reductions = True
-        else:
-            assert dst_inst not in state.valid_instances
-            self.found_dataflow_path = not state.is_initialized()
-            self.needs_reductions = False
-        if not self.found_dataflow_path or self.needs_reductions:
-            self.dataflow_stack = list()
-            self.dataflow_stack.append(dst_inst)    
-            self.dataflow_copy = list()
-        else:
-            self.dataflow_stack = None
-        self.observed_reductions = dict()
-        self.reductions_to_perform = dict()
         self.failed_analysis = False
+        # In order for this to be considered valid, we need to find a dataflow
+        # path to the instance which has no other writes to it upstream
+        self.found_dataflow_path = False 
+        self.found_previous_dataflow_path = False
+        self.dataflow_stack = list()
+        self.dataflow_stack.append(dst_inst)
+        # Keep track of whether we traverse this node for dataflow or not
+        self.dataflow_traversal = list()
+        # For tracking the reduction dataflow and accumulated reductions
+        # IDs of the reduction epochs in order applied
+        self.reduction_epochs = list()
+        # list[dicts[src,copy]] of the applied reductions for each epoch
+        self.dataflow_reductions = list()
+        # list[list[inst]]
+        self.reduction_stack = list()
+        # Mapping of accumulated reduction instances from source
+        # sets stored in each reduction instance
+        # list[dict[inst,dict[inst,copy]]]
+        self.accumulated_reductions = list() 
+        # Keep track of whether we traversed this fill on a dataflow path
+        self.dataflow_fill = list()
 
     def visit_node(self, node, eq_key): 
-        if isinstance(node, Operation):
-            pass 
-        elif isinstance(node, RealmCopy):
-            if not self.visit_copy(node, eq_key):
-                return False
+        if isinstance(node, RealmCopy):
+            return self.visit_copy(node, eq_key)
         elif isinstance(node, RealmFill):
-            if not self.visit_fill(node, eq_key):
-                return False
-        elif isinstance(node, RealmDeppart):
-            pass
-        else:
-            assert False # should never get here
+            return self.visit_fill(node, eq_key)
         return True
 
     def post_visit_node(self, node, eq_key):
         if isinstance(node, RealmCopy):
             self.post_visit_copy(node, eq_key)
+        elif isinstance(node, RealmFill):
+            self.post_visit_fill(node, eq_key)
 
     def run(self, first, eq_key):
         # Do this with DFS since we care about paths
+        # Use a stack instead of recursion to avoid stack overflow
         nodes = list()
         nodes.append((first,True))
         while nodes:
@@ -4856,7 +4843,7 @@ class DataflowTraverser(object):
             self.post_visit_node(node, eq_key)
             nodes.pop()
             # See if we are done
-            if self.failed_analysis or self.verified(eq_key):
+            if self.failed_analysis:
                 break
         # Unwind the stack in case we finished early
         while nodes:
@@ -4864,110 +4851,164 @@ class DataflowTraverser(object):
             # Skip any nodes that we finished early for
             if first_pass:
                 continue
-            # Run the post visit method for any ndoes on the stack
+            # Run the post visit method for any nodes on the stack
             self.post_visit_node(node, eq_key)
 
     def visit_copy(self, copy, eq_key):
         # We should never traverse through indirection copies here
         if copy.indirections is not None:
             return False
-        # Check to see if this is a reduction copy or not
-        if 0 in copy.redops:
-            # Normal copy
-            # See if we need to do the dataflow check
-            # and the copy has our field
-            if self.dst_field in copy.dst_fields and \
-                    copy.dsts[copy.dst_fields.index(self.dst_field)] is self.dataflow_stack[-1] and \
-                    self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
-                # Traverse the dataflow path
-                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
-                # See if the source is a valid instance or a
-                # previous instance in the presence of pending reductions
-                if self.state.pending_reductions and self.needs_reductions:
-                    # We have pending reductions, see if we went through any to find this
-                    # valid instance. If we did then check in previous instances otherwise
-                    # we can look directly in the valid instances
-                    if src in self.state.valid_instances:
-                        self.found_dataflow_path = True
-                        # No longer need reductions since we found a direct 
-                        # path to a valid instance
-                        self.needs_reductions = False
-                    elif src in self.state.previous_instances:
-                        self.found_dataflow_path = True
-                elif src in self.state.valid_instances:
-                    self.found_dataflow_path = True
-                # Continue the traversal if we're not done
-                if not self.verified(eq_key, last=False):
-                    # Push it on the stack and continue traversal
-                    self.dataflow_stack.append(src)
-                    self.dataflow_copy.append(True)
-                    return True
-                elif self.found_dataflow_path:
-                    # If we just finished finding it do the analysis now
-                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1], eq_key)
+        # Do not traverse through across copies if we're not across
+        if not self.across and copy.is_across():
+            return False
+        # See if all the fields make sense for what we're looking for
+        if self.dst_field not in copy.dst_fields:
+            return False
+        dst_index = copy.dst_fields.index(self.dst_field)
+        if self.src_field is not copy.src_fields[dst_index]:
+            return False
+        src = copy.srcs[dst_index]
+        if src.redop == 0:
+            # Copy from a normal instance
+            # A little sanity check that we're never reducing from normal instances
+            assert copy.redops[dst_index] == 0
+            dst = copy.dsts[dst_index]
+            # Check to see if this part of the dataflow path
+            if dst is not self.dataflow_stack[-1]:
+                # Traverse through non-dataflow copies as they might
+                # be an additional copy to another read-only region
+                # requirement for our same task
+                # See a multi-node run of region_reduce_aliased.rg for example
+                self.dataflow_traversal.append(False)
             else:
-                # Always traverse through non-dataflow copies
-                self.dataflow_copy.append(False)
-                return True
-        elif self.needs_reductions:
-            # Reduction copy
-            red_target = self.dataflow_stack[-1]
-            if self.dst_field in copy.dst_fields and \
-                    copy.dsts[copy.dst_fields.index(self.dst_field)] is red_target and \
-                    self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
-                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
-                if src.redop != 0:
-                    if src not in self.state.pending_reductions:
-                        return False
-                    if src in self.observed_reductions:
-                        assert self.observed_reductions[src] is not copy
-                        print("ERROR: Duplicate application of reductions by copies "+
-                                str(copy)+" and "+str(self.observed_reductions[src])+
-                                " from reduction instance "+str(src)+ " for op "+
-                                self.error_str)
-                        if self.op.state.eq_graph_on_error:
-                            self.op.state.dump_eq_graph(eq_key)
-                        if self.op.state.assert_on_error:
-                            assert False
-                        return False
-                    else:
-                        self.observed_reductions[src] = copy
-                        if not red_target in self.reductions_to_perform:
-                            self.reductions_to_perform[red_target] = list()
-                        self.reductions_to_perform[red_target].append(src)
-                        # Keep going as long as we haven't found the dataflow path
-                        # or there are more reductions to find
-                        return not self.verified(eq_key, last=False)
-        return False
+                if src in self.state.valid_instances:
+                    # We found the dataflow path
+                    self.found_dataflow_path = True
+                    # No need to continue traverse after we found the dataflow path
+                    self.perform_copy_analysis(copy, src, dst, eq_key)
+                    return False
+                elif src in self.state.previous_instances:
+                    # Still need to traverse to find pending reductions
+                    self.found_previous_dataflow_path = True
+                self.dataflow_stack.append(src)
+                self.dataflow_traversal.append(True)
+        else:
+            # Copy from a reduction instance
+            dst = copy.dsts[dst_index]
+            if dst is self.dataflow_stack[-1]:
+                # We're branching off the dataflow path
+                self.dataflow_traversal.append(True)
+                # See if we found the dataflow path
+                if dst in self.state.previous_instances:
+                    self.found_previous_dataflow_path = True
+                # Should be the right kind of reduction copy
+                assert copy.redops[dst_index] == src.redop
+                # Start a new reduction stack
+                new_stack = list()
+                new_stack.append(src)
+                self.reduction_stack.append(new_stack)
+                self.accumulated_reductions.append(dict())
+            elif self.reduction_stack and len(self.reduction_stack[-1]) > 0 and \
+                    dst is self.reduction_stack[-1][-1]:
+                # Part of the reduction path
+                self.dataflow_traversal.append(True)
+                self.reduction_stack[-1].append(src)
+                # Record that any downstream reduction fills are valid
+                if self.dataflow_fill:
+                    self.dataflow_fill[-1] = True
+            else:
+                # Not part of the reduction dataflow path
+                self.dataflow_traversal.append(False)
+        return True 
 
     def post_visit_copy(self, copy, eq_key):
-        if self.failed_analysis:
-            if self.dataflow_copy[-1]:
+        dst_index = copy.dst_fields.index(self.dst_field)
+        src = copy.srcs[dst_index]
+        dst = copy.dsts[dst_index]
+        # Always analyze the copy
+        self.perform_copy_analysis(copy, src, dst, eq_key)
+        if src.redop == 0:
+            # Easy just need to pop ourselves off the dataflow stack
+            if self.dataflow_traversal.pop():
                 self.dataflow_stack.pop()
-            self.dataflow_copy.pop()
-            return
-        if 0 in copy.redops:
-            # Normal copy, definitely do the analysis if we found the path
-            if self.found_dataflow_path and self.dataflow_copy[-1]: 
-                assert len(self.dataflow_stack) > 1
-                src = self.dataflow_stack[-1]
-                dst = self.dataflow_stack[-2]
-                # Check to see if we have any reductions to perform
-                if src in self.reductions_to_perform:
-                    # Do these in the reverse order of how they were added
-                    for red_src in reversed(self.reductions_to_perform[src]):
-                        reduction = self.observed_reductions[red_src]
-                        self.perform_copy_analysis(reduction, red_src, src, eq_key)
-                        if self.failed_analysis and self.op.state.assert_on_error:
-                            assert False
-                    del self.reductions_to_perform[src]
-                # Perform the copy analysis
-                self.perform_copy_analysis(copy, src, dst, eq_key)
-            # Only pop off our instance if this wasn't a reduction copy
-            if self.dataflow_copy:
-                if self.dataflow_copy[-1]:
-                    self.dataflow_stack.pop()
-                self.dataflow_copy.pop()
+        else:
+            # Check to see if we're a fold copy or an apply copy
+            if dst is self.dataflow_stack[-1]:
+                # This is an applied reduction
+                assert src.redop == copy.redops[dst_index]
+                # Start a new reduction epoch if we're a different redop
+                if len(self.reduction_epochs) == 0 or self.reduction_epochs[-1] != src.redop:
+                    self.reduction_epochs.append(src.redop)
+                    self.dataflow_reductions.append(dict())
+                # TODO: One thing we're not checking here is the case where
+                # we have multiple reduction operators being applied to the
+                # same destination instance in the right order. Depending on
+                # the order in which we traverse the nodes, we might by chance
+                # do them in the right order to look like things were ordered
+                # but we're not actually checking that the "earlier"
+                # reduction copy post-dominated the "later" reduction copy.
+                # We might just have happened to apply them in the right order.
+                # This might be non-deterministic depending on Python hashing :(
+                
+                # Now we can record any observed reductions to the dataflow path
+                if src in self.accumulated_reductions[-1]:
+                    for inst,reduction in iteritems(self.accumulated_reductions[-1][src]):
+                        if inst in self.dataflow_reductions[-1]:
+                            self.failed_analysis = True
+                            print("ERROR: Duplicate application of reduction data from "+
+                                str(inst)+"via copies "+str(self.dataflow_reductions[-1][inst])+
+                                " and "+str(reduction)+" for op "+self.error_str)
+                            if self.op.state.eq_graph_on_error:
+                                self.op.state.dump_eq_graph(eq_key)
+                            if self.op.state.assert_on_error:
+                                assert False
+                            break
+                        else:
+                            self.dataflow_reductions[-1][inst] = reduction
+                else:
+                    # We just read from this source instance so record it
+                    self.dataflow_reductions[-1][src] = copy
+                # Pop our entries off the stacks
+                self.reduction_stack.pop()
+                self.accumulated_reductions.pop()
+            elif self.dataflow_traversal.pop():
+                # This is a copy between reduction instances
+                # Check to see if this is reduction or a write
+                if copy.redops[dst_index] == 0:
+                    # Write copy, so overwrite the accumulated reductions
+                    self.accumulated_reductions[-1][dst] = self.accumulated_reductions[-1][src].copy()
+                else:
+                    # Reduction, see if this is an initial read
+                    if src not in self.accumulated_reductions[-1]:
+                        # Initial read so we can record it
+                        source = dict()
+                        source[src] = copy
+                        self.accumulated_reductions[-1][src] = source
+                    elif self.accumulated_reductions[-1][src][src] is None:
+                        # Fill in that this is the first copy for this instance
+                        self.accumulated_reductions[-1][src][src] = copy
+                    # Now we can propagate the reductions
+                    if dst in self.accumulated_reductions[-1]:
+                        # Merge them and check for duplicates
+                        target = self.accumulated_reductions[-1][dst]
+                        for inst,reduction in iteritems(self.accumulated_reductions[-1][src]):
+                            if inst in target:
+                                self.failed_analysis = True
+                                print("ERROR: Duplicate application of reduction data from "+
+                                    str(inst)+"via copies "+str(target[inst])+" and "+
+                                    str(reduction)+" for op "+self.error_str)
+                                if self.op.state.eq_graph_on_error:
+                                    self.op.state.dump_eq_graph(eq_key)
+                                if self.op.state.assert_on_error:
+                                    assert False
+                                break
+                            else:
+                                target[inst] = reduction
+                    else:
+                        self.accumulated_reductions[-1][dst] = self.accumulated_reductions[-1][src].copy()
+                        # Record that we need a pending copy from this instance
+                        self.accumulated_reductions[-1][dst][dst] = None
+                self.reduction_stack[-1].pop()
 
     def perform_copy_analysis(self, copy, src, dst, eq_key):
         # If we've already traversed this then we can skip the verification
@@ -4981,12 +5022,12 @@ class DataflowTraverser(object):
                                         self.src_req.index, True, 0, self.src_version)
         bad = check_preconditions(src_preconditions, copy)
         if bad is not None:
+            self.failed_analysis = True
             print("ERROR: Missing source precondition for "+str(copy)+
                 " on field "+str(self.src_field)+" for op "+self.error_str+
                 " on "+str(bad))
             if self.op.state.eq_graph_on_error:
                 self.op.state.dump_eq_graph(eq_key)
-            self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -4995,12 +5036,12 @@ class DataflowTraverser(object):
                             False, src.redop, self.dst_version)
         bad = check_preconditions(dst_preconditions, copy)
         if bad is not None:
+            self.failed_analysis = True
             print("ERROR: Missing destination precondition for "+str(copy)+
                 " on field "+str(self.dst_field)+" for op "+self.error_str+
                 " on "+str(bad))
             if self.op.state.eq_graph_on_error:
                 self.op.state.dump_eq_graph(eq_key)
-            self.failed_analysis = True
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -5010,87 +5051,120 @@ class DataflowTraverser(object):
                        copy, self.dst_req.index, False, src.redop, self.dst_version)
 
     def visit_fill(self, fill, eq_key):
-        # See if this fill is for the current target
-        if not self.found_dataflow_path and self.dataflow_stack and \
-              self.dst_field in fill.fields and \
-              fill.dsts[fill.fields.index(self.dst_field)] is self.dataflow_stack[-1]:
-            # If we don't have a pending fill, then this isn't right
-            if not self.state.pending_fill:
-                return False
-            self.found_dataflow_path = True
-            # If we've already traversed this then we can skip the verification
-            if fill.record_version_number(self.state):
-                return False
-            assert self.op.replayed or fill.fill_op in self.state.fill_ops
-            if self.across:
-                fill.record_across_version_number(self.point, self.dst_field,
-                                                  self.dst_tree, self.dst_version)
-            dst = fill.dsts[fill.fields.index(self.dst_field)]
-            preconditions = dst.find_verification_copy_dependences(self.dst_depth,
-                            self.dst_field, self.point, self.op, self.dst_req.index, 
-                            False, 0, self.dst_version)
-            bad = check_preconditions(preconditions, fill)
-            if bad is not None:
-                print("ERROR: Missing destination precondition for "+
-                    str(fill)+" on field "+str(self.dst_field)+" for op "+
-                    self.error_str+" on "+str(bad))
-                self.failed_analysis = True
-                if self.op.state.eq_graph_on_error:
-                    self.op.state.dump_eq_graph(eq_key)
-                if self.op.state.assert_on_error:
-                    assert False
-                return False
-            dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
-                                 fill, self.dst_req.index, False, 0, self.dst_version)
-        # We should never traverse backwards through a fill
-        return False
-
-    def verified(self, eq_key, last = False):
-        if self.failed_analysis:
-            if last and self.op.state.assert_on_error:
-                assert False
+        if self.dst_field not in fill.fields:
             return False
-        # If we didn't have a dataflow path then we're done
-        if not self.found_dataflow_path:
-            if last:
-                print("ERROR: No dataflow path found to update field "+
-                        str(self.dst_field)+" of instance "+str(self.target)+
-                        " of region requirement "+str(self.dst_req.index)+
-                        " of "+str(self.op))
-                if self.op.state.eq_graph_on_error:
-                    self.op.state.dump_eq_graph(eq_key)
-                if self.op.state.assert_on_error:
-                    assert False
-            return False
-        # See if we saw all the needed reductions
-        if self.needs_reductions:
-            if len(self.state.pending_reductions) != len(self.observed_reductions):
-                if last:
-                    print("ERROR: Missing reductions to apply to field "+
-                            str(self.dst_field)+" of instance "+str(self.target)+
-                            " of region requirement "+str(self.dst_req.index)+
-                            " of "+str(self.op))
-                    if self.op.state.eq_graph_on_error:
-                        self.op.state.dump_eq_graph(eq_key)
-                    if self.op.state.assert_on_error:
-                        assert False
+        dst_index = fill.fields.index(self.dst_field)
+        dst = fill.dsts[dst_index]
+        if dst.redop == 0:
+            # Fill to a normal instance
+            # Never do dataflow traversals through normal fills
+            self.dataflow_traversal.append(False)
+            if self.state.pending_fill:
+                if self.state.pending_reductions:
+                    self.found_previous_dataflow_path = True
+                else:
+                    self.found_dataflow_path = True
+                # No need to traverse after we found the dataflow path
+                self.perform_fill_analysis(fill, dst, eq_key)
                 return False
-            elif last:
-                # If this is the last check, replay any reductions for the target
-                if self.target in self.reductions_to_perform:
-                    # Do these in the reverse order of how they were added
-                    for src in reversed(self.reductions_to_perform[self.target]):
-                        reduction = self.observed_reductions[src]
-                        self.perform_copy_analysis(reduction, src, self.target, eq_key)
-                        if self.failed_analysis:
-                            if self.op.state.assert_on_error:
-                                assert False
-                            return False
+        else:
+            # Fill to a reduction instance
+            # Check to see if it is on the dataflow path
+            # Intermediate fills to reduction instances should always
+            # occur on the second entry in the reduction stack back
+            # because we will have already traversed through the 
+            # next copy that is going to be writing to it
+            if len(self.reduction_stack[-1]) >= 2 and  \
+                    dst is self.reduction_stack[-1][-2]:
+                self.dataflow_traversal.append(True)
+                self.dataflow_fill.append(False)
+            else:
+                self.dataflow_traversal.append(False)
         return True
+
+    def post_visit_fill(self, fill, eq_key):
+        dst_index = fill.fields.index(self.dst_field)
+        dst = fill.dsts[dst_index]
+        self.perform_fill_analysis(fill, dst, eq_key)
+        if self.dataflow_traversal.pop() and self.dataflow_fill.pop():
+            # This has to be a fill to a reduction instance
+            assert dst.redop != 0
+            # Overwrite the accumulated reductions for this instances
+            if dst in self.accumulated_reductions[-1]:
+                self.accumulated_reductions[-1][dst].clear()
+
+    def perform_fill_analysis(self, fill, dst, eq_key):
+        # If we've already traversed this then we can skip the verification
+        if fill.record_version_number(self.state):
+            return
+        if self.across:
+            fill.record_across_version_number(self.point, self.dst_field,
+                                              self.dst_tree, self.dst_version)
+        if dst.redop == 0 and fill.fill_op not in self.state.fill_ops and \
+                not self.op.replayed and fill.fill_op.index_owner not in self.state.fill_ops:
+            # There is one last check we can do here which is whether 
+            # these are fill operations in a control replicated context
+            # and therefore they just need to be the same operation in
+            # their respective contexts
+            same_fill = False
+            if fill.fill_op.index_owner is None:
+                context = fill.fill_op.context
+                if context.shard is not None:
+                    index = context.operations.index(fill.fill_op)
+                    for op in self.state.fill_ops:
+                        assert op.context.shard is not None
+                        op_index = op.context.operations.index(op)
+                        if op_index == index:
+                            same_fill = True
+                            break
+            else:
+                context = fill.fill_op.index_owner.context
+                if context.shard is not None:
+                    index = context.operations.index(fill.fill_op.index_owner)
+                    for op in self.state.fill_ops:
+                        assert op.context.shard is not None
+                        op_index = op.context.operations.index(op)
+                        if op_index == index:
+                            same_fill = True
+                            break
+            if not same_fill:
+                self.failed_analysis = True
+                print("ERROR: Not using same fill operation for "+
+                        str(fill)+" on field "+str(self.dst_field)+
+                        " for op "+self.error_str)
+                if self.op.state.eq_graph_on_error:
+                    self.op.state.dump_eq_graph(eq_key)
+                if self.op.state.assert_on_error:
+                    assert False
+        if self.across:
+            fill.record_across_version_number(self.point, self.dst_field,
+                                              self.dst_tree, self.dst_version)
+        preconditions = dst.find_verification_copy_dependences(self.dst_depth,
+                        self.dst_field, self.point, self.op, self.dst_req.index, 
+                        False, 0, self.dst_version)
+        bad = check_preconditions(preconditions, fill)
+        if bad is not None:
+            self.failed_analysis = True
+            print("ERROR: Missing destination precondition for "+
+                str(fill)+" on field "+str(self.dst_field)+" for op "+
+                self.error_str+" on "+str(bad))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(eq_key)
+            if self.op.state.assert_on_error:
+                assert False
+            return
+        dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
+                             fill, self.dst_req.index, False, 0, self.dst_version)
 
     def verify(self, op, restricted = False):
         src_key = (self.point, self.src_field, self.src_tree)
         dst_key = (self.point, self.dst_field, self.dst_tree)
+        ################################################################
+        # Step 1: Traverse backwards through the graph looking for a
+        #         dataflow path to the previous valid instances for 
+        #         destination as well as any reductions that need to
+        #         to be applied to destination instance.
+        ################################################################
         # The verification key is the src_key unless otherwise specified
         ver_key = src_key
         # Copies are a little weird in that they don't actually
@@ -5192,7 +5266,56 @@ class DataflowTraverser(object):
         else:
             # Traverse the node and then see if we satisfied everything
             self.run(op, src_key)
-        return self.verified(ver_key, True)
+        if self.failed_analysis:
+            return False
+        ################################################################
+        # Step 2: Check that we found the dataflow path and all the 
+        #         reductions have been applied in the right order
+        ################################################################
+        if not self.found_dataflow_path and not self.found_previous_dataflow_path:
+            print("ERROR: No dataflow path found to update field "+
+                    str(self.dst_field)+" of instance "+str(self.target)+
+                    " of region requirement "+str(self.dst_req.index)+
+                    " of "+str(self.op))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(ver_key)
+            if self.op.state.assert_on_error:
+                assert False
+            return False
+        # If we needed reduction as part of the dataflow path, then
+        # check that they align with the pending reductions
+        if self.state.pending_reductions and not self.found_dataflow_path:
+            # We can check these either front-to-back or back-to-front
+            # We do back-to-front for efficiency
+            for src in reversed(self.state.pending_reductions):
+                if not self.reduction_epochs or src not in self.dataflow_reductions[-1]:
+                    print("ERROR: Missing reduction from field "+str(self.dst_field)+
+                            " of instance "+str(src)+" of region requirement "+
+                            str(self.dst_req.index)+" of " +str(self.op))
+                    if self.op.state.eq_graph_on_error:
+                        self.op.state.dump_eq_graph(ver_key)
+                    if self.op.state.assert_on_error:
+                        assert False
+                    return False
+                # Remove this instance from the list
+                del self.dataflow_reductions[-1][src]
+                # Once the epoch is empty then pop it off the list
+                if not self.dataflow_reductions[-1]:
+                    self.dataflow_reductions.pop()
+                    self.reduction_epochs.pop()
+        # This should be empty by the time that we get here
+        if self.dataflow_reductions:
+            # Superfluous reductions were applied
+            printf("ERROR: Superfluous reductions were applied for reduction "+
+                    str(self.reduction_epochs[0])+" by region requirement "+
+                    str(self.dst_req.index)+" of "+str(self.op))
+            if self.op.state.eq_graph_on_error:
+                self.op.state.dump_eq_graph(ver_key)
+            if self.op.state.assert_on_error:
+                assert False
+            return False
+        return True
+
 
 class EquivalenceSet(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
@@ -5234,23 +5357,31 @@ class EquivalenceSet(object):
         if restricted:
             self.restricted_instances.add(inst)
 
-    def perform_fill_verification(self, op, req, perform_checks, replicated):
-        # Fills clear everything out so we are just done
-        if not replicated:
-            self.reset()
-            self.pending_fill = True
+    def perform_fill_verification(self, op, req, perform_checks, register, replicated):
+        if not register:
+            if not replicated:
+                self.reset()
+                self.pending_fill = True
+            else:
+                assert self.pending_fill
+            assert op.kind == FILL_OP_KIND
+            if op.index_owner:
+                self.fill_ops.add(op.index_owner)
+            else:
+                self.fill_ops.add(op)
         else:
-            assert self.pending_fill
-        assert op.kind == FILL_OP_KIND
-        self.fill_ops.add(op)
-        # If this instance is restricted then we need to perform the fill eagerly
-        if self.restricted_instances:
+            # Should only ever be here once to apply restricted updates
+            assert not replicated
+            # Should have restricted instances if we are here
+            assert self.restricted_instances
             error_str = "region requirement "+str(req.index)+" of "+str(op)
             for restricted_inst in self.restricted_instances:
                 if not self.issue_update_copies(restricted_inst, op, req,
                                 perform_checks, error_str, restricted=True):
                     return False
-                self.valid_instances.add(restricted_inst)
+            # Restricted applications always reset everything
+            self.reset()
+            self.valid_instances |= self.restricted_instances
         return True
 
     def add_restriction(self, op, req, inst, replicated):
@@ -5270,7 +5401,7 @@ class EquivalenceSet(object):
             self.valid_instances.remove(filter_inst)
         return True
 
-    def perform_physical_verification(self, op, req, inst, perform_checks, replicated):
+    def perform_physical_verification(self, op, req, inst, perform_checks, register_now):
         assert not inst.is_virtual()
         if req.is_reduce():
             assert inst.redop != 0
@@ -5308,36 +5439,16 @@ class EquivalenceSet(object):
                 if not self.issue_reduction_initialization(inst, op, req, perform_checks):
                     return False
                 self.pending_reductions.append(inst)
-        elif req.is_write_only():
-            assert inst.redop == 0
-            # We overwrite everything else
-            if not replicated:
-                self.reset()
-            self.valid_instances.add(inst)
-        else:
+        elif req.has_read():
             # See if we need to do anything to bring this up to date
             if inst not in self.valid_instances:
                 # Find or make copies to bring this up to date
                 error_str = "region requirement "+str(req.index)+" of "+str(op)
                 if not self.issue_update_copies(inst, op, req, perform_checks, error_str):
                     return False
-            # Now that it is up to date, we can update the instance sets
-            if req.is_write():
-                # We overwrite everything else
-                # Unless we are a close operation in which case we
-                # aren't really making a new version, we're just 
-                # flushing everything to a common instance which 
-                # makes a new valid instance but doesn't invalidate
-                # any of the other data that already exists
-                if op.kind != INTER_CLOSE_OP_KIND and not replicated:
-                    self.reset()
-                self.valid_instances.add(inst)
-            else:
-                assert req.is_read_only()
-                # Just have to add ourselves to the list of valid instances
-                # Only do this if we had valid data to begin with
-                if self.is_initialized():
-                    self.valid_instances.add(inst)
+        if register_now and not self.perform_registration_verification(op, req, inst, 
+                                    perform_checks, replicated=False, register=False):
+            return False
         return True
 
     def perform_copy(self, src, dst, op, req):
@@ -5462,30 +5573,42 @@ class EquivalenceSet(object):
             self.perform_copy(reduction_inst, inst, op, req)
         return True
 
-    def perform_registration_verification(self, op, req, inst, perform_checks):
-        preconditions = inst.find_verification_use_dependences(self.depth, 
-                                          self.field, self.point, op, req)
-        if perform_checks:
-            bad = check_preconditions(preconditions, op)
-            if bad is not None:
-                print("ERROR: Missing use precondition for field "+str(self.field)+
-                      " of region requirement "+str(req.index)+" of "+str(op)+
-                      " (UID "+str(op.uid)+") on previous "+str(bad))
-                if self.tree.state.eq_graph_on_error:
-                    self.tree.state.dump_eq_graph((self.point, self.field, self.tree.tree_id))
-                if self.tree.state.assert_on_error:
-                    assert False
-                return False
-        else:
-            for other in preconditions:
-                op.physical_incoming.add(other)
-                other.physical_outgoing.add(op)
-        # Record ourselves as a user for this instance
-        inst.add_verification_user(self.depth, self.field, self.point, 
-                                   op, req, self.version_number)
+    def perform_registration_verification(self, op, req, inst, perform_checks, replicated, register=True):
+        if register:
+            preconditions = inst.find_verification_use_dependences(self.depth, 
+                                              self.field, self.point, op, req)
+            if perform_checks:
+                bad = check_preconditions(preconditions, op)
+                if bad is not None:
+                    print("ERROR: Missing use precondition for field "+str(self.field)+
+                          " of region requirement "+str(req.index)+" of "+str(op)+
+                          " (UID "+str(op.uid)+") on previous "+str(bad))
+                    if self.tree.state.eq_graph_on_error:
+                        self.tree.state.dump_eq_graph((self.point, self.field, self.tree.tree_id))
+                    if self.tree.state.assert_on_error:
+                        assert False
+                    return False
+            else:
+                for other in preconditions:
+                    op.physical_incoming.add(other)
+                    other.physical_outgoing.add(op)
+            # Record ourselves as a user for this instance
+            inst.add_verification_user(self.depth, self.field, self.point, 
+                                       op, req, self.version_number)
+        # Update the valid instances (reductions have already been recorded)
+        if req.is_write():
+            assert inst.redop == 0
+            if not replicated:
+                self.reset()
+            self.valid_instances.add(inst)
+        elif req.is_read_only():
+            # Just have to add ourselves to the list of valid instances
+            # Only do this if we had valid data to begin with
+            if self.is_initialized() and not self.restricted_instances:
+                self.valid_instances.add(inst)
         # If we are restricted and we're not read-only we have to issue
         # copies back to the restricted instance
-        if self.restricted_instances:
+        if self.restricted_instances and not req.is_read_only():
             if inst not in self.restricted_instances and req.priv != READ_ONLY:
                 error_str = "restricted region requirement "+\
                         str(req.index)+" of "+str(op)
@@ -5676,6 +5799,115 @@ class EquivalenceSet(object):
                     req.is_read_only(), 0 if req.is_read_only() else redop, versions)
         return True
 
+class CollectiveRendezvous(object):
+    def __init__(self, owner):
+        self.owner = owner
+        self.matches = list()
+        self.points = set()
+
+    def record(self, idx, region, op):
+        self.points.add(op)
+        while len(self.matches) <= idx:
+            self.matches.append(dict())
+        if region not in self.matches[idx]:
+            self.matches[idx][region] = list()
+        self.matches[idx][region].append(op)
+
+    def verify(self):
+        # First check to see if any requirements have any potential collective behavior
+        total_points = len(self.points)
+        matched_reqs = list()
+        collective_reqs = list()
+        provenance = self.owner.get_provenance()
+        for idx in range(len(self.matches)):
+            diff_regions = len(self.matches[idx])
+            assert diff_regions <= total_points
+            # See if the user requested a collective check
+            requested = False
+            for ops in itervalues(self.matches[idx]):
+                for op in ops:
+                    if op.collective_rendezvous is not None and \
+                            idx in op.collective_rendezvous:
+                        requested = True
+                        break
+                if requested:
+                    break
+            if diff_regions == total_points:
+                # Check to make sure the user didn't ask for any collective behavior
+                if requested:
+                    if provenance is not None and len(provenance) > 0:
+                        printf('WARNING: A collective rendezvous was requested for '+
+                                'region requirement '+str(idx)+' of '+str(self.owner)+
+                                ' (from '+provenance+') but no point operations shared '+
+                                'the same logical region. This could lead to unnecessary '+
+                                'runtime overhead.')
+                    else:
+                        printf('WARNING: A collective rendezvous was requested for '+
+                                'region requirement '+str(idx)+' of '+str(self.owner)+
+                                ' but no point operations shared the same logical region.'+
+                                ' This could lead to unnecessary runtime overhead.')
+            elif requested:
+                matched_reqs.append(idx)
+            else:
+                collective_reqs.append(idx)
+        if matched_reqs:
+            for idx in matched_reqs:
+                # Count the number of points that matched with another
+                total_matches = 0
+                for ops in itervalues(self.matches[idx]):
+                    if len(ops) > 1:
+                        total_matches += len(ops)
+                assert total_matches <= total_points
+                efficiency = "{:.2f}".format(100 * total_matches / total_points)
+                if provenance is not None and len(provenance) > 0:
+                    print('Matched '+str(total_matches)+' points of '+str(self.owner)+
+                            ' (from '+provenance+') out of '+str(total_points)+
+                            ' for region requirement '+str(idx)+' (Efficiency: '+
+                            efficiency+'%)')
+                else:
+                    print('Matched '+str(total_matches)+' points of '+str(self.owner)+
+                            ' out of '+str(total_points)+' for region requirement '+
+                            str(idx)+' (Efficiency: '+efficiency+'%)')
+                for region,ops in iteritems(self.matches[idx]):
+                    pointstr = ''
+                    first = True
+                    for op in ops:
+                        if first:
+                            first = False
+                        else:
+                            pointstr += ', '
+                        pointstr += str(op.index_point)
+                    print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
+        if collective_reqs:
+            for idx in collective_reqs:
+                # Count the number of points that matched with another
+                total_matches = 0
+                for ops in itervalues(self.matches[idx]):
+                    if len(ops) > 1:
+                        total_matches += len(ops)
+                assert total_matches <= total_points
+                efficiency = "{:.2f}".format(100 * total_matches / total_points)
+                if provenance is not None and len(provenance) > 0:
+                    print('WARNING: Missed collective rendezvous optimization for region '+
+                            'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
+                            ') which had '+str(total_points)+' out of '+str(total_points)+
+                            ' ('+efficiency+'%) use the same logical region as another point.')
+                else:
+                    print('WARNING: Missed collective rendezvous optimization for region '+
+                            'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                            str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                            'use the same logical region as another point.')
+                for region,ops in iteritems(self.matches[idx]):
+                    pointstr = ''
+                    first = True
+                    for op in ops:
+                        if first:
+                            first = False
+                        else:
+                            pointstr += ', '
+                        pointstr += str(op.index_point)
+                    print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
+
 
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
@@ -5734,6 +5966,9 @@ class Requirement(object):
 
     def is_read_only(self):
         return self.priv == READ_ONLY
+
+    def has_read(self):
+        return (self.priv == READ_ONLY) or (self.priv == READ_WRITE)
 
     def has_write(self):
         return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
@@ -5844,7 +6079,8 @@ class Operation(object):
                  'version_numbers', 'internal_idx', 'partition_kind', 'partition_node',
                  'node_name', 'cluster_name', 'generation', 'transitive_warning_issued', 
                  'arrival_barriers', 'wait_barriers', 'created_futures', 'used_futures', 
-                 'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance']
+                 'intra_space_dependences', 'merged', 'replayed', 'restricted', 'provenance',
+                 'collective_rendezvous']
                  # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -5920,6 +6156,8 @@ class Operation(object):
         self.restricted = False
         # Provenance string from the application
         self.provenance = None
+        # Any collective rendezvous that we need to perform
+        self.collective_rendezvous = None
 
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
@@ -6310,6 +6548,12 @@ class Operation(object):
             self.intra_space_dependences = set()
         self.intra_space_dependences.add(dep)
 
+    def add_collective_rendezvous(self, req_index, analysis_index):
+        if self.collective_rendezvous is None:
+            self.collective_rendezvous = set()
+        # Ignore the analysis index for now
+        self.collective_rendezvous.add(req_index)
+
     def merge(self, other):
         if self.kind == NO_OP_KIND:
             self.kind = other.kind
@@ -6384,6 +6628,11 @@ class Operation(object):
         assert not other.points
         other.merged = True
         self.replayed = self.replayed or other.replayed
+        # All the collective rendezvous should occur on the same point
+        if self.collective_rendezvous is None:
+            self.collective_rendezvous = other.collective_rendezvous
+        else:
+            assert other.collective_rendezvous is None
 
     def record_current_version(self, point, field, tree, version_number):
         if not self.version_numbers:
@@ -6550,7 +6799,7 @@ class Operation(object):
         # If we get here we have to make our copy
         copy = self.state.create_copy(self)
         copy.set_tree_properties(None, req.tid, req.tid)
-        copy.add_field(field.fid, src, field.fid, dst, src.redop)
+        copy.add_field(field.fid, src, field.fid, dst, src.redop, first=False)
         self.realm_copies.append(copy)
         return copy
 
@@ -6575,7 +6824,7 @@ class Operation(object):
         # If we get here we have to make our own copy
         copy = self.state.create_copy(self)
         copy.set_tree_properties(None, src_req.tid, dst_req.tid)
-        copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop)
+        copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop, first=False)
         self.realm_copies.append(copy)
         return copy
 
@@ -6671,7 +6920,7 @@ class Operation(object):
             dst = dst_inst
         copy.set_indirection_properties(index_expr, indirections)
         copy.add_indirect_field(src_field.fid, src, src_index, 
-                            dst_field.fid, dst, dst_index, redop) 
+                            dst_field.fid, dst, dst_index, redop, first=False) 
         self.realm_copies.append(copy)
         return copy
 
@@ -7008,6 +7257,8 @@ class Operation(object):
         return True
 
     def perform_op_logical_verification(self, logical_op, previous_deps):
+        if not self.predicate_result:
+            return True
         # TODO: Remove this once we actually replay logical analysis correctly 
         # under all tracing cases
         if self.replayed or not self.predicate_result:
@@ -7032,17 +7283,20 @@ class Operation(object):
                     return False
                 # Finally record ourselves as the next fence
                 logical_op.context.current_fence = self
-        elif self.points is not None:
+        elif self.is_index_op():
             # For index space operations we'll perform all their operations
             # separately so everything gets updated individually
-            if self.kind == INDEX_TASK_KIND:
-                for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
-                    if not point.op.perform_op_logical_verification(logical_op, previous_deps):
-                        return False
-            else:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_logical_verification(logical_op, previous_deps):
-                        return False
+            if self.points:
+                if self.kind == INDEX_TASK_KIND:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.op.uid):
+                        if not point.op.perform_op_logical_verification(logical_op, previous_deps):
+                            return False
+                else:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_logical_verification(logical_op, previous_deps):
+                            return False
+            else: # Better be in a control replicated context to not have any points
+                assert self.launch_shape.empty() or self.context.shard is not None
         else:
             # This is a single operation
             assert self.launch_shape is None
@@ -7356,18 +7610,21 @@ class Operation(object):
                 copy_redop = dst_req.redop
                 dst_req.redop = 0
                 dst_req.priv = READ_WRITE 
+            # Check the path to the source instance
             if not src_inst.is_virtual() and \
                 not src_req.logical_node.perform_physical_verification(
                       src_depth, src_field, self, src_req, src_inst, 
-                      perform_checks):
+                      perform_checks, register_now=True):
                 return False
             # Record the destination version numbers
             dst_versions = dict()
+            # Check the path to the destination instance
             if not dst_req.logical_node.perform_physical_verification(
                       dst_depth, dst_field, self, dst_req, dst_inst, perform_checks,
-                      replicated=False, point_set=None, version_numbers=dst_versions):
+                      version_numbers=dst_versions, register_now=True):
                 return False
             # Now we can issue the copy across
+            # Check the path between the source and destination instances
             if is_reduce:
                 # Reduction case
                 assert copy_redop != 0
@@ -7529,7 +7786,7 @@ class Operation(object):
         idx_versions = dict()
         if not idx_req.logical_node.perform_physical_verification(
                 idx_depth, idx_field, self, idx_req, idx_inst, perform_checks,
-                replicated=False, point_set=None, version_numbers=idx_versions):
+                version_numbers=idx_versions, register_now=True):
             return False
         idx_copies = set()
         for fidx in xrange(len(src_req.fields)):
@@ -7554,13 +7811,13 @@ class Operation(object):
             src_versions = dict()
             if not src_req.logical_node.perform_physical_verification(
                       src_depth, src_field, self, src_req, src_inst, perform_checks,
-                      replicated=False, point_set=None, version_numbers=src_versions):
+                      version_numbers=src_versions, register_now=True):
                 return False
             # Record the destination version numbers
             dst_versions = dict()
             if not dst_req.logical_node.perform_physical_verification(
                       dst_depth, dst_field, self, dst_req, dst_inst, perform_checks,
-                      replicated=False, point_set=None, version_numbers=dst_versions):
+                      version_numbers=dst_versions, register_now=True):
                 return False
             if gather:
                 # Check to see if the copy space is empty
@@ -7695,12 +7952,12 @@ class Operation(object):
         src_idx_versions = dict()
         if not src_idx_req.logical_node.perform_physical_verification(
                 src_idx_depth, src_idx_field, self, src_idx_req, src_idx_inst, perform_checks,
-                replicated=False, point_set=None, version_numbers=src_idx_versions):
+                version_numbers=src_idx_versions, register_now=True):
             return False
         dst_idx_versions = dict()
         if not dst_idx_req.logical_node.perform_physical_verification(
                 dst_idx_depth, dst_idx_field, self, dst_idx_req, dst_idx_inst, perform_checks,
-                replicated=False, point_set=None, version_numbers=dst_idx_versions):
+                version_numbers=dst_idx_versions, register_now=True):
             return False
         idx_copies = set()
         for fidx in xrange(len(src_req.fields)):
@@ -7724,12 +7981,12 @@ class Operation(object):
             src_versions = dict()
             if not src_req.logical_node.perform_physical_verification(
                       src_depth, src_field, self, src_req, src_inst, perform_checks,
-                      replicated=False, point_set=None, version_numbers=src_versions):
+                      version_numbers=src_versions, register_now=True):
                 return False
             dst_versions = dict()
             if not dst_req.logical_node.perform_physical_verification(
                       dst_depth, dst_field, self, dst_req, dst_inst, perform_checks,
-                      replicated=False, point_set=None, version_numbers=dst_versions):
+                      version_numbers=dst_versions, register_now=True):
                 return False
             local_copies = set()
             if perform_checks:
@@ -7784,19 +8041,19 @@ class Operation(object):
             return False
         return True
 
-    def verify_fill_requirement(self, index, req, perform_checks, replicated):
+    def verify_fill_requirement(self, index, req, perform_checks, register, replicated):
         assert self.context
         mappings = self.find_mapping(index)
         depth = self.context.find_enclosing_context_depth(req, mappings)
-        for field in req.fields:
-            if not req.logical_node.perform_fill_verification(depth, field, self, req,
-                                                            perform_checks, replicated):
-                return False
-            # If this field is restricted, we effectively have to fill it
-            # now to get the proper semantics of seeing updates right away
-            if mappings is not None and field in mappings and not replicated:
-                if not req.logical_node.perform_physical_verification(depth, field,
-                        self, req, mappings[field], perform_checks):
+        if not register:
+            for field in req.fields:
+                if not req.logical_node.perform_fill_verification(depth, field, self, req,
+                                    perform_checks, register=False, replicated=replicated):
+                    return False
+        elif mappings is not None and not replicated:
+            for field in req.fields:
+                if not req.logical_node.perform_fill_verification(depth, field, self, req,
+                                    perform_checks, register=True, replicated=replicated):
                     return False
         return True
 
@@ -7851,11 +8108,11 @@ class Operation(object):
                 continue
             if registration:
                 if not req.logical_node.perform_registration_verification(depth, field,
-                                                        self, req, inst, perform_checks):
+                                            self, req, inst, perform_checks, replicated):
                     return False
             else:
                 if not req.logical_node.perform_physical_verification(depth, field,
-                        self, req, inst, perform_checks, replicated):
+                                                    self, req, inst, perform_checks):
                     # Switch privilege back if necessary
                     if self.kind == INTER_CLOSE_OP_KIND:
                         req.priv = READ_WRITE
@@ -7866,24 +8123,21 @@ class Operation(object):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
-        # If we're part of a control replication environment only do
-        # this operation if we are the owner
-        if self.owner_shard is not None:
-            assert self.context.shard is not None
-            if self.owner_shard != self.context.shard:
-                return True
+        # If we're control replicated we should only be here if we're the owner
+        assert self.owner_shard is None or self.owner_shard == self.context.shard
         # If we are an index space task, only do our points
-        if self.kind == INDEX_TASK_KIND and self.points:
-            for point in itervalues(self.points):
-                if not point.op.perform_op_physical_verification(perform_checks):
-                    return False
-            return True
-        # Handle other index space operations too
-        elif self.is_index_op(): 
+        if self.is_index_op():
             if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks):
-                        return False
+                if self.kind == INDEX_TASK_KIND:
+                    for point in itervalues(self.points):
+                        if not point.op.perform_op_physical_verification(perform_checks):
+                            return False
+                else:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_physical_verification(perform_checks):
+                            return False
+            else: # Better be in a control replicated context to not have any points
+                assert self.launch_shape.empty() or self.context.shard is not None
             return True
         prefix = ''
         if self.context:
@@ -7939,7 +8193,8 @@ class Operation(object):
             if perform_checks:
                 self.compute_current_version_numbers()
             for index,req in iteritems(self.reqs):
-                if not self.verify_fill_requirement(index, req, perform_checks, replicated):
+                if not self.verify_fill_requirement(index, req, perform_checks, 
+                                        register=False, replicated=replicated):
                     return False
         elif self.kind == DELETION_OP_KIND:
             # Skip deletions, they only impact logical analysis
@@ -7958,9 +8213,10 @@ class Operation(object):
                     self.mapping = shard.op.mapping
                     for index,req in iteritems(self.reqs):
                         if not self.verify_physical_requirement(index, req, perform_checks, 
-                                                                registration=False):
+                                                registration=False, replicated=replicated):
                             return False
                     self.mapping = None
+                    replicated = True
         else:
             if self.reqs:
                 # Compute our version numbers first
@@ -7978,29 +8234,34 @@ class Operation(object):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
-        # If we're part of a control replication environment only do
-        # this operation if we are the owner
-        if self.owner_shard is not None:
-            assert self.context.shard is not None
-            if self.owner_shard != self.context.shard:
-                return True
+        # If we're control replicated we should only be here if we're the owner
+        assert self.owner_shard is None or self.owner_shard == self.context.shard
         # If we are an index space task, only do our points
-        if self.kind == INDEX_TASK_KIND and self.points:
-            for point in itervalues(self.points):
-                if not point.op.perform_op_registration_verification(perform_checks):
-                    return False
-            return True
-        # Handle other index space operations too
-        elif self.is_index_op(): 
+        if self.is_index_op():
             if self.points:
-                for point in sorted(itervalues(self.points), key=lambda x: x.uid):
-                    if not point.perform_op_registration_verification(perform_checks):
-                        return False
+                if self.kind == INDEX_TASK_KIND:
+                    for point in itervalues(self.points):
+                        if not point.op.perform_op_registration_verification(perform_checks):
+                            return False
+                else:
+                    for point in sorted(itervalues(self.points), key=lambda x: x.uid):
+                        if not point.perform_op_registration_verification(perform_checks):
+                            return False
+            else: # Better be in a control replicated context to not have any points
+                assert self.launch_shape.empty() or self.context.shard is not None
             return True
         # Some kinds of operations don't need to perform registration
-        if self.kind == COPY_OP_KIND or self.kind == FILL_OP_KIND or self.kind == DELETION_OP_KIND \
+        if self.kind == COPY_OP_KIND or self.kind == DELETION_OP_KIND \
                 or self.kind == POST_CLOSE_OP_KIND or self.kind == INTER_CLOSE_OP_KIND:
             pass
+        elif self.kind == FILL_OP_KIND:
+            # Most fills will not need to do anything here, but for fills
+            # to restricted instances then then we need to apply the fill to
+            # the restricted instances
+            for index,req in iteritems(self.reqs):
+                if not self.verify_fill_requirement(index, req, perform_checks,
+                                            register=True, replicated=replicated):
+                    return False
         elif self.task and self.task.replicants:
             # Special case for if we are (control) replicated
             # Same check here that we have for perform_op_physical_verification
@@ -8012,9 +8273,10 @@ class Operation(object):
                     self.mapping = shard.op.mapping
                     for index,req in iteritems(self.reqs):
                         if not self.verify_physical_requirement(index, req, perform_checks,
-                                                                registration=True):
+                                                    registration=True, replicated=replicated):
                             return False
                     self.mapping = None
+                    replicated = True
             # Last decided how to analyze each of the shards depending
             # on whether we are control replicated or not
             if self.task.replicants.control_replicated:
@@ -8027,10 +8289,11 @@ class Operation(object):
                     if not shard.perform_task_physical_verification(perform_checks):
                         return False
         else:
+            # Attach operations do not register themselves as users currently in legion
             if self.reqs:
                 for index,req in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks,
-                                                            registration=True):
+                                                registration=True, replicated=replicated):
                         return False
             # Add any restrictions for different kinds of ops
             if self.kind == RELEASE_OP_KIND or \
@@ -8047,6 +8310,26 @@ class Operation(object):
                 if not self.task.perform_task_physical_verification(perform_checks):
                     return False
         return self.check_for_spurious_realm_ops(perform_checks)
+
+    def match_collective_regions(self, rendezvous):
+        if self.is_index_op():
+            if self.points is not None:
+                if self.kind == INDEX_TASK_KIND:
+                    for point in itervalues(self.points):
+                        point.op.match_collective_regions(rendezvous)
+                else:
+                    for point in itervalues(self.points):
+                        point.match_collective_regions(rendezvous)
+        elif self.reqs:
+            for idx,req in iteritems(self.reqs):
+                rendezvous.record(idx, req.logical_node, self)
+
+    def perform_op_collective_checks(self):
+        if self.task is not None:
+            self.task.perform_task_collective_checks()
+        elif self.points is not None and self.kind == INDEX_TASK_KIND:
+            for point in itervalues(self.points):
+                point.perform_task_collective_checks()
 
     def print_op_mapping_decisions(self, depth):
         if self.internal_ops:
@@ -8781,8 +9064,13 @@ class Task(object):
                     return self.op.context.find_enclosing_context_depth(our_req, mappings)
                 else:
                     if mappings:
-                        for fid,inst in iteritems(mappings):
-                            self.used_instances.add((inst,fid))
+                        if self.used_instances is not None:
+                            for fid,inst in iteritems(mappings):
+                                self.used_instances.add((inst,fid))
+                        else:
+                            assert self.shard is not None # Control replicated task
+                            for fid,inst in iteritems(mappings):
+                                self.op.context.used_instances.add((inst,fid))
                     return depth
         # Trust the runtime privilege checking here
         # If we get here this is a created privilege flowing back
@@ -8859,6 +9147,11 @@ class Task(object):
                 replicated = False
                 for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None:
+                        assert op.context.shard is not None
+                        if op.owner_shard != op.context.shard:
+                            continue
                     if not op.perform_op_physical_verification(perform_checks, replicated):
                         success = False
                         break
@@ -8869,6 +9162,9 @@ class Task(object):
                 replicated = False
                 for shard in itervalues(self.replicants.shards):
                     op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None and op.owner_shard != op.context.shard:
+                        continue
                     if not op.perform_op_registration_verification(perform_checks, replicated):
                         success = False
                         break
@@ -8897,6 +9193,73 @@ class Task(object):
             inst.reset_verification_users(depth)
         self.op.state.reset_verification_state(depth)
         return success
+
+    def perform_task_collective_checks(self):
+        if not self.operations:
+            if not self.replicants:
+                return
+            assert self.replicants.control_replicated
+        if self.replicants:
+            # Control-replicated path
+            # Should only have non-leaf control replicated replicants
+            assert self.replicants.control_replicated
+            num_ops = -1
+            for shard in itervalues(self.replicants.shards):
+                shard_ops = 0
+                for op in shard.operations:
+                    if not op.fully_logged:
+                        break
+                    else:
+                        shard_ops += 1
+                if num_ops == -1:
+                    num_ops = shard_ops
+                elif num_ops != shard_ops:
+                    print(('Warning: shard %s has %s operations which is '+
+                            'different than %s operations in other shards. '+
+                            'This is likely the result of a crash in a run.') %
+                            (str(shard.shard),str(shard_ops),str(num_ops)))
+                    if self.state.assert_on_warning:
+                        assert False
+                    num_ops = min(shard_ops,num_ops)
+            # Perform all the operations in order across the shards
+            for idx in range(num_ops):
+                # Perform the verification first
+                rendezvous = None
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None:
+                        continue
+                    if op.is_index_op():
+                        if rendezvous is None:
+                            rendezvous = CollectiveRendezvous(op)
+                        op.match_collective_regions(rendezvous)
+                if rendezvous is not None:
+                    rendezvous.verify()
+                # Then traverse down the task tree
+                for shard in itervalues(self.replicants.shards):
+                    op = shard.operations[idx]
+                    # If the operation is sharded, only perform it on the owner shard
+                    if op.owner_shard is not None and op.owner_shard != op.context.shard:
+                        continue
+                    op.perform_op_collective_checks()
+        else:
+            # Normal path
+            for op in self.operations:
+                if op.inlined:
+                    continue
+                if not op.fully_logged and perform_checks:
+                    print(('Warning: skipping collective checks of %s '+
+                            'because it was not fully logged...') % str(op))
+                    if op.state.assert_on_warning:
+                        assert False
+                    continue
+                if op.is_index_op():
+                    rendezvous = CollectiveRendezvous(op)
+                    op.match_collective_regions(rendezvous)
+                    rendezvous.verify()
+                # Then traverse down the task tree
+                op.perform_op_collective_checks()
 
     def print_task_mapping_decisions(self):
         if self.replicants is not None:
@@ -10081,10 +10444,32 @@ class RealmBase(object):
         if self.indirections is not None:
             return True
         point_set = self.index_expr.get_point_set()
+        output_allreduce_copy = None 
         for point in point_set.iterator():
             for field in fields:
                 eq_key = (point, field, tree)
                 if versions is None or eq_key not in versions:
+                    # Special case here: if this is a normal copy between two
+                    # reduction instances, that is most likely the result of
+                    # an all-reduce copy pattern generated by the runtime even
+                    # for the cases where not all the output reduction instances
+                    # will ultimately be consumed, that will appear to be a
+                    # spurious copy from the perspective of Legion Spy but there
+                    # is no way for the runtime to anticipate that in advance
+                    # right now so we'll tolerate it's behavior
+                    if output_allreduce_copy is None and \
+                            isinstance(self,RealmCopy) and not any(self.redops):
+                        # Not a reduction copy, check if all the src/dst pairs
+                        # are all reduction instances
+                        assert len(self.srcs) == len(self.dsts)
+                        output_allreduce_copy = True
+                        for idx in range(len(self.srcs)):
+                            if self.srcs[idx].redop != 0 and self.dsts[idx].redop != 0:
+                                continue
+                            output_allreduce_copy = False
+                            break
+                    if output_allreduce_copy:
+                        continue
                     print('ERROR: '+str(self.creator)+' generated spurious '+
                             str(self)+' for point '+str(point)+' of '+str(field)+
                             ' in tree '+str(tree))
@@ -10093,6 +10478,16 @@ class RealmBase(object):
                     if self.state.assert_on_error:
                         assert False
                     return False
+        if output_allreduce_copy:
+            print('WARNING: detected potentially spurious all-reduce copy '+
+                    str(self)+' created by '+str(self.creator)+'. This is '+
+                    'probably benign as the runtime will eagerly perform '+
+                    'collective all-reduce copy patterns for reduction '+
+                    'collective views without knowing if all the individual '+
+                    'instances will be directly consumed. This message just '+
+                    'alerts you to that at least one such copy was not consumed.')
+            if self.state.assert_on_warning:
+                assert False
         return True
 
     def compute_physical_reachable(self):
@@ -10219,7 +10614,8 @@ class Indirections(object):
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
                  'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'src_indirections',
-                 'dst_indirections', 'redops', 'across', 'node_name']
+                 'dst_indirections', 'redops', 'across', 'node_name',
+                 'pending_fields', 'pending_indirections']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -10236,6 +10632,8 @@ class RealmCopy(RealmBase):
         self.redops = list()
         self.across = None
         self.node_name = 'realm_copy_'+str(realm_num)
+        self.pending_fields = list()
+        self.pending_indirections = list()
 
     def __str__(self):
         if self.indirections:
@@ -10302,7 +10700,12 @@ class RealmCopy(RealmBase):
         assert new_creator is not self.creator
         self.creator = new_creator
 
-    def add_field(self, src_fid, src, dst_fid, dst, redop):
+    def add_field(self, src_fid, src, dst_fid, dst, redop, first=True):
+        if first:
+            # Defer the first time since the field spaces might not be
+            # available on the instances yet
+            self.pending_fields.append((src_fid, src, dst_fid, dst, redop, False))
+            return
         # Always get the fields from the source and destination regions
         # which is especially important for handling cross-region copies
         src_field = src.field_space.get_field(src_fid)
@@ -10313,7 +10716,12 @@ class RealmCopy(RealmBase):
         self.dsts.append(dst)
         self.redops.append(redop)
 
-    def add_indirect_field(self, src_fid, src, src_index, dst_fid, dst, dst_index, redop):
+    def add_indirect_field(self, src_fid, src, src_index, dst_fid, dst, dst_index, redop, first=True):
+        if first:
+            # Defer the first time since the field spaces might not be
+            # available on the instances or the indirections yet
+            self.pending_indirections.append((src_fid, src, src_index, dst_fid, dst, dst_index, redop, False))
+            return
         assert self.indirections is not None
         if src_index >= 0:
             assert src is None
@@ -10340,6 +10748,14 @@ class RealmCopy(RealmBase):
             self.dsts.append(dst)
             self.dst_indirections.append(None)
         self.redops.append(redop)
+
+    def update_fields(self):
+        for pending in self.pending_fields:
+            self.add_field(*pending)
+        self.pending_fields = None
+        for pending in self.pending_indirections:
+            self.add_indirect_field(*pending)
+        self.pending_indirections = None
 
     def find_src_inst(self, src_field):
         assert len(self.src_fields) == len(self.srcs)
@@ -10696,11 +11112,16 @@ class RealmFill(RealmBase):
         if self.eq_privileges is None:
             self.eq_privileges = dict()
             point_set = self.index_expr.get_point_set()
+            # If the fills are to normal instances then they
+            # are for writes, but if they are to reduction
+            # instance then they are just initialization so
+            # we only count that as "reading"
+            privilege = WRITE_ONLY if self.dsts[0].redop == 0 else READ_ONLY
             for point in point_set.iterator():
                 for field in self.fields:
                     key = (point,field,self.dst_tree_id)
                     assert key not in self.eq_privileges
-                    self.eq_privileges[key] = WRITE_ONLY
+                    self.eq_privileges[key] = privilege
         return self.eq_privileges
 
 class RealmDeppart(RealmBase):
@@ -11371,6 +11792,8 @@ task_premapping_pat     = re.compile(
 tunable_pat             = re.compile(
     prefix+"Task Tunable (?P<uid>[0-9]+) (?P<idx>[0-9]+) (?P<bytes>[0-9]+) "
            "(?P<value>[0-9a-f]+)")
+collective_rendezvous_pat = re.compile(
+    prefix+"Collective Rendezvous (?P<uid>[0-9]+) (?P<reqidx>[0-9]+) (?P<anaidx>[0-9]+)")
 # Physical event and operation patterns
 event_dependence_pat     = re.compile(
     prefix+"Event Event (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
@@ -12149,6 +12572,11 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_predicate_result(False)
         return True
+    m = collective_rendezvous_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.add_collective_rendezvous(int(m.group('reqidx')),int(m.group('anaidx')))
+        return True
     # Region tree shape patterns (near the bottom since they are infrequent)
     m = top_index_pat.match(line)
     if m is not None:
@@ -12599,6 +13027,9 @@ class State(object):
         # Update the futures
         for future in itervalues(self.futures):
             future.update_creator_and_users()     
+        # Update copy and fill fields
+        for copy in itervalues(self.copies):
+            copy.update_fields()
         # We can delete some of these data structures now that we
         # no longer need them, go go garbage collection
         self.slice_index = None
@@ -13784,6 +14215,9 @@ def main(temp_dir):
         '--zoom', dest='zoom_graphs', action='store_true',
         help='enable generation of "zoom" graphs for all emitted graphs')
     parser.add_argument(
+        '--collective', dest='collective_checks', action='store_true',
+        help='check for collective rendezvous opportunities and report missed optimizations')
+    parser.add_argument(
         '-b', '--bad_graph', dest='bad_graph_on_error', action='store_true',
         help='dump bad dataflow graph on failure')
     parser.add_argument(
@@ -13817,6 +14251,7 @@ def main(temp_dir):
     assert_on_warning = args.assert_on_warning
     test_geometry = args.test_geometry
     zoom_graphs = args.zoom_graphs
+    collective_checks = args.collective_checks
     bad_graph_on_error = args.bad_graph_on_error
     eq_graph_on_error = args.eq_graph_on_error
 
@@ -13943,6 +14378,11 @@ def main(temp_dir):
         state.print_mapping_decisions()
     if print_trees:
         state.print_trees()
+    if collective_checks:
+        print("Checking collective rendezvous...")
+        assert state.top_level_uid is not None
+        top_task = state.get_task(state.top_level_uid)
+        top_task.perform_task_collective_checks()
 
     print('Legion Spy analysis complete.  Exiting...')
     if keep_temp_files:

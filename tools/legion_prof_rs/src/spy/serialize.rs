@@ -447,6 +447,10 @@ pub enum Record {
     Proc { pid: ProcID, kind: u64 },
     #[serde(rename = "Memory")]
     Mem { mid: MemID, capacity: u64, kind: u64 },
+
+    // Patterns for things rust is too stupid to understand
+    #[serde(rename = "Collective Rendezvous")]
+    CollectiveRendezvous { uid: UniqueID, req: u32, index: u32 },
 }
 
 #[cfg(test)]

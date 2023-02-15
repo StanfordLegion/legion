@@ -60,7 +60,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (collective_mapping != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(collective_mapping->contains(owner_space));
+#endif
         collective_mapping->add_reference();
+      }
       if (do_registration)
         register_with_runtime();
     }

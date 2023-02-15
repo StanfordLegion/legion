@@ -37,8 +37,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndirectRecord::IndirectRecord(RegionTreeForest *forest,
                                    const RegionRequirement &req,
-                                   const InstanceSet &insts,
-                                   const DomainPoint &key)
+                                   const InstanceSet &insts)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *is = forest->get_node(req.region.get_index_space());
@@ -69,7 +68,7 @@ namespace Legion {
           if (!mask.is_set(field_indexes[fidx]))
             continue;
           PhysicalManager *manager = ref.get_physical_manager();
-          instances[fidx] = manager->get_instance(key);
+          instances[fidx] = manager->get_instance();
           if (!instance_events.empty())
             instance_events[fidx] = manager->get_unique_event();
 #ifdef DEBUG_LEGION
@@ -2034,10 +2033,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::physical_premap_region(Operation *op, unsigned index,
-                                                  RegionRequirement &req,
-                                                  VersionInfo &version_info,
-                                                  InstanceSet &targets,
-                                          std::set<RtEvent> &map_applied_events)
+                                                RegionRequirement &req,
+                                                const VersionInfo &version_info,
+                                                InstanceSet &targets,
+                                      FieldMaskSet<ReplicatedView> &collectives,
+                                      std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
@@ -2050,18 +2050,11 @@ namespace Legion {
         return;
       // Iterate over the equivalence sets and get all the instances that
       // are valid for all the different equivalence classes
-      const FieldMaskSet<EquivalenceSet> &eq_sets =
-        version_info.get_equivalence_sets();
       IndexSpaceNode *expr_node = get_node(req.region.get_index_space());
       ValidInstAnalysis analysis(runtime, op, index, expr_node,
                                  IS_REDUCE(req) ? req.redop : 0);
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events, 
-                          map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis.perform_traversal(
+          RtEvent::NO_RT_EVENT, version_info, map_applied_events);
       RtEvent ready;
       if (traversal_done.exists() || analysis.has_remote_sets())
         ready = analysis.perform_remote(traversal_done, map_applied_events);
@@ -2078,16 +2071,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(it->first->is_instance_view());
 #endif
-        PhysicalManager *manager = it->first->as_instance_view()->get_manager();
-        if (manager->meets_regions(to_meet))
-          targets.add_instance(InstanceRef(manager, it->second));
+        if (it->first->is_materialized_view())
+        {
+          MaterializedView *view = it->first->as_materialized_view();
+          PhysicalManager *manager = view->get_manager();
+          if (manager->meets_regions(to_meet))
+            targets.add_instance(InstanceRef(manager, it->second));
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->is_replicated_view());
+#endif
+          ReplicatedView *view = it->first->as_replicated_view();
+          if (view->meets_regions(to_meet))
+            collectives.insert(view, it->second);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::physical_perform_updates(
                                const RegionRequirement &req,
-                               VersionInfo &version_info,
+                               const VersionInfo &version_info,
                                Operation *op, unsigned index,
                                ApEvent precondition, ApEvent term_event,
                                const InstanceSet &targets,
@@ -2099,18 +2105,18 @@ namespace Legion {
                                const char *log_name,
                                UniqueID uid,
 #endif
+                               const bool collective_rendezvous,
                                const bool record_valid,
                                const bool check_initialized,
-                               const bool defer_copies,
-                               const bool skip_output)
+                               const bool defer_copies)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return RtEvent::NO_RT_EVENT;
-      InnerContext *context = op->find_physical_context(index);
 #ifdef DEBUG_LEGION
+      InnerContext *context = op->find_physical_context(index);
       RegionTreeContext ctx = context->get_context();
       assert(ctx.exists());
       assert((req.handle_type == LEGION_SINGULAR_PROJECTION) || 
@@ -2119,7 +2125,7 @@ namespace Legion {
       assert(!targets.is_virtual_mapping());
 #endif
       RegionNode *region_node = get_node(req.region);
-      FieldMask user_mask = 
+      const FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -2129,151 +2135,68 @@ namespace Legion {
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Perform the registration
-      std::vector<InstanceView*> target_views;
-      context->convert_target_views(targets, target_views);
-      std::vector<InstanceView*> source_views;
-      if (!sources.empty())
-        context->convert_source_views(sources, source_views);
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
 #ifdef DEBUG_LEGION
       assert(analysis == NULL);
       // Should be recording or must be read-only
       assert(record_valid || IS_READ_ONLY(req));
 #endif
       analysis = new UpdateAnalysis(runtime, op, index, req, region_node,
-                                    targets, target_views, source_views, 
-                                    trace_info, precondition, term_event, 
-                                    check_initialized,record_valid,skip_output);
-      analysis->add_reference();
-      // Iterate over all the equivalence classes and perform the analysis
-      // Only need to check for uninitialized data for things not discarding
-      // and things that are not simultaneous (simultaneous can appear 
-      // uninitialized since it might be reading, but then use internal
-      // synchronization to wait for something running concurrently to write)
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+                                    trace_info, precondition, term_event,
+                                    check_initialized, record_valid);
+      analysis->add_reference(); 
+      const RtEvent views_ready = analysis->convert_views(req.region,
+          targets, &sources, &analysis->usage, collective_rendezvous);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          views_ready, version_info, map_applied_events);
+      // Send out any remote updates
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
           analysis->perform_remote(traversal_done, map_applied_events);
-      // Then perform the updates
-      const RtEvent updates_ready = 
+      // Issue any release copies/fills that need to be done
+      const RtEvent updates_done = 
         analysis->perform_updates(traversal_done, map_applied_events);
-      return Runtime::merge_events(remote_ready, updates_ready);
+      if (remote_ready.exists())
+      {
+        if (updates_done.exists())
+          return Runtime::merge_events(remote_ready, updates_done);
+        else
+          return remote_ready;
+      }
+      else
+        return updates_done;
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_registration(
-                                         UpdateAnalysis *analysis,
-                                         InstanceSet &targets,
-                                         const PhysicalTraceInfo &trace_info,
-                                         std::set<RtEvent> &map_applied_events,
-                                         bool symbolic /*=false*/)
+                           RtEvent precondition, UpdateAnalysis *analysis, 
+                           std::set<RtEvent> &map_applied_events, bool symbolic)
     //--------------------------------------------------------------------------
     {
       // If we are a NO_ACCESS or there are no fields then analysis will be NULL
       if (analysis == NULL)
         return ApEvent::NO_AP_EVENT;
-      // We can skip this if the term event is a 
-      // no-event (happens with post-mapping and copies)
-      if (analysis->term_event.exists())
-      {
-        // Perform the registration
-        IndexSpaceNode *local_expr = analysis->node->row_source;
-        const UniqueID op_id = analysis->op->get_unique_op_id();
-        const AddressSpaceID local_space = runtime->address_space;
-        if (analysis->user_registered.exists())
-        {
-          std::set<RtEvent> user_applied;
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            InstanceRef &ref = targets[idx];
-            const FieldMask &inst_mask = ref.get_valid_fields();
-            ApEvent ready = analysis->target_views[idx]->register_user(
-                analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
-                analysis->term_event,
-                user_applied, trace_info, local_space, symbolic);
-            // Record the event as the precondition for the task
-            ref.set_ready_event(ready);
-            if (trace_info.recording)
-            {
-              const UniqueInst unique_inst(analysis->target_views[idx]);
-              trace_info.record_op_inst(analysis->usage, inst_mask, unique_inst,
-                                        analysis->node, map_applied_events);
-            }
-          }
-          if (!user_applied.empty())
-          {
-            Runtime::trigger_event(analysis->user_registered, 
-                Runtime::merge_events(user_applied));
-            map_applied_events.insert(analysis->user_registered);
-          }
-          else
-            Runtime::trigger_event(analysis->user_registered);
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            InstanceRef &ref = targets[idx];
-            const FieldMask &inst_mask = ref.get_valid_fields();
-            ApEvent ready = analysis->target_views[idx]->register_user(
-                analysis->usage, inst_mask, local_expr, op_id, analysis->index,
-                analysis->term_event, map_applied_events, 
-                trace_info, local_space, symbolic);
-            // Record the event as the precondition for the task
-            ref.set_ready_event(ready);
-            if (trace_info.recording)
-            {
-              const UniqueInst unique_inst(analysis->target_views[idx]);
-              trace_info.record_op_inst(analysis->usage, inst_mask, unique_inst,
-                                        analysis->node, map_applied_events);
-            }
-          }
-        }
-      }
-      else if (analysis->user_registered.exists())
-        Runtime::trigger_event(analysis->user_registered);
-      // Find any atomic locks we need to take for these instances
-      // Note that for now we also treat exclusive-reductions as
-      // needing to be atomic since we don't have a semantics for
-      // what exclusive reductions mean today
-      if (IS_ATOMIC(analysis->usage) ||
-          (IS_REDUCE(analysis->usage) && IS_EXCLUSIVE(analysis->usage)))
-      {
-        const bool exclusive = HAS_WRITE(analysis->usage);
-        for (unsigned idx = 0; idx < targets.size(); idx++)
-        {
-          const FieldMask &inst_mask = targets[idx].get_valid_fields();
-          analysis->target_views[idx]->find_atomic_reservations(inst_mask, 
-                                analysis->op, analysis->index, exclusive);
-        }
-      }
+      ApEvent instances_ready;
+      const RtEvent registered = analysis->perform_registration(precondition,
+          analysis->usage, map_applied_events, analysis->precondition,
+          analysis->term_event, instances_ready, symbolic);
       // Perform any output copies (e.g. for restriction) that need to be done
-      ApEvent result;
-      if (analysis->has_output_updates())
-        result = 
-          analysis->perform_output(RtEvent::NO_RT_EVENT, map_applied_events);
+      if (registered.exists() || analysis->has_output_updates())
+        analysis->perform_output(registered, map_applied_events);
       // Remove the reference that we added in the updates step
       if (analysis->remove_reference())
         delete analysis;
-      return result;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_updates_and_registration(
                                        const RegionRequirement &req,
-                                       VersionInfo &version_info,
+                                       const VersionInfo &version_info,
                                        Operation *op, unsigned index,
                                        ApEvent precondition, 
                                        ApEvent term_event,
-                                       InstanceSet &targets,
+                                       const InstanceSet &targets,
                                        const std::vector<PhysicalManager*> &src,
                                        const PhysicalTraceInfo &trace_info,
                                        std::set<RtEvent> &map_applied_events,
@@ -2281,6 +2204,7 @@ namespace Legion {
                                        const char *log_name,
                                        UniqueID uid,
 #endif
+                                       const bool collective_rendezvous,
                                        const bool record_valid,
                                        const bool check_initialized)
     //--------------------------------------------------------------------------
@@ -2292,55 +2216,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
          log_name, uid,
 #endif
-         record_valid, check_initialized, false/*defer copies*/);
-      if (registration_precondition.exists() && 
-          !registration_precondition.has_triggered())
-        registration_precondition.wait();
-      return physical_perform_registration(analysis, targets, trace_info, 
-                                           map_applied_events);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
-                         UpdateAnalysis *analysis, InstanceSet &targets,
-                         std::set<RtEvent> &map_applied_events,
-                         ApEvent &result, const PhysicalTraceInfo &info,
-                         bool symbolic)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent map_applied_done = Runtime::create_rt_user_event();
-      map_applied_events.insert(map_applied_done);
-      DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                             analysis, targets, map_applied_done, result, info,
-                             symbolic);
-      return runtime->issue_runtime_meta_task(args, 
-                    LG_LATENCY_WORK_PRIORITY, pre);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::handle_defer_registration(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferPhysicalRegistrationArgs *dargs = 
-        (const DeferPhysicalRegistrationArgs*)args;
-      std::set<RtEvent> applied_events;
-      dargs->result = physical_perform_registration(dargs->analysis, 
-                        dargs->targets, *dargs, applied_events, dargs->symbolic);
-      if (!applied_events.empty())
-        Runtime::trigger_event(dargs->map_applied_done,
-            Runtime::merge_events(applied_events));
-      else
-        Runtime::trigger_event(dargs->map_applied_done);
-      if (dargs->analysis->remove_reference())
-        delete dargs->analysis;
-      dargs->remove_recorder_reference();
+         collective_rendezvous, record_valid,
+         check_initialized, false/*defer copies*/);
+      return physical_perform_registration(registration_precondition, 
+                                           analysis, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::acquire_restrictions(
                                          const RegionRequirement &req,
-                                         VersionInfo &version_info,
+                                         const VersionInfo &version_info,
                                          AcquireOp *op, unsigned index,
+                                         ApEvent precondition, 
                                          ApEvent term_event,
                                          InstanceSet &restricted_instances,
                                          const PhysicalTraceInfo &trace_info,
@@ -2357,57 +2244,65 @@ namespace Legion {
       // should be exclusive
       assert(IS_EXCLUSIVE(req));
 #endif
+      const bool known_targets = !restricted_instances.empty();
+      RegionNode *region = get_node(req.region);
+      AcquireAnalysis *analysis =
+        new AcquireAnalysis(runtime, op, index, region, trace_info);
+      analysis->add_reference();
+      RtEvent views_ready;
+      if (known_targets)
+        views_ready = analysis->convert_views(req.region, restricted_instances);
       // Iterate through the equivalence classes and find all the restrictions
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
-      IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      AcquireAnalysis analysis(runtime, op, index, local_expr);
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          views_ready, version_info, map_applied_events);
       RtEvent remote_ready;
-      if (traversal_done.exists() || analysis.has_remote_sets())
-        remote_ready = 
-          analysis.perform_remote(traversal_done, map_applied_events);
-      if (remote_ready.exists() && !remote_ready.has_triggered())
-        remote_ready.wait();
-      FieldMaskSet<LogicalView> instances;
-      analysis.report_instances(instances);
-      // Fill in the restricted instances and record users
-      std::set<ApEvent> acquired_events;
-      restricted_instances.resize(instances.size());
-      unsigned inst_index = 0;
-      const RegionUsage usage(req);
-      const UniqueID op_id = op->get_unique_op_id();
-      // Now add users for all the instances
-      for (FieldMaskSet<LogicalView>::const_iterator it = 
-            instances.begin(); it != instances.end(); it++, inst_index++)
+      if (traversal_done.exists() || analysis->has_remote_sets())
+        remote_ready =
+          analysis->perform_remote(traversal_done, map_applied_events);
+      if (!known_targets)
       {
+        if (remote_ready.exists() && !remote_ready.has_triggered())
+          remote_ready.wait();
+        FieldMaskSet<LogicalView> instances;
+        analysis->report_instances(instances);
+        restricted_instances.resize(instances.size());
+        analysis->target_instances.resize(instances.size());
+        analysis->target_views.resize(instances.size());
+        unsigned inst_index = 0;
+        // Note that all of these should be individual views.
+        // The only way to get collective restricted view is by
+        // doing attaches in control replicated contexts and we insist
+        // that all acquire operations in control replicated context
+        // explicitly provide a PhysicalRegion argument so we should
+        // always go through the known_targets path, therefore there
+        // should be no collective views here.
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              instances.begin(); it != instances.end(); it++, inst_index++)
+        {
 #ifdef DEBUG_LEGION
-        assert(it->first->is_instance_view());
-#endif
-        InstanceView *inst_view = it->first->as_instance_view();
-        restricted_instances[inst_index] = 
-          InstanceRef(inst_view->get_manager(), it->second);
-        ApEvent ready = inst_view->register_user(usage, it->second,
-            local_expr, op_id, index, term_event,
-            map_applied_events, trace_info, runtime->address_space);
-        if (ready.exists())
-          acquired_events.insert(ready);
+          assert(it->first->is_individual_view());
+#endif         
+          IndividualView *inst_view = it->first->as_individual_view();
+          PhysicalManager *manager = inst_view->get_manager();
+          restricted_instances[inst_index] = InstanceRef(manager, it->second);
+          analysis->target_instances[inst_index] = manager;
+          analysis->target_views[inst_index].insert(inst_view, it->second);
+        }
       }
-      if (!acquired_events.empty())
-        return Runtime::merge_events(&trace_info, acquired_events);
-      return ApEvent::NO_AP_EVENT;
+      // Now add users for all the instances
+      ApEvent instances_ready;
+      const RegionUsage usage(req);
+      analysis->perform_registration(remote_ready, usage, map_applied_events,
+                                     precondition, term_event, instances_ready);
+      if (analysis->remove_reference())
+        delete analysis;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::release_restrictions(
                                    const RegionRequirement &req,
-                                   VersionInfo &version_info,
+                                   const VersionInfo &version_info,
                                    ReleaseOp *op, unsigned index,
                                    ApEvent precondition,
                                    ApEvent term_event,
@@ -2427,111 +2322,91 @@ namespace Legion {
       assert(IS_EXCLUSIVE(req));
 #endif
       const bool known_targets = !restricted_instances.empty();
-      std::vector<InstanceView*> target_views, source_views;
+      RegionNode *region = get_node(req.region);
+      ReleaseAnalysis *analysis = new ReleaseAnalysis(runtime, op, index,
+                                        precondition, region, trace_info);
+      analysis->add_reference();
+      RtEvent views_ready;
       if (known_targets)
-      {
-        InnerContext *context = op->find_physical_context(index);
-        context->convert_target_views(restricted_instances, target_views);
-        if (!sources.empty())
-          context->convert_source_views(sources, source_views);
-      }
-      else if (!sources.empty())
-      {
-        InnerContext *context = op->find_physical_context(index);
-        context->convert_source_views(sources, source_views);
-      }
+        views_ready = analysis->convert_views(req.region,
+                          restricted_instances, &sources);
       // Iterate through the equivalence classes and find all the restrictions
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
-      std::set<RtEvent> deferral_events;
-      IndexSpaceNode *local_expr = get_node(req.region.get_index_space());
-      ReleaseAnalysis analysis(runtime, op, index, precondition, local_expr,
-              restricted_instances, target_views, source_views, trace_info);
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis.traverse(it->first, it->second, deferral_events,
-                          map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          views_ready, version_info, map_applied_events);
       RtEvent remote_ready;
-      if (traversal_done.exists() || analysis.has_remote_sets())
+      if (traversal_done.exists() || analysis->has_remote_sets())
         remote_ready = 
-          analysis.perform_remote(traversal_done, map_applied_events);
+          analysis->perform_remote(traversal_done, map_applied_events);
       // Issue any release copies/fills that need to be done
-      const RtEvent updates_done = 
-        analysis.perform_updates(traversal_done, map_applied_events);
+      RtEvent updates_done = 
+        analysis->perform_updates(traversal_done, map_applied_events);
       // There are two cases here: one where we have the target intances
       // already from the operation and we know where to put the users
       // and the second case where we need to wait for the analysis to
       // tell us the names of the instances which are restricted
       const RegionUsage usage(req);
-      const UniqueID op_id = op->get_unique_op_id();
-      std::set<ApEvent> released_events;
-      if (known_targets)
+      std::vector<ApEvent> released_events;
+      if (!known_targets)
       {
-        // Wait for all the local and remote updates to be done
-        if (updates_done.exists() && !updates_done.has_triggered())
-          updates_done.wait();
         if (remote_ready.exists() && !remote_ready.has_triggered())
           remote_ready.wait();
-        // Now we can register our users
-        for (unsigned idx = 0; idx < restricted_instances.size(); idx++)
+        FieldMaskSet<LogicalView> instances;
+        analysis->report_instances(instances);
+        analysis->target_instances.resize(instances.size());
+        analysis->target_views.resize(instances.size());
+        restricted_instances.resize(instances.size());
+        unsigned inst_index = 0;
+        // Note that all of these should be individual views.
+        // The only way to get collective restricted view is by
+        // doing attaches in control replicated contexts and we insist
+        // that all release operations in control replicated context
+        // explicitly provide a PhysicalRegion argument so we should
+        // always go through the known_targets path, therefore there
+        // should be no collective views here.
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              instances.begin(); it != instances.end(); it++, inst_index++)
         {
-          const FieldMask &mask = restricted_instances[idx].get_valid_fields();
-          ApEvent ready = target_views[idx]->register_user(usage, mask,
-              local_expr, op_id, index, term_event,
-              map_applied_events, trace_info, runtime->address_space);
-          if (ready.exists())
-            released_events.insert(ready);
+#ifdef DEBUG_LEGION
+          assert(it->first->is_individual_view());
+#endif         
+          IndividualView *inst_view = it->first->as_individual_view();
+          PhysicalManager *manager = inst_view->get_manager();
+          restricted_instances[inst_index] = InstanceRef(manager, it->second);
+          analysis->target_instances[inst_index] = manager;
+          analysis->target_views[inst_index].insert(inst_view, it->second);
         }
       }
       else
       {
-        // Wait for any remote releases to come back to us before we 
-        // attempt to get the set of valid instances
-        if (remote_ready.exists() && !remote_ready.has_triggered())
-          remote_ready.wait();
-        FieldMaskSet<LogicalView> instances;
-        analysis.report_instances(instances);
-        // Now we can register our users
-        restricted_instances.resize(instances.size());
-        unsigned inst_index = 0;
-        // Make sure we're done applying updates before we do our registration
-        if (updates_done.exists() && !updates_done.has_triggered())
-          updates_done.wait();
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              instances.begin(); it != instances.end(); it++, inst_index++)
+        if (remote_ready.exists())
         {
-#ifdef DEBUG_LEGION
-          assert(it->first->is_instance_view());
-#endif
-          InstanceView *inst_view = it->first->as_instance_view();
-          restricted_instances[inst_index] = 
-            InstanceRef(inst_view->get_manager(), it->second);
-          ApEvent ready = inst_view->register_user(usage, it->second,
-              local_expr, op_id, index, term_event,
-              map_applied_events, trace_info, runtime->address_space);
-          if (ready.exists())
-            released_events.insert(ready);
+          if (updates_done.exists())
+            updates_done = Runtime::merge_events(updates_done, remote_ready);
+          else
+            updates_done = remote_ready;
         }
       }
-      if (!released_events.empty())
-        return Runtime::merge_events(&trace_info, released_events);
-      return ApEvent::NO_AP_EVENT;
+      ApEvent instances_ready;
+      analysis->perform_registration(updates_done, usage, map_applied_events,
+                                     precondition, term_event, instances_ready);
+      if (analysis->remove_reference())
+        delete analysis;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::copy_across(
                                    const RegionRequirement &src_req,
                                    const RegionRequirement &dst_req,
-                                   VersionInfo &src_version_info,
-                                   VersionInfo &dst_version_info,
+                                   const VersionInfo &src_version_info,
+                                   const VersionInfo &dst_version_info,
                                    const InstanceSet &src_targets,
                                    const InstanceSet &dst_targets,
                                    const std::vector<PhysicalManager*> &sources,
                                    CopyOp *op, 
                                    unsigned src_index, unsigned dst_index,
-                                   ApEvent precondition, PredEvent guard, 
+                                   ApEvent precondition, ApEvent src_ready,
+                                   ApEvent dst_ready, PredEvent guard, 
                                  const std::map<Reservation,bool> &reservations,
                                    const PhysicalTraceInfo &trace_info,
                                    std::set<RtEvent> &map_applied_events)
@@ -2552,8 +2427,8 @@ namespace Legion {
         return ApEvent::NO_AP_EVENT;
       // Perform the copies/reductions across
       InnerContext *context = op->find_physical_context(dst_index);
-      std::vector<InstanceView*> target_views;
-      context->convert_target_views(dst_targets, target_views);
+      LegionVector<FieldMaskSet<InstanceView> > target_views;
+      context->convert_analysis_views(dst_targets, target_views);
       if (!src_targets.empty())
       {
         // If we already have the targets there's no need to 
@@ -2567,32 +2442,20 @@ namespace Legion {
         across->dst_tree_id = dst_req.region.get_tree_id();
 #endif
         // Fill in the source fields 
-        InnerContext *src_context = op->find_physical_context(src_index);
-        std::vector<InstanceView*> source_views;
-        src_context->convert_target_views(src_targets, source_views);
-        across->initialize_source_fields(this, src_req,
-                              src_targets, source_views, trace_info);
+        across->initialize_source_fields(this, src_req, src_targets,trace_info);
         // Fill in the destination fields 
         const bool exclusive_redop = 
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
         across->initialize_destination_fields(this, dst_req, dst_targets, 
-                              target_views, trace_info, exclusive_redop);
+                                              trace_info, exclusive_redop);
         // Get the preconditions for this copy
         std::vector<ApEvent> copy_preconditions;
         if (precondition.exists())
           copy_preconditions.push_back(precondition);
-        for (unsigned idx = 0; idx < src_targets.size(); idx++)
-        {
-          const ApEvent ready = src_targets[idx].get_ready_event();
-          if (ready.exists())
-            copy_preconditions.push_back(ready);
-        }
-        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-        {
-          const ApEvent ready = dst_targets[idx].get_ready_event();
-          if (ready.exists())
-            copy_preconditions.push_back(ready);
-        }
+        if (src_ready.exists())
+          copy_preconditions.push_back(src_ready);
+        if (dst_ready.exists())
+          copy_preconditions.push_back(dst_ready);
         if (!copy_preconditions.empty())
           precondition = Runtime::merge_events(&trace_info, copy_preconditions);
         ApEvent result = across->execute(op, guard, precondition,
@@ -2603,17 +2466,28 @@ namespace Legion {
           trace_info.record_issue_across(result, precondition, precondition,
                         ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT, across);
           LegionMap<UniqueInst,FieldMask> tracing_srcs, tracing_dsts;
+          InnerContext *src_context = op->find_physical_context(src_index);
+          std::vector<IndividualView*> source_views;
+          src_context->convert_individual_views(src_targets, source_views);
           for (unsigned idx = 0; idx < src_targets.size(); idx++)
           {
             const InstanceRef &ref = src_targets[idx];
-            const UniqueInst unique_inst(source_views[idx], op->index_point);
+            const UniqueInst unique_inst(source_views[idx]);
             tracing_srcs[unique_inst] = ref.get_valid_fields();
           }
-          for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+          for (unsigned idx = 0; idx < target_views.size(); idx++)
           {
-            const InstanceRef &ref = src_targets[idx];
-            const UniqueInst unique_inst(target_views[idx], op->index_point);
-            tracing_dsts[unique_inst] = ref.get_valid_fields();
+#ifdef DEBUG_LEGION
+            assert(target_views[idx].size() == 1);
+#endif
+            FieldMaskSet<InstanceView>::const_iterator it =
+              target_views[idx].begin();
+#ifdef DEBUG_LEGION
+            assert(it->first->is_individual_view());
+#endif
+            IndividualView *view = it->first->as_individual_view();
+            const UniqueInst unique_inst(view);
+            tracing_dsts[unique_inst] = it->second;
           }
           trace_info.record_across_insts(result, src_index, dst_index,
                                          LEGION_READ_PRIV, LEGION_WRITE_PRIV,
@@ -2642,8 +2516,6 @@ namespace Legion {
         src_mask.set_bit(src_indexes[idx]);
         dst_mask.set_bit(dst_indexes[idx]);
       }
-      const FieldMaskSet<EquivalenceSet> &src_eq_sets = 
-        src_version_info.get_equivalence_sets();
       // Check to see if we have a perfect across-copy
       bool perfect = true;
       for (unsigned idx = 0; idx < src_indexes.size(); idx++)
@@ -2653,24 +2525,19 @@ namespace Legion {
         perfect = false;
         break;
       }
-      std::vector<InstanceView*> source_views;
+      std::vector<IndividualView*> source_views;
       if (!sources.empty())
       {
         InnerContext *src_context = op->find_physical_context(src_index);
-        src_context->convert_source_views(sources, source_views);
+        src_context->convert_individual_views(sources, source_views);
       }
       CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, op, 
           src_index, dst_index, src_req, dst_req, dst_targets, target_views, 
-          source_views, precondition, guard, dst_req.redop, src_indexes, 
-          dst_indexes, trace_info, perfect);
+          source_views, precondition, dst_ready, guard, dst_req.redop,
+          src_indexes, dst_indexes, trace_info, perfect);
       analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            src_eq_sets.begin(); it != src_eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          RtEvent::NO_RT_EVENT, src_version_info, map_applied_events);
       // Start with the source mask here in case we need to filter which
       // is all done on the source fields
       analysis->local_exprs.insert(copy_expr, src_mask);
@@ -2702,6 +2569,9 @@ namespace Legion {
                                             unsigned dst_index,
                                             const bool gather_is_range,
                                             const ApEvent init_precondition, 
+                                            const ApEvent src_ready,
+                                            const ApEvent dst_ready,
+                                            const ApEvent idx_ready,
                                             const PredEvent pred_guard,
                                             const ApEvent collective_pre,
                                             const ApEvent collective_post,
@@ -2729,12 +2599,8 @@ namespace Legion {
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
         local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+      if (src_ready.exists())
+        local_preconditions.push_back(src_ready);
       ApEvent local_precondition;
       if (!local_preconditions.empty())
         local_precondition = 
@@ -2748,32 +2614,24 @@ namespace Legion {
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &idx_target = idx_targets[0];
-      across->initialize_source_indirections(this, src_records,
-          src_req, idx_req, idx_target, op->index_point, gather_is_range, 
-          possible_src_out_of_range);
+      across->initialize_source_indirections(this, src_records, src_req,
+          idx_req, idx_target, gather_is_range, possible_src_out_of_range);
       across->src_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
       // Initialize the destination fields
-      InnerContext *context = op->find_physical_context(dst_index);
-      std::vector<InstanceView*> target_views;
-      context->convert_target_views(dst_targets, target_views);
       const bool exclusive_redop =
           IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req);
       across->initialize_destination_fields(this, dst_req, dst_targets,
-          target_views, trace_info, exclusive_redop);
+                                            trace_info, exclusive_redop);
       // Compute the copy preconditions
       std::vector<ApEvent> copy_preconditions;
       if (collective_pre.exists())
         copy_preconditions.push_back(collective_pre);
       else
         copy_preconditions.swap(local_preconditions);
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          copy_preconditions.push_back(ready);
-      }
-      ApEvent src_indirect_ready = idx_target.get_ready_event();
+      if (dst_ready.exists())
+        copy_preconditions.push_back(dst_ready);
+      ApEvent src_indirect_ready = idx_ready;
       if (src_indirect_ready.exists())
         copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
@@ -2800,27 +2658,30 @@ namespace Legion {
         LegionMap<UniqueInst,FieldMask> src_insts, idx_insts, dst_insts;
         // Get the src_insts
         InnerContext *src_context = op->find_physical_context(src_index);
-        std::vector<InstanceView*> source_views;
-        src_context->convert_target_views(src_targets, source_views);
+        std::vector<IndividualView*> source_views;
+        src_context->convert_individual_views(src_targets, source_views);
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          const UniqueInst unique_inst(source_views[idx]);
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
         {
           InnerContext *idx_context = op->find_physical_context(idx_index); 
-          std::vector<InstanceView*> indirect_views;
-          idx_context->convert_target_views(idx_targets, indirect_views);
-          const UniqueInst unique_inst(indirect_views.back(), op->index_point);
+          std::vector<IndividualView*> indirect_views;
+          idx_context->convert_individual_views(idx_targets, indirect_views);
+          const UniqueInst unique_inst(indirect_views.back());
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
+        InnerContext *dst_context = op->find_physical_context(dst_index);
+        std::vector<IndividualView*> target_views;
+        dst_context->convert_individual_views(dst_targets, target_views);
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          const UniqueInst unique_inst(target_views[idx]);
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
@@ -2848,6 +2709,9 @@ namespace Legion {
                                              unsigned dst_index,
                                              const bool scatter_is_range,
                                              const ApEvent init_precondition, 
+                                             const ApEvent src_ready,
+                                             const ApEvent dst_ready,
+                                             const ApEvent idx_ready,
                                              const PredEvent pred_guard,
                                              const ApEvent collective_pre,
                                              const ApEvent collective_post,
@@ -2877,12 +2741,8 @@ namespace Legion {
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
         local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+      if (dst_ready.exists())
+        local_preconditions.push_back(dst_ready);
       ApEvent local_precondition;
       if (!local_preconditions.empty())
         local_precondition =
@@ -2895,11 +2755,7 @@ namespace Legion {
         copy_expr->create_across_unstructured(reservations, compute_preimages);
       across->add_reference();
       // Initialize the sources
-      InnerContext *context = op->find_physical_context(src_index);
-      std::vector<InstanceView*> source_views;
-      context->convert_target_views(src_targets, source_views);
-      across->initialize_source_fields(this, src_req, src_targets,
-                                       source_views, trace_info);
+      across->initialize_source_fields(this, src_req, src_targets, trace_info);
       // Initialize the destination indirections
       const InstanceRef idx_target = idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -2907,7 +2763,7 @@ namespace Legion {
       const bool exclusive_redop = (dst_records.size() == 1) && 
         (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
       across->initialize_destination_indirections(this, dst_records,
-          dst_req, idx_req, idx_target, op->index_point, scatter_is_range,
+          dst_req, idx_req, idx_target, scatter_is_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
       across->dst_indirect_instance_event = 
         idx_target.get_physical_manager()->get_unique_event();
@@ -2917,13 +2773,9 @@ namespace Legion {
         copy_preconditions.push_back(collective_pre);
       else
         copy_preconditions.swap(local_preconditions);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          copy_preconditions.push_back(ready);
-      }
-      ApEvent dst_indirect_ready = idx_target.get_ready_event();
+      if (src_ready.exists())
+        copy_preconditions.push_back(src_ready);
+      ApEvent dst_indirect_ready = idx_ready;
       if (dst_indirect_ready.exists())
         copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
@@ -2948,29 +2800,32 @@ namespace Legion {
            copy_precondition, ApEvent::NO_AP_EVENT, dst_indirect_ready, across);
         // If we're tracing record the insts for this copy
         LegionMap<UniqueInst,FieldMask> src_insts, idx_insts, dst_insts;
+        InnerContext *context = op->find_physical_context(src_index);
+        std::vector<IndividualView*> source_views;
+        context->convert_individual_views(src_targets, source_views);
         // Get the src_insts
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          const UniqueInst unique_inst(source_views[idx]);
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the idx_insts
         {
-          std::vector<InstanceView*> indirect_views;
+          std::vector<IndividualView*> indirect_views;
           InnerContext *idx_context = op->find_physical_context(idx_index);
-          idx_context->convert_target_views(idx_targets, indirect_views);
-          const UniqueInst unique_inst(indirect_views.back(), op->index_point);
+          idx_context->convert_individual_views(idx_targets, indirect_views);
+          const UniqueInst unique_inst(indirect_views.back());
           idx_insts[unique_inst] = idx_target.get_valid_fields();
         }
         // Get the dst_insts
-        std::vector<InstanceView*> target_views;
+        std::vector<IndividualView*> target_views;
         InnerContext *dst_context = op->find_physical_context(dst_index);
-        dst_context->convert_target_views(dst_targets, target_views);
+        dst_context->convert_individual_views(dst_targets, target_views);
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          const UniqueInst unique_inst(target_views[idx]);
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         trace_info.record_across_insts(copy_post, src_index, idx_index,
@@ -3000,6 +2855,10 @@ namespace Legion {
                               unsigned src_idx_index, unsigned dst_idx_index,
                               const bool both_are_range,
                               const ApEvent init_precondition, 
+                              const ApEvent src_ready,
+                              const ApEvent dst_ready,
+                              const ApEvent src_idx_ready,
+                              const ApEvent dst_idx_ready,
                               const PredEvent pred_guard,
                               const ApEvent collective_pre,
                               const ApEvent collective_post,
@@ -3035,18 +2894,10 @@ namespace Legion {
       std::vector<ApEvent> local_preconditions;
       if (init_precondition.exists())
         local_preconditions.push_back(init_precondition);
-      for (unsigned idx = 0; idx < src_targets.size(); idx++)
-      {
-        const ApEvent ready = src_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
-      {
-        const ApEvent ready = dst_targets[idx].get_ready_event();
-        if (ready.exists())
-          local_preconditions.push_back(ready);
-      }
+      if (src_ready.exists())
+        local_preconditions.push_back(src_ready);
+      if (dst_ready.exists())
+        local_preconditions.push_back(dst_ready);
       ApEvent local_precondition;
       if (!local_preconditions.empty())
         local_precondition = 
@@ -3060,11 +2911,10 @@ namespace Legion {
       across->add_reference();
       // Initialize the source indirection fields
       const InstanceRef &src_idx_target = src_idx_targets[0];
-      across->initialize_source_indirections(this, src_records,
-          src_req, src_idx_req, src_idx_target, op->index_point, 
-          both_are_range, possible_src_out_of_range);
+      across->initialize_source_indirections(this, src_records, src_req,
+        src_idx_req, src_idx_target, both_are_range, possible_src_out_of_range);
       across->src_indirect_instance_event = 
-        src_idx_target.get_physical_manager()->get_unique_event();
+       src_idx_target.get_physical_manager()->get_unique_event();
       // Initialize the destination indirections
       const InstanceRef &dst_idx_target = dst_idx_targets[0];
       // Only exclusive if we're the only point sctatting to our instance
@@ -3072,7 +2922,7 @@ namespace Legion {
       const bool exclusive_redop = (dst_records.size() == 1) && 
         (IS_EXCLUSIVE(dst_req) || IS_ATOMIC(dst_req));
       across->initialize_destination_indirections(this, dst_records,
-          dst_req, dst_idx_req, dst_idx_target, op->index_point, both_are_range,
+          dst_req, dst_idx_req, dst_idx_target, both_are_range,
           possible_dst_out_of_range, possible_dst_aliasing, exclusive_redop);
       across->dst_indirect_instance_event = 
         dst_idx_target.get_physical_manager()->get_unique_event();
@@ -3082,7 +2932,7 @@ namespace Legion {
         copy_preconditions.push_back(collective_pre);
       else
         copy_preconditions.swap(local_preconditions);
-      ApEvent src_indirect_ready = src_idx_target.get_ready_event();
+      ApEvent src_indirect_ready = src_idx_ready;
       if (src_indirect_ready.exists())
         copy_preconditions.push_back(src_indirect_ready);
       if (init_precondition.exists())
@@ -3093,7 +2943,7 @@ namespace Legion {
         else
           src_indirect_ready = init_precondition;
       }
-      ApEvent dst_indirect_ready = dst_idx_target.get_ready_event();
+      ApEvent dst_indirect_ready = dst_idx_ready;
       if (dst_indirect_ready.exists())
         copy_preconditions.push_back(dst_indirect_ready);
       if (init_precondition.exists())
@@ -3120,45 +2970,43 @@ namespace Legion {
         LegionMap<UniqueInst,FieldMask> src_insts, src_idx_insts, 
                                         dst_insts, dst_idx_insts;
         // Get the src_insts
-        std::vector<InstanceView*> source_views;
+        std::vector<IndividualView*> source_views;
         InnerContext *src_context = op->find_physical_context(src_index);
-        src_context->convert_target_views(src_targets, source_views);
+        src_context->convert_individual_views(src_targets, source_views);
         for (unsigned idx = 0; idx < src_targets.size(); idx++)
         {
           const InstanceRef &ref = src_targets[idx];
-          const UniqueInst unique_inst(source_views[idx], op->index_point);
+          const UniqueInst unique_inst(source_views[idx]);
           src_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the src_idx_insts
         {
           InnerContext *src_idx_context =
             op->find_physical_context(src_idx_index);
-          std::vector<InstanceView*> src_indirect_views;
-          src_idx_context->convert_target_views(src_idx_targets,
+          std::vector<IndividualView*> src_indirect_views;
+          src_idx_context->convert_individual_views(src_idx_targets,
                                                 src_indirect_views);
-          const UniqueInst unique_inst(src_indirect_views.back(), 
-                                       op->index_point);
+          const UniqueInst unique_inst(src_indirect_views.back());
           src_idx_insts[unique_inst] = src_idx_target.get_valid_fields();
         }
         // Get the dst_insts
-        std::vector<InstanceView*> target_views;
+        std::vector<IndividualView*> target_views;
         InnerContext *dst_context = op->find_physical_context(dst_index);
-        dst_context->convert_target_views(dst_targets, target_views);
+        dst_context->convert_individual_views(dst_targets, target_views);
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
-          const UniqueInst unique_inst(target_views[idx], op->index_point);
+          const UniqueInst unique_inst(target_views[idx]);
           dst_insts[unique_inst] = ref.get_valid_fields();
         }
         // Get the dst_idx_insts
         {
           InnerContext *dst_idx_context =
             op->find_physical_context(dst_idx_index);
-          std::vector<InstanceView*> dst_indirect_views;
-          dst_idx_context->convert_target_views(dst_idx_targets,
+          std::vector<IndividualView*> dst_indirect_views;
+          dst_idx_context->convert_individual_views(dst_idx_targets,
                                                 dst_indirect_views);
-          const UniqueInst unique_inst(dst_indirect_views.back(),
-                                       op->index_point);
+          const UniqueInst unique_inst(dst_indirect_views.back());
           dst_idx_insts[unique_inst] = dst_idx_target.get_valid_fields();
         }
         IndexSpaceNode *src_node = get_node(src_req.region.get_index_space());
@@ -3177,15 +3025,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::fill_fields(FillOp *op,
-                                          const RegionRequirement &req,
-                                          const unsigned index,
-                                          FillView *fill_view,
-                                          VersionInfo &version_info,
-                                          ApEvent precondition,
-                                          PredEvent true_guard, 
-                                          const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events)
+    void RegionTreeForest::fill_fields(FillOp *op,
+                                       const RegionRequirement &req,
+                                       const unsigned index,
+                                       FillView *fill_view,
+                                       const VersionInfo &version_info,
+                                       ApEvent precondition,
+                                       PredEvent true_guard, 
+                                       PredEvent false_guard,
+                                       const PhysicalTraceInfo &trace_info,
+                                       std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
@@ -3193,82 +3042,23 @@ namespace Legion {
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       RegionNode *region_node = get_node(req.region);
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();     
+      bool first_local = true;
+      CollectiveMapping *collective_mapping = NULL;
+      op->perform_collective_analysis(collective_mapping, first_local);
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
           RegionUsage(req), region_node->row_source, fill_view, 
-          eq_sets.get_valid_mask(), trace_info, precondition, 
-          RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
+          version_info.get_valid_mask(), trace_info, collective_mapping,
+          precondition, true_guard, false_guard, false/*add restriction*/,
+          first_local);
       analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events, 
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
+      const RtEvent traversal_done = analysis->perform_traversal(
+          RtEvent::NO_RT_EVENT, version_info, map_applied_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, map_applied_events);
-      RtEvent output_ready;
+        analysis->perform_remote(traversal_done, map_applied_events);
       if (traversal_done.exists() || analysis->has_output_updates())
-        output_ready = 
-          analysis->perform_updates(traversal_done, map_applied_events);
-      const ApEvent result = analysis->perform_output(
-         Runtime::merge_events(remote_ready, output_ready), map_applied_events);
+        analysis->perform_output(traversal_done, map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::overwrite_sharded(Operation *op, 
-                                          const unsigned index,
-                                          const RegionRequirement &req,
-                                          ShardedView *view, 
-                                          VersionInfo &version_info,
-                                          const PhysicalTraceInfo &trace_info,
-                                          const ApEvent precondition,
-                                          std::set<RtEvent> &map_applied_events,
-                                          const bool add_restriction)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
-#endif
-      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
-        return ApEvent::NO_AP_EVENT;
-      RegionNode *region_node = get_node(req.region);
-      FieldMask overwrite_mask = 
-        region_node->column_source->get_field_mask(req.privilege_fields);
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();     
-      OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          req, region_node->row_source, view, overwrite_mask, trace_info, 
-          precondition, RtEvent::NO_RT_EVENT, PredEvent::NO_PRED_EVENT, 
-          true/*track effects*/, add_restriction);
-      analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
-      if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, map_applied_events);
-      RtEvent output_ready;
-      if (traversal_done.exists() || analysis->has_output_updates())
-        output_ready = 
-          analysis->perform_updates(traversal_done, map_applied_events);
-      const ApEvent result = analysis->perform_output(
-         Runtime::merge_events(remote_ready, output_ready), map_applied_events);
-      if (analysis->remove_reference())
-        delete analysis;
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -3287,163 +3077,115 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
-                                    unsigned index,
-                                    const RegionRequirement &req,
-                                    std::vector<InstanceView*> &local_views,
-                                    const ApEvent termination_event,
-                                    VersionInfo &version_info,
-                                    const PhysicalTraceInfo &trace_info,
-                                    std::set<RtEvent> &map_applied_events,
-                                    const bool restricted)
+                               unsigned index,
+                               const RegionRequirement &req,
+                               const InstanceSet &external_instances,
+                               const VersionInfo &version_info,
+                               const ApEvent termination_event,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &map_applied_events,
+                               const bool restricted)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      const RegionUsage usage(req);
-      RegionNode *region_node = get_node(req.region);
-      FieldSpaceNode *fs_node = region_node->column_source;
-      const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
-      // Perform the registration first since we might need it in case
-      // that we have some remote equivalence sets
-      std::set<RtEvent> registration_applied;
-      const UniqueID op_id = attach_op->get_unique_op_id();
-      std::vector<ApEvent> ready_events;
-      for (std::vector<InstanceView*>::const_iterator it =
-            local_views.begin(); it != local_views.end(); it++)
-      {
-        const ApEvent ready = (*it)->register_user(usage, ext_mask,
-                    region_node->row_source, op_id, index, termination_event,
-                    registration_applied, trace_info, 
-                    runtime->address_space);
-        if (ready.exists())
-          ready_events.push_back(ready);
-      }
-      RtEvent guard_event;
-      if (!registration_applied.empty())
-      {
-        guard_event = Runtime::merge_events(registration_applied);
-        if (guard_event.exists())
-          map_applied_events.insert(guard_event);
-      }
-      FieldMaskSet<LogicalView> registration_views;
-      for (std::vector<InstanceView*>::const_iterator it =
-            local_views.begin(); it != local_views.end(); it++)
-        registration_views.insert(*it, ext_mask);
+      IndexSpaceNode *expr_node = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, RegionUsage(req), region_node->row_source, registration_views,
-          trace_info, ApEvent::NO_AP_EVENT, guard_event, 
-          PredEvent::NO_PRED_EVENT, false/*track effects*/, restricted);
+            index, RegionUsage(req), expr_node, trace_info,
+            ApEvent::NO_AP_EVENT, restricted);
       analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent views_ready =
+        analysis->convert_views(req.region, external_instances);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          views_ready, version_info, map_applied_events);
+      // Send out any remote updates
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_events);
+      // We can perform the registration in parallel with everything else
+      ApEvent instances_ready;
+      const RegionUsage usage(req);
+      RtEvent registration_done = 
+        analysis->perform_registration(views_ready, usage, map_applied_events,
+          ApEvent::NO_AP_EVENT, termination_event, instances_ready);
+      if (registration_done.exists())
+        map_applied_events.insert(registration_done);
       if (analysis->remove_reference())
         delete analysis;
-      if (!ready_events.empty())
-        return Runtime::merge_events(&trace_info, ready_events);
-      return ApEvent::NO_AP_EVENT;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::detach_external(const RegionRequirement &req,
                                           DetachOp *detach_op,
                                           unsigned index,
-                                          VersionInfo &version_info,
-                                          InstanceView *local_view,
+                                          const VersionInfo &version_info,
+                                          const InstanceSet &instances,
+                                          const ApEvent termination_event,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                          LogicalView *registration_view)
+                                          RtEvent filter_precondition,
+                                          const bool second_analysis)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+      assert(instances.size() == 1);
 #endif 
-      RegionNode *region_node = get_node(req.region);
-      FieldSpaceNode *fs_node = region_node->column_source;
-      const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
-      const UniqueID op_id = detach_op->get_unique_op_id();
-      const ApEvent term_event = detach_op->get_completion_event();
-      const RegionUsage usage(req);
-      const ApEvent done = local_view->register_user(usage, ext_mask, 
-                                                     region_node->row_source,
-                                                     op_id, index, term_event,
-                                                     map_applied_events, 
-                                                     trace_info,
-                                                     runtime->address_space);
+      RegionNode *region = get_node(req.region);
       FilterAnalysis *analysis = new FilterAnalysis(runtime, detach_op, index,
-                                  region_node->row_source, local_view, 
-                                  registration_view, true/*remove restriction*/);
+                                region, trace_info, true/*remove restriction*/);
       analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_events);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      if (traversal_done.exists() || analysis->has_remote_sets())     
+      // If we have a filter precondition, then we know this is not the first
+      // potential collective analysis to be used here
+      const RtEvent views_ready = analysis->convert_views(req.region, 
+          instances, NULL/*sources*/, NULL/*usage*/, false/*collective*/, 
+          second_analysis ? 1 : 0);
+      // Don't start the analysis until the views are ready and the filter
+      // precondition has been met
+      const RtEvent traversal_precondition = 
+        Runtime::merge_events(views_ready, filter_precondition);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          traversal_precondition, version_info, map_applied_events);
+      // Send out any remote updates
+      if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_events);
+      ApEvent instances_ready;
+      const RegionUsage usage(req);
+      analysis->perform_registration(traversal_precondition, usage,
+          map_applied_events, ApEvent::NO_AP_EVENT/*no precondition*/,
+          termination_event, instances_ready);
       if (analysis->remove_reference())
         delete analysis;
-      return done;
+      return instances_ready;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_fields(Operation *op, unsigned index,
                                              const RegionRequirement &req,
-                                             VersionInfo &version_info,
+                                             const VersionInfo &version_info,
                                             const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
-                                          const bool collective)  
+                                          CollectiveMapping *collective_mapping,
+                                              const bool collective_first_local)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      const FieldMaskSet<EquivalenceSet> &eq_sets = 
-        version_info.get_equivalence_sets();
+      
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       IndexSpaceExpression *local_expr = get_node(req.region.get_index_space());
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
-          usage, local_expr, NULL/*view*/, eq_sets.get_valid_mask(), 
-          trace_info, ApEvent::NO_AP_EVENT);
+          usage, local_expr, NULL/*view*/, version_info.get_valid_mask(), 
+          trace_info, collective_mapping, ApEvent::NO_AP_EVENT,
+          PredEvent::NO_PRED_EVENT, PredEvent::NO_PRED_EVENT,
+          false/*add restriction*/, collective_first_local);
       analysis->add_reference();
-      std::set<RtEvent> deferral_events;
-      if (collective)
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
-        {
-          // Skip any that are not ones that we own, they will be handled
-          // by a a remote node
-          if (!it->first->is_owner())
-            continue;
-          analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events);
-        }
-      }
-      else
-      {
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
-          analysis->traverse(it->first, it->second, deferral_events,
-                             map_applied_events);
-      }
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          RtEvent::NO_RT_EVENT, version_info, map_applied_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
@@ -3501,7 +3243,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(Operation *op,
                                   const RegionRequirement &req,
-                                  const std::vector<MappingInstance> &chosen,
+                                  std::vector<MappingInstance> &chosen,
                                   InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
                                   std::map<PhysicalManager*,unsigned> *acquired,
@@ -3518,6 +3260,9 @@ namespace Legion {
       const RegionTreeID req_tid = req.parent.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_virtual = false;
+      // If we're doing safe mapping, then sort these in order for determinism
+      if (!runtime->unsafe_mapper)
+        std::sort(chosen.begin(), chosen.end());
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
             it != chosen.end(); it++)
       {
@@ -3596,7 +3341,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool RegionTreeForest::physical_convert_postmapping(Operation *op,
                                   const RegionRequirement &req,
-                                  const std::vector<MappingInstance> &chosen,
+                                  std::vector<MappingInstance> &chosen,
                                   InstanceSet &result,RegionTreeID &bad_tree,
                                   std::map<PhysicalManager*,unsigned> *acquired,
                                   std::vector<PhysicalManager*> &unacquired,
@@ -3613,6 +3358,9 @@ namespace Legion {
       const RegionTreeID reg_tree = req.region.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
+      // If we're doing safe mapping, then sort these in order for determinism
+      if (!runtime->unsafe_mapper)
+        std::sort(chosen.begin(), chosen.end());
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
             it != chosen.end(); it++)
       {
@@ -3656,11 +3404,15 @@ namespace Legion {
                                 const std::vector<PhysicalManager*> &unacquired)
     //--------------------------------------------------------------------------
     {
-      // Try and do the acquires for any instances that weren't acquired
-      for (std::vector<PhysicalManager*>::const_iterator it = 
-            unacquired.begin(); it != unacquired.end(); it++)
-        if ((*it)->acquire_instance(MAPPING_ACQUIRE_REF))
-          acquired.insert(std::pair<PhysicalManager*,unsigned>(*it, 1));
+      // This code is very similar to what we see in the MapperManager
+      for (unsigned idx = 0; idx < unacquired.size(); idx++)
+      {
+        PhysicalManager *manager = unacquired[idx];
+        // Try and do the acquires for any instances that weren't acquired
+        if (manager->acquire_instance(MAPPING_ACQUIRE_REF))
+          // We already know it wasn't there before
+          acquired.insert(std::pair<PhysicalManager*,unsigned>(manager, 1));
+      }
     }
 
 #ifdef DEBUG_LEGION
@@ -6802,9 +6554,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyAcrossUnstructured::initialize_source_fields(
-              RegionTreeForest *forest, const RegionRequirement &req,
-              const InstanceSet &insts, const std::vector<InstanceView*> &views,
-              const PhysicalTraceInfo &trace_info)
+       RegionTreeForest *forest, const RegionRequirement &req,
+       const InstanceSet &insts, const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6829,7 +6580,8 @@ namespace Legion {
             continue;
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
-          views[idx]->copy_from(copy_mask, src_fields);
+          PhysicalManager *manager = ref.get_physical_manager();
+          manager->compute_copy_offsets(copy_mask, src_fields);
           src_unique_events.push_back(
               ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
@@ -6845,9 +6597,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CopyAcrossUnstructured::initialize_destination_fields(
-              RegionTreeForest *forest, const RegionRequirement &req,
-              const InstanceSet &insts, const std::vector<InstanceView*> &views,
-              const PhysicalTraceInfo &trace_info, const bool exclusive_redop)
+                  RegionTreeForest *forest, const RegionRequirement &req,
+                  const InstanceSet &insts, const PhysicalTraceInfo &trace_info,
+                  const bool exclusive_redop)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6872,7 +6624,8 @@ namespace Legion {
             continue;
           FieldMask copy_mask;
           copy_mask.set_bit(*it);
-          views[idx]->copy_to(copy_mask, dst_fields);
+          PhysicalManager *manager = ref.get_physical_manager();
+          manager->compute_copy_offsets(copy_mask, dst_fields);
           dst_unique_events.push_back(
               ref.get_physical_manager()->get_unique_event());
 #ifdef DEBUG_LEGION
@@ -6895,7 +6648,7 @@ namespace Legion {
     void CopyAcrossUnstructured::initialize_source_indirections(
             RegionTreeForest *forest, std::vector<IndirectRecord> &records,
             const RegionRequirement &src_req, const RegionRequirement &idx_req,
-            const InstanceRef &indirect_instance, const DomainPoint &point,
+            const InstanceRef &indirect_instance,
             const bool are_range, const bool possible_out_of_range)
     //--------------------------------------------------------------------------
     {
@@ -6906,7 +6659,7 @@ namespace Legion {
       src_indirections.swap(records);
       src_indirect_field = *(idx_req.privilege_fields.begin());
       src_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance(point);
+        indirect_instance.get_physical_manager()->get_instance();
       src_indirect_type = src_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_src_out_of_range = possible_out_of_range;
@@ -6924,7 +6677,7 @@ namespace Legion {
     void CopyAcrossUnstructured::initialize_destination_indirections(
             RegionTreeForest *forest, std::vector<IndirectRecord> &records,
             const RegionRequirement &dst_req, const RegionRequirement &idx_req,
-            const InstanceRef &indirect_instance, const DomainPoint &point,
+            const InstanceRef &indirect_instance,
             const bool are_range, const bool possible_out_of_range,
             const bool possible_aliasing, const bool exclusive_redop)
     //--------------------------------------------------------------------------
@@ -6936,7 +6689,7 @@ namespace Legion {
       dst_indirections.swap(records);
       dst_indirect_field = *(idx_req.privilege_fields.begin());
       dst_indirect_instance =
-        indirect_instance.get_physical_manager()->get_instance(point);
+        indirect_instance.get_physical_manager()->get_instance();
       dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_dst_out_of_range = possible_out_of_range;
@@ -14483,6 +14236,9 @@ namespace Legion {
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(node->column_source == this);
+#endif
       std::vector<size_t> field_sizes(field_set.size());
       std::vector<unsigned> mask_index_map(field_set.size());
       std::vector<CustomSerdezID> serdez(field_set.size());
@@ -14490,58 +14246,9 @@ namespace Legion {
       compute_field_layout(field_set, field_sizes, 
                            mask_index_map, serdez, external_mask);
       // Now make the instance, this should always succeed
-      ApEvent ready_event;
-      LgEvent unique_event;
-      size_t instance_footprint;
-      LayoutConstraintSet constraints;
-      PhysicalInstance inst = 
-        attach_op->create_instance(node->row_source, field_set, field_sizes,
-            constraints, ready_event, unique_event, instance_footprint);
-      // Check to see if this instance is local or whether we need
-      // to send this request to a remote node to make
-      if (inst.address_space() != context->runtime->address_space)
-      {
-        Serializer rez;
-        std::atomic<DistributedID> remote_did(0);
-        const RtUserEvent wait_for = Runtime::create_rt_user_event();
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(inst);
-          rez.serialize(ready_event);
-          rez.serialize(unique_event);
-          rez.serialize(instance_footprint);
-          constraints.serialize(rez);
-          rez.serialize(external_mask);
-          rez.serialize<size_t>(field_set.size());
-          for (unsigned idx = 0; idx < field_set.size(); idx++)
-          {
-            rez.serialize(field_set[idx]);
-            rez.serialize(field_sizes[idx]);
-            rez.serialize(mask_index_map[idx]);
-            rez.serialize(serdez[idx]);
-          }
-          rez.serialize(node->handle);
-          rez.serialize(&remote_did);
-          rez.serialize(wait_for);
-        }
-        runtime->send_external_create_request(inst.address_space(), rez);
-        // Wait for the response to come back
-        wait_for.wait();
-        // Now we can request the physical manager
-        RtEvent wait_on;
-        PhysicalManager *result = 
-         context->runtime->find_or_request_instance_manager(
-             remote_did.load(), wait_on);
-        if (wait_on.exists())
-          wait_on.wait();
-        return InstanceRef(result, external_mask);
-      }
-      else // Local so we can just do this call here
-        return InstanceRef(create_external_manager(inst, ready_event, 
-                            instance_footprint, constraints, field_set, 
-                            field_sizes,  external_mask, mask_index_map, 
-                            unique_event, node, serdez), external_mask);
+      PhysicalManager *manager = attach_op->create_manager(node, field_set,
+          field_sizes, mask_index_map, serdez, external_mask);
+      return InstanceRef(manager, external_mask); 
     }
 
     //--------------------------------------------------------------------------
@@ -14581,6 +14288,15 @@ namespace Legion {
       LogicalRegion region_handle;
       derez.deserialize(region_handle);
       RegionNode *region_node = runtime->forest->get_node(region_handle);
+      size_t collective_mapping_size;
+      derez.deserialize(collective_mapping_size);
+      CollectiveMapping *collective_mapping = NULL;
+      if (collective_mapping_size > 0)
+      {
+        collective_mapping =
+          new CollectiveMapping(derez, collective_mapping_size);
+        collective_mapping->add_reference();
+      }
       std::atomic<DistributedID> *did_ptr;
       derez.deserialize(did_ptr);
       RtUserEvent done_event;
@@ -14588,7 +14304,23 @@ namespace Legion {
 
       PhysicalManager *manager = fs->create_external_manager(inst, ready_event,
           footprint, constraints, field_set, field_sizes, file_mask,
-          mask_index_map, unique_event, region_node, serdez);
+          mask_index_map, unique_event, region_node, serdez,
+          runtime->get_available_distributed_id(), collective_mapping);
+      
+      if (collective_mapping != NULL)
+      {
+        // Since we're the owner address space, record that we have 
+        // instances on all other address spaces in the control
+        // replicated parent task's collective mapping
+        for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
+        {
+          const AddressSpaceID space = (*collective_mapping)[idx];
+          if (space == manager->owner_space)
+            continue;
+          manager->update_remote_instances(space);
+        }
+      }
+
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14597,6 +14329,10 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_external_create_response(source, rez);
+
+      if ((collective_mapping != NULL) &&
+          collective_mapping->remove_reference())
+        delete collective_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -14623,7 +14359,8 @@ namespace Legion {
             const std::vector<size_t> &field_sizes, 
             const FieldMask &external_mask,
             const std::vector<unsigned> &mask_index_map, LgEvent unique_event,
-            RegionNode *node, const std::vector<CustomSerdezID> &serdez)
+            RegionNode *node, const std::vector<CustomSerdezID> &serdez,
+            DistributedID did, CollectiveMapping *collective_mapping)
     //--------------------------------------------------------------------------
     {
       // Pull out the pointer constraint so that we can use it separately
@@ -14646,11 +14383,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
 #endif
-      DistributedID did = context->runtime->get_available_distributed_id();
       MemoryManager *memory = 
         context->runtime->find_memory_manager(inst.get_location());
-      IndividualManager *result = new IndividualManager(context, did, 
-                                         context->runtime->address_space,
+      PhysicalManager *result = new PhysicalManager(context, did, 
                                          memory, inst, node->row_source, 
                                          NULL/*piece list*/, 
                                          0/*piece list size*/,
@@ -14660,7 +14395,9 @@ namespace Legion {
                                          true/*register now*/,
                                          instance_footprint, 
                                          ready_event, unique_event,
-                              PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND);
+                              PhysicalManager::EXTERNAL_ATTACHED_INSTANCE_KIND,
+                                         NULL/*redop*/,
+                                         collective_mapping);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

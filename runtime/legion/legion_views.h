@@ -51,7 +51,7 @@ namespace Legion {
      */
     class LogicalView : public DistributedCollectable {
     public:
-      LogicalView(RegionTreeForest *ctx, DistributedID did,
+      LogicalView(Runtime *runtime, DistributedID did,
                   bool register_now, CollectiveMapping *mapping);
       virtual ~LogicalView(void);
     public:
@@ -60,23 +60,26 @@ namespace Legion {
     public:
       inline bool is_instance_view(void) const;
       inline bool is_deferred_view(void) const;
+      inline bool is_individual_view(void) const;
+      inline bool is_collective_view(void) const;
       inline bool is_materialized_view(void) const;
       inline bool is_reduction_view(void) const;
+      inline bool is_replicated_view(void) const;
+      inline bool is_allreduce_view(void) const;
       inline bool is_fill_view(void) const;
       inline bool is_phi_view(void) const;
-      inline bool is_sharded_view(void) const;
+      inline bool is_reduction_kind(void) const;
     public:
       inline InstanceView* as_instance_view(void) const;
       inline DeferredView* as_deferred_view(void) const;
+      inline IndividualView* as_individual_view(void) const;
+      inline CollectiveView* as_collective_view(void) const;
       inline MaterializedView* as_materialized_view(void) const;
       inline ReductionView* as_reduction_view(void) const;
+      inline ReplicatedView* as_replicated_view(void) const;
+      inline AllreduceView* as_allreduce_view(void) const;
       inline FillView* as_fill_view(void) const;
       inline PhiView *as_phi_view(void) const;
-      inline ShardedView* as_sharded_view(void) const;
-    public:
-      virtual bool has_manager(void) const = 0;
-      virtual PhysicalManager* get_manager(void) const = 0;
-      virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
@@ -104,19 +107,21 @@ namespace Legion {
     public:
       static inline DistributedID encode_materialized_did(DistributedID did);
       static inline DistributedID encode_reduction_did(DistributedID did);
+      static inline DistributedID encode_replicated_did(DistributedID did);
+      static inline DistributedID encode_allreduce_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
       static inline DistributedID encode_phi_did(DistributedID did);
-      static inline DistributedID encode_sharded_did(DistributedID did);
       static inline bool is_materialized_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
+      static inline bool is_replicated_did(DistributedID did);
+      static inline bool is_allreduce_did(DistributedID did);
+      static inline bool is_individual_did(DistributedID did);
+      static inline bool is_collective_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
       static inline bool is_phi_did(DistributedID did);
-      static inline bool is_sharded_did(DistributedID did);
-    public:
-      RegionTreeForest *const context;
     protected:
       mutable LocalLock view_lock;
-    private:
+    protected:
 #ifdef DEBUG_LEGION_GC
       int valid_references;
 #else
@@ -131,56 +136,163 @@ namespace Legion {
 
     /**
      * \class InstanceView 
-     * The InstanceView class is used for managing the meta-data
-     * for one or more physical instances which represent the
-     * up-to-date version from a logical region's perspective.
+     * The InstanceView class is used for performing the dependence
+     * analysis for a single physical instance.
      * The InstaceView class has two sub-classes: materialized
-     * views which represent a single physical instance a reduction
+     * views which represent a normal instance a reduction
      * view which is a specialized instance for storing reductions
      */
     class InstanceView : public LogicalView {
+    public:
+      // This structure acts as a key for performing rendezvous
+      // between collective user registrations
+      struct RendezvousKey {
+      public:
+        RendezvousKey(void)
+          : op_context_index(0), match(0), index(0) { }
+        RendezvousKey(size_t ctx, unsigned idx, IndexSpaceID m)
+          : op_context_index(ctx), match(m), index(idx) { }
+      public:
+        inline bool operator<(const RendezvousKey &rhs) const
+        {
+          if (op_context_index < rhs.op_context_index) return true;
+          if (op_context_index > rhs.op_context_index) return false;
+          if (match < rhs.match) return true;
+          if (match > rhs.match) return false;
+          return (index < rhs.index);
+        }
+      public:
+        size_t op_context_index; // unique name operation in context
+        IndexSpaceID match; // index space of regions that should match
+        unsigned index; // uniquely name analysis for op by region req index
+      };
     public:
       typedef LegionMap<ApEvent,FieldMask> EventFieldMap;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> > EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
-      InstanceView(RegionTreeForest *ctx,DistributedID did,PhysicalManager *man,
-                   AddressSpaceID logical_owner, UniqueID owner_context,
-                   bool register_now, CollectiveMapping *mapping); 
-      virtual ~InstanceView(void);
+      InstanceView(Runtime *runtime, DistributedID did,
+                   bool register_now, CollectiveMapping *mapping);
+      virtual ~InstanceView(void);  
+    public:
+      virtual ApEvent fill_from(FillView *fill_view,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events,
+                                const bool fill_restricted,
+                                const bool need_valid_return) = 0;
+      virtual ApEvent copy_from(InstanceView *src_view, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &copy_mask,
+                                PhysicalManager *src_point,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events,
+                                const bool copy_restricted,
+                                const bool need_valid_return) = 0;
+      // Always want users to be full index space expressions
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    const IndexSpaceID collective_match_space,
+                                    ApEvent term_event,
+                                    PhysicalManager *target,
+                                    CollectiveMapping *collective_mapping,
+                                    size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source,
+                                    const bool symbolic = false) = 0;
+    public:
+      virtual void send_view(AddressSpaceID target) = 0; 
+      virtual ReductionOpID get_redop(void) const { return 0; }
+      virtual FillView* get_redop_fill_view(void) const 
+        { assert(false); return NULL; }
+      virtual AddressSpaceID get_analysis_space(PhysicalManager *man) const = 0;
+      virtual bool aliases(InstanceView *other) const = 0;
+    public:
+      static void handle_view_register_user(Deserializer &derez,
+                        Runtime *runtime, AddressSpaceID source);
+    }; 
+
+    /**
+     * \class IndividualView
+     * This class provides an abstract base class for any kind of view 
+     * that only represents an individual physical instance.
+     */
+    class IndividualView : public InstanceView { 
+    public:
+      IndividualView(Runtime *runtime, DistributedID did,
+                     PhysicalManager *man, AddressSpaceID logical_owner,
+                     bool register_now, CollectiveMapping *mapping); 
+      virtual ~IndividualView(void);
     public:
       inline bool is_logical_owner(void) const
-        { return (local_space == logical_owner); }
-      AddressSpaceID get_analysis_space(const DomainPoint &point) const;
+        { return (local_space == logical_owner); } 
+      inline PhysicalManager* get_manager(void) const { return manager; }
       void destroy_reservations(ApEvent all_done);
     public:
-      virtual bool has_manager(void) const = 0;
-      virtual PhysicalManager* get_manager(void) const = 0;
-      virtual bool has_space(const FieldMask &space_mask) const = 0;
+      virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
+      virtual bool aliases(InstanceView *other) const;
     public:
+      // Reference counting state change functions
+      virtual void notify_local(void);
       virtual void notify_valid(void);
       virtual bool notify_invalid(void);
+    public:
       virtual void pack_valid_ref(void);
       virtual void unpack_valid_ref(void);
-    public: 
-      // Entry point functions for doing physical dependence analysis
+    public:
+      virtual ApEvent fill_from(FillView *fill_view,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events,
+                                const bool fill_restricted,
+                                const bool need_valid_return);
+      virtual ApEvent copy_from(InstanceView *src_view, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &copy_mask,
+                                PhysicalManager *src_point,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events,
+                                const bool copy_restricted,
+                                const bool need_valid_return);
+    public:
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index) = 0;
-      // Always want users to be full index space expressions
-      virtual ApEvent register_user(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    IndexSpaceNode *expr,
-                                    const UniqueID op_id,
-                                    const unsigned index,
-                                    ApEvent term_event,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source,
-                                    bool symbolic = false) = 0;
       virtual ApEvent find_copy_preconditions(bool reading,
                                     ReductionOpID redop,              
                                     const FieldMask &copy_mask,
@@ -196,52 +308,62 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source) = 0;
-      virtual void find_last_users(std::set<ApEvent> &events,
-                                   const DomainPoint &collective_point,
+      virtual void find_last_users(PhysicalManager *target,
+                                   std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
                                    std::vector<RtEvent> &applied) const = 0;
-#ifdef ENABLE_VIEW_REPLICATION
     public:
-      virtual void process_replication_request(AddressSpaceID source,
-                                 const FieldMask &request_mask,
-                                 RtUserEvent done_event);
-      virtual void process_replication_response(RtUserEvent done_event,
-                                 Deserializer &derez);
-      virtual void process_replication_removal(AddressSpaceID source,
-                                 const FieldMask &removal_mask);
-#endif
-    public:
-      // Reference counting state change functions
-      virtual void notify_local(void);
-    public:
-      virtual void send_view(AddressSpaceID target) = 0; 
-    public:
-      // Getting field information for performing copies
-      // We used to use these calls for all copy calls, but
-      // now they are primarily used by region-to-region copy
-      // calls as we use the extra layer of indirection below
-      // to issue calls for collective cases
-      virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &dst_fields,
-                           CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &src_fields) = 0;
-    public:
+      void pack_fields(Serializer &rez,
+                       const std::vector<CopySrcDstField> &fields) const;
       void find_atomic_reservations(const FieldMask &mask, Operation *op, 
                                     const unsigned index, bool exclusive);
       void find_field_reservations(const FieldMask &mask,
                                    std::vector<Reservation> &results);
-      static void handle_send_atomic_reservation_request(Runtime *runtime,
-                                  Deserializer &derez, AddressSpaceID source);
+    protected:
+      RtEvent find_field_reservations(const FieldMask &mask,
+                                      std::vector<Reservation> *results,
+                                      AddressSpaceID source,
+                                      RtUserEvent to_trigger =
+                                        RtUserEvent::NO_RT_USER_EVENT);
       void update_field_reservations(const FieldMask &mask,
-                                  const std::vector<Reservation> &reservations);
-      static void handle_send_atomic_reservation_response(Runtime *runtime,
-                                                          Deserializer &derez);
+                                     const std::vector<Reservation> &rsrvs);
+    public: 
+      void register_collective_analysis(const CollectiveView *source,
+                                        CollectiveAnalysis *analysis);
+      CollectiveAnalysis* find_collective_analysis(size_t context_index,
+                        unsigned region_index, IndexSpaceID match_space);
+      void unregister_collective_analysis(const CollectiveView *source,
+                                          size_t context_index,
+                                          unsigned region_index,
+                                          IndexSpaceID match_space);
+    protected:
+      ApEvent register_collective_user(const RegionUsage &usage,
+                                       const FieldMask &user_mask,
+                                       IndexSpaceNode *expr,
+                                       const UniqueID op_id,
+                                       const size_t op_ctx_index,
+                                       const unsigned index,
+                                       const IndexSpaceID match_space,
+                                       ApEvent term_event,
+                                       PhysicalManager *target,
+                                       CollectiveMapping *analysis_mapping,
+                                       size_t local_collective_arrivals,
+                                       std::vector<RtEvent> &registered_events,
+                                       std::set<RtEvent> &applied_events,
+                                       const PhysicalTraceInfo &trace_info,
+                                       const bool symbolic);
+      void process_collective_user_registration(const size_t op_ctx_index,
+                                            const unsigned index,
+                                            const IndexSpaceID match_space,
+                                            const AddressSpaceID origin,
+                                            const PhysicalTraceInfo &trace_info,
+                                            ApEvent remote_term_event,
+                                            ApUserEvent remote_ready_event,
+                                            RtUserEvent remote_registered,
+                                            RtUserEvent remote_applied);
     public:
-      static void handle_view_register_user(Deserializer &derez,
-                        Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_add_copy_user(Deserializer &derez,
@@ -249,7 +371,22 @@ namespace Legion {
       static void handle_view_find_last_users_request(Deserializer &derz,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_last_users_response(Deserializer &derez);
+      static void handle_collective_user_registration(Runtime *runtime,
+                                                      Deserializer &derez);
+    public:
+      static void handle_atomic_reservation_request(Runtime *runtime,
+                                                    Deserializer &derez);
+      static void handle_atomic_reservation_response(Runtime *runtime,
+                                                     Deserializer &derez);
 #ifdef ENABLE_VIEW_REPLICATION
+    public:
+      virtual void process_replication_request(AddressSpaceID source,
+                                 const FieldMask &request_mask,
+                                 RtUserEvent done_event) = 0;
+      virtual void process_replication_response(RtUserEvent done_event,
+                                 Deserializer &derez) = 0;
+      virtual void process_replication_removal(AddressSpaceID source,
+                                 const FieldMask &removal_mask) = 0;
       static void handle_view_replication_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_replication_response(Deserializer &derez,
@@ -258,17 +395,456 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID source);
 #endif
     public:
-      PhysicalManager *const manager;
-      // The ID of the context that made this view
-      // instance made for a virtual mapping
-      const UniqueID owner_context;
+      PhysicalManager *const manager; 
       // This is the owner space for the purpose of logical analysis
+      // If you ever make this non-const then be sure to update the
+      // code in register_collective_user
       const AddressSpaceID logical_owner;
     protected:
-      // Keep track of the locks used for managing atomic coherence
-      // on individual fields of this materialized view. Only the
-      // top-level view for an instance needs to track this.
-      std::map<unsigned,Reservation> atomic_reservations;
+      std::map<unsigned,Reservation> view_reservations;
+    protected:
+      // This is an infrequently used data structure for handling collective
+      // register user calls on individual managers that occurs with certain
+      // operation in control replicated contexts
+      struct UserRendezvous {
+        UserRendezvous(void) 
+          : remaining_local_arrivals(0), remaining_remote_arrivals(0),
+            trace_info(NULL), mask(NULL), expr(NULL), op_id(0),
+            symbolic(false), local_initialized(false) { }
+        // event for when local instances can be used
+        ApUserEvent ready_event; 
+        // remote ready events to trigger
+        std::map<ApUserEvent,PhysicalTraceInfo*> remote_ready_events;
+        // all the local term events
+        std::vector<ApEvent> term_events;
+        // event that marks when all registrations are done
+        RtUserEvent registered;
+        // event for when any local effects are applied
+        RtUserEvent applied;
+        // Counts of remaining notficiations before registration
+        unsigned remaining_local_arrivals;
+        unsigned remaining_remote_arrivals;
+        // PhysicalTraceInfo that made the ready_event and should trigger it
+        PhysicalTraceInfo *trace_info;
+        // Arguments for performing the local registration
+        RegionUsage usage;
+        FieldMask *mask;
+        IndexSpaceNode *expr;
+        UniqueID op_id;
+        bool symbolic;
+        bool local_initialized;
+      };
+      std::map<RendezvousKey,UserRendezvous> rendezvous_users;
+    protected:
+      // This is actually quite important!
+      // Normally each collective analysis is associated with a specific
+      // collective view. However the copies done by that analysis might
+      // only be occurring on collective views that are a subset of the 
+      // collective view for the analysis. Therefore we register the analyses
+      // with the individual views so that they can be found by any copies
+      struct RegisteredAnalysis {
+      public:
+        CollectiveAnalysis *analysis;
+        RtUserEvent            ready;
+        // We need to deduplicate across views that are performing
+        // registrations on this instance. With multiple fields we
+        // can get multiple different views using the same instance
+        // and each doing their own registration
+        std::set<DistributedID> views;
+      };
+      std::map<RendezvousKey,RegisteredAnalysis> collective_analyses;
+    };
+
+    /**
+     * \class CollectiveView
+     * This class provides an abstract base class for any kind of view
+     * that represents a group of instances that need to be analyzed
+     * cooperatively for physical analysis.
+     */
+    class CollectiveView : public InstanceView, 
+                           public InstanceDeletionSubscriber {
+    public:
+      enum ValidState {
+        FULL_VALID_STATE,
+        PENDING_INVALID_STATE,
+        NOT_VALID_STATE, 
+      };
+    public:
+      CollectiveView(Runtime *runtime, DistributedID did,
+                     DistributedID context_did,
+                     const std::vector<IndividualView*> &views,
+                     const std::vector<DistributedID> &instances,
+                     bool register_now, CollectiveMapping *mapping); 
+      virtual ~CollectiveView(void);
+    public:
+      virtual AddressSpaceID get_analysis_space(PhysicalManager *inst) const;
+      virtual bool aliases(InstanceView *other) const;
+    public:
+      // Reference counting state change functions
+      virtual void notify_local(void);
+      virtual void notify_valid(void);
+      virtual bool notify_invalid(void);
+    public:
+      virtual void pack_valid_ref(void);
+      virtual void unpack_valid_ref(void);
+    public:
+      virtual ApEvent fill_from(FillView *fill_view,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events,
+                                const bool fill_restricted,
+                                const bool need_valid_return);
+      virtual ApEvent copy_from(InstanceView *src_view, ApEvent precondition,
+                                PredEvent predicate_guard, ReductionOpID redop,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &copy_mask,
+                                PhysicalManager *src_point,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                CopyAcrossHelper *across_helper,
+                                const bool manage_dst_events,
+                                const bool copy_restricted,
+                                const bool need_valid_return);
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    const IndexSpaceID collective_match_space,
+                                    ApEvent term_event,
+                                    PhysicalManager *target,
+                                    CollectiveMapping *collective_mapping,
+                                    size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source,
+                                    const bool symbolic = false);
+      // This is a special entry point variation copy_from only for
+      // collective view (not it is not virtual) that will handle the 
+      // special case where we have a bunch of individual views that
+      // we'll be copying to this collective view, so we can do all
+      // the individual copies to a local instance, and then fuse the
+      // resulting broadcast or reduce out to everywhere
+      ApEvent collective_fuse_gather(
+                const std::map<IndividualView*,IndexSpaceExpression*> &sources,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool copy_restricted,
+                                const bool need_valid_return);
+    public:
+      void perform_collective_fill(FillView *fill_view,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID match_space,
+                                const size_t op_context_index,
+                                const FieldMask &fill_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent result, AddressSpaceID origin,
+                                const bool fill_restricted);
+      ApEvent perform_collective_point(
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const FieldMask &copy_mask,
+                                const FieldMask &dst_mask,
+                                const Memory location,
+                                const UniqueInst &dst_inst,
+                                const LgEvent dst_unique_event,
+                                const DistributedID src_inst_did,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events);
+      void perform_collective_broadcast(
+                                const std::vector<CopySrcDstField> &src_fields,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const size_t op_ctx_index,
+                                const FieldMask &copy_mask,
+                                const UniqueInst &src_inst,
+                                const LgEvent src_unique_event,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent copy_done, ApUserEvent all_done,
+                                ApBarrier all_bar, ShardID owner_shard,
+                                AddressSpaceID origin,
+                                const bool copy_restricted);
+      void perform_collective_reducecast(ReductionView *source,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const size_t op_ctx_index,
+                                const FieldMask &copy_mask,
+                                const UniqueInst &src_inst,
+                                const LgEvent src_unique_event,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent copy_done,
+                                ApBarrier all_bar, ShardID owner_shard,
+                                AddressSpaceID origin,
+                                const bool copy_restricted);
+      void perform_collective_hourglass(AllreduceView *source,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const FieldMask &copy_mask,
+                                const DistributedID src_inst_did,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent all_done,
+                                AddressSpaceID target,
+                                const bool copy_restricted);
+      void perform_collective_pointwise(CollectiveView *source,
+                                ApEvent precondition,
+                                PredEvent predicate_guard, 
+                                IndexSpaceExpression *copy_expression,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const size_t op_ctx_index,
+                                const FieldMask &copy_mask,
+                                const DistributedID src_inst_did,
+                                const UniqueID src_inst_op_id,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent all_done, ApBarrier all_bar,
+                                ShardID owner_shard, AddressSpaceID origin,
+                                const uint64_t allreduce_tag,
+                                const bool copy_restricted);
+    public:
+      inline AddressSpaceID select_origin_space(void) const
+        { return (collective_mapping->contains(local_space) ? local_space :
+                  collective_mapping->find_nearest(local_space)); }
+      bool contains(PhysicalManager *manager) const;
+      bool meets_regions(const std::vector<LogicalRegion> &regions,
+                         bool tight_bounds = false) const;
+      void find_instances_in_memory(Memory memory,
+                                    std::vector<PhysicalManager*> &instances);
+      void find_instances_nearest_memory(Memory memory,
+                                    std::vector<PhysicalManager*> &instances,
+                                    bool bandwidth);
+    protected:
+      void process_remote_instances_response(AddressSpaceID source,
+                          const std::vector<IndividualView*> &view);
+      void record_remote_instances(const std::vector<IndividualView*> &view);
+      RtEvent find_instances_nearest_memory(Memory memory, 
+                                    AddressSpaceID source,
+                                    std::vector<DistributedID> *instances,
+                                    std::atomic<size_t> *target,
+                                    AddressSpaceID origin, size_t best,
+                                    bool bandwidth);
+      void find_nearest_local_instances(Memory memory, size_t &best,
+                                    std::vector<PhysicalManager*> &results,
+                                    bool bandwidth) const;
+    public:
+      AddressSpaceID select_source_space(AddressSpaceID destination) const;
+      void pack_fields(Serializer &rez,
+                       const std::vector<CopySrcDstField> &fields) const;
+      unsigned find_local_index(PhysicalManager *target) const;
+      void register_collective_analysis(PhysicalManager *target,
+                                        CollectiveAnalysis *analysis,
+                                        std::set<RtEvent> &applied_events);
+    public:
+      void notify_instance_deletion(RegionTreeID tid);
+      virtual void notify_instance_deletion(PhysicalManager *manager);
+      virtual void add_subscriber_reference(PhysicalManager *manager);
+      virtual bool remove_subscriber_reference(PhysicalManager *manager);
+    protected:
+      ApEvent register_collective_user(const RegionUsage &usage,
+                                       const FieldMask &user_mask,
+                                       IndexSpaceNode *expr,
+                                       const UniqueID op_id,
+                                       const size_t op_ctx_index,
+                                       const unsigned index,
+                                       const IndexSpaceID match_space,
+                                       ApEvent term_event,
+                                       PhysicalManager *target,
+                                       size_t local_collective_arrivals,
+                                       std::vector<RtEvent> &regsitered_events,
+                                       std::set<RtEvent> &applied_events,
+                                       const PhysicalTraceInfo &trace_info,
+                                       const bool symbolic);
+      void process_register_user_request(const size_t op_ctx_index,
+                                       const unsigned index,
+                                       const IndexSpaceID match_space,
+                                       RtEvent registered, RtEvent applied);
+      void process_register_user_response(const size_t op_ctx_index,
+                                       const unsigned index,
+                                       const IndexSpaceID match_space,
+                                       const RtEvent registered,
+                                       const RtEvent applied);
+      void finalize_collective_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    const IndexSpaceID match_space,
+                                    RtUserEvent local_registered,
+                                    RtEvent global_registered,
+                                    RtUserEvent local_applied,
+                                    RtEvent global_applied,
+                                    std::vector<ApUserEvent> &ready_events,
+                                    std::vector<std::vector<ApEvent> > &terms,
+                                    const PhysicalTraceInfo *trace_info,
+                                    const bool symbolic);
+      void perform_local_broadcast(IndividualView *local_view,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                const std::vector<AddressSpaceID> &children,
+                                CollectiveAnalysis *first_local_analysis,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const IndexSpaceID collective_match_space,
+                                const size_t op_ctx_index,
+                                const FieldMask &copy_mask,
+                                const UniqueInst &src_inst,
+                                const LgEvent src_unique_event,
+                                const PhysicalTraceInfo &local_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent all_done,
+                                ApBarrier all_bar, ShardID owner_shard,
+                                AddressSpaceID origin,
+                                const bool copy_restricted);
+    protected:
+      void make_valid(bool need_lock);
+      bool make_invalid(bool need_lock);
+      bool perform_invalidate_request(uint64_t generation, bool need_lock);
+      bool perform_invalidate_response(uint64_t generation, uint64_t sent,
+                          uint64_t received, bool failed, bool need_lock);
+    public:
+      static void handle_register_user_request(Runtime *runtime,
+                                    Deserializer &derez);
+      static void handle_register_user_response(Runtime *runtime,
+                                    Deserializer &derez);
+      static void handle_remote_instances_request(Runtime *runtime,
+                                    Deserializer &derez, AddressSpaceID source);
+      static void handle_remote_instances_response(Runtime *runtime,
+                                    Deserializer &derez, AddressSpaceID source);
+      static void handle_nearest_instances_request(Runtime *runtime,
+                                                   Deserializer &derez);
+      static void handle_nearest_instances_response(Deserializer &derez);
+      static void handle_remote_analysis_registration(Deserializer &derez,
+                                                      Runtime *runtime);
+      static void handle_collective_view_deletion(Deserializer &derez,
+                                                  Runtime *runtime);
+      static void unpack_fields(std::vector<CopySrcDstField> &fields,
+          Deserializer &derez, std::set<RtEvent> &ready_events,
+          CollectiveView *view, RtEvent view_ready, Runtime *runtime);
+      static void handle_distribute_fill(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_point(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_broadcast(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_reducecast(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_hourglass(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_pointwise(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_fuse_gather(Runtime *runtime,
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_make_valid(Runtime *runtime, Deserializer &derez);
+      static void handle_make_invalid(Runtime *runtime, Deserializer &derez);
+      static void handle_invalidate_request(Runtime *runtime, 
+                                            Deserializer &derez);
+      static void handle_invalidate_response(Runtime *runtime,
+                                             Deserializer &derez);
+      static void handle_add_remote_reference(Runtime *runtime, 
+                                              Deserializer &derez);
+      static void handle_remove_remote_reference(Runtime *runtime,
+                                                 Deserializer &derez);
+    public:
+      const DistributedID context_did;
+      const std::vector<DistributedID> instances;
+    protected:
+      const std::vector<IndividualView*> local_views;
+    protected:
+      std::map<PhysicalManager*,IndividualView*> remote_instances;
+      NodeSet remote_instance_responses;
+    protected:
+      struct UserRendezvous {
+        UserRendezvous(void) 
+          : remaining_local_arrivals(0), remaining_remote_arrivals(0),
+            remaining_analyses(0), trace_info(NULL), mask(NULL), expr(NULL),
+            op_id(0), symbolic(false), local_initialized(false) { }
+        // event for when local instances can be used
+        std::vector<ApUserEvent> ready_events;
+        // all the local term events for each view
+        std::vector<std::vector<ApEvent> > local_term_events;
+        // events from remote nodes indicating they are registered
+        std::vector<RtEvent> remote_registered;
+        // events from remote nodes indicating they are applied
+        std::vector<RtEvent> remote_applied;
+        // event to trigger when local registration is done
+        RtUserEvent local_registered; 
+        // event that marks when all registrations are done
+        RtUserEvent global_registered;
+        // event to trigger when local effects are done
+        RtUserEvent local_applied; 
+        // event that marks when all effects are done
+        RtUserEvent global_applied;
+        // Counts of remaining notficiations before registration
+        unsigned remaining_local_arrivals;
+        unsigned remaining_remote_arrivals;
+        unsigned remaining_analyses;
+        // PhysicalTraceInfo that made the ready_event and should trigger it
+        PhysicalTraceInfo *trace_info;
+        // Arguments for performing the local registration
+        RegionUsage usage;
+        FieldMask *mask;
+        IndexSpaceNode *expr;
+        UniqueID op_id;
+        bool symbolic;
+        bool local_initialized;
+      };
+      std::map<RendezvousKey,UserRendezvous> rendezvous_users;
+    private:
+      // For valid state tracking
+      ValidState valid_state;
+      uint32_t remaining_invalidation_responses;
+      uint64_t invalidation_generation;
+      uint64_t total_valid_sent, total_valid_received;
+      uint64_t sent_valid_references, received_valid_references;
+      bool invalidation_failed;
+    private:
+      // Use this flag to deduplicate deletion notifications from our instances
+      std::atomic<bool> deletion_notified;
     };
 
     /**
@@ -288,11 +864,11 @@ namespace Legion {
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(RegionTreeForest *ctx, PhysicalManager *manager,
-               InstanceView *view, IndexSpaceExpression *expr); 
-      ExprView(const ExprView &rhs);
+               MaterializedView *view, IndexSpaceExpression *expr); 
+      ExprView(const ExprView &rhs) = delete;
       virtual ~ExprView(void);
     public:
-      ExprView& operator=(const ExprView &rhs);
+      ExprView& operator=(const ExprView &rhs) = delete;
     public:
       inline bool deterministic_pointer_less(const ExprView *rhs) const
         { return view_expr->deterministic_pointer_less(rhs->view_expr); }
@@ -331,11 +907,9 @@ namespace Legion {
                             FieldMask user_mask,
                             const ApEvent term_event,
                             IndexSpaceExpression *user_expr,
-                            const size_t user_volume,
-                            const bool trace_recording);
+                            const size_t user_volume);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
-                            const FieldMask &user_mask,
-                            const bool trace_recording);
+                            const FieldMask &user_mask);
       // TODO: Optimize this so that we prune out intermediate nodes in 
       // the tree that are empty and re-balance the tree. The hard part of
       // this is that it will require stopping any precondition searches
@@ -440,9 +1014,9 @@ namespace Legion {
       static void verify_current_to_filter(const FieldMask &dominated,
                                   EventFieldUsers &current_to_filter);
     public:
-      RegionTreeForest *const context;
+      RegionTreeForest *const forest;
       PhysicalManager *const manager;
-      InstanceView *const inst_view;
+      MaterializedView *const inst_view;
       IndexSpaceExpression *const view_expr;
       std::atomic<size_t> view_volume;
 #if defined(DEBUG_LEGION_GC) || defined(LEGION_GC)
@@ -528,10 +1102,10 @@ namespace Legion {
 
     /**
      * \class MaterializedView 
-     * The MaterializedView class is used for representing a given
-     * logical view onto a single physical instance.
+     * This class represents a view on to a single normal physical 
+     * instance in a specific memory.
      */
-    class MaterializedView : public InstanceView, 
+    class MaterializedView : public IndividualView, 
                              public LegionHeapify<MaterializedView> {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
@@ -548,24 +1122,22 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
       public:
         DeferMaterializedViewArgs(DistributedID d, PhysicalManager *m,
-                                  AddressSpaceID log, UniqueID ctx)
+                                  AddressSpaceID log)
           : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
-            did(d), manager(m), logical_owner(log), context_uid(ctx) { }
+            did(d), manager(m), logical_owner(log) { }
       public:
         const DistributedID did;
         PhysicalManager *const manager;
         const AddressSpaceID logical_owner;
-        const UniqueID context_uid;
       };
     public:
-      MaterializedView(RegionTreeForest *ctx, DistributedID did,
+      MaterializedView(Runtime *runtime, DistributedID did,
                        AddressSpaceID logical_owner, PhysicalManager *manager,
-                       UniqueID owner_context, bool register_now,
-                       CollectiveMapping *mapping = NULL);
-      MaterializedView(const MaterializedView &rhs);
+                       bool register_now, CollectiveMapping *mapping = NULL);
+      MaterializedView(const MaterializedView &rhs) = delete;
       virtual ~MaterializedView(void);
     public:
-      MaterializedView& operator=(const MaterializedView &rhs);
+      MaterializedView& operator=(const MaterializedView &rhs) = delete;
     public:
       inline const FieldMask& get_space_mask(void) const 
         { return manager->layout->allocated_fields; }
@@ -573,34 +1145,34 @@ namespace Legion {
       const FieldMask& get_physical_mask(void) const;
     public:
       virtual bool has_space(const FieldMask &space_mask) const;
-    public:
-      virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &dst_fields,
-                           CopyAcrossHelper *across_helper = NULL);
-      virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &src_fields);
-    public:
-      virtual bool has_manager(void) const { return true; }
-      virtual PhysicalManager* get_manager(void) const { return manager; }
-    public:
+    public: // From InstanceView
+      virtual void send_view(AddressSpaceID target);
+      // Always want users to be full index space expressions
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    const IndexSpaceID collective_match_space,
+                                    ApEvent term_event,
+                                    PhysicalManager *target,
+                                    CollectiveMapping *collective_mapping,
+                                    size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source,
+                                    const bool symbolic = false);
+    public: // From IndividualView
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index);
-      virtual ApEvent register_user(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    IndexSpaceNode *expr,
-                                    const UniqueID op_id,
-                                    const unsigned index,
-                                    ApEvent term_event,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source,
-                                    bool symbolic = false);
       virtual ApEvent find_copy_preconditions(bool reading,
-                                    ReductionOpID redop,
+                                    ReductionOpID redop,              
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
@@ -613,13 +1185,13 @@ namespace Legion {
                                  UniqueID op_id, unsigned index,
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
-                                 const AddressSpaceID source); 
-      virtual void find_last_users(std::set<ApEvent> &events,
-                                   const DomainPoint &collective_point,
+                                 const AddressSpaceID source);
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
-                                   std::vector<RtEvent> &ready_events) const;
+                                   std::vector<RtEvent> &applied) const;
 #ifdef ENABLE_VIEW_REPLICATION
     public:
       virtual void process_replication_request(AddressSpaceID source,
@@ -630,8 +1202,6 @@ namespace Legion {
       virtual void process_replication_removal(AddressSpaceID source,
                                  const FieldMask &removal_mask);
 #endif
-    public:
-      virtual void send_view(AddressSpaceID target); 
     protected:
       friend class PendingTaskUser;
       friend class PendingCopyUser;
@@ -640,15 +1210,13 @@ namespace Legion {
                                   const FieldMask &user_mask,
                                   ApEvent term_event, 
                                   UniqueID op_id,
-                                  const unsigned index,
-                                  const bool trace_recording);
+                                  const unsigned index);
       void add_internal_copy_user(const RegionUsage &usage,
                                   IndexSpaceExpression *user_expr,
                                   const FieldMask &user_mask,
                                   ApEvent term_event, 
                                   UniqueID op_id,
-                                  const unsigned index,
-                                  const bool trace_recording);
+                                  const unsigned index);
       template<bool NEED_EXPR_LOCK>
       void clean_cache(void);
 #ifdef ENABLE_VIEW_REPLICATION
@@ -657,12 +1225,11 @@ namespace Legion {
 #endif 
     public:
       static void handle_send_materialized_view(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source);
+                                                Deserializer &derez);
       static void handle_defer_materialized_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
                                      PhysicalManager *manager,
-                                     AddressSpaceID logical_owner, 
-                                     UniqueID context_uid);
+                                     AddressSpaceID logical_owner); 
     protected: 
       // Use a ExprView DAG to track the current users of this instance
       ExprView *current_users; 
@@ -709,11 +1276,35 @@ namespace Legion {
     };
 
     /**
-     * \class ReductionView
-     * The ReductionView class is used for providing a view
-     * onto reduction physical instances from any logical perspective.
+     * \class ReplicatedView
+     * This class represents a group of normal instances which all
+     * must contain the same copy of data.
      */
-    class ReductionView : public InstanceView,
+    class ReplicatedView : public CollectiveView,
+                           public LegionHeapify<ReplicatedView> {
+    public:
+      static const AllocationType alloc_type = REPLICATED_VIEW_ALLOC;
+    public:
+      ReplicatedView(Runtime *runtime, DistributedID did, DistributedID ctx_did,
+                     const std::vector<IndividualView*> &views,
+                     const std::vector<DistributedID> &instances,
+                     bool register_now, CollectiveMapping *mapping);
+      ReplicatedView(const ReplicatedView &rhs) = delete;
+      virtual ~ReplicatedView(void);
+    public:
+      ReplicatedView& operator=(const ReplicatedView &rhs) = delete;
+    public: // From InstanceView
+      virtual void send_view(AddressSpaceID target);
+      static void handle_send_replicated_view(Runtime *runtime,
+                                              Deserializer &derez);
+    };
+
+    /**
+     * \class ReductionView
+     * This class represents a single reduction physical instance
+     * in a specific memory.
+     */
+    class ReductionView : public IndividualView,
                           public LegionHeapify<ReductionView> {
     public:
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
@@ -724,48 +1315,52 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_VIEW_TASK_ID;
       public:
         DeferReductionViewArgs(DistributedID d, PhysicalManager *m,
-                               AddressSpaceID log, UniqueID ctx)
+                               AddressSpaceID log)
           : LgTaskArgs<DeferReductionViewArgs>(implicit_provenance),
-            did(d), manager(m), logical_owner(log), context_uid(ctx) { }
+            did(d), manager(m), logical_owner(log) { }
       public:
         const DistributedID did;
         PhysicalManager *const manager;
         const AddressSpaceID logical_owner;
-        const UniqueID context_uid;
       };
     public:
-      ReductionView(RegionTreeForest *ctx, DistributedID did,
+      ReductionView(Runtime *runtime, DistributedID did,
                     AddressSpaceID logical_owner, PhysicalManager *manager,
-                    UniqueID owner_context, bool register_now,
-                    CollectiveMapping *mapping = NULL);
-      ReductionView(const ReductionView &rhs);
+                    bool register_now, CollectiveMapping *mapping = NULL);
+      ReductionView(const ReductionView &rhs) = delete;
       virtual ~ReductionView(void);
     public:
-      ReductionView& operator=(const ReductionView&rhs);
-    public:
-      virtual bool has_manager(void) const { return true; } 
-      virtual PhysicalManager* get_manager(void) const;
-      virtual bool has_space(const FieldMask &space_mask) const
-        { return false; }
-    public: 
+      ReductionView& operator=(const ReductionView&rhs) = delete;
+    public: // From InstanceView
+      virtual void send_view(AddressSpaceID target);
+      virtual ReductionOpID get_redop(void) const; 
+      virtual FillView* get_redop_fill_view(void) const { return fill_view; }
+      // Always want users to be full index space expressions
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceNode *expr,
+                                    const UniqueID op_id,
+                                    const size_t op_ctx_index,
+                                    const unsigned index,
+                                    const IndexSpaceID collective_match_space,
+                                    ApEvent term_event,
+                                    PhysicalManager *target,
+                                    CollectiveMapping *collective_mapping,
+                                    size_t local_collective_arrivals,
+                                    std::vector<RtEvent> &registered_events,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source,
+                                    const bool symbolic = false);
+    public: // From IndividualView
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
                                     IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index);
-      virtual ApEvent register_user(const RegionUsage &usage,
-                                    const FieldMask &user_mask,
-                                    IndexSpaceNode *expr,
-                                    const UniqueID op_id,
-                                    const unsigned index,
-                                    ApEvent term_event,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info,
-                                    const AddressSpaceID source,
-                                    bool symbolic = false);
       virtual ApEvent find_copy_preconditions(bool reading,
-                                    ReductionOpID redop,
+                                    ReductionOpID redop,              
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
@@ -779,21 +1374,21 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events,
                                  const bool trace_recording,
                                  const AddressSpaceID source);
-      virtual void find_last_users(std::set<ApEvent> &events,
-                                   const DomainPoint &collective_point,
+      virtual void find_last_users(PhysicalManager *manager,
+                                   std::set<ApEvent> &events,
                                    const RegionUsage &usage,
                                    const FieldMask &mask,
                                    IndexSpaceExpression *user_expr,
-                                   std::vector<RtEvent> &ready_events) const;
+                                   std::vector<RtEvent> &applied) const;
     protected: 
       void find_reducing_preconditions(const RegionUsage &usage,
                                        const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,
                                        std::set<ApEvent> &wait_on) const;
-      void find_initializing_preconditions(const FieldMask &user_mask,
-                                           IndexSpaceExpression *user_expr,
-                                           std::set<ApEvent> &preconditions,
-                                           const bool trace_recording);
+      void find_writing_preconditions(const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      std::set<ApEvent> &preconditions,
+                                      const bool trace_recording);
       void find_reading_preconditions(const FieldMask &user_mask,
                                       IndexSpaceExpression *user_expr,
                                       std::set<ApEvent> &preconditions) const;
@@ -804,64 +1399,328 @@ namespace Legion {
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask, ApEvent term_event,
                     UniqueID op_id, unsigned index, bool copy_user);
-    public:
-      virtual void copy_to(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &dst_fields,
-                           CopyAcrossHelper *across_helper = NULL);
-      virtual void copy_from(const FieldMask &copy_mask, 
-                   std::vector<CopySrcDstField> &src_fields);
-    public:
-      virtual void send_view(AddressSpaceID target); 
     protected:
       void add_physical_user(PhysicalUser *user, bool reading,
                              ApEvent term_event, const FieldMask &user_mask);
+      void find_dependences(const EventFieldUsers &users,
+                            IndexSpaceExpression *user_expr,
+                            const FieldMask &user_mask,
+                            std::set<ApEvent> &wait_on) const;
+      void find_dependences_and_filter(EventFieldUsers &users,
+                            IndexSpaceExpression *user_expr,
+                            const FieldMask &user_mask,
+                            std::set<ApEvent> &wait_on,
+                            const bool trace_recording);
     public:
       static void handle_send_reduction_view(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source);
+                                             Deserializer &derez);
       static void handle_defer_reduction_view(const void *args, Runtime *rt);
       static void create_remote_view(Runtime *runtime, DistributedID did, 
                                      PhysicalManager *manager,
-                                     AddressSpaceID logical_owner, 
-                                     UniqueID context_uid);
+                                     AddressSpaceID logical_owner); 
     public:
-      ReductionOpID get_redop(void) const;
-    public:
-      FillView *const fill_view; // fill view for this reduction value
+      FillView *const fill_view;
     protected:
-      EventFieldUsers initialization_users;
+      EventFieldUsers writing_users;
       EventFieldUsers reduction_users;
       EventFieldUsers reading_users;
     };
 
     /**
+     * \class AllreduceView
+     * This class represents a group of reduction instances that
+     * all need to be reduced together to produce valid reduction data
+     */
+    class AllreduceView : public CollectiveView,
+                          public LegionHeapify<AllreduceView> {
+    public:
+      static const AllocationType alloc_type = ALLREDUCE_VIEW_ALLOC;
+    public:
+      AllreduceView(Runtime *runtime, DistributedID did, DistributedID ctx_did,
+                    const std::vector<IndividualView*> &views,
+                    const std::vector<DistributedID> &instances,
+                    bool register_now, CollectiveMapping *mapping,
+                    ReductionOpID redop_id); 
+      AllreduceView(const AllreduceView &rhs) = delete;
+      virtual ~AllreduceView(void);
+    public:
+      AllreduceView& operator=(const AllreduceView &rhs) = delete;
+    public: // From InstanceView
+      virtual void send_view(AddressSpaceID target);
+      virtual ReductionOpID get_redop(void) const { return redop; }
+      virtual FillView* get_redop_fill_view(void) const { return fill_view; }
+    public:
+      void perform_collective_reduction(
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const FieldMask &copy_mask,
+                                const FieldMask &dst_mask,
+                                const DistributedID src_inst_did,
+                                const UniqueInst &dst_inst,
+                                const LgEvent dst_unique_event,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                ApUserEvent result, AddressSpaceID origin);
+      // Degenerate case
+      ApEvent perform_hammer_reduction(
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const FieldMask &copy_mask,
+                                const FieldMask &dst_mask,
+                                const UniqueInst &dst_inst,
+                                const LgEvent dst_unique_event,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                AddressSpaceID origin);
+      void perform_collective_allreduce(ApEvent precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expresison,
+                                Operation *op, const unsigned index,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                const std::vector<CollectiveAnalysis*> &analyze,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                const uint64_t allreduce_tag);
+      uint64_t generate_unique_allreduce_tag(void);
+    protected:
+      inline void set_redop(std::vector<CopySrcDstField> &fields) const
+      {
+#ifdef DEBUG_LEGION
+        assert(redop > 0);
+#endif
+        for (std::vector<CopySrcDstField>::iterator it =
+              fields.begin(); it != fields.end(); it++)
+          it->set_redop(redop, true/*fold*/, true/*exclusive*/);
+      }
+      inline void clear_redop(std::vector<CopySrcDstField> &fields) const 
+      {
+        for (std::vector<CopySrcDstField>::iterator it =
+              fields.begin(); it != fields.end(); it++)
+          it->set_redop(0/*redop*/, false/*fold*/);
+      }
+      bool is_multi_instance(void);
+      void perform_single_allreduce(const uint64_t allreduce_tag,
+                                Operation *op, unsigned index,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                const std::vector<CollectiveAnalysis*> &analyze,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events);
+      void perform_multi_allreduce(const uint64_t allreduce_tag,
+                                Operation *op, unsigned index,
+                                ApEvent precondition, PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                const std::vector<CollectiveAnalysis*> &analyze,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events);
+      ApEvent initialize_allreduce_with_reductions(
+                                ApEvent precondition, PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+                    std::vector<std::vector<Reservation> > &reservations);
+      void complete_initialize_allreduce_with_reductions(
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+                                std::vector<ApEvent> *reduced = NULL);
+      void initialize_allreduce_without_reductions(
+                                ApEvent precondition, PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+                    std::vector<std::vector<CopySrcDstField> > &local_fields,
+                    std::vector<std::vector<Reservation> > &reservations);
+      ApEvent finalize_allreduce_with_broadcasts(PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+              const std::vector<std::vector<CopySrcDstField> > &local_fields,
+                                const unsigned final_index = 0);
+      void complete_finalize_allreduce_with_broadcasts(
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &recorded_events,
+                                const std::vector<ApEvent> &instance_events,
+                                std::vector<ApEvent> *broadcast = NULL,
+                                const unsigned final_index = 0);
+      void finalize_allreduce_without_broadcasts(PredEvent predicate_guard,
+                                Operation *op, unsigned index,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                    const std::vector<CollectiveAnalysis*> &local_analyses,
+                                std::set<RtEvent> &recorded_events,
+                                std::set<RtEvent> &applied_events,
+                                std::vector<ApEvent> &instance_events,
+              const std::vector<std::vector<CopySrcDstField> > &local_fields,
+                                const unsigned finalize_index = 0);
+      void send_allreduce_stage(const uint64_t allreduce_tag, const int stage,
+                                const int local_rank, ApEvent src_precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const PhysicalTraceInfo &trace_info,
+                                const std::vector<CopySrcDstField> &src_fields,
+                                const unsigned src_index,
+                                const AddressSpaceID *targets, size_t total,
+                                std::vector<ApEvent> &read_events);
+      void receive_allreduce_stage(const unsigned dst_index,
+                                const uint64_t allreduce_tag,
+                                const int stage, Operation *op,
+                                ApEvent dst_precondition,
+                                PredEvent predicate_guard,
+                                IndexSpaceExpression *copy_expression,
+                                const FieldMask &copy_mask,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &applied_events,
+                                const std::vector<CopySrcDstField> &dst_fields,
+                                const std::vector<Reservation> &reservations,
+                                const int *expected_ranks, size_t total_ranks,
+                                std::vector<ApEvent> &reduce_events);
+      void process_distribute_allreduce(const uint64_t allreduce_tag,
+                                const int src_rank, const int stage,
+                                std::vector<CopySrcDstField> &src_fields,
+                                const ApEvent src_precondition,
+                                ApUserEvent src_postcondition,
+                                ApBarrier src_barrier, ShardID bar_shard,
+                                const UniqueInst &src_inst,
+                                const LgEvent src_unique_event);
+    public:
+      static void handle_send_allreduce_view(Runtime *runtime,
+                                             Deserializer &derez);
+      static void handle_distribute_reduction(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_hammer_reduction(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+      static void handle_distribute_allreduce(Runtime *runtime, 
+                                    AddressSpaceID source, Deserializer &derez);
+    public:
+      const ReductionOpID redop;
+      const ReductionOp *const reduction_op;
+      FillView *const fill_view;
+    protected:
+      struct CopyKey {
+      public:
+        CopyKey(void) : tag(0), rank(0), stage(0) { }
+        CopyKey(uint64_t t, int r, int s) : tag(t), rank(r), stage(s) { }
+      public:
+        inline bool operator==(const CopyKey &rhs) const
+        { return (tag == rhs.tag) &&
+            (rank == rhs.rank) && (stage == rhs.stage); }
+        inline bool operator<(const CopyKey &rhs) const
+        {
+          if (tag < rhs.tag) return true;
+          if (tag > rhs.tag) return false;
+          if (rank < rhs.rank) return true;
+          if (rank > rhs.rank) return false;
+          return (stage < rhs.stage);
+        }
+      public:
+        uint64_t tag;
+        int rank, stage;
+      };
+      struct AllReduceCopy {
+        std::vector<CopySrcDstField> src_fields;
+        ApEvent src_precondition;
+        ApUserEvent src_postcondition;
+        ApBarrier barrier_postcondition;
+        ShardID barrier_shard;
+        UniqueInst src_inst;
+        LgEvent src_unique_event;
+      };
+      std::map<CopyKey,AllReduceCopy> all_reduce_copies;
+      struct AllReduceStage {
+        unsigned dst_index;
+        Operation *op;
+        IndexSpaceExpression *copy_expression;
+        FieldMask copy_mask;
+        std::vector<CopySrcDstField> dst_fields;
+        std::vector<Reservation> reservations;
+        PhysicalTraceInfo *trace_info;
+        ApEvent dst_precondition;
+        PredEvent predicate_guard;
+        std::vector<ApUserEvent> remaining_postconditions;
+        std::set<RtEvent> applied_events;
+        RtUserEvent applied_event;
+      };
+      LegionMap<std::pair<uint64_t,int>,AllReduceStage> remaining_stages;
+    protected:
+      std::atomic<uint64_t> unique_allreduce_tag;
+      // A boolean flag that says whether this collective instance
+      // has multiple instances on every node. This is primarily
+      // useful for reduction instances where we want to pick an
+      // algorithm for performing an in-place all-reduce
+      std::atomic<bool> multi_instance;
+      // Whether we've computed multi instance or not
+      std::atomic<bool> evaluated_multi_instance;
+    };
+
+    /**
      * \class DeferredView
-     * A DeferredView class is an abstract class the complements
-     * the MaterializedView class. While materialized views are 
-     * actual views onto a real instance, deferred views are 
-     * effectively place holders for non-physical isntances which
-     * contain enough information to perform the necessary 
-     * operations to bring a materialized view up to date for 
-     * specific fields. There are several different flavors of
-     * deferred views and this class is the base type.
+     * A DeferredView class is an abstract class for representing
+     * lazy computation in an equivalence set. At the moment, the
+     * types only allow deferred views to capture other kinds of
+     * lazy evaluation. In particular this is either a fill view
+     * or nested levels of predicated fill views. It could also
+     * support other kinds of lazy evaluation as well. Importantly,
+     * since it only captures lazy computation and not materialized
+     * data there are no InstanceView managers captured in its
+     * representations, which is an important invariant for the
+     * equivalence sets. Think long and hard about what you're
+     * doing if you ever decide that you want to break that 
+     * invariant and capture the names of instance views inside
+     * of a deferred view.
      */
     class DeferredView : public LogicalView {
     public:
-      DeferredView(RegionTreeForest *ctx, DistributedID did,
-                   bool register_now);
+      DeferredView(Runtime *runtime, DistributedID did,
+                   bool register_now, CollectiveMapping *mapping = NULL);
       virtual ~DeferredView(void);
-    public:
-      // Deferred views never have managers
-      virtual bool has_manager(void) const { return false; }
-      virtual PhysicalManager* get_manager(void) const
-        { return NULL; }
-      virtual bool has_space(const FieldMask &space_mask) const
-        { return false; }
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           PredEvent pred_guard,
+                           const PhysicalTraceInfo &trace_info,
                            EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper) = 0;
     public:
@@ -879,40 +1738,46 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = FILL_VIEW_ALLOC;
     public:
-      class FillViewValue : public Collectable {
+      struct DeferIssueFill : public LgTaskArgs<DeferIssueFill> {
       public:
-        FillViewValue(const void *v, size_t size)
-          : value(v), value_size(size) { }
-        FillViewValue(const FillViewValue &rhs)
-          : value(NULL), value_size(0) { assert(false); }
-        ~FillViewValue(void)
-        { free(const_cast<void*>(value)); }
+        static const LgTaskID TASK_ID = LG_DEFER_ISSUE_FILL_TASK_ID;
       public:
-        FillViewValue& operator=(const FillViewValue &rhs)
-        { assert(false); return *this; }
+        DeferIssueFill(FillView *view, Operation *op, 
+                       IndexSpaceExpression *fill_expr,
+                       const PhysicalTraceInfo &trace_info,
+                       const std::vector<CopySrcDstField> &dst_fields,
+                       PhysicalManager *manager,
+                       ApEvent precondition, PredEvent pred_guard);
       public:
-        inline bool matches(const void *other, const size_t size)
-        {
-          if (value_size != size)
-            return false;
-          // Compare the bytes
-          return (memcmp(other, value, value_size) == 0);
-        }
-      public:
-        const void *const value;
-        const size_t value_size;
+        FillView *const view;
+        Operation *const op;
+        IndexSpaceExpression *const fill_expr;
+        PhysicalTraceInfo *const trace_info;
+        std::vector<CopySrcDstField> *const dst_fields;
+        PhysicalManager *const manager;
+        const ApEvent precondition;
+        const PredEvent pred_guard;
+        const ApUserEvent done;
       };
     public:
-      FillView(RegionTreeForest *ctx, DistributedID did,
-               FillViewValue *value, bool register_now
+      // Don't know the fill value yet, will be set later
+      FillView(Runtime *runtime, DistributedID did,
 #ifdef LEGION_SPY
-               , UniqueID fill_op_uid
+               UniqueID fill_op_uid,
 #endif
-               );
-      FillView(const FillView &rhs);
+               bool register_now,
+               CollectiveMapping *mapping = NULL);
+      // Already know the fill value
+      FillView(Runtime *runtime, DistributedID did,
+#ifdef LEGION_SPY
+               UniqueID fill_op_uid,
+#endif
+               const void *value, size_t size, bool register_now,
+               CollectiveMapping *mapping = NULL);
+      FillView(const FillView &rhs) = delete;
       virtual ~FillView(void);
     public:
-      FillView& operator=(const FillView &rhs);
+      FillView& operator=(const FillView &rhs) = delete;
     public:
       virtual void notify_local(void) { /*nothing to do*/ }
       virtual void pack_valid_ref(void);
@@ -923,16 +1788,39 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           PredEvent pred_guard,
+                           const PhysicalTraceInfo &trace_info,
                            EquivalenceSet *tracing_eq,
                            CopyAcrossHelper *helper); 
     public:
-      static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
-                                        AddressSpaceID source);
+      bool matches(const void *value, size_t size) const;
+      bool set_value(const void *value, size_t size);
+      ApEvent issue_fill(Operation *op, IndexSpaceExpression *fill_expr,
+                         const PhysicalTraceInfo &trace_info,
+                         const std::vector<CopySrcDstField> &dst_fields,
+                         std::set<RtEvent> &applied_events,
+                         PhysicalManager *manager,
+                         ApEvent precondition, PredEvent pred_guard);
+      static void handle_defer_issue_fill(const void *args);
     public:
-      FillViewValue *const value;
+      static void handle_send_fill_view(Runtime *runtime, Deserializer &derez);
+      static void handle_send_fill_view_value(Runtime *runtime,
+                                              Deserializer &derez);
 #ifdef LEGION_SPY
+    public:
       const UniqueID fill_op_uid;
 #endif
+    protected:
+      std::atomic<void*> value;
+      std::atomic<size_t> value_size;
+      RtUserEvent value_ready;
+      // To help with reference counting creation on collective fill views
+      // we don't need to actually send the updates on our first active call
+      // Note that this only works the fill view will eventually becomes
+      // active on all the nodes of the collective mapping, which currently
+      // it does, but that is a higher-level invariant maintained by the
+      // fill view creation and not the fill view itself
+      bool collective_first_active;
     };
 
     /**
@@ -951,19 +1839,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHI_VIEW_ALLOC;
     public:
-      struct DeferPhiViewRefArgs : 
-        public LgTaskArgs<DeferPhiViewRefArgs> {
-      public:
-        static const LgTaskID TASK_ID =
-          LG_DEFER_PHI_VIEW_REF_TASK_ID;
-      public:
-        DeferPhiViewRefArgs(DistributedCollectable *d, DistributedID id)
-          : LgTaskArgs<DeferPhiViewRefArgs>(implicit_provenance),
-            dc(d), did(id) { }
-      public:
-        DistributedCollectable *const dc;
-        const DistributedID did; 
-      };
       struct DeferPhiViewRegistrationArgs : 
         public LgTaskArgs<DeferPhiViewRegistrationArgs> {
       public:
@@ -977,18 +1852,17 @@ namespace Legion {
         PhiView *const view;
       };
     public:
-      PhiView(RegionTreeForest *ctx, DistributedID did,
-              PredEvent true_guard,
-              PredEvent false_guard, InnerContext *owner,
-              bool register_now);
-      PhiView(const PhiView &rhs);
+      PhiView(Runtime *runtime, DistributedID did,
+              PredEvent true_guard, PredEvent false_guard,
+              FieldMaskSet<DeferredView> &&true_views,
+              FieldMaskSet<DeferredView> &&false_views,
+              bool register_now = true);
+      PhiView(const PhiView &rhs) = delete;
       virtual ~PhiView(void);
     public:
-      PhiView& operator=(const PhiView &rhs);
+      PhiView& operator=(const PhiView &rhs) = delete;
     public:
       virtual void notify_local(void);
-      virtual void notify_valid(void);
-      virtual bool notify_invalid(void);
       virtual void pack_valid_ref(void);
       virtual void unpack_valid_ref(void);
     public:
@@ -997,74 +1871,18 @@ namespace Legion {
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
+                           PredEvent pred_guard,
+                           const PhysicalTraceInfo &trace_info,
                            EquivalenceSet *tracign_eq,
                            CopyAcrossHelper *helper);
     public:
-      void record_true_view(LogicalView *view, const FieldMask &view_mask);
-      void record_false_view(LogicalView *view, const FieldMask &view_mask);
-    public:
-      void pack_phi_view(Serializer &rez);
-      void unpack_phi_view(Deserializer &derez,std::set<RtEvent> &ready_events);
-      RtEvent defer_add_reference(DistributedCollectable *dc, 
-                                  RtEvent precondition) const;
-      static void handle_send_phi_view(Runtime *runtime, Deserializer &derez,
-                                       AddressSpaceID source);
-      static void handle_deferred_view_ref(const void *args);
+      void add_initial_references(bool unpack_references);
+      static void handle_send_phi_view(Runtime *runtime, Deserializer &derez);
       static void handle_deferred_view_registration(const void *args);
     public:
       const PredEvent true_guard;
       const PredEvent false_guard;
-      InnerContext *const owner_context;
-    protected:
-      LegionMap<LogicalView*,FieldMask> true_views;
-      LegionMap<LogicalView*,FieldMask> false_views;
-    };
-
-    /**
-     * \class ShardedView
-     * A shared view is a representation of many instances all of which
-     * have the same data at the same version. This comes up mainly in
-     * control replication cases such as for inline mappings and attach 
-     * operations where we make many local copies of the same data for
-     * the same logical region. It's better to store one of these in
-     * an equivalence set instead of a bunch of seperate invidividual views.
-     */
-    class ShardedView : public DeferredView {
-    public:
-      ShardedView(RegionTreeForest *forest, DistributedID did,
-                  AddressSpaceID owner_space, bool register_now);
-      ShardedView(const ShardedView &rhs);
-      virtual ~ShardedView(void);
-    public:
-      ShardedView& operator=(const ShardedView &rhs);
-    public:
-      virtual void notify_local(void);
-      virtual void notify_valid(void);
-      virtual bool notify_invalid(void);
-      virtual void pack_valid_ref(void);
-      virtual void unpack_valid_ref(void);
-    public:
-      virtual void send_view(AddressSpaceID target); 
-    public:
-      virtual void flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view, const FieldMask &src_mask,
-                           IndexSpaceExpression *expr,
-                           EquivalenceSet *tracing_eq,
-                           CopyAcrossHelper *helper);
-    public:
-      void initialize(LegionMap<DistributedID,FieldMask> &views,
-                      const InstanceSet &local_instances,
-                      std::set<RtEvent> &applied_events);
-      void unpack_view(Deserializer &derez);
-    public:
-      static void handle_send_sharded_view(Runtime *runtime,
-                      Deserializer &derez, AddressSpaceID source);
-    protected:
-      std::set<PhysicalManager*> local_instances;
-      LegionMap<DistributedID,FieldMask> global_views;
-#ifdef DEBUG_LEGION
-      bool valid;
-#endif
+      const FieldMaskSet<DeferredView> true_views, false_views;
     };
 
     //--------------------------------------------------------------------------
@@ -1072,10 +1890,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(DIST_TYPE_LAST_DC < (1U << 7));
-#endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, MATERIALIZED_VIEW_DC); 
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, MATERIALIZED_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -1083,10 +1898,23 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(DIST_TYPE_LAST_DC < (1U << 7));
-#endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, REDUCTION_VIEW_DC); 
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, REDUCTION_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_replicated_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, REPLICATED_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_allreduce_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, ALLREDUCE_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -1094,9 +1922,6 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(DIST_TYPE_LAST_DC < (1U << 7));
-#endif
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, FILL_VIEW_DC);
     }
 
@@ -1105,28 +1930,14 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(DIST_TYPE_LAST_DC < (1U << 7));
-#endif
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHI_VIEW_DC);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ inline DistributedID LogicalView::encode_sharded_did(
-                                                              DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(DIST_TYPE_LAST_DC < (1U << 7));
-#endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, SHARDED_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                           MATERIALIZED_VIEW_DC);
     }
 
@@ -1134,15 +1945,45 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_reduction_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                               REDUCTION_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_replicated_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
+                                          REPLICATED_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_allreduce_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
+                                              ALLREDUCE_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_individual_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return is_materialized_did(did) || is_reduction_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_collective_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return is_replicated_did(did) || is_allreduce_did(did);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_fill_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
                                                     FILL_VIEW_DC);
     }
 
@@ -1150,29 +1991,23 @@ namespace Legion {
     /*static*/ inline bool LogicalView::is_phi_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == PHI_VIEW_DC);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ inline bool LogicalView::is_sharded_did(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
-                                                SHARDED_VIEW_DC);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & (DIST_TYPE_LAST_DC-1)) ==
+                                                    PHI_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     inline bool LogicalView::is_instance_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_materialized_did(did) || is_reduction_did(did));
+      return (is_materialized_did(did) || is_reduction_did(did) ||
+              is_replicated_did(did) || is_allreduce_did(did));
     }
 
     //--------------------------------------------------------------------------
     inline bool LogicalView::is_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_fill_did(did) || is_phi_did(did) || is_sharded_did(did));
+      return (is_fill_did(did) || is_phi_did(did));
     }
 
     //--------------------------------------------------------------------------
@@ -1190,6 +2025,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline bool LogicalView::is_replicated_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_replicated_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_allreduce_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_allreduce_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_individual_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_individual_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_collective_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_collective_did(did);
+    }
+
+    //--------------------------------------------------------------------------
     inline bool LogicalView::is_fill_view(void) const
     //--------------------------------------------------------------------------
     {
@@ -1204,10 +2067,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool LogicalView::is_sharded_view(void) const
+    inline bool LogicalView::is_reduction_kind(void) const
     //--------------------------------------------------------------------------
     {
-      return is_sharded_did(did);
+      return is_reduction_view() || is_allreduce_view();
     }
 
     //--------------------------------------------------------------------------
@@ -1251,6 +2114,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline ReplicatedView* LogicalView::as_replicated_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_replicated_view());
+#endif
+      return static_cast<ReplicatedView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline AllreduceView* LogicalView::as_allreduce_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_allreduce_view());
+#endif
+      return static_cast<AllreduceView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline IndividualView* LogicalView::as_individual_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_individual_view());
+#endif
+      return static_cast<IndividualView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CollectiveView* LogicalView::as_collective_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_collective_view());
+#endif
+      return static_cast<CollectiveView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
     inline FillView* LogicalView::as_fill_view(void) const
     //--------------------------------------------------------------------------
     {
@@ -1268,16 +2171,6 @@ namespace Legion {
       assert(is_phi_view());
 #endif
       return static_cast<PhiView*>(const_cast<LogicalView*>(this));
-    }
-
-    //--------------------------------------------------------------------------
-    inline ShardedView* LogicalView::as_sharded_view(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_sharded_view());
-#endif
-      return static_cast<ShardedView*>(const_cast<LogicalView*>(this));
     }
 
     //--------------------------------------------------------------------------
@@ -1321,7 +2214,7 @@ namespace Legion {
           // Neither one covers so we actually need to do the
           // full intersection test and see if next covers
           IndexSpaceExpression *overlap = 
-            context->intersect_index_spaces(expr, user->expr);
+            forest->intersect_index_spaces(expr, user->expr);
           if (overlap->is_empty())
             return false;
         }
@@ -1373,7 +2266,7 @@ namespace Legion {
       if (!user->covers && !next_covers)
       {
         IndexSpaceExpression *overlap = 
-          context->intersect_index_spaces(expr, user->expr);
+          forest->intersect_index_spaces(expr, user->expr);
         if (overlap->is_empty())
           return false;
       }

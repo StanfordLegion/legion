@@ -24,19 +24,16 @@ namespace Legion {
 
     class MappingCallInfo {
     public:
-      MappingCallInfo(MapperManager *man, MappingCallKind k,
-                      Operation *op = NULL); 
+      MappingCallInfo(MapperManager *man, MappingCallKind k, Operation *op); 
     public:
       MapperManager*const               manager;
       RtUserEvent                       resume;
-      MappingCallKind                   kind;
-      Operation*                        operation;
+      const MappingCallKind             kind;
+      Operation*const                   operation;
       std::map<PhysicalManager*,unsigned/*count*/>* acquired_instances;
       unsigned long long                start_time;
       unsigned long long                stop_time;
-      unsigned                          collective_count;
       bool                              reentrant_disabled;
-      bool                              supports_collectives;
     };
 
     /**
@@ -598,9 +595,8 @@ namespace Legion {
       int find_local_MPI_rank(void);
     protected:
       // Both these must be called while holding the lock
-      MappingCallInfo* allocate_call_info(MappingCallKind kind, 
-                                          Operation *op, bool need_lock);
-      void free_call_info(MappingCallInfo *info, bool need_lock);
+      MappingCallInfo* allocate_call_info(MappingCallKind kind, Operation *op);
+      void free_call_info(MappingCallInfo *info);
     public:
       static const char* get_mapper_call_name(MappingCallKind kind);
     public:
@@ -624,8 +620,6 @@ namespace Legion {
       const bool is_default_mapper;
     protected:
       mutable LocalLock mapper_lock;
-    protected:
-      std::vector<MappingCallInfo*> available_infos;
     protected: // Steal request information
       // Mappers on other processors that we've tried to steal from and failed
       std::set<Processor> steal_blacklist;

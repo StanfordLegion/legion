@@ -29,9 +29,9 @@
 #define IS_NO_ACCESS(req) \
   (((req).privilege & LEGION_READ_WRITE) == LEGION_NO_ACCESS)
 #define IS_READ_ONLY(req) \
-  (((req).privilege & LEGION_READ_WRITE) <= LEGION_READ_PRIV)
+  (((req).privilege & LEGION_READ_WRITE) == LEGION_READ_PRIV)
 #define HAS_READ(req) \
-  ((req).privilege & LEGION_READ_PRIV)
+  ((req).privilege & (LEGION_READ_PRIV | LEGION_REDUCE))
 #define HAS_WRITE(req) \
   ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
 #define IS_WRITE(req) \
@@ -115,6 +115,7 @@ namespace Legion {
       inline void serialize(const CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void serialize(const Domain &domain);
       inline void serialize(const DomainPoint &dp);
+      inline void serialize(const Internal::CopySrcDstField &field);
       inline void serialize(const void *src, size_t bytes);
     public:
       inline void begin_context(void);
@@ -204,6 +205,7 @@ namespace Legion {
       inline void deserialize(CompoundBitMask<DT,BLOAT,BIDIR> &mask);
       inline void deserialize(Domain &domain);
       inline void deserialize(DomainPoint &dp);
+      inline void deserialize(Internal::CopySrcDstField &field);
       inline void deserialize(void *dst, size_t bytes);
     public:
       inline void begin_context(void);
@@ -379,7 +381,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(collective_radix > 0);
+      assert(participants > 0);
+      assert(collective_radix > 1);
 #endif
       const int MultiplyDeBruijnBitPosition[32] = 
       {
@@ -388,7 +391,20 @@ namespace Legion {
       };
       // First adjust the radix based on the number of nodes if necessary
       if (collective_radix > participants)
-        collective_radix = participants;
+      {
+        if (participants == 1)
+        {
+          // Handle the unsual case of a single participant
+          collective_radix = 0;
+          collective_log_radix = 0;
+          collective_stages = 0;
+          participating_spaces = 1;
+          collective_last_radix = 0;
+          return (local_space == 0);
+        }
+        else
+          collective_radix = participants;
+      }
       // Adjust the radix to the next smallest power of 2
       uint32_t radix_copy = collective_radix;
       for (int i = 0; i < 5; i++)
@@ -971,6 +987,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void Serializer::serialize(const Internal::CopySrcDstField &field)
+    //--------------------------------------------------------------------------
+    {
+      serialize(field.inst);
+      serialize(field.field_id);
+      serialize(field.redop_id);
+      if (field.redop_id > 0)
+      {
+        serialize<bool>(field.red_fold);
+        serialize<bool>(field.red_exclusive);
+      }
+      serialize(field.serdez_id);
+      serialize(field.subfield_offset);
+      serialize(field.indirect_index);
+      serialize(field.size);
+      // we know if there's a fill value if the field ID is -1
+      if (field.field_id == (Realm::FieldID)-1)
+      {
+        if (field.size <= Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+          serialize(field.fill_data.direct, field.size);
+        else
+          serialize(field.fill_data.indirect, field.size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     inline void Serializer::serialize(const void *src, size_t bytes)
     //--------------------------------------------------------------------------
     {
@@ -1208,6 +1250,40 @@ namespace Legion {
       {
         for (int idx = 0; idx < dp.dim; idx++)
           deserialize(dp.point_data[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Deserializer::deserialize(Internal::CopySrcDstField &field)
+    //--------------------------------------------------------------------------
+    {
+      deserialize(field.inst);
+      deserialize(field.field_id);
+      deserialize(field.redop_id);
+      if (field.redop_id > 0)
+      {
+        deserialize<bool>(field.red_fold);
+        deserialize<bool>(field.red_exclusive);
+      }
+      deserialize(field.serdez_id);
+      deserialize(field.subfield_offset);
+      deserialize(field.indirect_index);
+      if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+      {
+        free(field.fill_data.indirect);
+        field.fill_data.indirect = NULL;
+      }
+      deserialize(field.size);
+      // we know if there's a fill value if the field ID is -1
+      if (field.field_id == (Realm::FieldID)-1)
+      {
+        if (field.size > Internal::CopySrcDstField::MAX_DIRECT_SIZE)
+        {
+          field.fill_data.indirect = malloc(field.size);
+          deserialize(field.fill_data.indirect, field.size);
+        }
+        else
+          deserialize(field.fill_data.direct, field.size);
       }
     }
       
@@ -2870,7 +2946,6 @@ namespace Legion {
             result->second -= mask;
             // Don't filter valid fields since its unsound
           }
-
         inline void clear(void)
           {
             result->second.clear();
