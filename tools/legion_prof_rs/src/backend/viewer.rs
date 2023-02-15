@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use legion_prof_viewer::{
     app,
     data::{
-        Color32, DataSource, EntryID, EntryInfo, Field, Item, ItemMeta, Rgba, SlotMetaTile,
-        SlotTile, SummaryTile, TileID, UtilPoint,
+        Color32, DataSource, EntryID, EntryInfo, Field, Item, ItemMeta, ItemUID, Rgba,
+        SlotMetaTile, SlotTile, SummaryTile, TileID, UtilPoint,
     },
     timestamp as ts,
 };
@@ -13,7 +13,7 @@ use legion_prof_viewer::{
 use crate::backend::common::{MemGroup, ProcGroup, StatePostprocess};
 use crate::state::{
     ChanID, ChanKind, Color, Container, ContainerEntry, MemID, MemKind, NodeID, ProcID, ProcKind,
-    State, Timestamp,
+    ProfUID, State, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -25,6 +25,12 @@ impl Into<ts::Timestamp> for Timestamp {
 impl Into<Timestamp> for ts::Timestamp {
     fn into(self) -> Timestamp {
         Timestamp(self.0.try_into().unwrap())
+    }
+}
+
+impl Into<ItemUID> for ProfUID {
+    fn into(self) -> ItemUID {
+        ItemUID(self.0)
     }
 }
 
@@ -375,6 +381,7 @@ impl StateDataSource {
                 let color = (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
                 let item = Item {
                     interval: view_interval,
+                    item_uid: base.prof_uid.into(),
                     color,
                 };
                 items[level].push(item);
