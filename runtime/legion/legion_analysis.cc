@@ -9901,6 +9901,9 @@ namespace Legion {
       }
     }
 
+    // Explicit instantiation for CollectiveRefinementTree
+    template class CollectiveRefinementTree<MakeCollectiveValid>;
+
     /////////////////////////////////////////////////////////////
     // CollectiveAntiAlias
     /////////////////////////////////////////////////////////////
@@ -10058,6 +10061,9 @@ namespace Legion {
       alt_views.insert(view, local_mask);
     }
 
+    // Explicit instantiation for CollectiveRefinementTree
+    template class CollectiveRefinementTree<CollectiveAntiAlias>;
+
     /////////////////////////////////////////////////////////////
     // InitializeCollectiveReduction
     /////////////////////////////////////////////////////////////
@@ -10187,6 +10193,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void InitializeCollectiveReduction::analyze(InstanceView *view, 
+         const FieldMask &mask, const FieldMaskSet<IndexSpaceExpression> &exprs)
+    //--------------------------------------------------------------------------
+    {
+      // This method should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void InitializeCollectiveReduction::visit_leaf(const FieldMask &mask,
                                       IndexSpaceExpression *expr, bool &failure)
     //--------------------------------------------------------------------------
@@ -10281,6 +10296,9 @@ namespace Legion {
         }
       }
     }
+
+    // Explicit instantiation for CollectiveRefinementTree
+    template class CollectiveRefinementTree<InitializeCollectiveReduction>;
 
     /////////////////////////////////////////////////////////////
     // Equivalence Set

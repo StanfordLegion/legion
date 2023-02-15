@@ -2803,6 +2803,8 @@ namespace Legion {
           const FieldMask &mask, std::vector<DistributedID> &&insts) const;
       void analyze(InstanceView *view, const FieldMask &mask,
                    IndexSpaceExpression *expr);
+      void analyze(InstanceView *view, const FieldMask &mask,
+                   const FieldMaskSet<IndexSpaceExpression> &exprs);
       // Check for ABA problem
       void visit_leaf(const FieldMask &mask, IndexSpaceExpression *expr,
                       bool &failure);
