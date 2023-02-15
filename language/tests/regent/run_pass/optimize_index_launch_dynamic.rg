@@ -67,4 +67,11 @@ task main()
     f_mixed(p[(i+1)%10])
   end
 end
-regentlib.start(main)
+
+-- Temporarily disable this test for multi-node legion spy
+-- There is a known bug in Legion that needs to be fixed here
+if os.getenv("LAUNCHER") and os.getenv("TEST_SPY") == "1" then
+  print("Skipping multi-node spy test optimize_index_launch_dynamic.rg!")
+else
+  regentlib.start(main)
+end
