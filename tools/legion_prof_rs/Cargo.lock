@@ -1143,7 +1143,7 @@ dependencies = [
 [[package]]
 name = "legion_prof_viewer"
 version = "0.1.0"
-source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#debce3a0d0cf1030272d1ff19c41d05abea0e9fe"
+source = "git+https://github.com/StanfordLegion/prof-viewer?branch=master#a839ea3c1e06a0caceadbe90c503655052e03ffd"
 dependencies = [
  "console_error_panic_hook",
  "eframe",

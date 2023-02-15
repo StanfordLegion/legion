@@ -1482,6 +1482,28 @@ impl ContainerEntry for Inst {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct Color(pub u32);
 
+impl Color {
+    pub fn new(r: u8, g: u8, b: u8) -> Self {
+        let r = r as u32;
+        let g = g as u32;
+        let b = b as u32;
+        Color((r << 16) | (g << 8) | b)
+    }
+
+    // These are HTML colors. Values are determined empirically by fiddling
+    // with CSS styles in Firefox. As best I can tell (by visual comparison)
+    // they seem to be sRGB (note: this is gamma space, not linear).
+    pub const BLACK: Color = Color(0x000000);
+    pub const BLUE: Color = Color(0x0000FF);
+    pub const CRIMSON: Color = Color(0xDC143C);
+    pub const DARKGOLDENROD: Color = Color(0xB8860B);
+    pub const DARKMAGENTA: Color = Color(0x8B008B);
+    pub const OLIVEDRAB: Color = Color(0x6B8E23);
+    pub const ORANGERED: Color = Color(0xFF4500);
+    pub const STEELBLUE: Color = Color(0x4682B4);
+    pub const GRAY: Color = Color(0x808080);
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MapperCallKindID(pub u32);
 
@@ -2101,10 +2123,10 @@ fn compute_color(step: u32, num_steps: u32) -> Color {
     } else {
         unreachable!();
     }
-    let r = (r * 255.0).floor() as u32;
-    let g = (g * 255.0).floor() as u32;
-    let b = (b * 255.0).floor() as u32;
-    Color((r << 16) | (g << 8) | b)
+    let r = (r * 255.0).floor() as u8;
+    let g = (g * 255.0).floor() as u8;
+    let b = (b * 255.0).floor() as u8;
+    Color::new(r, g, b)
 }
 
 #[derive(Debug)]
@@ -2237,7 +2259,7 @@ impl State {
             }
         }
 
-        Color(0x000000)
+        Color::BLACK
     }
 
     fn create_task(
