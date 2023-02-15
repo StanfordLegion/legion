@@ -845,7 +845,7 @@ gcc9_cxx11_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnetex_ucx, *regent, *incremental,  *short]
-#   * MPI
+#   * MPI and multi-node legion prof
 gcc9_cxx11_release_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
@@ -853,11 +853,11 @@ gcc9_cxx11_release_mpi_legion:
 gcc9_cxx11_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *short, *shared]
-gcc9_cxx11_debug_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *shared]
+gcc9_cxx11_debug_mpi_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental, *prof, *short]
 #   * UCX
 gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
