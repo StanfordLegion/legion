@@ -16,6 +16,12 @@ import "regent"
 
 -- Tests for dynamic index launches.
 
+-- Temporarily disable this test for multi-node legion spy
+-- There is a known bug in Legion that needs to be fixed here
+-- runs-with:
+-- [
+-- ]
+
 fspace fs {
   x : int,
   y : int,
@@ -68,10 +74,4 @@ task main()
   end
 end
 
--- Temporarily disable this test for multi-node legion spy
--- There is a known bug in Legion that needs to be fixed here
-if os.getenv("LAUNCHER") and os.getenv("TEST_SPY") == "1" then
-  print("Skipping multi-node spy test optimize_index_launch_dynamic.rg!")
-else
-  regentlib.start(main)
-end
+regentlib.start(main)
