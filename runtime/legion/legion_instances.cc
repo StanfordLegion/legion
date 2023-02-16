@@ -3552,7 +3552,8 @@ namespace Legion {
         const std::vector<FieldID> &field_set = 
           constraints.field_constraint.get_field_set();
         bool compact = false;
-        switch (constraints.specialized_constraint.get_kind())
+        const SpecializedConstraint &spec = constraints.specialized_constraint;
+        switch (spec.get_kind())
         {
           case LEGION_COMPACT_SPECIALIZE:
           case LEGION_COMPACT_REDUCTION_SPECIALIZE:
@@ -3565,11 +3566,22 @@ namespace Legion {
         }
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, unsat_kind, unsat_index, 
-             &piece_list, &piece_list_size);
-        // If constraints were unsatisfied then return now
-        if (realm_layout == NULL)
+             field_sizes, compact, &piece_list, &piece_list_size);
+#ifdef DEBUG_LEGION
+        assert(realm_layout != NULL);
+#endif
+        // If we were doing a compact layout then Check that we met 
+        // the constraints for efficiency and number of pieces
+        if (compact && (spec.max_pieces < piece_list_size))
+        {
+          if (unsat_kind != NULL)
+            *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+          if (unsat_index != NULL)
+            *unsat_index = 0;
+          if (footprint != NULL)
+            *footprint = realm_layout->bytes_used;
           return NULL;
+        }
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
