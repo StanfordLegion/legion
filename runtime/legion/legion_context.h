@@ -471,6 +471,7 @@ namespace Legion {
       virtual void unmap_all_regions(bool external) = 0;
       virtual void fill_fields(const FillLauncher &launcher) = 0;
       virtual void fill_fields(const IndexFillLauncher &launcher) = 0;
+      virtual void discard_fields(const DiscardLauncher &launcher) = 0;
       virtual void issue_copy(const CopyLauncher &launcher) = 0;
       virtual void issue_copy(const IndexCopyLauncher &launcher) = 0;
       virtual void issue_acquire(const AcquireLauncher &launcher) = 0;
@@ -1152,6 +1153,8 @@ namespace Legion {
                                     std::vector<PhysicalRegion> &conflicting);
       void find_conflicting_regions(FillOp *fill,
                                     std::vector<PhysicalRegion> &conflicting); 
+      void find_conflicting_regions(DiscardOp *fill,
+                                    std::vector<PhysicalRegion> &conflicting);
       void register_inline_mapped_region(const PhysicalRegion &region);
       void unregister_inline_mapped_region(const PhysicalRegion &region);
     public:
@@ -1496,6 +1499,7 @@ namespace Legion {
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
+      virtual void discard_fields(const DiscardLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
       virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
@@ -2268,6 +2272,7 @@ namespace Legion {
         REPLICATE_MAP_REGION,
         REPLICATE_REMAP_REGION,
         REPLICATE_FILL_FIELDS,
+        REPLICATE_DISCARD_FIELDS,
         REPLICATE_ISSUE_COPY,
         REPLICATE_ATTACH_RESOURCE,
         REPLICATE_DETACH_RESOURCE,
@@ -2793,6 +2798,7 @@ namespace Legion {
       // Unmapping region is the same as for an inner context
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
+      virtual void discard_fields(const DiscardLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
       virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);
@@ -3743,6 +3749,7 @@ namespace Legion {
       virtual void unmap_all_regions(bool external);
       virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
+      virtual void discard_fields(const DiscardLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
       virtual void issue_copy(const IndexCopyLauncher &launcher);
       virtual void issue_acquire(const AcquireLauncher &launcher);

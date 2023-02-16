@@ -2952,6 +2952,125 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Discard Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplDiscardOp::ReplDiscardOp(Runtime *rt)
+      : DiscardOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDiscardOp::~ReplDiscardOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDiscardOp::initialize_replication(ReplicateContext *ctx,
+                                               bool is_first_local)
+    //--------------------------------------------------------------------------
+    {
+      is_first_local_shard = is_first_local;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDiscardOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      DiscardOp::activate();
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      is_first_local_shard = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDiscardOp::deactivate(bool free)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Make sure we didn't leak our barrier
+      assert(!collective_map_barrier.exists());
+#endif
+      DiscardOp::deactivate(false/*free*/);
+      if (free)
+        runtime->free_repl_discard_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDiscardOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      collective_map_barrier = repl_ctx->get_next_collective_map_barriers();
+      // Then do the base class analysis
+      DiscardOp::trigger_dependence_analysis();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDiscardOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      // Signal that all of our mapping dependences are satisfied
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      std::set<RtEvent> preconditions;
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
+      if (!collective_map_barrier.has_triggered())
+        preconditions.insert(collective_map_barrier);
+      Runtime::advance_barrier(collective_map_barrier);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplDiscardOp::finalize_complete_mapping(RtEvent pre)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_map_barrier.exists());
+#endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
+#ifdef DEBUG_LEGION
+      const RtEvent result = collective_map_barrier;
+      collective_map_barrier = RtBarrier::NO_RT_BARRIER;
+      return result;
+#else
+      return collective_map_barrier;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDiscardOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      mapping = &(repl_ctx->shard_manager->get_collective_mapping()); 
+      mapping->add_reference();
+      first_local = is_first_local_shard;
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl Copy Op 
     /////////////////////////////////////////////////////////////
 

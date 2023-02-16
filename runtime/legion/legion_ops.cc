@@ -20289,6 +20289,327 @@ namespace Legion {
     }
 
     ///////////////////////////////////////////////////////////// 
+    // Discard Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DiscardOp::DiscardOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DiscardOp::~DiscardOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      Operation::activate();
+      parent_req_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::deactivate(bool free)
+    //--------------------------------------------------------------------------
+    {
+      Operation::deactivate(false/*free*/);
+      requirement.privilege_fields.clear();
+      version_info.clear();
+      map_applied_conditions.clear();
+      if (free)
+        runtime->free_discard_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* DiscardOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DISCARD_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DiscardOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DISCARD_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t DiscardOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DiscardOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::initialize(InnerContext *ctx,
+                        const DiscardLauncher &launcher, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, 1/*regions*/,
+                           provenance, launcher.static_dependences);
+      requirement.region = launcher.handle;
+      requirement.parent = launcher.parent;
+      requirement.privilege = LEGION_WRITE_DISCARD;
+      requirement.prop = LEGION_EXCLUSIVE;
+      requirement.handle_type = LEGION_SINGULAR_PROJECTION;
+      requirement.privilege_fields = launcher.fields;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_discard_operation(parent_ctx->get_unique_id(),
+                                         unique_op_id, context_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::log_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->check_privileges)
+        check_privilege();
+      ProjectionInfo projection_info;
+      LogicalAnalysis analysis(this, map_applied_conditions);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, analysis);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;  
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/);
+      runtime->forest->discard_fields(this, 0/*idx*/, requirement,
+                version_info, trace_info, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
+      else
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::check_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldID bad_field = LEGION_AUTO_GENERATE_ID;
+      int bad_index = -1;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == LEGION_NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
+      switch (et)
+      {
+        // Note there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
+        case LEGION_NO_ERROR:
+        case ERROR_BAD_REGION_PRIVILEGES:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                             "Requirements for invalid region handle "
+                             "(%x,%d,%d) for discard operation "
+                             "(ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             unique_op_id)
+            break;
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION) ? 
+                requirement.region.field_space :
+                requirement.partition.field_space;
+            REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
+                             "Field %d is not a valid field of field "
+                             "space %d for discard operation (ID %lld)",
+                             bad_field, sp.id, unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_PRIVILEGE,
+                             "Instance field %d is not one of the "
+                             "privilege fields for discard operation "
+                             "(ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_DUPLICATE,
+                             "Instance field %d is a duplicate for "
+                             "discard operation (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            if (bad_index > 0) 
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DISCARD,
+                               "Parent task %s (ID %lld) of discard operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "no 'parent' region had that name.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id)
+            else if (bad_field == LEGION_AUTO_GENERATE_ID) 
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DISCARD,
+                               "Parent task %s (ID %lld) of discard operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "parent requirement %d did not have "
+                               "sufficient privileges.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id, bad_index)
+            else 
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DISCARD,
+                               "Parent task %s (ID %lld) of discard operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "region requirement %d was missing field %d.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id,
+                               bad_index, bad_field)
+            break;
+          }
+        case ERROR_BAD_REGION_PATH:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_NOT_SUBREGION,
+                             "Region (%x,%x,%x) is not a "
+                             "sub-region of parent region "
+                             "(%x,%x,%x) for region requirement of discard "
+                             "operation (ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             requirement.parent.index_space.id,
+                             requirement.parent.field_space.id,
+                             requirement.parent.tree_id,
+                             unique_op_id)
+            break;
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_REQUIREMENT_DISCARD,
+                             "Region requirement of discard operation "
+                             "(ID %lld) cannot find privileges for field "
+                             "%d in parent task",
+                             unique_op_id, bad_field)
+            break;
+          }
+        // this should never happen with an discard operation
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+        REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DETACH,
+                               "Parent task %s (ID %lld) of discard "
+                               "operation (ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) as a parent",
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
+                               unique_op_id, 
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id, 
+                               requirement.region.tree_id)
+      else
+        parent_req_index = unsigned(parent_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::pack_remote_operation(Serializer &rez, 
+                        AddressSpaceID target, std::set<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
     // Attach Op 
     /////////////////////////////////////////////////////////////
 
@@ -23900,6 +24221,11 @@ namespace Legion {
             result = new RemoteFillOp(runtime, remote_ptr, source);
             break;
           }
+        case DISCARD_OP_KIND:
+          {
+            result = new RemoteDiscardOp(runtime, remote_ptr, source);
+            break;
+          }
         case ATTACH_OP_KIND:
           {
             result = new RemoteAttachOp(runtime, remote_ptr, source);
@@ -24828,6 +25154,81 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unpack_external_fill(derez, runtime);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Discard Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteDiscardOp::RemoteDiscardOp(Runtime *rt, 
+                                     Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDiscardOp::~RemoteDiscardOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteDiscardOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t RemoteDiscardOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDiscardOp::set_context_index(size_t index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteDiscardOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteDiscardOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DISCARD_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteDiscardOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DISCARD_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDiscardOp::pack_remote_operation(Serializer &rez,
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDiscardOp::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
     }
 
     ///////////////////////////////////////////////////////////// 

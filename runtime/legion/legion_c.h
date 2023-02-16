@@ -76,6 +76,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_index_copy_launcher_t);
   NEW_OPAQUE_TYPE(legion_fill_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_fill_launcher_t);
+  NEW_OPAQUE_TYPE(legion_discard_launcher_t);
   NEW_OPAQUE_TYPE(legion_acquire_launcher_t);
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_attach_launcher_t);
@@ -3899,6 +3900,50 @@ extern "C" {
    */
   legion_region_requirement_t
   legion_fill_get_requirement(legion_fill_t fill);
+
+  // -----------------------------------------------------------------------
+  // Discard Operation
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::DiscardLauncher::DiscardLauncher()
+   */
+  legion_discard_launcher_t
+  legion_discard_launcher_create(
+    legion_logical_region_t handle,
+    legion_logical_region_t parent);
+
+  /**
+   * @param hanlde Caller must have ownership of parameter 'handle'
+   *
+   * @see Legion::DiscardLauncher::~DiscardLauncher()
+   */
+  void
+  legion_discard_launcher_destroy(legion_discard_launcher_t handle);
+
+  /**
+   * @see Legion::DiscardLauncher::add_field()
+   */
+  void
+  legion_discard_launcher_add_field(legion_discard_launcher_t handle,
+                                    legion_field_id_t fid);
+
+  /**
+   * @see Legion::Runtime::discard_fields()
+   */
+  void
+  legion_discard_launcher_execute(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  legion_discard_launcher_t launcher);
+
+  /**
+   * @see Legion::DiscardLauncher::provenance
+   */
+  void
+  legion_discard_launcher_set_provenance(legion_discard_launcher_t launcher,
+                                         const char *provenance);
 
   // -----------------------------------------------------------------------
   // File Operations

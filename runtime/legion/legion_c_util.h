@@ -112,6 +112,7 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_index_copy_launcher_t, IndexCopyLauncher *);
       NEW_OPAQUE_WRAPPER(legion_fill_launcher_t, FillLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_fill_launcher_t, IndexFillLauncher *);
+      NEW_OPAQUE_WRAPPER(legion_discard_launcher_t, DiscardLauncher *);
       NEW_OPAQUE_WRAPPER(legion_acquire_launcher_t, AcquireLauncher *);
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);

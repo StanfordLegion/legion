@@ -648,6 +648,11 @@ namespace Legion {
                        PredEvent false_guard,
                        const PhysicalTraceInfo &trace_info,
                        std::set<RtEvent> &map_applied_events);
+      void discard_fields(DiscardOp *op, const unsigned index,
+                       const RegionRequirement &req,
+                       const VersionInfo &version_info,
+                       const PhysicalTraceInfo &trace_info,
+                       std::set<RtEvent> &map_applied_events);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);

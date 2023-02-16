@@ -2244,6 +2244,32 @@ namespace Legion {
     };
 
     /**
+     * \struct DiscardLauncher
+     * Discard launchers will reset the state of one or more fields
+     * for a particular logical region to an uninitialized state.
+     * @see Runtime
+     */
+    struct DiscardLauncher {
+    public:
+      DiscardLauncher(LogicalRegion handle, LogicalRegion parent);
+    public:
+      inline void add_field(FieldID fid);
+    public:
+      LogicalRegion                   handle;
+      LogicalRegion                   parent;
+      std::set<FieldID>               fields;
+    public:
+      // Provenance string for the runtime and tools to use
+      std::string                     provenance;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      const std::vector<StaticDependence> *static_dependences;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
      * \struct AttachLauncher
      * Attach launchers are used for attaching existing physical resources
      * outside of a Legion application to a specific logical region.
@@ -7744,6 +7770,13 @@ namespace Legion {
        * @param launcher the launcher that describes the index fill operation
        */
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
+
+      /**
+       * Discard the data inside the fields of a particular logical region
+       * @param ctx enclosing task context
+       * @param launcher the launcher that describes the discard operation
+       */
+      void discard_fields(Context ctx, const DiscardLauncher &launcher);
     public:
       //------------------------------------------------------------------------
       // Attach Operations

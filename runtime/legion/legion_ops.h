@@ -283,6 +283,7 @@ namespace Legion {
         PENDING_PARTITION_OP_KIND,
         DEPENDENT_PARTITION_OP_KIND,
         FILL_OP_KIND,
+        DISCARD_OP_KIND,
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
@@ -321,6 +322,7 @@ namespace Legion {
         "Pending Partition",        \
         "Dependent Partition",      \
         "Fill",                     \
+        "Discard",                  \
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
@@ -3859,6 +3861,53 @@ namespace Legion {
     };
 
     /**
+     * \class DiscardOp
+     * Operation for reseting the state of fields back to an 
+     * uninitialized state like they were just created
+     */
+    class DiscardOp : public Operation {
+    public:
+      static const AllocationType alloc_type = DISCARD_OP_ALLOC;
+    public:
+      DiscardOp(Runtime *rt);
+      DiscardOp(const DiscardOp &rhs) = delete;
+      virtual ~DiscardOp(void);
+    public:
+      DiscardOp& operator=(const DiscardOp &rhs) = delete;
+    public:
+      void initialize(InnerContext *ctx, const DiscardLauncher &launcher,
+                      Provenance *provenance);
+      inline const RegionRequirement& get_requirement(void) const
+        { return requirement; }
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual size_t get_region_count(void) const;
+      virtual unsigned find_parent_index(unsigned idx);
+    public:
+      virtual bool has_prepipeline_stage(void) const { return true; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+      virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
+    protected:
+      void check_privilege(void);
+      void compute_parent_index(void);
+      void log_requirement(void);
+    public:
+      RegionRequirement requirement;
+      RegionTreePath privilege_path;
+      VersionInfo version_info;
+      unsigned parent_req_index;
+      std::set<RtEvent> map_applied_conditions;
+    };
+
+    /**
      * \class AttachOp
      * Operation for attaching a file to a physical instance
      */
@@ -4055,13 +4104,13 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
+      virtual unsigned find_parent_index(unsigned idx);
     public:
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
-      virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
       virtual void select_sources(const unsigned index, PhysicalManager *target,
@@ -4588,6 +4637,32 @@ namespace Legion {
     };
 
     /**
+     * \class RemoteDiscardOp
+     * This is a remote copy of a AttachOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteDiscardOp : public RemoteOp,
+                            public LegionHeapify<RemoteDiscardOp> {
+    public:
+      RemoteDiscardOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteDiscardOp(const RemoteDiscardOp &rhs) = delete;
+      virtual ~RemoteDiscardOp(void);
+    public:
+      RemoteDiscardOp& operator=(const RemoteDiscardOp &rhs) = delete;
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual size_t get_context_index(void) const;
+      virtual void set_context_index(size_t index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
+                                         std::set<RtEvent> &applied) const;
+      virtual void unpack(Deserializer &derez);
+    };
+
+    /**
      * \class RemotePartitionOp
      * This is a remote copy of a DependentPartitionOp to be
      * used for mapper calls and other operations
@@ -4624,7 +4699,7 @@ namespace Legion {
 
     /**
      * \class RemoteAttachOp
-     * This is a remote copy of a DetachOp to be used for 
+     * This is a remote copy of a AttachOp to be used for 
      * mapper calls and other operations
      */
     class RemoteAttachOp : public RemoteOp,

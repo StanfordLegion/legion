@@ -18029,6 +18029,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void DiscardLauncher::add_field(FieldID f)
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(f);
+    }
+
+    //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_file(const char *name,
                                             const std::vector<FieldID> &fields,
                                             LegionFileMode m)

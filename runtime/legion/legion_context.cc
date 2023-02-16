@@ -6832,7 +6832,7 @@ namespace Legion {
       if (launcher.fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
-            "Ignoring fill request with no fields in ask %s (UID %lld)",
+            "Ignoring fill request with no fields in task %s (UID %lld)",
             get_task_name(), get_unique_id())
         return;
       }
@@ -6876,7 +6876,7 @@ namespace Legion {
       if (launcher.fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
-            "Ignoring index fill request with no fields in ask %s (UID %lld)",
+            "Ignoring index fill request with no fields in task %s (UID %lld)",
             get_task_name(), get_unique_id())
         return;
       }
@@ -6922,6 +6922,45 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::discard_fields(const DiscardLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      if (launcher.fields.empty())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
+            "Ignoring discard request with no fields in task %s (UID %lld)",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      AutoProvenance provenance(launcher.provenance);
+      DiscardOp *discard_op = runtime->get_available_discard_op();
+      discard_op->initialize(this, launcher, provenance);
+      // We still unamp conflicting regions for discard, but we wil never
+      // remap them afterwards since this is invalidating the data
+      if (!runtime->unsafe_launch)
+      {
+        std::vector<PhysicalRegion> unmapped_regions;
+        find_conflicting_regions(discard_op, unmapped_regions);
+        if (!unmapped_regions.empty())
+        {
+          if (runtime->runtime_warnings && !launcher.silence_warnings)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
+              "Runtime is unmapping and remapping "
+                "physical regions around discard_fields call in "
+                "task %s (UID %lld).", get_task_name(), get_unique_id());
+          }
+          // Unmap any regions which are conflicting
+          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+            unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      add_to_dependence_queue(discard_op);
+      // Do not remap the previously mapped regions, they are uninitialized
     }
 
     //--------------------------------------------------------------------------
@@ -9183,6 +9222,16 @@ namespace Legion {
       const RegionRequirement &req = fill->get_requirement();
       find_conflicting_internal(req, conflicting);
     } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_conflicting_regions(DiscardOp *discard,
+                                       std::vector<PhysicalRegion> &conflicting)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, FIND_CONFLICTING_CALL);
+      const RegionRequirement &req = discard->get_requirement();
+      find_conflicting_internal(req, conflicting);
+    }
 
     //--------------------------------------------------------------------------
     void InnerContext::register_inline_mapped_region(
@@ -18450,7 +18499,7 @@ namespace Legion {
       if (launcher.fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
-            "Ignoring fill request with no fields in ask %s (UID %lld)",
+            "Ignoring fill request with no fields in task %s (UID %lld)",
             get_task_name(), get_unique_id())
         return;
       }
@@ -18529,7 +18578,7 @@ namespace Legion {
       if (launcher.fields.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
-            "Ignoring index fill request with no fields in ask %s (UID %lld)",
+            "Ignoring index fill request with no fields in task %s (UID %lld)",
             get_task_name(), get_unique_id())
         return;
       }
@@ -18575,6 +18624,63 @@ namespace Legion {
       // Remap any regions which we unmapped
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions, provenance);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::discard_fields(const DiscardLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      AutoProvenance provenance(launcher.provenance);
+      for (int i = 0; runtime->safe_control_replication && (i < 2) &&
+            ((current_trace == NULL) || !current_trace->is_fixed()); i++)
+      {
+        Murmur3Hasher hasher(this, runtime->safe_control_replication > 1,
+                              i > 0, provenance);
+        hasher.hash(REPLICATE_DISCARD_FIELDS, __func__);
+        hasher.hash(launcher.handle, "handle");
+        hasher.hash(launcher.parent, "parent");
+        for (std::set<FieldID>::const_iterator it = 
+              launcher.fields.begin(); it != launcher.fields.end(); it++)
+          hasher.hash(*it, "fields");
+        hash_static_dependences(hasher, launcher.static_dependences);
+        hasher.hash(launcher.silence_warnings, "silence_warnings");
+        if (hasher.verify(__func__))
+          break;
+      }
+      if (launcher.fields.empty())
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_EMPTY_FILL_FIELDS,
+            "Ignoring discard request with no fields in task %s (UID %lld)",
+            get_task_name(), get_unique_id())
+        return;
+      }
+      ReplDiscardOp *discard_op = runtime->get_available_repl_discard_op();
+      discard_op->initialize(this, launcher, provenance);
+      discard_op->initialize_replication(this,
+          shard_manager->is_first_local_shard(owner_shard));
+      // We still unamp conflicting regions for discard, but we wil never
+      // remap them afterwards since this is invalidating the data
+      if (!runtime->unsafe_launch)
+      {
+        std::vector<PhysicalRegion> unmapped_regions;
+        find_conflicting_regions(discard_op, unmapped_regions);
+        if (!unmapped_regions.empty())
+        {
+          if (runtime->runtime_warnings && !launcher.silence_warnings)
+          {
+            REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
+              "Runtime is unmapping and remapping "
+                "physical regions around discard_fields call in "
+                "task %s (UID %lld).", get_task_name(), get_unique_id());
+          }
+          // Unmap any regions which are conflicting
+          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+            unmapped_regions[idx].impl->unmap_region();
+        }
+      }
+      add_to_dependence_queue(discard_op);
+      // Do not remap the previously mapped regions, they are uninitialized
     }
 
     //--------------------------------------------------------------------------
@@ -23755,6 +23861,15 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_FILL_OPERATION_CALL,
         "Illegal index fill operation call performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::discard_fields(const DiscardLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_LEAF_TASK_VIOLATION,
+        "Illegal discard operation call performed in leaf task %s "
+                     "(ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------

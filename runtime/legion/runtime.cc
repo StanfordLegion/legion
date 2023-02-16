@@ -16704,6 +16704,7 @@ namespace Legion {
       free_available(available_pending_partition_ops);
       free_available(available_dependent_partition_ops);
       free_available(available_fill_ops);
+      free_available(available_discard_ops);
       free_available(available_attach_ops);
       free_available(available_index_attach_ops);
       free_available(available_point_attach_ops);
@@ -16719,6 +16720,7 @@ namespace Legion {
       free_available(available_repl_refinement_ops);
       free_available(available_repl_fill_ops);
       free_available(available_repl_index_fill_ops);
+      free_available(available_repl_discard_ops);
       free_available(available_repl_copy_ops);
       free_available(available_repl_index_copy_ops);
       free_available(available_repl_deletion_ops);
@@ -27501,6 +27503,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    DiscardOp* Runtime::get_available_discard_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(discard_op_lock, available_discard_ops);
+    }
+
+    //--------------------------------------------------------------------------
     AttachOp* Runtime::get_available_attach_op(void)
     //--------------------------------------------------------------------------
     {
@@ -27700,6 +27709,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return get_available(map_op_lock, available_repl_map_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDiscardOp* Runtime::get_available_repl_discard_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(discard_op_lock, available_repl_discard_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -28090,6 +28106,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::free_discard_op(DiscardOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(discard_op_lock);
+      release_operation<false>(available_discard_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_attach_op(AttachOp *op)
     //--------------------------------------------------------------------------
     {
@@ -28279,6 +28303,14 @@ namespace Legion {
     {
       AutoLock m_lock(map_op_lock);
       release_operation<false>(available_repl_map_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_discard_op(ReplDiscardOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(discard_op_lock);
+      release_operation<false>(available_repl_discard_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -28957,6 +28989,8 @@ namespace Legion {
           return "Dependent Partition Op";
         case FILL_OP_ALLOC:
           return "Fill Op";
+        case DISCARD_OP_ALLOC:
+          return "Discard Op";
         case ATTACH_OP_ALLOC:
           return "Attach Op";
         case DETACH_OP_ALLOC:

@@ -4009,6 +4009,7 @@ namespace Legion {
       FillOp*               get_available_fill_op(void);
       IndexFillOp*          get_available_index_fill_op(void);
       PointFillOp*          get_available_point_fill_op(void);
+      DiscardOp*            get_available_discard_op(void);
       AttachOp*             get_available_attach_op(void);
       IndexAttachOp*        get_available_index_attach_op(void);
       PointAttachOp*        get_available_point_attach_op(void);
@@ -4025,6 +4026,7 @@ namespace Legion {
       ReplRefinementOp*     get_available_repl_refinement_op(void);
       ReplFillOp*           get_available_repl_fill_op(void);
       ReplIndexFillOp*      get_available_repl_index_fill_op(void);
+      ReplDiscardOp*        get_available_repl_discard_op(void);
       ReplCopyOp*           get_available_repl_copy_op(void);
       ReplIndexCopyOp*      get_available_repl_index_copy_op(void);
       ReplDeletionOp*       get_available_repl_deletion_op(void);
@@ -4084,6 +4086,7 @@ namespace Legion {
       void free_fill_op(FillOp *op);
       void free_index_fill_op(IndexFillOp *op);
       void free_point_fill_op(PointFillOp *op);
+      void free_discard_op(DiscardOp *op);
       void free_attach_op(AttachOp *op);
       void free_index_attach_op(IndexAttachOp *op);
       void free_point_attach_op(PointAttachOp *op);
@@ -4100,6 +4103,7 @@ namespace Legion {
       void free_repl_refinement_op(ReplRefinementOp *op);
       void free_repl_fill_op(ReplFillOp *op);
       void free_repl_index_fill_op(ReplIndexFillOp *op);
+      void free_repl_discard_op(ReplDiscardOp *op);
       void free_repl_copy_op(ReplCopyOp *op);
       void free_repl_index_copy_op(ReplIndexCopyOp *op);
       void free_repl_deletion_op(ReplDeletionOp *op);
@@ -4488,6 +4492,7 @@ namespace Legion {
       mutable LocalLock pending_partition_op_lock;
       mutable LocalLock dependent_partition_op_lock;
       mutable LocalLock fill_op_lock;
+      mutable LocalLock discard_op_lock;
       mutable LocalLock attach_op_lock;
       mutable LocalLock detach_op_lock;
       mutable LocalLock timing_op_lock;
@@ -4530,6 +4535,7 @@ namespace Legion {
       std::deque<FillOp*>               available_fill_ops;
       std::deque<IndexFillOp*>          available_index_fill_ops;
       std::deque<PointFillOp*>          available_point_fill_ops;
+      std::deque<DiscardOp*>            available_discard_ops;
       std::deque<AttachOp*>             available_attach_ops;
       std::deque<IndexAttachOp*>        available_index_attach_ops;
       std::deque<PointAttachOp*>        available_point_attach_ops;
@@ -4546,6 +4552,7 @@ namespace Legion {
       std::deque<ReplRefinementOp*>     available_repl_refinement_ops;
       std::deque<ReplFillOp*>           available_repl_fill_ops;
       std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
+      std::deque<ReplDiscardOp*>        available_repl_discard_ops;
       std::deque<ReplCopyOp*>           available_repl_copy_ops;
       std::deque<ReplIndexCopyOp*>      available_repl_index_copy_ops;
       std::deque<ReplDeletionOp*>       available_repl_deletion_ops;

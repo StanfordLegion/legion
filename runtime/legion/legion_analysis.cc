@@ -9213,10 +9213,13 @@ namespace Legion {
     {
       if (precondition.exists() && !precondition.has_triggered())
         return defer_traversal(precondition, info, applied_events);
+      if (!target_views.empty())
+      {
 #ifdef DEBUG_LEGION
-      assert(target_views.size() == 1);
+        assert(target_views.size() == 1);
 #endif
-      filter_views = target_views.back();
+        filter_views = target_views.back();
+      }
       return RegistrationAnalysis::perform_traversal(precondition,
                                                      info, applied_events);
     }
@@ -16647,7 +16650,13 @@ namespace Legion {
     {
       // Already holding the eq_lock from EquivalenceSet::analyze method
       // No need to lock the analysis here since we're not going to change it
-      // Filter partial first since total could flow back here
+      if (analysis.filter_views.empty())
+      {
+        // This is the fast path for when we're just invalidating everything
+        invalidate_state(expr, expr_covers, filter_mask);
+        return;
+      }
+      // We're filtering specific views from this set
       for (FieldMaskSet<InstanceView>::const_iterator fit =
             analysis.filter_views.begin(); fit != 
             analysis.filter_views.end(); fit++)

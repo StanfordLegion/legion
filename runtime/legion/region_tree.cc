@@ -3062,6 +3062,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::discard_fields(DiscardOp *op, const unsigned index,
+                                          const RegionRequirement &req,
+                                          const VersionInfo &version_info,
+                                          const PhysicalTraceInfo &trace_info,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == LEGION_SINGULAR_PROJECTION);
+#endif     
+      RegionNode *region = get_node(req.region);
+      FilterAnalysis *analysis = new FilterAnalysis(runtime, op, index,
+                                                    region, trace_info);
+      analysis->add_reference();
+      // Still need to pretend to convert an empty set of views to get
+      // the collective mapping initialized properly
+      const InstanceSet empty_instances;
+      const RtEvent views_ready = analysis->convert_views(req.region,
+          empty_instances, NULL/*sources*/, NULL/*usage*/, false/*rendezvous*/);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          views_ready, version_info, map_applied_events);
+      // Send out any remote updates
+      if (traversal_done.exists() || analysis->has_remote_sets())
+        analysis->perform_remote(traversal_done, map_applied_events);
+      if (analysis->remove_reference())
+        delete analysis;
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::create_external_instance(
                              AttachOp *attach_op, const RegionRequirement &req,
                              const std::vector<FieldID> &field_set)
@@ -3141,7 +3170,7 @@ namespace Legion {
       // If we have a filter precondition, then we know this is not the first
       // potential collective analysis to be used here
       const RtEvent views_ready = analysis->convert_views(req.region, 
-          instances, NULL/*sources*/, NULL/*usage*/, false/*collective*/, 
+          instances, NULL/*sources*/, NULL/*usage*/, false/*rendezvous*/, 
           second_analysis ? 1 : 0);
       // Don't start the analysis until the views are ready and the filter
       // precondition has been met

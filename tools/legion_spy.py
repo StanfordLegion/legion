@@ -95,6 +95,7 @@ CREATION_OP_KIND = 25
 TUNABLE_OP_KIND = 26
 REFINEMENT_OP_KIND = 27
 ADVISEMENT_OP_KIND = 28
+DISCARD_OP_KIND = 29
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -131,6 +132,7 @@ OpNames = [
 "Creation Op",
 "Refinement Op",
 "Advisement Op",
+"Discard Op",
 ]
 
 INDEX_SPACE_EXPR = 0
@@ -3496,6 +3498,23 @@ class LogicalRegion(object):
                     return False
             return True
 
+    def invalidate_state(self, depth, field, op, req, perform_checks, point_set=None):
+        if point_set is None:
+            # First get the point set
+            return self.invalidate_state(depth, field, op, req,
+                                         perform_checks, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.invalidate_state(depth, field, op, req,
+                                                       perform_checks, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.invalidate_state(op, req):
+                    return False
+            return True
+
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks, 
                                       version_numbers=None, register_now=False, point_set=None):
         if point_set is None:
@@ -5399,6 +5418,10 @@ class EquivalenceSet(object):
             self.restricted_instances.remove(filter_inst)
         if filter_inst in self.valid_instances:
             self.valid_instances.remove(filter_inst)
+        return True
+
+    def invalidate_state(self, op, req):
+        self.reset()
         return True
 
     def perform_physical_verification(self, op, req, inst, perform_checks, register_now):
@@ -8086,6 +8109,14 @@ class Operation(object):
                 return False
         return True
 
+    def invalidate_state(self, index, req, perform_checks):
+        assert self.context
+        depth = self.context.find_enclosing_context_depth(req, mappings=None)
+        for field in req.fields:
+            if not req.logical_node.invalidate_state(depth, field, self, req, perform_checks):
+                return False
+        return True
+
     def verify_physical_requirement(self, index, req, perform_checks, registration, replicated=False):
         # We can end up with no mappings in control replicated cases
         if req.is_no_access() or len(req.fields) == 0 or self.mappings is None:
@@ -8305,6 +8336,10 @@ class Operation(object):
                 for index,req in iteritems(self.reqs):
                     if not self.remove_restriction(index, req, perform_checks):
                         return False
+            elif self.kind == DISCARD_OP_KIND:
+                for index,req in iteritems(self.reqs):
+                    if not self.invalidate_state(index, req, perform_checks):
+                        return False
             # If we are not a leaf task, go down the task tree
             elif self.kind == SINGLE_TASK_KIND and self.task:
                 if not self.task.perform_task_physical_verification(perform_checks):
@@ -8401,6 +8436,7 @@ class Operation(object):
             REFINEMENT_OP_KIND : "royalblue",
             ADVISEMENT_OP_KIND : "magenta",
             TUNABLE_OP_KIND : "lightcoral",
+            DISCARD_OP_KIND : "peachpuff",
             }[self.kind]
 
     @property
@@ -8552,6 +8588,8 @@ class Operation(object):
         if self.kind is CREATION_OP_KIND:
             return False
         if self.kind is DELETION_OP_KIND:
+            return False
+        if self.kind is DISCARD_OP_KIND:
             return False
         return True
 
@@ -11648,6 +11686,8 @@ copy_op_pat              = re.compile(
            "(?P<index>[0-9]+) (?P<src>[0-1]) (?P<dst>[0-1])")
 fill_op_pat              = re.compile(
     prefix+"Fill Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
+discard_op_pat           = re.compile(
+    prefix+"Discard Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 acquire_op_pat           = re.compile(
     prefix+"Acquire Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 release_op_pat           = re.compile(
@@ -12348,6 +12388,14 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(FILL_OP_KIND)
         op.set_name("Fill Op")
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, int(m.group('index')))
+        return True
+    m = discard_op_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_op_kind(DISCARD_OP_KIND)
+        op.set_name("Discard Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context, int(m.group('index')))
         return True

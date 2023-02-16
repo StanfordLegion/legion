@@ -1767,6 +1767,7 @@ namespace Legion {
     class FillOp;
     class IndexFillOp;
     class PointFillOp;
+    class DiscardOp;
     class AttachOp;
     class IndexAttachOp;
     class PointAttachOp;
@@ -1953,6 +1954,7 @@ namespace Legion {
     class ReplRefinementOp;
     class ReplFillOp;
     class ReplIndexFillOp;
+    class ReplDiscardOp;
     class ReplCopyOp;
     class ReplIndexCopyOp;
     class ReplDeletionOp;
@@ -2092,6 +2094,7 @@ namespace Legion {
     friend class Internal::FillOp;                          \
     friend class Internal::IndexFillOp;                     \
     friend class Internal::PointFillOp;                     \
+    friend class Internal::DiscardOp;                       \
     friend class Internal::AttachOp;                        \
     friend class Internal::IndexAttachOp;                   \
     friend class Internal::ReplIndexAttachOp;               \
@@ -2117,6 +2120,7 @@ namespace Legion {
     friend class Internal::ReplIndexTask;                   \
     friend class Internal::ReplFillOp;                      \
     friend class Internal::ReplIndexFillOp;                 \
+    friend class Internal::ReplDiscardOp;                   \
     friend class Internal::ReplCopyOp;                      \
     friend class Internal::ReplIndexCopyOp;                 \
     friend class Internal::ReplDeletionOp;                  \

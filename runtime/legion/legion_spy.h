@@ -580,6 +580,14 @@ namespace Legion {
                       context, unique_id, context_index);
       }
 
+      static inline void log_discard_operation(UniqueID context,
+                                               UniqueID unique_id,
+                                               size_t context_index)
+      {
+        log_spy.print("Discard Operation %llu %llu %zd",
+                      context, unique_id, context_index);
+      }
+
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
                                              size_t context_index,

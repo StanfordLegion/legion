@@ -1679,6 +1679,33 @@ namespace Legion {
     };
 
     /**
+     * \class ReplDiscardOp
+     * A discard operation that is aware that it is being
+     * exected in a control replication context.
+     */
+    class ReplDiscardOp : public DiscardOp {
+    public:
+      ReplDiscardOp(Runtime *rt);
+      ReplDiscardOp(const ReplDiscardOp &rhs) = delete;
+      virtual ~ReplDiscardOp(void);
+    public:
+      ReplDiscardOp& operator=(const ReplDiscardOp &rhs) = delete;
+    public:
+      void initialize_replication(ReplicateContext *ctx, bool is_first_local);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(bool free = true);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
+      virtual RtEvent finalize_complete_mapping(RtEvent event);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
+    protected:
+      RtBarrier collective_map_barrier;
+      bool is_first_local_shard;
+    };
+
+    /**
      * \class ReplCopyOp
      * A copy operation that is aware that it is being
      * executed in a control replication context.
