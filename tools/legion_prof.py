@@ -4764,6 +4764,11 @@ class State(object):
             if group in timepoints_dict:
                     stats_structure[node].append(group)
 
+        # remove nodes whose value is empty
+        for node in nodes:
+            if len(stats_structure[node]) == 0:
+                del stats_structure[node]
+
         json_file_name = os.path.join(output_dirname, "json", "utils.json")
 
         with open(json_file_name, "w") as json_file:
