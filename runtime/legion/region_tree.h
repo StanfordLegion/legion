@@ -1320,8 +1320,7 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
-                           unsigned *unsat_index = NULL,void **piece_list =NULL,
+                           bool compact, void **piece_list = NULL,
                            size_t *piece_list_size = NULL) = 0;
       // Return the expression with a resource ref on the expression
       virtual IndexSpaceExpression* create_layout_expression(
@@ -1392,8 +1391,7 @@ namespace Legion {
                                const LayoutConstraintSet &constraints,
                                const std::vector<FieldID> &field_ids,
                                const std::vector<size_t> &field_sizes,
-                               bool compact, LayoutConstraintKind *unsat_kind,
-                               unsigned *unsat_index, void **piece_list = NULL,
+                               bool compact, void **piece_list = NULL,
                                size_t *piece_list_size = NULL) const;
       template<int DIM, typename T>
       inline IndexSpaceExpression* create_layout_expression_internal(
@@ -1634,8 +1632,7 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
-                           unsigned *unsat_index = NULL,void **piece_list =NULL, 
+                           bool compact, void **piece_list = NULL, 
                            size_t *piece_list_size = NULL);
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
@@ -2556,8 +2553,7 @@ namespace Legion {
                            const LayoutConstraintSet &constraints,
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
-                           bool compact,LayoutConstraintKind *unsat_kind = NULL,
-                           unsigned *unsat_index = NULL,void **piece_list =NULL, 
+                           bool compact, void **piece_list = NULL, 
                            size_t *piece_list_size = NULL);
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);

@@ -3588,11 +3588,27 @@ namespace Legion {
         }
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, unsat_kind, unsat_index, 
-             &piece_list, &piece_list_size);
-        // If constraints were unsatisfied then return now
-        if (realm_layout == NULL)
-          return NULL;
+             field_sizes, compact, &piece_list, &piece_list_size);
+#ifdef DEBUG_LEGION
+        assert(realm_layout != NULL);
+#endif
+        // If we were doing a compact layout then Check that we met 
+        // the constraints for efficiency and number of pieces
+        if (compact)
+        {
+          const SpecializedConstraint &spec = 
+            constraints.specialized_constraint;
+          if (spec.max_pieces < piece_list_size)
+          {
+            if (unsat_kind != NULL)
+              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            if (unsat_index != NULL)
+              *unsat_index = 0;
+            if (footprint != NULL)
+              *footprint = realm_layout->bytes_used;
+            return NULL;
+          }
+        }
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
@@ -3804,11 +3820,10 @@ namespace Legion {
         }
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, unsat_kind, unsat_index, 
-             &piece_list, &piece_list_size);
-        // If constraints were unsatisfied then return now
-        if (realm_layout == NULL)
-          return NULL;
+             field_sizes, compact, &piece_list, &piece_list_size);
+#ifdef DEBUG_LEGION
+        assert(realm_layout != NULL);
+#endif
       }
       const size_t instance_footprint = realm_layout->bytes_used;
       // Save the footprint size if we need to
