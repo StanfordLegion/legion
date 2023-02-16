@@ -6167,6 +6167,7 @@ namespace Legion {
                 substitutions.find(arrival->rhs);
               if (finder != substitutions.end())
                 arrival->rhs = finder->second;
+              lhs = arrival->lhs;
               break;
             }
           case MERGE_EVENT:
