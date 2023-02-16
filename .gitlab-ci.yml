@@ -845,7 +845,7 @@ gcc9_cxx11_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnetex_ucx, *regent, *incremental,  *short]
-#   * MPI
+#   * MPI and multi-node legion prof
 gcc9_cxx11_release_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
@@ -853,11 +853,11 @@ gcc9_cxx11_release_mpi_legion:
 gcc9_cxx11_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *short, *shared]
-gcc9_cxx11_debug_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *shared]
+gcc9_cxx11_debug_mpi_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental]
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental, *prof, *short]
 #   * UCX
 gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
@@ -1342,10 +1342,13 @@ p100_cuda112_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
     <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 
 # HPCSDK (nvc++) tests:
-hpcsdk2211_cxx11_release_legion:
+# Make all HPC SDK tests use cmake since nvc++ is really slow and can't handle doing compile+link
+# for all tests without exceeding the two hour timeout, this means we're missing coverage of building
+# with make for nvc++ but we'll just have to live with that
+hpcsdk2211_cxx11_release_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *release, *cxx11_normal, *legion]
+    <<: [*hpcsdk2211, *release, *cxx11_normal, *cmake, *legion]
 hpcsdk2211_cxx11_debug_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:

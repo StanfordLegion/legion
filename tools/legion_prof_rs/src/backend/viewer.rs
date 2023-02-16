@@ -1,17 +1,19 @@
+use std::cmp::max;
 use std::collections::{BTreeMap, BTreeSet};
 
 use legion_prof_viewer::{
     app,
     data::{
-        Color32, DataSource, EntryID, EntryInfo, Field, Item, SlotTile, SummaryTile, TileID,
-        UtilPoint,
+        Color32, DataSource, EntryID, EntryInfo, Field, Item, ItemMeta, ItemUID, Rgba,
+        SlotMetaTile, SlotTile, SummaryTile, TileID, UtilPoint,
     },
     timestamp as ts,
 };
 
 use crate::backend::common::{MemGroup, ProcGroup, StatePostprocess};
 use crate::state::{
-    ChanID, ChanKind, Color, MemID, MemKind, NodeID, ProcID, ProcKind, State, Timestamp,
+    ChanID, ChanKind, Color, Container, ContainerEntry, MemID, MemKind, NodeID, ProcID, ProcKind,
+    ProfUID, State, Timestamp,
 };
 
 impl Into<ts::Timestamp> for Timestamp {
@@ -23,6 +25,12 @@ impl Into<ts::Timestamp> for Timestamp {
 impl Into<Timestamp> for ts::Timestamp {
     fn into(self) -> Timestamp {
         Timestamp(self.0.try_into().unwrap())
+    }
+}
+
+impl Into<ItemUID> for ProfUID {
+    fn into(self) -> ItemUID {
+        ItemUID(self.0)
     }
 }
 
@@ -43,6 +51,11 @@ enum EntryKind {
     Mem(MemID),
     ChanKind(Option<NodeID>),
     Chan(ChanID),
+}
+
+struct ItemInfo {
+    point_interval: ts::Interval,
+    expand: bool,
 }
 
 struct StateDataSource {
@@ -223,7 +236,12 @@ impl StateDataSource {
     const MIN_RATIO: f64 = 1000.0;
 
     /// Expand small items to improve visibility
-    fn expand_item(interval: &mut ts::Interval, tile_id: TileID, last: Option<&Item>) -> bool {
+    fn expand_item(
+        interval: &mut ts::Interval,
+        tile_id: TileID,
+        last: Option<&Item>,
+        merged: u64,
+    ) -> bool {
         let view_ratio = tile_id.0.duration_ns() as f64 / interval.duration_ns() as f64;
 
         let expand = view_ratio > Self::MAX_RATIO;
@@ -239,7 +257,7 @@ impl StateDataSource {
                 let last_ratio =
                     tile_id.0.duration_ns() as f64 / last.interval.duration_ns() as f64;
                 if interval.overlaps(last.interval) && last_ratio < Self::MIN_RATIO {
-                    if let Some((_, Field::U64(_))) = last.fields.get(0) {
+                    if merged > 0 {
                         // It's already a merged task, ok to keep merging
                     } else {
                         interval.start = last.interval.stop;
@@ -251,7 +269,13 @@ impl StateDataSource {
     }
 
     /// Merge small tasks to reduce load on renderer
-    fn merge_items(interval: ts::Interval, tile_id: TileID, last: &mut Item) -> bool {
+    fn merge_items(
+        interval: ts::Interval,
+        tile_id: TileID,
+        last: &mut Item,
+        last_meta: Option<&mut ItemMeta>,
+        merged: &mut u64,
+    ) -> bool {
         // Check for overlap with previous task. If so, either one or the
         // other task was expanded (since tasks don't normally overlap)
         // and this is a good opportunity to combine them.
@@ -263,36 +287,48 @@ impl StateDataSource {
                 last.interval.stop = interval.start;
             } else {
                 last.interval.stop = interval.stop;
-                last.color = Color(0x808080).into();
-                last.title = "Merged Tasks".to_owned();
-                if let Some((_, Field::U64(value))) = last.fields.get_mut(0) {
-                    *value += 1;
-                    if let (_, Field::Interval(interval)) = last.fields.get_mut(1).unwrap() {
-                        *interval = last.interval;
+                last.color = Color::GRAY.into();
+                if let Some(last_meta) = last_meta {
+                    if let Some((_, Field::U64(value))) = last_meta.fields.get_mut(0) {
+                        *value += 1;
+                    } else {
+                        last_meta.title = "Merged Tasks".to_owned();
+                        last_meta.fields = vec![("Number of Tasks".to_owned(), Field::U64(2))];
                     }
-                } else {
-                    last.fields = vec![
-                        ("Number of Tasks".to_owned(), Field::U64(2)),
-                        ("Interval".to_owned(), Field::Interval(last.interval)),
-                    ];
                 }
+                *merged += 1;
                 return true;
             }
         }
+        *merged = 0;
         false
     }
 
-    fn generate_proc_slot_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotTile {
-        let proc = self.state.procs.get(&proc_id).unwrap();
+    fn build_items<C>(
+        &self,
+        cont: &C,
+        tile_id: TileID,
+        mut item_metas: Option<&mut Vec<Vec<ItemMeta>>>,
+        get_meta: impl Fn(&C::Entry, ItemInfo) -> ItemMeta,
+    ) -> Vec<Vec<Item>>
+    where
+        C: Container,
+    {
         let mut items: Vec<Vec<Item>> = Vec::new();
-        items.resize_with(proc.max_levels as usize + 1, Vec::new);
-        for point in &proc.time_points {
+        let mut merged = Vec::new();
+        items.resize_with(cont.max_levels() + 1, Vec::new);
+        if let Some(ref mut item_metas) = item_metas {
+            item_metas.resize_with(cont.max_levels() + 1, Vec::new);
+        }
+        merged.resize(cont.max_levels() + 1, 0u64);
+        for point in cont.time_points() {
             if !point.first {
                 continue;
             }
 
-            let entry = proc.entry(point.entry);
-            let (base, time_range, _waiters) = (&entry.base, &entry.time_range, &entry.waiters);
+            let entry = cont.entry(point.entry);
+            let (base, time_range, waiters) =
+                (&entry.base(), &entry.time_range(), &entry.waiters());
 
             let point_interval = ts::Interval::new(
                 time_range.start.unwrap().into(),
@@ -303,23 +339,102 @@ impl StateDataSource {
             }
             let mut view_interval = point_interval.intersection(tile_id.0);
 
-            let level = base.level.unwrap();
+            let level = base.level.unwrap() as usize;
 
-            let expand =
-                Self::expand_item(&mut view_interval, tile_id, items[level as usize].last());
+            let expand = Self::expand_item(
+                &mut view_interval,
+                tile_id,
+                items[level].last(),
+                merged[level],
+            );
 
-            if let Some(last) = items[level as usize].last_mut() {
-                if Self::merge_items(view_interval, tile_id, last) {
+            if let Some(last) = items[level].last_mut() {
+                let last_meta = if let Some(ref mut item_metas) = item_metas {
+                    item_metas[level].last_mut()
+                } else {
+                    None
+                };
+                if Self::merge_items(view_interval, tile_id, last, last_meta, &mut merged[level]) {
                     continue;
                 }
             }
 
-            let name = self.state.proc_entry_name(entry);
-
-            let color = self.state.proc_entry_color(entry);
+            let color = entry.color(&self.state);
             let color: Color32 = color.into();
+            let color: Rgba = color.into();
 
-            let provenance = self.state.proc_entry_provenance(entry);
+            let item_meta = item_metas.as_ref().map(|_| {
+                get_meta(
+                    entry,
+                    ItemInfo {
+                        point_interval,
+                        expand,
+                    },
+                )
+            });
+
+            let mut add_item = |interval: ts::Interval, opacity: f32, status: Option<&str>| {
+                if !interval.overlaps(tile_id.0) {
+                    return;
+                }
+                let view_interval = interval.intersection(tile_id.0);
+                let color = (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
+                let item = Item {
+                    interval: view_interval,
+                    item_uid: base.prof_uid.into(),
+                    color,
+                };
+                items[level].push(item);
+                if let Some(ref mut item_metas) = item_metas {
+                    let mut item_meta = item_meta.clone().unwrap();
+                    if let Some(status) = status {
+                        item_meta
+                            .fields
+                            .insert(1, (status.to_owned(), Field::Interval(interval)));
+                    }
+                    item_metas[level].push(item_meta);
+                }
+            };
+            if let Some(waiters) = waiters {
+                let mut start = time_range.start.unwrap();
+                for wait in &waiters.wait_intervals {
+                    let running_interval = ts::Interval::new(start.into(), wait.start.into());
+                    let waiting_interval = ts::Interval::new(wait.start.into(), wait.ready.into());
+                    let ready_interval = ts::Interval::new(wait.ready.into(), wait.end.into());
+                    add_item(running_interval, 1.0, Some("Running"));
+                    add_item(waiting_interval, 0.15, Some("Waiting"));
+                    add_item(ready_interval, 0.45, Some("Ready"));
+                    start = max(start, wait.end);
+                }
+                let stop = time_range.stop.unwrap();
+                if start < stop {
+                    let running_interval = ts::Interval::new(start.into(), stop.into());
+                    add_item(running_interval, 1.0, Some("Running"));
+                }
+            } else {
+                add_item(view_interval, 1.0, None);
+            }
+        }
+        items
+    }
+
+    fn generate_proc_slot_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotTile {
+        let proc = self.state.procs.get(&proc_id).unwrap();
+        let items = self.build_items(proc, tile_id, None, |_, _| unreachable!());
+        SlotTile { tile_id, items }
+    }
+
+    fn generate_proc_slot_meta_tile(&self, proc_id: ProcID, tile_id: TileID) -> SlotMetaTile {
+        let proc = self.state.procs.get(&proc_id).unwrap();
+        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(proc, tile_id, Some(&mut item_metas), |entry, info| {
+            let ItemInfo {
+                point_interval,
+                expand,
+            } = info;
+
+            let name = entry.name(&self.state);
+            let provenance = entry.provenance(&self.state);
 
             let mut fields = Vec::new();
             if expand {
@@ -333,141 +448,118 @@ impl StateDataSource {
                 fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
             }
             if let Some(provenance) = provenance {
-                fields.push(("Provenance".to_owned(), Field::String(provenance)));
+                fields.push((
+                    "Provenance".to_owned(),
+                    Field::String(provenance.to_string()),
+                ));
             }
-            let item = Item {
-                interval: view_interval,
-                color,
+            ItemMeta {
                 title: name,
                 fields,
-            };
-
-            items[level as usize].push(item);
+            }
+        });
+        assert_eq!(items.len(), item_metas.len());
+        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+            assert_eq!(item_row.len(), item_meta_row.len());
         }
-        SlotTile { tile_id, items }
+        SlotMetaTile {
+            tile_id,
+            items: item_metas,
+        }
     }
 
     fn generate_mem_slot_tile(&self, mem_id: MemID, tile_id: TileID) -> SlotTile {
         let mem = self.state.mems.get(&mem_id).unwrap();
-        let mut items = Vec::new();
-        items.resize_with(mem.max_live_insts as usize + 1, Vec::new);
-        for point in &mem.time_points {
-            if !point.first {
-                continue;
-            }
+        let items = self.build_items(mem, tile_id, None, |_, _| unreachable!());
+        SlotTile { tile_id, items }
+    }
 
-            let inst = mem.insts.get(&point.entry).unwrap();
-            let (base, time_range) = (&inst.base, &inst.time_range);
+    fn generate_mem_slot_meta_tile(&self, mem_id: MemID, tile_id: TileID) -> SlotMetaTile {
+        let mem = self.state.mems.get(&mem_id).unwrap();
+        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(mem, tile_id, Some(&mut item_metas), |entry, info| {
+            let ItemInfo {
+                point_interval,
+                expand,
+            } = info;
 
-            let point_interval = ts::Interval::new(
-                time_range.start.unwrap().into(),
-                time_range.stop.unwrap().into(),
-            );
-            if !point_interval.overlaps(tile_id.0) {
-                continue;
-            }
-            let mut view_interval = point_interval.intersection(tile_id.0);
-
-            let level = base.level.unwrap();
-
-            let expand =
-                Self::expand_item(&mut view_interval, tile_id, items[level as usize].last());
-
-            if let Some(last) = items[level as usize].last_mut() {
-                if Self::merge_items(view_interval, tile_id, last) {
-                    continue;
-                }
-            }
-
-            let name = self.state.mem_inst_name(inst);
-
-            let color = self.state.mem_inst_color(inst);
-            let color: Color32 = color.into();
-
-            let provenance = self.state.mem_inst_provenance(inst);
+            let name = entry.name(&self.state);
+            let provenance = entry.provenance(&self.state);
 
             let mut fields = Vec::new();
             if expand {
                 fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
-            if let Some(initiation_op) = inst.op_id {
+            if let Some(initiation_op) = entry.initiation() {
                 fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
             }
             if let Some(provenance) = provenance {
-                fields.push(("Provenance".to_owned(), Field::String(provenance)));
+                fields.push((
+                    "Provenance".to_owned(),
+                    Field::String(provenance.to_string()),
+                ));
             }
-            let item = Item {
-                interval: view_interval,
-                color,
+            ItemMeta {
                 title: name,
                 fields,
-            };
-
-            items[level as usize].push(item);
+            }
+        });
+        assert_eq!(items.len(), item_metas.len());
+        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+            assert_eq!(item_row.len(), item_meta_row.len());
         }
-        SlotTile { tile_id, items }
+        SlotMetaTile {
+            tile_id,
+            items: item_metas,
+        }
     }
 
     fn generate_chan_slot_tile(&self, chan_id: ChanID, tile_id: TileID) -> SlotTile {
         let chan = self.state.chans.get(&chan_id).unwrap();
-        let mut items = Vec::new();
-        items.resize_with(chan.max_levels as usize + 1, Vec::new);
-        for point in &chan.time_points {
-            if !point.first {
-                continue;
-            }
+        let items = self.build_items(chan, tile_id, None, |_, _| unreachable!());
+        SlotTile { tile_id, items }
+    }
 
-            let entry = chan.entry(point.entry);
-            let (base, time_range) = (entry.base(), entry.time_range());
+    fn generate_chan_slot_meta_tile(&self, chan_id: ChanID, tile_id: TileID) -> SlotMetaTile {
+        let chan = self.state.chans.get(&chan_id).unwrap();
+        let mut item_metas: Vec<Vec<ItemMeta>> = Vec::new();
+        let items = self.build_items(chan, tile_id, Some(&mut item_metas), |entry, info| {
+            let ItemInfo {
+                point_interval,
+                expand,
+            } = info;
 
-            let point_interval = ts::Interval::new(
-                time_range.start.unwrap().into(),
-                time_range.stop.unwrap().into(),
-            );
-            if !point_interval.overlaps(tile_id.0) {
-                continue;
-            }
-            let mut view_interval = point_interval.intersection(tile_id.0);
-
-            let level = base.level.unwrap();
-
-            let expand =
-                Self::expand_item(&mut view_interval, tile_id, items[level as usize].last());
-
-            if let Some(last) = items[level as usize].last_mut() {
-                if Self::merge_items(view_interval, tile_id, last) {
-                    continue;
-                }
-            }
-
-            let name = self.state.chan_entry_name(entry);
-
-            let color = self.state.chan_entry_color(entry);
-            let color: Color32 = color.into();
-
-            let initiation_op = self.state.chan_entry_initiation(entry);
-            let provenance = self.state.chan_entry_provenance(entry);
+            let name = entry.name(&self.state);
+            let provenance = entry.provenance(&self.state);
 
             let mut fields = Vec::new();
             if expand {
                 fields.push(("(Expanded for Visibility)".to_owned(), Field::Empty));
             }
             fields.push(("Interval".to_owned(), Field::Interval(point_interval)));
-            fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
-            if let Some(provenance) = provenance {
-                fields.push(("Provenance".to_owned(), Field::String(provenance)));
+            if let Some(initiation_op) = entry.initiation() {
+                fields.push(("Initiation".to_owned(), Field::U64(initiation_op.0)));
             }
-            let item = Item {
-                interval: view_interval,
-                color,
+            if let Some(provenance) = provenance {
+                fields.push((
+                    "Provenance".to_owned(),
+                    Field::String(provenance.to_string()),
+                ));
+            }
+            ItemMeta {
                 title: name,
                 fields,
-            };
-
-            items[level as usize].push(item);
+            }
+        });
+        assert_eq!(items.len(), item_metas.len());
+        for (item_row, item_meta_row) in items.iter().zip(item_metas.iter()) {
+            assert_eq!(item_row.len(), item_meta_row.len());
         }
-        SlotTile { tile_id, items }
+        SlotMetaTile {
+            tile_id,
+            items: item_metas,
+        }
     }
 }
 
@@ -539,15 +631,16 @@ impl DataSource for StateDataSource {
                 kind_index += 1;
 
                 let color = match kind {
-                    ProcKind::GPU => Color32::from_rgb(107, 142, 35), // steelblue
-                    ProcKind::CPU => Color32::from_rgb(70, 130, 180), // olivedrab
-                    ProcKind::Utility => Color32::from_rgb(220, 20, 60), // crimson
-                    ProcKind::IO => Color32::from_rgb(255, 69, 0),    // orangered
-                    ProcKind::ProcGroup => Color32::from_rgb(255, 69, 0), // orangered
-                    ProcKind::ProcSet => Color32::from_rgb(255, 69, 0), // orangered
-                    ProcKind::OpenMP => Color32::from_rgb(255, 69, 0), // orangered
-                    ProcKind::Python => Color32::from_rgb(70, 130, 180), // olivedrab
+                    ProcKind::GPU => Color::OLIVEDRAB,
+                    ProcKind::CPU => Color::STEELBLUE,
+                    ProcKind::Utility => Color::CRIMSON,
+                    ProcKind::IO => Color::ORANGERED,
+                    ProcKind::ProcGroup => Color::ORANGERED,
+                    ProcKind::ProcSet => Color::ORANGERED,
+                    ProcKind::OpenMP => Color::ORANGERED,
+                    ProcKind::Python => Color::OLIVEDRAB,
                 };
+                let color: Color32 = color.into();
 
                 let mut proc_slots = Vec::new();
                 if node.is_some() {
@@ -607,21 +700,22 @@ impl DataSource for StateDataSource {
 
                 let color = match kind {
                     MemKind::NoMemKind => unreachable!(),
-                    MemKind::Global => Color32::from_rgb(220, 20, 60), // crimson
-                    MemKind::System => Color32::from_rgb(70, 130, 180), // olivedrab
-                    MemKind::Registered => Color32::from_rgb(139, 0, 139), // darkmagenta
-                    MemKind::Socket => Color32::from_rgb(255, 69, 0),  // orangered
-                    MemKind::ZeroCopy => Color32::from_rgb(220, 20, 60), // crimson
-                    MemKind::Framebuffer => Color32::from_rgb(0, 0, 255), // blue
-                    MemKind::Disk => Color32::from_rgb(184, 134, 11),  // darkgoldenrod
-                    MemKind::HDF5 => Color32::from_rgb(70, 130, 180),  // olivedrab
-                    MemKind::File => Color32::from_rgb(255, 69, 0),    // orangered
-                    MemKind::L3Cache => Color32::from_rgb(220, 20, 60), // crimson
-                    MemKind::L2Cache => Color32::from_rgb(139, 0, 139), // darkmagenta
-                    MemKind::L1Cache => Color32::from_rgb(70, 130, 180), // olivedrab
-                    MemKind::GPUManaged => Color32::from_rgb(139, 0, 139), // darkmagenta
-                    MemKind::GPUDynamic => Color32::from_rgb(255, 69, 0), // orangered
+                    MemKind::Global => Color::CRIMSON,
+                    MemKind::System => Color::OLIVEDRAB,
+                    MemKind::Registered => Color::DARKMAGENTA,
+                    MemKind::Socket => Color::ORANGERED,
+                    MemKind::ZeroCopy => Color::CRIMSON,
+                    MemKind::Framebuffer => Color::BLUE,
+                    MemKind::Disk => Color::DARKGOLDENROD,
+                    MemKind::HDF5 => Color::OLIVEDRAB,
+                    MemKind::File => Color::ORANGERED,
+                    MemKind::L3Cache => Color::CRIMSON,
+                    MemKind::L2Cache => Color::DARKMAGENTA,
+                    MemKind::L1Cache => Color::OLIVEDRAB,
+                    MemKind::GPUManaged => Color::DARKMAGENTA,
+                    MemKind::GPUDynamic => Color::ORANGERED,
                 };
+                let color: Color32 = color.into();
 
                 let mut mem_slots = Vec::new();
                 if node.is_some() {
@@ -659,7 +753,7 @@ impl DataSource for StateDataSource {
             {
                 let kind_id = node_id.child(kind_index);
 
-                let color = Color32::from_rgb(255, 69, 0); // orangered
+                let color: Color32 = Color::ORANGERED.into();
 
                 let mut chan_slots = Vec::new();
                 if node.is_some() {
@@ -797,6 +891,16 @@ impl DataSource for StateDataSource {
             EntryKind::Proc(proc_id) => self.generate_proc_slot_tile(*proc_id, tile_id),
             EntryKind::Mem(mem_id) => self.generate_mem_slot_tile(*mem_id, tile_id),
             EntryKind::Chan(chan_id) => self.generate_chan_slot_tile(*chan_id, tile_id),
+            _ => unreachable!(),
+        }
+    }
+
+    fn fetch_slot_meta_tile(&mut self, entry_id: &EntryID, tile_id: TileID) -> SlotMetaTile {
+        let entry = self.entry_map.get(entry_id).unwrap();
+        match entry {
+            EntryKind::Proc(proc_id) => self.generate_proc_slot_meta_tile(*proc_id, tile_id),
+            EntryKind::Mem(mem_id) => self.generate_mem_slot_meta_tile(*mem_id, tile_id),
+            EntryKind::Chan(chan_id) => self.generate_chan_slot_meta_tile(*chan_id, tile_id),
             _ => unreachable!(),
         }
     }
