@@ -854,10 +854,10 @@ gcc9_cxx11_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *shared]
-gcc9_cxx11_debug_mpi_prof_regent:
+gcc9_cxx11_release_mpi_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental, *prof, *short]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *mpi, *regent, *incremental, *prof, *short]
 #   * UCX
 gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
