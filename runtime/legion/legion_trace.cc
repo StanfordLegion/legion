@@ -6311,7 +6311,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::rewrite_frontiers(
-                               const std::map<unsigned,unsigned> &substitutions)
+                                     std::map<unsigned,unsigned> &substitutions)
     //--------------------------------------------------------------------------
     {
       std::vector<std::pair<unsigned,unsigned> > to_add;
@@ -6331,7 +6331,22 @@ namespace Legion {
       }
       for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
             to_add.begin(); it != to_add.end(); it++)
-        frontiers.insert(*it);
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          frontiers.find(it->first);
+        if (finder != frontiers.end())
+        {
+          // Handle the case where we recorded two different frontiers
+          // but they are now being merged together from the same source
+          // and we can therefore substitute the first one for the second
+#ifdef DEBUG_LEGION
+          assert(substitutions.find(it->second) == substitutions.end());
+#endif
+          substitutions[it->second] = finder->second;
+        }
+        else
+          frontiers.insert(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9508,7 +9523,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::rewrite_frontiers(
-                               const std::map<unsigned,unsigned> &substitutions)
+                                     std::map<unsigned,unsigned> &substitutions)
     //--------------------------------------------------------------------------
     {
       PhysicalTemplate::rewrite_frontiers(substitutions);
