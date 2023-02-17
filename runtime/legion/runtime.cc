@@ -1470,7 +1470,7 @@ namespace Legion {
     void FutureImpl::set_local(const void *value, size_t size, bool own)
     //--------------------------------------------------------------------------
     {
-      FutureInstance *instance = 
+      FutureInstance *instance = (size == 0) ? NULL : 
         FutureInstance::create_local(value, size, own, runtime);
       set_result(ApEvent::NO_AP_EVENT, instance);
     }
