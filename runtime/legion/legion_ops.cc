@@ -21580,7 +21580,7 @@ namespace Legion {
       // Create the result and the point attach operations
       ExternalResourcesImpl *result = new ExternalResourcesImpl(ctx,
           indexes.size(), upper_bound, launch_bounds, launcher.parent,
-          launcher.privilege_fields);
+          requirement.privilege_fields);
       points.resize(indexes.size());
       for (unsigned idx = 0; idx < indexes.size(); idx++)
       {
