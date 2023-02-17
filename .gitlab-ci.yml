@@ -1348,7 +1348,7 @@ p100_cuda112_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
 hpcsdk2211_cxx11_release_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *release, *cxx11_normal, *cmake, *legion]
+    <<: [*hpcsdk2211, *release, *cxx11_normal, *cmake, *legion, *ctest]
 hpcsdk2211_cxx11_debug_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
