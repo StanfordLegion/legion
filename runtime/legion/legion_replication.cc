@@ -7438,19 +7438,6 @@ namespace Legion {
             footprint, constraints, field_set, field_sizes, external_mask,
             mask_index_map, unique_event, node, serdez, 
             manager_did.load(), mapping);
-          // If we're the owner address space, record that we have 
-          // instances on all other address spaces in the control
-          // replicated parent task's collective mapping
-          if (manager->is_owner())
-          {
-            for (unsigned idx = 0; idx < mapping->size(); idx++)
-            {
-              const AddressSpaceID space = (*mapping)[idx];
-              if (space == manager->owner_space)
-                continue;
-              manager->update_remote_instances(space);
-            }
-          }
           if (mapping->remove_reference())
             delete mapping;
           shard_manager->exchange_shard_local_op_data(context_index,
