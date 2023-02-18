@@ -1314,20 +1314,20 @@ p100_cuda112_gcc9_cxx14_release_ucx_cuda_regent:
 clang12_cxx17_debug_kokkos_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion, *ctest]
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 clang10_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_kokkos_openmp, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+    <<: [*clang10, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
 # clang14_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
-#     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+#     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
 p100_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion]
+    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion, *ctest]
 p100_cuda112_clang10_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
