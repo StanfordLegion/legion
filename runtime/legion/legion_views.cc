@@ -6386,12 +6386,7 @@ namespace Legion {
       else
       {
         if (valid_state == NOT_VALID_STATE)
-        {
-          if (!local_views.empty())
-            make_valid(false/*need lock*/);
-          else
-            add_base_gc_ref(INTERNAL_VALID_REF);
-        }
+          make_valid(false/*need lock*/);
         else // restore ourselves back to full valid state
           valid_state = FULL_VALID_STATE;
         // Not the owner so need to send a message on down the chain
@@ -6419,15 +6414,12 @@ namespace Legion {
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(!local_views.empty());
-        assert(is_owner() || collective_mapping->contains(local_space));
-#endif
         // If we're already fully valid then there is nothing more to do
         if (valid_state == FULL_VALID_STATE)
           return;
         // Send the messages to the children to get them in flight
-        if (collective_mapping != NULL)
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
         {
           std::vector<AddressSpaceID> children;
           collective_mapping->get_children(owner_space, local_space, children);
