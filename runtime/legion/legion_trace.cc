@@ -2177,29 +2177,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(InnerContext *ctx, TraceViewSet &source,
-                               DistributedID own_did, RegionNode *r)
-      : context(ctx), region(r), owner_did(
-          (own_did > 0) ? own_did : ctx->did), has_collective_views(false)
-    //--------------------------------------------------------------------------
-    {
-      region->add_nested_resource_ref(owner_did);
-      if (owner_did == ctx->did)
-        context->add_base_resource_ref(TRACE_REF);
-      else
-        context->add_nested_resource_ref(owner_did);
-      conditions.swap(source.conditions);
-      for (ViewExprs::const_iterator vit = 
-            conditions.begin(); vit != conditions.end(); ++vit)
-      {
-        vit->first->add_nested_valid_ref(owner_did);
-        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-              vit->second.begin(); it != vit->second.end(); ++it)
-          it->first->add_nested_expression_reference(owner_did);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {

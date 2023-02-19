@@ -557,8 +557,6 @@ namespace Legion {
     public:
       TraceViewSet(InnerContext *context, DistributedID owner_did,
                    RegionNode *region);
-      TraceViewSet(InnerContext *context, TraceViewSet &source,
-                   DistributedID owner_did, RegionNode *region);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
@@ -619,7 +617,7 @@ namespace Legion {
     protected:
       typedef LegionMap<LogicalView*,
                         FieldMaskSet<IndexSpaceExpression> > ViewExprs;
-    protected:
+    public:
       InnerContext *const context;
       RegionNode *const region;
       const DistributedID owner_did;

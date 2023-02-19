@@ -11883,7 +11883,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        pack_state(rez, logical_owner_space, set_expr, true/*covers*/,
+        pack_state(rez, logical_owner_space, did, set_expr, true/*covers*/,
                     all_ones, true/*pack guards*/);
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
@@ -17641,9 +17641,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::pack_state(Serializer &rez,const AddressSpaceID target,
-                             IndexSpaceExpression *expr, const bool expr_covers, 
-                             const FieldMask &mask, const bool pack_guards)
+    void EquivalenceSet::pack_state(Serializer &rez,
+                          const AddressSpaceID target, DistributedID target_did,
+                          IndexSpaceExpression *expr, const bool expr_covers, 
+                          const FieldMask &mask, const bool pack_guards)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
@@ -17662,7 +17663,7 @@ namespace Legion {
                            pack_guards ? &read_only_guards : NULL, 
                            pack_guards ? &reduction_fill_guards : NULL, 
                            precondition_updates, anticondition_updates, 
-                           postcondition_updates);
+                           postcondition_updates, target_did);
       pack_updates(rez, target, valid_updates, initialized_updates,
            reduction_updates, restricted_updates, released_updates, 
            &read_only_guards, &reduction_fill_guards, precondition_updates, 
@@ -17967,7 +17968,7 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       if (num_preconditions > 0)
       {
-        precondition_updates = new TraceViewSet(context, 0/*did*/, region_node);
+        precondition_updates = new TraceViewSet(context, did, region_node);
         precondition_updates->unpack(derez, num_preconditions, 
                                      source, ready_events);
       }
@@ -17976,7 +17977,7 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       if (num_anticonditions > 0)
       {
-        anticondition_updates = new TraceViewSet(context,0/*did*/,region_node); 
+        anticondition_updates = new TraceViewSet(context, did, region_node);
         anticondition_updates->unpack(derez, num_anticonditions, 
                                      source, ready_events);
       }
@@ -17985,7 +17986,7 @@ namespace Legion {
       TraceViewSet *postcondition_updates = NULL;
       if (num_postconditions > 0)
       {
-        postcondition_updates = new TraceViewSet(context,0/*did*/,region_node);
+        postcondition_updates = new TraceViewSet(context, did, region_node);
         postcondition_updates->unpack(derez, num_postconditions, 
                                      source, ready_events);
       }
@@ -18223,7 +18224,7 @@ namespace Legion {
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates);
+                             postcondition_updates, dst->did);
       }
       else if (dst->set_expr->is_empty())
         find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
@@ -18231,7 +18232,7 @@ namespace Legion {
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates);
+                             postcondition_updates, dst->did);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
             restricted_updates, released_updates, precondition_updates,
@@ -18300,7 +18301,8 @@ namespace Legion {
         rez.serialize(local_space);
         rez.serialize(done_event);
         rez.serialize<bool>(forward_to_owner);
-        pack_state(rez, target_space, overlap, overlap_covers, mask, false);
+        pack_state(rez, target_space, target, overlap, 
+                   overlap_covers, mask, false/*pack guards*/);
       }
       runtime->send_equivalence_set_clone_response(target_space, rez);
       if (invalidate_overlap)
@@ -18329,7 +18331,8 @@ namespace Legion {
               FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
-              TraceViewSet *&postcondition_updates) const
+              TraceViewSet *&postcondition_updates,
+              DistributedID target_did) const
     //--------------------------------------------------------------------------
     {
       // Get updates from the total valid instances
@@ -18616,7 +18619,8 @@ namespace Legion {
       {
         if (precondition_updates == NULL)
         {
-          precondition_updates = new TraceViewSet(context,0/*did*/,region_node);
+          precondition_updates = 
+            new TraceViewSet(context, target_did, region_node);
           tracing_preconditions->find_overlaps(*precondition_updates,
                                  overlap_expr, overlap_covers, mask);
           if (precondition_updates->empty())
@@ -18634,7 +18638,7 @@ namespace Legion {
         if (anticondition_updates == NULL)
         {
           anticondition_updates =
-            new TraceViewSet(context, 0/*did*/, region_node);
+            new TraceViewSet(context, target_did, region_node);
           tracing_anticonditions->find_overlaps(*anticondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (anticondition_updates->empty())
@@ -18652,7 +18656,7 @@ namespace Legion {
         if (postcondition_updates == NULL)
         {
           postcondition_updates = 
-            new TraceViewSet(context, 0/*did*/, region_node);
+            new TraceViewSet(context, target_did, region_node);
           tracing_postconditions->find_overlaps(*postcondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (postcondition_updates->empty())
@@ -18834,9 +18838,10 @@ namespace Legion {
       {
         if (tracing_preconditions == NULL)
         {
-          tracing_preconditions =
-            new TraceViewSet(context, *precondition_updates, did,
-                             region_node);
+#ifdef DEBUG_LEGION
+          assert(precondition_updates->owner_did == did);
+#endif
+          tracing_preconditions = precondition_updates;
           if (unpack_references)
             tracing_preconditions->unpack_references();
         }
@@ -18845,15 +18850,17 @@ namespace Legion {
           precondition_updates->merge(*tracing_preconditions);
           if (unpack_references)
             precondition_updates->unpack_references();
+          delete precondition_updates;
         }
       }
       if (anticondition_updates != NULL)
       {
         if (tracing_anticonditions == NULL)
         {
-          tracing_anticonditions =
-            new TraceViewSet(context, *anticondition_updates, did,
-                             region_node);
+#ifdef DEBUG_LEGION
+          assert(anticondition_updates->owner_did == did);
+#endif
+          tracing_anticonditions = anticondition_updates;
           if (unpack_references)
             tracing_anticonditions->unpack_references();
         }
@@ -18862,15 +18869,17 @@ namespace Legion {
           anticondition_updates->merge(*tracing_anticonditions);
           if (unpack_references)
             anticondition_updates->unpack_references();
+          delete anticondition_updates;
         }
       }
       if (postcondition_updates != NULL)
       {
         if (tracing_postconditions == NULL)
         {
-          tracing_postconditions =
-            new TraceViewSet(context, *postcondition_updates, did,
-                             region_node);
+#ifdef DEBUG_LEGION
+          assert(postcondition_updates->owner_did == did);
+#endif
+          tracing_postconditions = postcondition_updates;
           if (unpack_references)
             tracing_postconditions->unpack_references();
         }
@@ -18879,6 +18888,7 @@ namespace Legion {
           postcondition_updates->merge(*tracing_postconditions);
           if (unpack_references)
             postcondition_updates->unpack_references();
+          delete postcondition_updates;
         }
       }
     }

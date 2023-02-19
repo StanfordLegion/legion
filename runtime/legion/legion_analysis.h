@@ -3255,6 +3255,7 @@ namespace Legion {
       void process_replication_invalidation(std::vector<RtEvent> &applied);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
+            DistributedID target_did,
             IndexSpaceExpression *expr, const bool expr_covers,
             const FieldMask &mask, const bool pack_guards);
       void unpack_state_and_apply(Deserializer &derez, 
@@ -3285,7 +3286,7 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
-            TraceViewSet *&postcondition_updates) const;
+            TraceViewSet *&postcondition_updates, DistributedID target) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
