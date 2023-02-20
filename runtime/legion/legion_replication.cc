@@ -7252,14 +7252,14 @@ namespace Legion {
                 if (!collective_instances)
                   single_broadcast->broadcast(
                       {instance, ready_event, unique_event});
+                constraints.memory_constraint =
+                  MemoryConstraint(instance.get_location().kind());
               }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);
               constraints.field_constraint = 
                 FieldConstraint(requirement.privilege_fields, 
                                 false/*contiguous*/, false/*inorder*/);
-              constraints.memory_constraint = 
-                MemoryConstraint(instance.get_location().kind());
               // TODO: Fill in the other constraints: 
               // OrderingConstraint, SplittingConstraints DimensionConstraints,
               // AlignmentConstraints, OffsetConstraints
@@ -7288,14 +7288,14 @@ namespace Legion {
                 if (!collective_instances)
                   single_broadcast->broadcast(
                       {instance, ready_event, unique_event});
+                constraints.memory_constraint =
+                  MemoryConstraint(instance.get_location().kind());
               }
               constraints.specialized_constraint = 
                 SpecializedConstraint(LEGION_HDF5_FILE_SPECIALIZE);
               constraints.field_constraint = 
                 FieldConstraint(requirement.privilege_fields, 
                                 false/*contiguous*/, false/*inorder*/);
-              constraints.memory_constraint = 
-                MemoryConstraint(instance.get_location().kind());
               constraints.ordering_constraint = 
                 layout_constraint_set.ordering_constraint;
               break;
@@ -7314,6 +7314,8 @@ namespace Legion {
                 if (!collective_instances)
                   single_broadcast->broadcast(
                       {instance, ready_event, unique_event});
+                constraints.memory_constraint =
+                  MemoryConstraint(instance.get_location().kind());
               }
               constraints = layout_constraint_set;
               constraints.specialized_constraint = 
@@ -7332,6 +7334,8 @@ namespace Legion {
         instance = result.instance;
         ready_event = result.ready_event;
         unique_event = result.unique_event;
+        constraints.memory_constraint =
+          MemoryConstraint(instance.get_location().kind());
       }
       else if ((runtime->profiler != NULL) && making_instance)
       {
