@@ -380,8 +380,8 @@ impl StateDataSource {
                 let view_interval = interval.intersection(tile_id.0);
                 let color = (Rgba::WHITE.multiply(1.0 - opacity) + color.multiply(opacity)).into();
                 let item = Item {
-                    interval: view_interval,
                     item_uid: base.prof_uid.into(),
+                    interval: view_interval,
                     color,
                 };
                 items[level].push(item);
@@ -454,8 +454,8 @@ impl StateDataSource {
                 ));
             }
             ItemMeta {
-                title: name,
                 item_uid: entry.base().prof_uid.into(),
+                title: name,
                 fields,
             }
         });
@@ -502,8 +502,8 @@ impl StateDataSource {
                 ));
             }
             ItemMeta {
-                title: name,
                 item_uid: entry.base().prof_uid.into(),
+                title: name,
                 fields,
             }
         });
@@ -550,8 +550,8 @@ impl StateDataSource {
                 ));
             }
             ItemMeta {
-                title: name,
                 item_uid: entry.base().prof_uid.into(),
+                title: name,
                 fields,
             }
         });
