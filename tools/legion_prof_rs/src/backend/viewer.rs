@@ -455,6 +455,7 @@ impl StateDataSource {
             }
             ItemMeta {
                 title: name,
+                item_uid: entry.base().prof_uid.into(),
                 fields,
             }
         });
@@ -502,6 +503,7 @@ impl StateDataSource {
             }
             ItemMeta {
                 title: name,
+                item_uid: entry.base().prof_uid.into(),
                 fields,
             }
         });
@@ -549,6 +551,7 @@ impl StateDataSource {
             }
             ItemMeta {
                 title: name,
+                item_uid: entry.base().prof_uid.into(),
                 fields,
             }
         });
