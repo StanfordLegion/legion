@@ -20,6 +20,7 @@
 
 #include <memory>
 #include <cuda.h>
+#include <nvml.h>
 #if defined(REALM_USE_CUDART_HIJACK)
 #include <cuda_runtime_api.h>   // For cudaDeviceProp
 #endif
@@ -67,6 +68,7 @@
     abort(); \
   } while(0)
 #else
+#define REPORT_CU_ERROR(cmd, ret) \
   do { \
     fprintf(stderr, "CU: %s = %d\n", cmd, ret); \
     abort(); \
@@ -78,6 +80,19 @@
   if(ret != CUDA_SUCCESS) REPORT_CU_ERROR(#cmd, ret); \
 } while(0)
 
+#define REPORT_NVML_ERROR(cmd, ret)                                                      \
+  do {                                                                                   \
+    fprintf(stderr, "NVML: %s = %d\n", cmd, ret);                                        \
+    abort();                                                                             \
+  } while(0)
+
+#define CHECK_NVML(cmd)                                                                  \
+  do {                                                                                   \
+    nvmlReturn_t ret = (cmd);                                                            \
+    if(ret != NVML_SUCCESS)                                                              \
+      REPORT_NVML_ERROR(#cmd, ret);                                                      \
+  } while(0)
+
 namespace Realm {
 
   namespace Cuda {
@@ -86,11 +101,16 @@ namespace Realm {
     {
       int index;  // index used by CUDA runtime
       CUdevice device;
+      nvmlDevice_t nvml_dev;
+      CUuuid uuid;
       int major;
       int minor;
       static const size_t MAX_NAME_LEN = 256;
       char name[MAX_NAME_LEN];
       size_t totalGlobalMem;
+      static const size_t MAX_NUMA_NODE_LEN = 20;
+      bool has_numa_preference;
+      unsigned long numa_node_affinity[MAX_NUMA_NODE_LEN];
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
 
       #ifdef REALM_USE_CUDART_HIJACK
@@ -1194,6 +1214,7 @@ namespace Realm {
   __op__(cuCtxSynchronize);                                                    \
   __op__(cuDeviceCanAccessPeer);                                               \
   __op__(cuDeviceGet);                                                         \
+  __op__(cuDeviceGetUuid);                                                     \
   __op__(cuDeviceGetAttribute);                                                \
   __op__(cuDeviceGetCount);                                                    \
   __op__(cuDeviceGetName);                                                     \
@@ -1258,6 +1279,23 @@ namespace Realm {
 #else
   #define CUDA_DRIVER_FNPTR(name) (name)
 #endif
+
+#define NVML_FNPTR(name) (name##_fnptr)
+
+#if NVML_API_VERSION >= 11
+#define NVML_11_APIS(__op__) __op__(nvmlDeviceGetMemoryAffinity);
+#else
+#define NVML_11_APIS(__op__)
+#endif
+
+#define NVML_APIS(__op__)                                                                \
+  __op__(nvmlInit);                                                                      \
+  __op__(nvmlDeviceGetHandleByUUID);                                                     \
+  NVML_11_APIS(__op__);
+
+#define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;
+    NVML_APIS(DECL_FNPTR_EXTERN)
+#undef DECL_FNPTR_EXTERN
 
   }; // namespace Cuda
 
