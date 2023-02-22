@@ -2882,7 +2882,7 @@ class IndexPartition(object):
         self.color = Point(0)
         self.children = dict()
         self.instances = dict()
-        self.disjoint = False
+        self.disjoint = None
         self.complete = None 
         self.name = None
         self.depth = None
