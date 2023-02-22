@@ -11883,8 +11883,8 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        pack_state(rez, logical_owner_space, did, set_expr, true/*covers*/,
-                    all_ones, true/*pack guards*/);
+        pack_state(rez, logical_owner_space, did, region_node, set_expr,
+                    true/*covers*/, all_ones, true/*pack guards*/);
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
       invalidate_state(set_expr, true/*covers*/, all_ones);
@@ -17514,7 +17514,7 @@ namespace Legion {
                             invalidate_overlap, forward_to_owner);
       }
       else
-        src->clone_to_remote(did, target_space, region_node->row_source,
+        src->clone_to_remote(did, target_space, region_node,
              mask, applied_events, invalidate_overlap, forward_to_owner);
     }
 
@@ -17641,8 +17641,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::pack_state(Serializer &rez,
-                          const AddressSpaceID target, DistributedID target_did,
+    void EquivalenceSet::pack_state(Serializer &rez,const AddressSpaceID target,
+                          DistributedID target_did, RegionNode *target_region,
                           IndexSpaceExpression *expr, const bool expr_covers, 
                           const FieldMask &mask, const bool pack_guards)
     //--------------------------------------------------------------------------
@@ -17663,7 +17663,7 @@ namespace Legion {
                            pack_guards ? &read_only_guards : NULL, 
                            pack_guards ? &reduction_fill_guards : NULL, 
                            precondition_updates, anticondition_updates, 
-                           postcondition_updates, target_did);
+                           postcondition_updates, target_did, target_region);
       pack_updates(rez, target, valid_updates, initialized_updates,
            reduction_updates, restricted_updates, released_updates, 
            &read_only_guards, &reduction_fill_guards, precondition_updates, 
@@ -18224,7 +18224,7 @@ namespace Legion {
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates, dst->did);
+                             postcondition_updates, dst->did, dst->region_node);
       }
       else if (dst->set_expr->is_empty())
         find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
@@ -18232,7 +18232,7 @@ namespace Legion {
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates, dst->did);
+                             postcondition_updates, dst->did, dst->region_node);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
             restricted_updates, released_updates, precondition_updates,
@@ -18254,7 +18254,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_remote(DistributedID target, 
-                     AddressSpaceID target_space, IndexSpaceNode *target_node, 
+                     AddressSpaceID target_space, RegionNode *target_region, 
                      FieldMask mask, std::set<RtEvent> &applied_events, 
                      const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
@@ -18270,7 +18270,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(target);
           rez.serialize(target_space);
-          rez.serialize(target_node->handle);
+          rez.serialize(target_region->handle);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
@@ -18280,8 +18280,8 @@ namespace Legion {
         applied_events.insert(done_event);
         return;
       }
-      IndexSpaceExpression *overlap = 
-        runtime->forest->intersect_index_spaces(set_expr, target_node); 
+      IndexSpaceExpression *overlap = runtime->forest->intersect_index_spaces(
+                                          set_expr, target_region->row_source);
 #ifdef DEBUG_LEGION
       assert(!overlap->is_empty());
 #endif
@@ -18290,8 +18290,8 @@ namespace Legion {
       const bool overlap_covers = (overlap_volume == set_volume); 
       if (overlap_covers)
         overlap = set_expr;
-      else if (overlap_volume == target_node->get_volume())
-        overlap = target_node;
+      else if (overlap_volume == target_region->row_source->get_volume())
+        overlap = target_region->row_source;
       // If we make it here, then we've got valid data for the all the fields
       const RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
@@ -18301,7 +18301,7 @@ namespace Legion {
         rez.serialize(local_space);
         rez.serialize(done_event);
         rez.serialize<bool>(forward_to_owner);
-        pack_state(rez, target_space, target, overlap, 
+        pack_state(rez, target_space, target, target_region, overlap,
                    overlap_covers, mask, false/*pack guards*/);
       }
       runtime->send_equivalence_set_clone_response(target_space, rez);
@@ -18332,7 +18332,7 @@ namespace Legion {
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
               TraceViewSet *&postcondition_updates,
-              DistributedID target_did) const
+              DistributedID target_did, RegionNode *target_region) const
     //--------------------------------------------------------------------------
     {
       // Get updates from the total valid instances
@@ -18620,7 +18620,7 @@ namespace Legion {
         if (precondition_updates == NULL)
         {
           precondition_updates = 
-            new TraceViewSet(context, target_did, region_node);
+            new TraceViewSet(context, target_did, target_region);
           tracing_preconditions->find_overlaps(*precondition_updates,
                                  overlap_expr, overlap_covers, mask);
           if (precondition_updates->empty())
@@ -18638,7 +18638,7 @@ namespace Legion {
         if (anticondition_updates == NULL)
         {
           anticondition_updates =
-            new TraceViewSet(context, target_did, region_node);
+            new TraceViewSet(context, target_did, target_region);
           tracing_anticonditions->find_overlaps(*anticondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (anticondition_updates->empty())
@@ -18656,7 +18656,7 @@ namespace Legion {
         if (postcondition_updates == NULL)
         {
           postcondition_updates = 
-            new TraceViewSet(context, target_did, region_node);
+            new TraceViewSet(context, target_did, target_region);
           tracing_postconditions->find_overlaps(*postcondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (postcondition_updates->empty())
@@ -18836,11 +18836,12 @@ namespace Legion {
       }
       if (precondition_updates != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(precondition_updates->owner_did == did);
+        assert(precondition_updates->region == region_node);
+#endif
         if (tracing_preconditions == NULL)
         {
-#ifdef DEBUG_LEGION
-          assert(precondition_updates->owner_did == did);
-#endif
           tracing_preconditions = precondition_updates;
           if (unpack_references)
             tracing_preconditions->unpack_references();
@@ -18855,11 +18856,12 @@ namespace Legion {
       }
       if (anticondition_updates != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(anticondition_updates->owner_did == did);
+        assert(anticondition_updates->region == region_node);
+#endif
         if (tracing_anticonditions == NULL)
         {
-#ifdef DEBUG_LEGION
-          assert(anticondition_updates->owner_did == did);
-#endif
           tracing_anticonditions = anticondition_updates;
           if (unpack_references)
             tracing_anticonditions->unpack_references();
@@ -18874,11 +18876,12 @@ namespace Legion {
       }
       if (postcondition_updates != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(postcondition_updates->owner_did == did);
+        assert(postcondition_updates->region == region_node);
+#endif
         if (tracing_postconditions == NULL)
         {
-#ifdef DEBUG_LEGION
-          assert(postcondition_updates->owner_did == did);
-#endif
           tracing_postconditions = postcondition_updates;
           if (unpack_references)
             tracing_postconditions->unpack_references();
@@ -18907,7 +18910,7 @@ namespace Legion {
       derez.deserialize(target);
       AddressSpaceID target_space;
       derez.deserialize(target_space);
-      IndexSpace handle;
+      LogicalRegion handle;
       derez.deserialize(handle);
       FieldMask mask;
       derez.deserialize(mask);
@@ -18933,9 +18936,9 @@ namespace Legion {
       }
       else
       {
-        IndexSpaceNode *node = runtime->forest->get_node(handle);
-        set->clone_to_remote(target, target_space, node, mask, applied_events,
-                             invalidate_overlap, forward_to_owner);
+        RegionNode *target_region = runtime->forest->get_node(handle);
+        set->clone_to_remote(target, target_space, target_region, mask,
+                  applied_events, invalidate_overlap, forward_to_owner);
       }
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 

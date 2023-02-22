@@ -3255,7 +3255,7 @@ namespace Legion {
       void process_replication_invalidation(std::vector<RtEvent> &applied);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
-            DistributedID target_did,
+            DistributedID target_did, RegionNode *target_region,
             IndexSpaceExpression *expr, const bool expr_covers,
             const FieldMask &mask, const bool pack_guards);
       void unpack_state_and_apply(Deserializer &derez, 
@@ -3268,7 +3268,7 @@ namespace Legion {
                           const bool invalidate_overlap,
                           const bool forward_to_owner);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
-                    IndexSpaceNode *target_node, FieldMask mask,
+                    RegionNode *target_region, FieldMask mask,
                     std::set<RtEvent> &applied_events,
                     const bool invalidate_overlap, const bool forward_to_owner);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
@@ -3286,7 +3286,8 @@ namespace Legion {
             FieldMaskSet<CopyFillGuard> *reduction_fill_guard_updates,
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
-            TraceViewSet *&postcondition_updates, DistributedID target) const;
+            TraceViewSet *&postcondition_updates, 
+            DistributedID target, RegionNode *target_region) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
