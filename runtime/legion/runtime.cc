@@ -23629,7 +23629,9 @@ namespace Legion {
     /*static*/ ReductionOpID& Runtime::get_current_static_reduction_id(void)
     //--------------------------------------------------------------------------
     {
-      static ReductionOpID current_redop_id = LEGION_MAX_APPLICATION_REDOP_ID;
+      // Make sure to reserve space for the built-in reduction operators
+      static ReductionOpID current_redop_id = 
+        LEGION_MAX_APPLICATION_REDOP_ID + LEGION_REDOP_LAST;
       return current_redop_id;
     }
 
