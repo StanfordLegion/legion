@@ -19837,6 +19837,9 @@ namespace Legion {
           const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instances.size() > 1);
+#endif
       // Find which shard is the owner
       const ShardID tid_shard = shard_manager->find_collective_owner(tid);
       if (tid_shard != owner_shard->shard_id)
@@ -22131,6 +22134,9 @@ namespace Legion {
           const std::vector<DistributedID> &instances, RtEvent &ready)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(instances.size() > 1);
+#endif
       const RtUserEvent to_trigger = Runtime::create_rt_user_event();
       CollectiveResult *result = new CollectiveResult(instances);
       result->add_reference();

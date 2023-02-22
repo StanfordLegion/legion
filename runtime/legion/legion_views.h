@@ -1488,7 +1488,6 @@ namespace Legion {
                                 Operation *op, const unsigned index,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const std::vector<CollectiveAnalysis*> &analyze,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 const uint64_t allreduce_tag);
@@ -1516,7 +1515,6 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const std::vector<CollectiveAnalysis*> &analyze,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events);
       void perform_multi_allreduce(const uint64_t allreduce_tag,
@@ -1525,7 +1523,6 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                                const std::vector<CollectiveAnalysis*> &analyze,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events);
       ApEvent initialize_allreduce_with_reductions(
@@ -1534,7 +1531,6 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
                     std::vector<std::vector<CopySrcDstField> > &local_fields,
@@ -1555,7 +1551,6 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
@@ -1566,7 +1561,6 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,
@@ -1586,7 +1580,6 @@ namespace Legion {
                                 IndexSpaceExpression *copy_expression,
                                 const FieldMask &copy_mask,
                                 const PhysicalTraceInfo &trace_info,
-                    const std::vector<CollectiveAnalysis*> &local_analyses,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 std::vector<ApEvent> &instance_events,

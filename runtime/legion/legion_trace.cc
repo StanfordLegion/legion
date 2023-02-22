@@ -3461,10 +3461,12 @@ namespace Legion {
         if (!mask)
           break;
       }
+      Runtime *runtime = context->runtime;
       // We've got the names of any collective views that need to be
       // refined to not include this individual view, so go ahead and
       // ask the context to make that collective view for us
       std::vector<RtEvent> views_ready;
+      std::map<CollectiveView*,PhysicalManager*> individual_results;
       std::map<CollectiveView*,InnerContext::CollectiveResult*> results;
       for (FieldMaskSet<CollectiveView>::const_iterator it = 
             to_refine.begin(); it != to_refine.end(); it++)
@@ -3477,10 +3479,20 @@ namespace Legion {
 #endif
         dids.erase(finder);
         RtEvent ready;
-        InnerContext::CollectiveResult *result =
-          context->find_or_create_collective_view(region->handle.get_tree_id(),
-              dids, ready);
-        results[it->first] = result;
+        if (dids.size() > 1)
+        {
+          InnerContext::CollectiveResult *result =
+            context->find_or_create_collective_view(
+                region->handle.get_tree_id(), dids, ready);
+          results[it->first] = result;
+        }
+        else
+        {
+          // Just making a single view at this point
+          PhysicalManager *manager = 
+            runtime->find_or_request_instance_manager(dids.back(), ready);
+          individual_results[it->first] = manager;
+        }
         if (ready.exists())
           views_ready.push_back(ready);
       }
@@ -3493,17 +3505,30 @@ namespace Legion {
       for (FieldMaskSet<CollectiveView>::const_iterator rit =
             to_refine.begin(); rit != to_refine.end(); rit++)
       {
-        InnerContext::CollectiveResult *result = results[rit->first];
-        // Then wait for the collective view to be registered
-        if (result->ready_event.exists() && 
-            !result->ready_event.has_triggered())
-          result->ready_event.wait();
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
-          context->runtime->find_or_request_logical_view(
-            result->collective_did, ready));
-        if (result->remove_reference())
-          delete result;
+        InstanceView *view = NULL;
+        std::map<CollectiveView*,PhysicalManager*>::const_iterator
+          individual_finder = individual_results.find(rit->first);
+        if (individual_finder == individual_results.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(results.find(rit->first) != results.end());
+#endif
+          // Common case
+          InnerContext::CollectiveResult *result = results[rit->first];
+          // Then wait for the collective view to be registered
+          if (result->ready_event.exists() && 
+              !result->ready_event.has_triggered())
+            result->ready_event.wait();
+          view = static_cast<InstanceView*>(
+              runtime->find_or_request_logical_view(
+                result->collective_did, ready));
+          if (result->remove_reference())
+            delete result;
+        }
+        else // Unusual case of an downgrading to an individual view
+          view = context->create_instance_top_view(individual_finder->second,
+                                                   runtime->address_space);
         ViewExprs::iterator finder = conditions.find(rit->first);
         if (finder->second.get_valid_mask() == rit->second)
         {
