@@ -4123,6 +4123,7 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
+      virtual RtEvent detach_external_instance(PhysicalManager *manager);
       virtual bool is_point_detach(void) const { return false; }
     protected:
       void compute_parent_index(void);

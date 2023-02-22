@@ -7509,6 +7509,7 @@ namespace Legion {
       ReplCollectiveViewCreator<CollectiveViewCreator<DetachOp> >::activate();
       collective_map_barrier = RtBarrier::NO_RT_BARRIER;
       effects_barrier = ApBarrier::NO_AP_BARRIER;
+      exchange_index = 0;
       collective_instances = false;
       is_first_local_shard = false;
     }
@@ -7639,6 +7640,42 @@ namespace Legion {
       Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
       detach_event = effects_barrier;
       DetachOp::trigger_complete();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplDetachOp::detach_external_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      if (collective_instances)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        ShardManager *shard_manager = repl_ctx->shard_manager;
+        // See if all local shards have the same manager or not
+        if (is_first_local_shard)
+        {
+          shard_manager->exchange_shard_local_op_data(context_index,
+                                          exchange_index++, manager);
+          return manager->detach_external_instance();
+        }
+        else
+        {
+          PhysicalManager *first_manager = 
+            shard_manager->find_shard_local_op_data<PhysicalManager*>(
+                                      context_index, exchange_index++);
+          // If the managers are different then we do the detach as well
+          if (manager != first_manager)
+            return manager->detach_external_instance();
+        }
+      }
+      else if (manager->is_owner())
+        return manager->detach_external_instance();
+      return RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
