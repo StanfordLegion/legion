@@ -18189,7 +18189,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(dst->did);
           rez.serialize(local_space);
-          rez.serialize(dst->region_node->row_source->handle);
+          rez.serialize(dst->region_node->handle);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
