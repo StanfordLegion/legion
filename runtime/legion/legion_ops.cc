@@ -1788,35 +1788,42 @@ namespace Legion {
       assert(reported.exists());
       assert(!reported.has_triggered());
 #endif
+      std::string prov_str;
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL) {
+        std::stringstream prov_ss;
+        prov_ss << ", provenance: " << provenance->human_str();
+        prov_str = prov_ss.str();
+      }
       // Read-only or reduction usage of uninitialized data is always an error
       if (IS_READ_ONLY(usage))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
-                      "Region requirement %d of operation %s (UID %lld) in "
+                      "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d) with "
                       "read-only privileges", index, get_logging_name(), 
-                      get_unique_op_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id(), field_string, 
-                      handle.get_index_space().get_id(),
+                      get_unique_op_id(), prov_str.c_str(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
                       handle.get_tree_id())
       else if (IS_REDUCE(usage))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
-                      "Region requirement %d of operation %s (UID %lld) in "
+                      "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d) with "
                       "reduction privileges", index, get_logging_name(), 
-                      get_unique_op_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id(), field_string, 
-                      handle.get_index_space().get_id(),
+                      get_unique_op_id(), prov_str.c_str(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
                       handle.get_tree_id())
       else // Read-write usage is just a warning
         REPORT_LEGION_WARNING(LEGION_WARNING_UNINITIALIZED_USE,
-                      "Region requirement %d of operation %s (UID %lld) in "
+                      "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d)", index, 
-                      get_logging_name(), get_unique_op_id(),
+                      get_logging_name(), get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                       field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
@@ -25879,4 +25886,3 @@ namespace Legion {
 }; // namespace Legion 
 
 // EOF
-
