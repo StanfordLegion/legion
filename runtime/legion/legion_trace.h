@@ -1120,7 +1120,6 @@ namespace Legion {
       static void handle_transitive_reduction(const void *args);
       static void handle_delete_template(const void *args);
     protected:
-      unsigned find_memo_entry(const TraceLocalID &tlid);
       void record_memo_entry(const TraceLocalID &tlid, unsigned entry,
                              unsigned op_kind);
     protected:
@@ -1182,6 +1181,8 @@ namespace Legion {
       std::deque<std::map<TraceLocalID,MemoizableOp*> > operations;
       std::deque<std::pair<ApEvent,bool/*recurrent*/> > pending_replays;
       // Pair in memo_entries is <entry index, Operation::Kind>
+      // This data structure is only used during template capture and
+      // can be ignored after the template has been optimized
       std::map<TraceLocalID,std::pair<unsigned,unsigned> > memo_entries;
     private:
       CachedPremappings cached_premappings;

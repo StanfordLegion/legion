@@ -4704,7 +4704,6 @@ namespace Legion {
       std::map<TraceLocalID,MemoizableOp*> &ops = operations.back();
 #ifdef DEBUG_LEGION
       assert(ops.find(tid) == ops.end());
-      assert(memo_entries.find(tid) != memo_entries.end());
 #endif
       ops[tid] = memoizable;
     }
@@ -7608,18 +7607,6 @@ namespace Legion {
     {
       const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
       delete pargs->tpl;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned PhysicalTemplate::find_memo_entry(const TraceLocalID &op_key)
-    //--------------------------------------------------------------------------
-    {
-      std::map<TraceLocalID,std::pair<unsigned,unsigned> >::iterator 
-        entry_finder = memo_entries.find(op_key);
-#ifdef DEBUG_LEGION
-      assert(entry_finder != memo_entries.end());
-#endif
-      return entry_finder->second.first;
     }
 
     //--------------------------------------------------------------------------
