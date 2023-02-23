@@ -5600,6 +5600,23 @@ class EquivalenceSet(object):
         if register:
             preconditions = inst.find_verification_use_dependences(self.depth, 
                                               self.field, self.point, op, req)
+            # Handle the unusual case of replicated operations with writing requirements
+            # If any of them are the same index from a different shard then we ignore them
+            if replicated and req.is_write():
+                assert op.context.shard is not None
+                for prev in preconditions:
+                    if prev.context.shard is not None and \
+                        prev.context.op.context is op.context.op.context and \
+                        prev.context_index == op.context_index:
+                        assert prev.context.shard != op.context.shard
+                        # There are only a few kinds of operations which will map the
+                        # same instance with read-write privileges across shards
+                        assert op.kind == ATTACH_OP_KIND or op.kind == DETACH_OP_KIND or \
+                                op.kind == ACQUIRE_OP_KIND or op.kind == RELEASE_OP_KIND
+                        assert op.kind == prev.kind
+                        # If we duplicated with another shard on this instance then there
+                        # is nothing more for us to do here
+                        return True
             if perform_checks:
                 bad = check_preconditions(preconditions, op)
                 if bad is not None:
@@ -8320,7 +8337,6 @@ class Operation(object):
                     if not shard.perform_task_physical_verification(perform_checks):
                         return False
         else:
-            # Attach operations do not register themselves as users currently in legion
             if self.reqs:
                 for index,req in iteritems(self.reqs):
                     if not self.verify_physical_requirement(index, req, perform_checks,
