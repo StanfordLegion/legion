@@ -7595,7 +7595,6 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -7618,6 +7617,7 @@ namespace Legion {
       }
       // Handle the case for marking when the copy completes
       record_completion_effect(copy_complete_event);
+      complete_mapping();
       complete_execution();
     }
 
@@ -8522,10 +8522,13 @@ namespace Legion {
       // Enumerate the points
       enumerate_points(true/*replaying*/);
       // Then call replay analysis on all of them
-      for (std::vector<PointCopyOp*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
-        (*it)->trigger_replay();
-      complete_mapping();
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->trigger_replay();
+      }
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
       complete_execution();
     }
 
@@ -19494,7 +19497,6 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      complete_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -19516,6 +19518,7 @@ namespace Legion {
         }
       }
       record_completion_effect(fill_complete_event);
+      complete_mapping();
       complete_execution();
     }
 
@@ -19815,10 +19818,13 @@ namespace Legion {
       // Enumerate the points
       enumerate_points(true/*replaying*/);
       // Then call replay analysis on all of them
-      for (std::vector<PointFillOp*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
-        (*it)->trigger_replay();
-      complete_mapping();
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->trigger_replay();
+      }
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
       complete_execution();
     }
 
