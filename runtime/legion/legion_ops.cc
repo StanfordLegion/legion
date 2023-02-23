@@ -16717,9 +16717,9 @@ namespace Legion {
       future_map = fm;
 #ifdef DEBUG_LEGION
       assert(sources.empty());
-      assert(future_map.impl != NULL);
 #endif
-      future_map.impl->get_all_futures(sources);
+      if (future_map.impl != NULL)
+        future_map.impl->get_all_futures(sources);
     }
 
     //--------------------------------------------------------------------------

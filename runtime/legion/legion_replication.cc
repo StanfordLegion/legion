@@ -4479,20 +4479,24 @@ namespace Legion {
       assert(sources.empty());
       assert(future_map.impl != NULL);
 #endif
-      if (!thunk->need_all_futures())
+      if (future_map.impl != NULL)
       {
+        if (!thunk->need_all_futures())
+        {
 #ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
+          ReplicateContext *repl_ctx = 
+            dynamic_cast<ReplicateContext*>(parent_ctx);
+          assert(repl_ctx != NULL);
 #else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+          ReplicateContext *repl_ctx =
+            static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        future_map.impl->get_shard_local_futures(
-            repl_ctx->owner_shard->shard_id, sources);
+          future_map.impl->get_shard_local_futures(
+              repl_ctx->owner_shard->shard_id, sources);
+        }
+        else
+          future_map.impl->get_all_futures(sources);
       }
-      else
-        future_map.impl->get_all_futures(sources);
     }
 
     //--------------------------------------------------------------------------
