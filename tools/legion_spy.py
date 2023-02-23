@@ -5605,7 +5605,7 @@ class EquivalenceSet(object):
             if replicated and req.is_write():
                 assert op.context.shard is not None
                 for prev in preconditions:
-                    if prev.context.shard is not None and \
+                    if isinstance(prev,Operation) and prev.context.shard is not None and \
                         prev.context.op.context is op.context.op.context and \
                         prev.context_index == op.context_index:
                         assert prev.context.shard != op.context.shard
