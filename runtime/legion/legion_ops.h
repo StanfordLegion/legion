@@ -1133,7 +1133,7 @@ namespace Legion {
         { assert(false); return ApEvent::NO_AP_EVENT; }
       virtual MemoizableOp* get_memoizable(void) { return this; }
     protected:
-      void invoke_memoize_operation(MapperID mapper_id);
+      void invoke_memoize_operation(void);
       RtEvent record_complete_replay(const TraceInfo &trace_info,
                     RtEvent ready = RtEvent::NO_RT_EVENT,
                     ApEvent precondition = ApEvent::NO_AP_EVENT);

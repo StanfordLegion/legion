@@ -1269,7 +1269,8 @@ namespace Legion {
     Mappable* Operation::get_mappable(void)
     //--------------------------------------------------------------------------
     {
-      return parent_ctx->get_task();
+      // should never be called on this class
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -4071,7 +4072,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoizableOp::invoke_memoize_operation(MapperID mapper_id)
+    void MemoizableOp::invoke_memoize_operation(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4079,18 +4080,24 @@ namespace Legion {
       assert(!runtime->no_tracing);
       assert(!runtime->no_physical_tracing);
 #endif
-      Mapper::MemoizeInput  input;
-      Mapper::MemoizeOutput output;
-      input.trace_id = trace->get_trace_id();
-      output.memoize = false;
-      Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
       Mappable *mappable = get_mappable();
+      if (mappable != NULL)
+      {
+        Mapper::MemoizeInput  input;
+        Mapper::MemoizeOutput output;
+        input.trace_id = trace->get_trace_id();
+        output.memoize = false;
+        Processor mapper_proc = parent_ctx->get_executing_processor();
+        MapperManager *mapper = runtime->find_mapper(mapper_proc, 
+                                                     mappable->map_id);
 #ifdef DEBUG_LEGION
-      assert(mappable != NULL);
+        assert(mappable != NULL);
 #endif
-      mapper->invoke_memoize_operation(mappable, &input, &output);
-      if (output.memoize)
+        mapper->invoke_memoize_operation(mappable, &input, &output);
+        if (output.memoize)
+          memo_state = MEMO_REQ;
+      }
+      else // Assume that all operations which are not mappable can be memoized
         memo_state = MEMO_REQ;
     }
 

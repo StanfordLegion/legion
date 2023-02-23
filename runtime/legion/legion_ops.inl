@@ -41,7 +41,7 @@ namespace Legion {
       {
         this->tpl = physical_trace->get_current_template();
         if ((this->tpl == NULL) || !this->tpl->is_replaying())
-          this->invoke_memoize_operation(this->get_mappable()->map_id);
+          this->invoke_memoize_operation();
         else
           this->memo_state = OP::MEMO_REQ; // replaying so memoization required
       }
