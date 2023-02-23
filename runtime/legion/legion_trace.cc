@@ -9543,10 +9543,15 @@ namespace Legion {
             local_subscriptions.find(it->first);
 #ifdef DEBUG_LEGION
           assert(subscription_finder != local_subscriptions.end());
-          assert(local_subscriptions.find(finder->second) == 
-                  local_subscriptions.end());
 #endif
-          local_subscriptions[finder->second].swap(subscription_finder->second);
+          std::map<unsigned,std::set<ShardID> >::iterator local_finder =
+            local_subscriptions.find(finder->second);
+          if (local_finder != local_subscriptions.end())
+            local_finder->second.insert(subscription_finder->second.begin(),
+                                        subscription_finder->second.end());
+          else
+            local_subscriptions[finder->second].swap(
+                                        subscription_finder->second);
           local_subscriptions.erase(subscription_finder);
           std::map<unsigned,ApBarrier>::iterator to_delete = it++;
           local_frontiers.erase(to_delete);
