@@ -374,7 +374,12 @@ namespace Legion {
               std::vector<LegionColor> colors;
               child_node->get_colors(colors);
               if (!colors.empty())
-                existing_colors.insert(colors.begin(), colors.end());
+              {
+                for (std::vector<LegionColor>::const_iterator it =
+                      colors.begin(); it != colors.end(); it++)
+                  if (LEGION_MAX_APPLICATION_PARTITION_COLOR < (*it))
+                    existing_colors.insert(*it);
+              }
             }
           }
           else
@@ -389,7 +394,12 @@ namespace Legion {
               std::vector<LegionColor> colors;
               child_node->get_colors(colors);
               if (!colors.empty())
-                existing_colors.insert(colors.begin(), colors.end());
+              {
+                for (std::vector<LegionColor>::const_iterator it =
+                      colors.begin(); it != colors.end(); it++)
+                  if (LEGION_MAX_APPLICATION_PARTITION_COLOR < (*it))
+                    existing_colors.insert(*it);
+              }
             }
             delete itr;
           }
@@ -414,10 +424,10 @@ namespace Legion {
               part_color = (*prev) + 1;
           }
           else
-            part_color = 0; 
+            part_color = LEGION_MAX_APPLICATION_PARTITION_COLOR + 1; 
         }
         else
-          part_color = 0;
+          part_color = LEGION_MAX_APPLICATION_PARTITION_COLOR + 1;
 #ifdef DEBUG_LEGION
         assert(part_color != INVALID_COLOR);
 #endif
