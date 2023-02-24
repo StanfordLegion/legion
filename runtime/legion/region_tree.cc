@@ -408,7 +408,7 @@ namespace Legion {
         if (!existing_colors.empty())
         {
           std::set<LegionColor>::const_iterator next = existing_colors.begin();
-          if ((*next) == 0)
+          if ((*next) == (LEGION_MAX_APPLICATION_PARTITION_COLOR + 1))
           {
             std::set<LegionColor>::const_iterator prev = next++;
             while (next != existing_colors.end())
