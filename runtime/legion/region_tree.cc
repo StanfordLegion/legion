@@ -374,7 +374,12 @@ namespace Legion {
               std::vector<LegionColor> colors;
               child_node->get_colors(colors);
               if (!colors.empty())
-                existing_colors.insert(colors.begin(), colors.end());
+              {
+                for (std::vector<LegionColor>::const_iterator it =
+                      colors.begin(); it != colors.end(); it++)
+                  if (LEGION_MAX_APPLICATION_PARTITION_COLOR < (*it))
+                    existing_colors.insert(*it);
+              }
             }
           }
           else
@@ -389,7 +394,12 @@ namespace Legion {
               std::vector<LegionColor> colors;
               child_node->get_colors(colors);
               if (!colors.empty())
-                existing_colors.insert(colors.begin(), colors.end());
+              {
+                for (std::vector<LegionColor>::const_iterator it =
+                      colors.begin(); it != colors.end(); it++)
+                  if (LEGION_MAX_APPLICATION_PARTITION_COLOR < (*it))
+                    existing_colors.insert(*it);
+              }
             }
             delete itr;
           }
@@ -398,7 +408,7 @@ namespace Legion {
         if (!existing_colors.empty())
         {
           std::set<LegionColor>::const_iterator next = existing_colors.begin();
-          if ((*next) == 0)
+          if ((*next) == (LEGION_MAX_APPLICATION_PARTITION_COLOR + 1))
           {
             std::set<LegionColor>::const_iterator prev = next++;
             while (next != existing_colors.end())
@@ -414,10 +424,10 @@ namespace Legion {
               part_color = (*prev) + 1;
           }
           else
-            part_color = 0; 
+            part_color = LEGION_MAX_APPLICATION_PARTITION_COLOR + 1; 
         }
         else
-          part_color = 0;
+          part_color = LEGION_MAX_APPLICATION_PARTITION_COLOR + 1;
 #ifdef DEBUG_LEGION
         assert(part_color != INVALID_COLOR);
 #endif
@@ -8079,6 +8089,7 @@ namespace Legion {
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
+        next_available_color(LEGION_MAX_APPLICATION_PARTITION_COLOR + 1),
         send_references((parent != NULL) ? 1 : 0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
@@ -8439,45 +8450,18 @@ namespace Legion {
       if (is_owner())
       {
         AutoLock n_lock(node_lock);
-        // If the user made a suggestion see if it was right
-        if (suggestion != INVALID_COLOR)
+        if ((suggestion == INVALID_COLOR) || 
+            (suggestion < next_available_color))
         {
-          // If someone already has it then they can't use it
-          if (color_map.find(suggestion) == color_map.end())
-          {
-            color_map[suggestion] = NULL;
-            return suggestion;
-          }
-          else
-            return INVALID_COLOR;
+          suggestion = next_available_color++;
+#ifdef DEBUG_LEGION
+          // Check for overflow
+          assert(suggestion < next_available_color);
+#endif
         }
-        if (color_map.empty())
-        {
-          // save a space for later
-          color_map[0] = NULL;
-          return 0;
-        }
-        std::map<LegionColor,IndexPartNode*>::const_iterator next = 
-          color_map.begin();
-        if (next->first > 0)
-        {
-          // save a space for later
-          color_map[0] = NULL;
-          return 0;
-        }
-        std::map<LegionColor,IndexPartNode*>::const_iterator prev = next++;
-        while (next != color_map.end())
-        {
-          if (next->first != (prev->first + 1))
-          {
-            // save a space for later
-            color_map[prev->first+1] = NULL;
-            return prev->first+1;
-          }
-          prev = next++;
-        }
-        color_map[prev->first+1] = NULL;
-        return prev->first+1;
+        else // Just skip ahead a bunch of colors presuming we won't run out
+          next_available_color = suggestion + 1;
+        return suggestion;
       }
       else
       {
