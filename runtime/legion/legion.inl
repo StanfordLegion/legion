@@ -19681,20 +19681,40 @@ namespace Legion {
                                     IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                                     bool perform_intersections,
                                     PartitionKind part_kind, Color color,
-                                    const char *provenance)
+                                    const char *provenance, bool collective)
     //--------------------------------------------------------------------------
     {
-      // Make realm index spaces for each of the points and then we can call
-      // the base domain version of this method which takes ownership of the
-      // sparsity maps that have been created
-      std::map<DomainPoint,Domain> domains;
-      for (typename std::map<Point<COLOR_DIM,COLOR_T>,
-            std::vector<Rect<DIM,T> > >::const_iterator it =
-              rectangles.begin(); it != rectangles.end(); it++)
-        domains[DomainPoint(it->first)] = DomainT<DIM,T>(it->second); 
-      return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
-            IndexSpace(parent), domains, IndexSpace(color_space),
-            perform_intersections, part_kind, color, provenance));
+      if (collective)
+      {
+        std::map<DomainPoint,Future> futures;
+        for (typename std::map<Point<COLOR_DIM,COLOR_T>,
+              std::vector<Rect<DIM,T> > >::const_iterator it =
+                rectangles.begin(); it != rectangles.end(); it++)
+        {
+          const DomainT<DIM,T> domain(it->second);
+          futures[DomainPoint(it->first)] = Future::from_value(domain);
+        }
+        FutureMap fm = construct_future_map(ctx, IndexSpace(color_space),
+                              futures, true/*collective*/, 0/*shard id*/, 
+                              true/*implicit sharding*/, provenance);
+        return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), fm, IndexSpace(color_space),
+              perform_intersections, part_kind, color, provenance));
+      }
+      else
+      {
+        // Make realm index spaces for each of the points and then we can call
+        // the base domain version of this method which takes ownership of the
+        // sparsity maps that have been created
+        std::map<DomainPoint,Domain> domains;
+        for (typename std::map<Point<COLOR_DIM,COLOR_T>,
+              std::vector<Rect<DIM,T> > >::const_iterator it =
+                rectangles.begin(); it != rectangles.end(); it++)
+          domains[DomainPoint(it->first)] = DomainT<DIM,T>(it->second); 
+        return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), domains, IndexSpace(color_space),
+              perform_intersections, part_kind, color, provenance));
+      }
     }
 
     //--------------------------------------------------------------------------

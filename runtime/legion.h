@@ -5954,6 +5954,8 @@ namespace Legion {
        * @param color the color of the result of the partition
        * @param provenance an optional string describing the provenance 
        *                   information for this operation
+       * @param collective whether shards from a control replicated context
+       *                   should work collectively to construct the map
        * @return a new index partition of the parent index space
        */
       template<int DIM, typename COORD_T, int COLOR_DIM, typename COLOR_COORD_T>
@@ -5966,7 +5968,8 @@ namespace Legion {
                                   bool perform_intersections = true,
                                   PartitionKind part_kind = LEGION_COMPUTE_KIND,
                                   Color color = LEGION_AUTO_GENERATE_ID,
-                                  const char *provenance = NULL);
+                                  const char *provenance = NULL,
+                                  bool collective = false);
       ///@}
       ///@{
       /**
