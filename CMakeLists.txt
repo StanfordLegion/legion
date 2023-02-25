@@ -392,7 +392,8 @@ endif()
 # UCX configuration
 #------------------------------------------------------------------------------#
 if("${Legion_NETWORKS}" MATCHES .*ucx.*)
-  find_package(UCX REQUIRED)
+  find_package(ucx 1.14.0 REQUIRED CONFIG)
+  message(STATUS "Found UCX: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES})")
   find_package(MPI REQUIRED) # for MPI bootstrap plugin
   # define variable for realm_defines.h
   set(REALM_USE_UCX ON)

@@ -439,7 +439,7 @@ if(REALM_USE_MPI)
 endif()
 
 if(REALM_USE_UCX)
-  target_link_libraries(RealmRuntime PRIVATE UCX::UCP)
+  target_link_libraries(RealmRuntime PRIVATE ucx::ucp)
   # build the MPI bootstrap plugin
   add_library(realm_ucp_bootstrap_mpi MODULE
     realm/ucx/bootstrap/bootstrap_mpi.c)

@@ -216,6 +216,9 @@ def build_regent(root_dir, use_cmake, cmake_exe, extra_flags,
          ('CMAKE_PREFIX_PATH', llvm_dir)]
     )
 
+    if use_cmake and hdf_enabled():
+        extra_flags = extra_flags + ['-DHDF5_ROOT=%s' % hdf_dir]
+
     subprocess.check_call(
         [os.path.join(root_dir, 'install.py'),
          '--with-terra', terra_dir,

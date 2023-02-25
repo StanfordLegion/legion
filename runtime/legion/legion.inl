@@ -19674,6 +19674,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_rectangles(
+                                    Context ctx, IndexSpaceT<DIM,T> parent,
+                                    const std::map<Point<COLOR_DIM,COLOR_T>,
+                                      std::vector<Rect<DIM,T> > > &rectangles,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    bool perform_intersections,
+                                    PartitionKind part_kind, Color color,
+                                    const char *provenance)
+    //--------------------------------------------------------------------------
+    {
+      // Make realm index spaces for each of the points and then we can call
+      // the base domain version of this method which takes ownership of the
+      // sparsity maps that have been created
+      std::map<DomainPoint,Domain> domains;
+      for (typename std::map<Point<COLOR_DIM,COLOR_T>,
+            std::vector<Rect<DIM,T> > >::const_iterator it =
+              rectangles.begin(); it != rectangles.end(); it++)
+        domains[DomainPoint(it->first)] = DomainT<DIM,T>(it->second); 
+      return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+            IndexSpace(parent), domains, IndexSpace(color_space),
+            perform_intersections, part_kind, color, provenance));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
                                     LogicalRegionT<DIM,T> handle,
                                     LogicalRegionT<DIM,T> parent,
