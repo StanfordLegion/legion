@@ -2345,7 +2345,6 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     protected:
-      static constexpr uintptr_t PENDING_CHILD = 0xabcd;
       static constexpr uintptr_t REMOVED_CHILD = 0xdead;
       Color                     next_uncollected_color;
       // On the owner node track when the index space is set
