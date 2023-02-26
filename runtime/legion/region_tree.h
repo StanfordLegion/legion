@@ -1915,7 +1915,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
-      virtual void get_colors(std::vector<LegionColor> &colors) = 0;
+      virtual LegionColor get_colors(std::vector<LegionColor> &colors) = 0;
       virtual bool send_node(AddressSpaceID target, RtEvent done,
                              RtEvent &send_precondition,
                              std::set<IndexTreeNode*> &visited,
@@ -2076,7 +2076,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(IndexSpace handle, Runtime *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
-      virtual void get_colors(std::vector<LegionColor> &colors);
+      virtual LegionColor get_colors(std::vector<LegionColor> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
@@ -2309,7 +2309,9 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     protected:
-      Color                     next_available_color;
+      static constexpr uintptr_t PENDING_CHILD = 0xabcd;
+      static constexpr uintptr_t REMOVED_CHILD = 0xdead;
+      Color                     next_uncollected_color;
       unsigned                  send_references; 
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
@@ -2968,7 +2970,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(IndexPartition handle, Runtime *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
-      virtual void get_colors(std::vector<LegionColor> &colors);
+      virtual LegionColor get_colors(std::vector<LegionColor> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
