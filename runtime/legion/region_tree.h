@@ -1935,7 +1935,7 @@ namespace Legion {
       virtual ~IndexTreeNode(void);
     public:
       virtual IndexTreeNode* get_parent(void) const = 0;
-      virtual void get_colors(std::vector<LegionColor> &colors) = 0;
+      virtual LegionColor get_colors(std::vector<LegionColor> &colors) = 0;
     public:
       virtual bool is_index_space_node(void) const = 0;
 #ifdef DEBUG_LEGION
@@ -2060,7 +2060,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(IndexSpace handle, Runtime *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
-      virtual void get_colors(std::vector<LegionColor> &colors);
+      virtual LegionColor get_colors(std::vector<LegionColor> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
@@ -2345,7 +2345,9 @@ namespace Legion {
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
     protected:
-      Color                     next_available_color;
+      static constexpr uintptr_t PENDING_CHILD = 0xabcd;
+      static constexpr uintptr_t REMOVED_CHILD = 0xdead;
+      Color                     next_uncollected_color;
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
       // Keep track of whether we've tightened these bounds
@@ -3099,7 +3101,7 @@ namespace Legion {
       static AddressSpaceID get_owner_space(IndexPartition handle, Runtime *rt);
     public:
       virtual IndexTreeNode* get_parent(void) const;
-      virtual void get_colors(std::vector<LegionColor> &colors);
+      virtual LegionColor get_colors(std::vector<LegionColor> &colors);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);

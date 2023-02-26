@@ -386,12 +386,13 @@ namespace Legion {
       // for all the partitions we're about to make so instead
       // we'll do this iteratively until we succeed, which 
       // hopefully will not be too many iterations
+      LegionColor lower_bound = 0;
       std::set<LegionColor> existing_colors;
       std::vector<IndexSpaceNode*> children_nodes;
       while (part_color == INVALID_COLOR)
       {
         // If this is the first time through populate the existing colors
-        if (existing_colors.empty())
+        if ((lower_bound == 0) && existing_colors.empty())
         {
           if (base->total_children == base->max_linearized_color)
           {
@@ -400,14 +401,11 @@ namespace Legion {
               IndexSpaceNode *child_node = base->get_child(color);
               children_nodes.push_back(child_node);
               std::vector<LegionColor> colors;
-              child_node->get_colors(colors);
+              LegionColor bound = child_node->get_colors(colors);
               if (!colors.empty())
-              {
-                for (std::vector<LegionColor>::const_iterator it =
-                      colors.begin(); it != colors.end(); it++)
-                  if (LEGION_MAX_APPLICATION_PARTITION_COLOR < (*it))
-                    existing_colors.insert(*it);
-              }
+                existing_colors.insert(colors.begin(), colors.end());
+              if (bound > lower_bound)
+                lower_bound = bound;
             }
           }
           else
@@ -420,42 +418,31 @@ namespace Legion {
               IndexSpaceNode *child_node = base->get_child(color);
               children_nodes.push_back(child_node);
               std::vector<LegionColor> colors;
-              child_node->get_colors(colors);
+              LegionColor bound = child_node->get_colors(colors);
               if (!colors.empty())
-              {
-                for (std::vector<LegionColor>::const_iterator it =
-                      colors.begin(); it != colors.end(); it++)
-                  if (LEGION_MAX_APPLICATION_PARTITION_COLOR < (*it))
-                    existing_colors.insert(*it);
-              }
+                existing_colors.insert(colors.begin(), colors.end());
+              if (bound > lower_bound)
+                lower_bound = bound;
             }
             delete itr;
           }
         }
-        // Find the next available color
-        if (!existing_colors.empty())
+        // Prune out any colors below the lower bound, we know they are never
+        // going to be something that we can use across all the children
+        while (!existing_colors.empty())
         {
-          std::set<LegionColor>::const_iterator next = existing_colors.begin();
-          if ((*next) == (LEGION_MAX_APPLICATION_PARTITION_COLOR + 1))
+          std::set<LegionColor>::iterator next = existing_colors.begin();
+          if ((*next) <= lower_bound)
           {
-            std::set<LegionColor>::const_iterator prev = next++;
-            while (next != existing_colors.end())
-            {
-              if ((*next) != ((*prev) + 1))
-              {
-                part_color = (*prev) + 1;
-                break;
-              }
-              prev = next++;
-            }
-            if (part_color == INVALID_COLOR)
-              part_color = (*prev) + 1;
+            if ((*next) == lower_bound)
+              lower_bound++;
+            existing_colors.erase(next);
           }
           else
-            part_color = LEGION_MAX_APPLICATION_PARTITION_COLOR + 1; 
+            break;
         }
-        else
-          part_color = LEGION_MAX_APPLICATION_PARTITION_COLOR + 1;
+        // Find the next available color
+        part_color = lower_bound++;
 #ifdef DEBUG_LEGION
         assert(part_color != INVALID_COLOR);
 #endif
@@ -7940,8 +7927,8 @@ namespace Legion {
           init, map, prov, tree_valid),
         IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
-        handle(h), parent(par), index_space_ready(ready), 
-        next_available_color(LEGION_MAX_APPLICATION_PARTITION_COLOR + 1),
+        handle(h), parent(par), index_space_ready(ready),
+        next_uncollected_color(0),
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
         index_space_set(false), tight_index_space(false)
@@ -8201,18 +8188,46 @@ namespace Legion {
       if (is_owner())
       {
         AutoLock n_lock(node_lock);
-        if ((suggestion == INVALID_COLOR) || 
-            (suggestion < next_available_color))
+        // If the user made a suggestion see if it was right
+        if (suggestion != INVALID_COLOR)
         {
-          suggestion = next_available_color++;
-#ifdef DEBUG_LEGION
-          // Check for overflow
-          assert(suggestion < next_available_color);
-#endif
+          // If someone already has it then they can't use it
+          if ((next_uncollected_color <= suggestion) &&
+              (color_map.find(suggestion) == color_map.end()))
+          {
+            color_map[suggestion] = (IndexPartNode*)PENDING_CHILD;
+            return suggestion;
+          }
+          else
+            return INVALID_COLOR;
         }
-        else // Just skip ahead a bunch of colors presuming we won't run out
-          next_available_color = suggestion + 1;
-        return suggestion;
+        if (color_map.empty())
+        {
+          // save a space for later
+          color_map[next_uncollected_color] = (IndexPartNode*)PENDING_CHILD;
+          return next_uncollected_color;
+        }
+        std::map<LegionColor,IndexPartNode*>::const_iterator next = 
+          color_map.begin();
+        if (next->first > next_uncollected_color)
+        {
+          // save a space for later
+          color_map[next_uncollected_color] = (IndexPartNode*)PENDING_CHILD;
+          return next_uncollected_color;
+        }
+        std::map<LegionColor,IndexPartNode*>::const_iterator prev = next++;
+        while (next != color_map.end())
+        {
+          if (next->first != (prev->first + 1))
+          {
+            // save a space for later
+            color_map[prev->first+1] = (IndexPartNode*)PENDING_CHILD;
+            return prev->first+1;
+          }
+          prev = next++;
+        }
+        color_map[prev->first+1] = (IndexPartNode*)PENDING_CHILD;
+        return prev->first+1;
       }
       else
       {
@@ -8245,7 +8260,7 @@ namespace Legion {
           color_map.find(color);
 #ifdef DEBUG_LEGION
         assert(finder != color_map.end());
-        assert(finder->second == NULL);
+        assert(finder->second == (IndexPartNode*)PENDING_CHILD);
 #endif
         color_map.erase(finder);
       }
@@ -8338,7 +8353,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Can have a NULL pointer
       assert((color_map.find(child->color) == color_map.end()) ||
-             (color_map[child->color] == NULL));
+             (color_map[child->color] == ((IndexPartNode*)PENDING_CHILD)));
 #endif
       color_map[child->color] = child;
       if (!remote_colors.empty())
@@ -8354,8 +8369,19 @@ namespace Legion {
         color_map.find(c);
 #ifdef DEBUG_LEGION
       assert(finder != color_map.end());
+      assert(finder->second != ((IndexPartNode*)PENDING_CHILD));
+      assert(finder->second != ((IndexPartNode*)REMOVED_CHILD));
 #endif
-      color_map.erase(finder);
+      finder->second = (IndexPartNode*)REMOVED_CHILD;
+      while ((finder->first == next_uncollected_color) &&
+             (finder->second == ((IndexPartNode*)REMOVED_CHILD)))
+      {
+        next_uncollected_color++;
+        color_map.erase(finder);
+        if (color_map.empty())
+          break;
+        finder = color_map.begin();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8488,7 +8514,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexSpaceNode::get_colors(std::vector<LegionColor> &colors)
+    LegionColor IndexSpaceNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
       // If we're not the owner, we need to request an up to date set of colors
@@ -8496,16 +8522,22 @@ namespace Legion {
       AddressSpaceID owner_space = get_owner_space();
       if (owner_space != context->runtime->address_space)
       {
+        LegionColor bound = INVALID_COLOR;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(handle);
           rez.serialize(&colors);
+          rez.serialize(&bound);
           rez.serialize(ready_event); 
         }
         context->runtime->send_index_space_colors_request(owner_space, rez);
         ready_event.wait();
+#ifdef DEBUG_LEGION
+        assert(bound != INVALID_COLOR);
+#endif
+        return bound;
       }
       else
       {
@@ -8518,6 +8550,7 @@ namespace Legion {
                 it->second->initialized.has_triggered()))
             colors.push_back(it->first);
         }
+        return next_uncollected_color;
       }
     }
 
@@ -8953,11 +8986,13 @@ namespace Legion {
       derez.deserialize(handle);
       std::vector<LegionColor> *target;
       derez.deserialize(target);
+      LegionColor *bound_target;
+      derez.deserialize(bound_target);
       RtUserEvent ready;
       derez.deserialize(ready);
       IndexSpaceNode *node = context->get_node(handle);
       std::vector<LegionColor> results;
-      node->get_colors(results);
+      LegionColor bound = node->get_colors(results);
       Serializer rez;
       {
         RezCheck z(rez);
@@ -8966,6 +9001,8 @@ namespace Legion {
         for (std::vector<LegionColor>::const_iterator it = results.begin();
               it != results.end(); it++)
           rez.serialize(*it);
+        rez.serialize(bound_target);
+        rez.serialize(bound);
         rez.serialize(ready);
       }
       context->runtime->send_index_space_colors_response(source, rez);
@@ -8986,6 +9023,9 @@ namespace Legion {
         derez.deserialize(cp);
         target->push_back(cp);
       }
+      LegionColor *bound_target;
+      derez.deserialize(bound_target);
+      derez.deserialize(*bound_target);
       RtUserEvent ready;
       derez.deserialize(ready);
       Runtime::trigger_event(ready);
@@ -10271,10 +10311,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::get_colors(std::vector<LegionColor> &colors)
+    LegionColor IndexPartNode::get_colors(std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
       color_space->instantiate_colors(colors);
+      if (!colors.empty())
+        return colors.front();
+      else
+        return 0;
     }
 
     //--------------------------------------------------------------------------

@@ -5268,16 +5268,7 @@ namespace Legion {
 #endif
       LegionColor part_color = INVALID_COLOR;
       if (color != LEGION_AUTO_GENERATE_ID)
-      {
-        if (LEGION_MAX_APPLICATION_PARTITION_COLOR < color)
-          REPORT_LEGION_ERROR(ERROR_EXCEEDED_CONFIGURATION_LIMIT,
-              "Application specified that a partition be created with color "
-              "%d which exceeds the LEGION_MAX_APPLICATION_PARTITION_COLOR "
-              "of %d in legion_config.h. Please adjust to the configuration "
-              "to support more application-specified colors.", color,
-              LEGION_MAX_APPLICATION_PARTITION_COLOR)
         part_color = color;
-      }
       size_t color_space_size = runtime->forest->get_domain_volume(color_space);
       const ApBarrier partition_ready(
                      Realm::Barrier::create_barrier(color_space_size));
