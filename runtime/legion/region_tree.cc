@@ -8444,7 +8444,7 @@ namespace Legion {
           if ((next_uncollected_color <= suggestion) &&
               (color_map.find(suggestion) == color_map.end()))
           {
-            color_map[suggestion] = (IndexPartNode*)PENDING_CHILD;
+            color_map[suggestion] = NULL;
             return suggestion;
           }
           else
@@ -8453,7 +8453,7 @@ namespace Legion {
         if (color_map.empty())
         {
           // save a space for later
-          color_map[next_uncollected_color] = (IndexPartNode*)PENDING_CHILD;
+          color_map[next_uncollected_color] = NULL;
           return next_uncollected_color;
         }
         std::map<LegionColor,IndexPartNode*>::const_iterator next = 
@@ -8461,7 +8461,7 @@ namespace Legion {
         if (next->first > next_uncollected_color)
         {
           // save a space for later
-          color_map[next_uncollected_color] = (IndexPartNode*)PENDING_CHILD;
+          color_map[next_uncollected_color] = NULL;
           return next_uncollected_color;
         }
         std::map<LegionColor,IndexPartNode*>::const_iterator prev = next++;
@@ -8470,12 +8470,12 @@ namespace Legion {
           if (next->first != (prev->first + 1))
           {
             // save a space for later
-            color_map[prev->first+1] = (IndexPartNode*)PENDING_CHILD;
+            color_map[prev->first+1] = NULL;
             return prev->first+1;
           }
           prev = next++;
         }
-        color_map[prev->first+1] = (IndexPartNode*)PENDING_CHILD;
+        color_map[prev->first+1] = NULL;
         return prev->first+1;
       }
       else
@@ -8509,7 +8509,7 @@ namespace Legion {
           color_map.find(color);
 #ifdef DEBUG_LEGION
         assert(finder != color_map.end());
-        assert(finder->second == (IndexPartNode*)PENDING_CHILD);
+        assert(finder->second == NULL);
 #endif
         color_map.erase(finder);
       }
@@ -8599,7 +8599,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Can have a NULL pointer
       assert((color_map.find(child->color) == color_map.end()) ||
-             (color_map[child->color] == ((IndexPartNode*)PENDING_CHILD)));
+             (color_map[child->color] == NULL));
 #endif
       color_map[child->color] = child;
       if (!remote_colors.empty())
@@ -8615,7 +8615,7 @@ namespace Legion {
         color_map.find(c);
 #ifdef DEBUG_LEGION
       assert(finder != color_map.end());
-      assert(finder->second != ((IndexPartNode*)PENDING_CHILD));
+      assert(finder->second != NULL);
       assert(finder->second != ((IndexPartNode*)REMOVED_CHILD));
 #endif
       finder->second = (IndexPartNode*)REMOVED_CHILD;
