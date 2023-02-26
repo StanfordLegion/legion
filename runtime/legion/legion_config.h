@@ -250,10 +250,6 @@
 #ifndef LEGION_MAX_APPLICATION_SERDEZ_ID
 #define LEGION_MAX_APPLICATION_SERDEZ_ID      (1<<20)
 #endif
-// Maximum application specified color for a partition
-#ifndef LEGION_MAX_APPLICATION_PARTTITION_COLOR
-#define LEGION_MAX_APPLICATION_PARTITION_COLOR    (1<<20)
-#endif
 // Default number of local fields per field space
 #ifndef DEFAULT_LOCAL_FIELDS // For backwards compatibility
 #ifndef LEGION_DEFAULT_LOCAL_FIELDS
