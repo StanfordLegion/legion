@@ -7643,18 +7643,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplDetachOp::trigger_complete(void)
+    void ReplDetachOp::detach_external_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
+      // Always arrive on the effects barrier with the detach event
       Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
-      detach_event = effects_barrier;
-      DetachOp::trigger_complete();
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent ReplDetachOp::detach_external_instance(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
       if (collective_instances)
       {
 #ifdef DEBUG_LEGION
@@ -7670,7 +7663,7 @@ namespace Legion {
         {
           shard_manager->exchange_shard_local_op_data(context_index,
                                           exchange_index++, manager);
-          return manager->detach_external_instance();
+          manager->detach_external_instance(effects_barrier);
         }
         else
         {
@@ -7679,12 +7672,11 @@ namespace Legion {
                                       context_index, exchange_index++);
           // If the managers are different then we do the detach as well
           if (manager != first_manager)
-            return manager->detach_external_instance();
+            manager->detach_external_instance(effects_barrier);
         }
       }
       else if (manager->is_owner())
-        return manager->detach_external_instance();
-      return RtEvent::NO_RT_EVENT;
+        manager->detach_external_instance(effects_barrier);
     }
 
     /////////////////////////////////////////////////////////////

@@ -10486,7 +10486,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::detach_external_instance(PhysicalManager *manager)
+    void MemoryManager::detach_external_instance(PhysicalManager *manager,
+                                                    ApEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10495,44 +10496,43 @@ namespace Legion {
       if (!is_owner)
       {
         // Send a message to the owner node to do the deletion
-        RtUserEvent result = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(memory);
           rez.serialize(manager->did);
-          rez.serialize(result);
+          rez.serialize(precondition);
         }
+        manager->pack_valid_ref();
         runtime->send_external_detach(manager->owner_space, rez);
-        return result;
       }
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
-      // Either delete the instance now or do a deferred deltion
-      // that will delete the instance once all operations are
-      // done using it
+      else
       {
-        AutoLock m_lock(manager_lock);
-        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-          current_instances.find(manager->tree_id);
+        // Either delete the instance now or do a deferred deltion
+        // that will delete the instance once all operations are
+        // done using it
+        {
+          AutoLock m_lock(manager_lock);
+          std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+            current_instances.find(manager->tree_id);
 #ifdef DEBUG_LEGION
-        assert(tree_finder != current_instances.end());
+          assert(tree_finder != current_instances.end());
 #endif
-        TreeInstances::iterator finder = tree_finder->second.find(manager);
+          TreeInstances::iterator finder = tree_finder->second.find(manager);
 #ifdef DEBUG_LEGION
-        assert(finder != tree_finder->second.end());
+          assert(finder != tree_finder->second.end());
 #endif
-        // Reference will flow out
-        tree_finder->second.erase(finder);
-        if (tree_finder->second.empty())
-          current_instances.erase(tree_finder);
+          // Reference will flow out
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
+        }
+        // Perform the deletion now with the precondition for all the users
+        // being done accessing the instance
+        manager->force_deletion(precondition);
+        if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete manager;
       }
-      // Perform the deletion contingent on references being removed
-      const RtEvent result = manager->perform_deletion(runtime->address_space);
-      if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        delete manager;
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -25066,13 +25066,13 @@ namespace Legion {
       RtEvent manager_ready;
       PhysicalManager *manager = 
         find_or_request_instance_manager(did, manager_ready);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
+      ApEvent precondition;
+      derez.deserialize(precondition);
       MemoryManager *memory_manager = find_memory_manager(target_memory);
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
-      RtEvent local_done = memory_manager->detach_external_instance(manager);
-      Runtime::trigger_event(done_event, local_done);
+      memory_manager->detach_external_instance(manager, precondition);
+      manager->unpack_valid_ref();
     }
 
     //--------------------------------------------------------------------------

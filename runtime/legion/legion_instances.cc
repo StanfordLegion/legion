@@ -3175,6 +3175,10 @@ namespace Legion {
                                               AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(source == local_space);
+#endif
       if (i_lock == NULL)
       {
         AutoLock instance_lock(inst_lock);
@@ -3188,8 +3192,6 @@ namespace Legion {
         return args.done;
       }
 #ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(source == local_space);
       assert(pending_views.empty());
 #endif
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
@@ -3226,7 +3228,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::force_deletion(void)
+    void PhysicalManager::force_deletion(ApEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3237,21 +3239,23 @@ namespace Legion {
 #ifndef LEGION_DISABLE_GC
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields);
-#ifndef LEGION_MALLOC_INSTANCES
-      // If this is an eager allocation, return it back to the eager pool
-      if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
-      else
-#endif
-      {
-        if (!serdez_fields.empty())
-          instance.destroy(serdez_fields);
-        else
-          instance.destroy();
-      }
+      RtEvent deferred_deletion;
+      if (precondition.exists())
+        deferred_deletion = Runtime::protect_event(precondition);
 #ifdef LEGION_MALLOC_INSTANCES
       if (kind == INTERNAL_INSTANCE_KIND)
-        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
+        memory_manager->free_legion_instance(this, deferred_deletion);
+#else
+      // If this is an eager allocation, return it back to the eager pool
+      if (kind == EAGER_INSTANCE_KIND)
+        memory_manager->free_eager_instance(instance, deferred_deletion);
+      else
+      {
+        if (!serdez_fields.empty())
+          instance.destroy(serdez_fields, deferred_deletion);
+        else
+          instance.destroy(deferred_deletion);
+      }
 #endif
 #endif
     }
@@ -3293,13 +3297,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalManager::detach_external_instance(void)
+    void PhysicalManager::detach_external_instance(ApEvent precondition)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_external_instance());
 #endif
-      return memory_manager->detach_external_instance(this);
+      memory_manager->detach_external_instance(this, precondition);
     }
     
     //--------------------------------------------------------------------------
