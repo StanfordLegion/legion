@@ -1410,10 +1410,15 @@ namespace Legion {
             sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
                 launch_space, launch_space->handle, get_provenance());
       }
-#ifdef DEBUG_LEGION
+      else
+      {
+        if (serdez_redop_collective != NULL)
+          delete serdez_redop_collective;
+        if (all_reduce_collective != NULL)
+          delete all_reduce_collective;
+      }
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
-#endif
       // Now continue through and do the base case
       IndexTask::resolve_false(speculated, launched);
     }
