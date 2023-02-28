@@ -1413,9 +1413,9 @@ namespace Legion {
       else
       {
         if (serdez_redop_collective != NULL)
-          delete serdez_redop_collective;
+          serdez_redop_collective->elide_collective();
         if (all_reduce_collective != NULL)
-          delete all_reduce_collective;
+          all_reduce_collective->elide_collective();
       }
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
