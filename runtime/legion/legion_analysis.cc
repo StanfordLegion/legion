@@ -13559,7 +13559,7 @@ namespace Legion {
               // Group expressions by fields since unions
               // and differences are expensive and hard to group later
               LegionList<FieldSet<IndexSpaceExpression*> > expr_groups;
-              partial_valid_exprs.compute_field_sets(inst_mask, expr_groups);
+              partial_valid_exprs.compute_field_sets(FieldMask(), expr_groups);
               // Clear this in case we want to use it later
               partial_valid_exprs.clear();
               // Compute differences for each of the field groups
