@@ -406,11 +406,11 @@ namespace Legion {
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
                                   AddressSpaceID source, GCPriority priority);
       RtEvent perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
-      void force_deletion(void);
+      void force_deletion(ApEvent precondition = ApEvent::NO_AP_EVENT);
       RtEvent update_garbage_collection_priority(AddressSpaceID source,
                                                  GCPriority priority);
       RtEvent attach_external_instance(void);
-      RtEvent detach_external_instance(void);
+      void detach_external_instance(ApEvent precondition);
       bool has_visible_from(const std::set<Memory> &memories) const;
       uintptr_t get_instance_pointer(void) const; 
       size_t get_instance_size(void) const;

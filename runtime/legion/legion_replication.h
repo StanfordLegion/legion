@@ -2365,9 +2365,8 @@ namespace Legion {
       virtual void deactivate(bool free = true);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void trigger_complete(void);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
-      virtual RtEvent detach_external_instance(PhysicalManager *manager);
+      virtual void detach_external_instance(PhysicalManager *manager);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
       virtual bool find_shard_participants(std::vector<ShardID> &shards);

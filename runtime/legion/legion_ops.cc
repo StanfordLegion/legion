@@ -22504,13 +22504,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent DetachOp::detach_external_instance(PhysicalManager *manager)
+    void DetachOp::detach_external_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
       // It's only safe to actually perform the detach after the mapping
       // is performed to know that all the updates to the instance have
       // been mapped
-      return manager->detach_external_instance();
+      manager->detach_external_instance(detach_event);
     }
 
     //--------------------------------------------------------------------------
@@ -22527,11 +22527,11 @@ namespace Legion {
 #endif
       const InstanceRef &reference = references[0];
       PhysicalManager *manager = reference.get_physical_manager();
-      const RtEvent detached_event = detach_external_instance(manager);
+      detach_external_instance(manager);
       // We can remove the acquire reference that we added after we're mapped
       if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
         delete manager;
-      complete_operation(detached_event);
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
