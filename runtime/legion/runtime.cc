@@ -23371,8 +23371,8 @@ namespace Legion {
                 "the runtime has been started with multiple runtime instances.") 
         const RtEvent done_event = the_runtime->perform_registration_callback(
             (void*)callback, buffer.get_ptr(), buffer.get_size(), 
-            true/*withargs*/, global, false/*preregistered*/, false/*dedup*/,
-            0/*dedup tag*/);
+            true/*withargs*/, global, false/*preregistered*/,
+            deduplicate, dedup_tag);
         if (done_event.exists() && !done_event.has_triggered())
         {
           // Block waiting for these to finish currently since we need
