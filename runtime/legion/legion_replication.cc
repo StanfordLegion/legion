@@ -488,6 +488,19 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void ReplCollectiveViewCreator<OP>::
+                                  resolve_false_collective_view_rendezvous(void)
+    //--------------------------------------------------------------------------
+    {
+      for (typename std::map<RendezvousKey,
+                             CollectiveViewRendezvous*>::const_iterator
+            it = collective_view_rendezvous.begin(); 
+            it != collective_view_rendezvous.end(); it++)
+        it->second->elide_collective();
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Individual Task 
     /////////////////////////////////////////////////////////////
@@ -1419,6 +1432,7 @@ namespace Legion {
       }
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
+      resolve_false_collective_view_rendezvous();
       // Now continue through and do the base case
       IndexTask::resolve_false(speculated, launched);
     }
@@ -8236,6 +8250,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!collective_map_barrier.exists());
 #endif
+      resolve_false_collective_view_rendezvous();
       AcquireOp::resolve_false(speculated, launched);
     }
 
@@ -8422,6 +8437,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!collective_map_barrier.exists());
 #endif
+      resolve_false_collective_view_rendezvous();
       ReleaseOp::resolve_false(speculated, launched);
     }
 

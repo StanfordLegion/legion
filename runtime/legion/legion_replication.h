@@ -1402,6 +1402,7 @@ namespace Legion {
       void create_collective_view_rendezvous(RegionTreeID tid,
           unsigned requirement_index, unsigned analysis_index = 0);
       void shard_off_collective_view_rendezvous(std::set<RtEvent> &done_events);
+      void resolve_false_collective_view_rendezvous(void);
     protected:
       std::map<RendezvousKey,
                CollectiveViewRendezvous*> collective_view_rendezvous;
