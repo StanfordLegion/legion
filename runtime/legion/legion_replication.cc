@@ -2696,6 +2696,21 @@ namespace Legion {
 #endif
     }
 
+    //--------------------------------------------------------------------------
+    void ReplFillOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      // Trigger the first generation of the collective_map_barrier
+      if (!launched)
+      {
+        // Advance the first generation of the barrier for trigger_ready
+        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+        Runtime::advance_barrier(collective_map_barrier);
+      }
+      // Second generation triggered by callback to finalize_complete_mapping
+      FillOp::resolve_false(speculated, launched);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Index Fill Op 
     /////////////////////////////////////////////////////////////
@@ -8240,8 +8255,10 @@ namespace Legion {
       if (launched)
         return;
 #ifdef DEBUG_LEGION
-      assert(!collective_map_barrier.exists());
+      assert(collective_map_barrier.exists());
 #endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      Runtime::advance_barrier(collective_map_barrier);
       resolve_false_collective_view_rendezvous();
       AcquireOp::resolve_false(speculated, launched);
     }
@@ -8427,8 +8444,10 @@ namespace Legion {
       if (launched)
         return;
 #ifdef DEBUG_LEGION
-      assert(!collective_map_barrier.exists());
+      assert(collective_map_barrier.exists());
 #endif
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      Runtime::advance_barrier(collective_map_barrier);
       resolve_false_collective_view_rendezvous();
       ReleaseOp::resolve_false(speculated, launched);
     }

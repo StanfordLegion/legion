@@ -12924,7 +12924,8 @@ namespace Legion {
       // Otherwise do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
         complete_mapping();
     } 
@@ -13787,7 +13788,8 @@ namespace Legion {
       // Do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
         complete_mapping();
     } 

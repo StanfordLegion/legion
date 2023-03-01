@@ -1627,6 +1627,7 @@ namespace Legion {
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
       virtual RtEvent initialize_fill_view(void);
+      virtual void resolve_false(bool speculated, bool launched);
     public:
       RtBarrier collective_map_barrier;
       CreateCollectiveFillView *collective;
