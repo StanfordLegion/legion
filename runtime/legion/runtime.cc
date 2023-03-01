@@ -9459,9 +9459,16 @@ namespace Legion {
                                 bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
+      RegionTreeID tree_id = 0;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        tree_id = it->get_tree_id();
+        break;
+      }
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id =
-        regions.empty() ? 0 : regions[0].get_tree_id(); 
       if (tree_id != 0)
       {
         // Hold the lock while searching here
@@ -9561,9 +9568,16 @@ namespace Legion {
                             bool acquire, bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
+      RegionTreeID tree_id = 0;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        tree_id = it->get_tree_id();
+        break;
+      }
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id =
-        regions.empty() ? 0 : regions[0].get_tree_id(); 
       if (tree_id != 0)
       {
         // Hold the lock while searching here
@@ -9659,8 +9673,18 @@ namespace Legion {
     {
       if (regions.empty())
         return false;
+      RegionTreeID tree_id = 0;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        tree_id = it->get_tree_id();
+        break;
+      }
+      if (tree_id == 0)
+        return false;
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id();
       {
         // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);

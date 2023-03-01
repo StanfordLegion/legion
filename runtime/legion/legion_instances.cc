@@ -3737,7 +3737,9 @@ namespace Legion {
         // Log the logical regions and fields that make up this instance
         for (std::vector<LogicalRegion>::const_iterator it =
               regions.begin(); it != regions.end(); it++)
-          runtime->profiler->record_physical_instance_region(unique_event, *it);
+          if (it->exists())
+            runtime->profiler->record_physical_instance_region(unique_event, 
+                                                               *it);
         runtime->profiler->record_physical_instance_layout(unique_event,
                                                      layout->owner->handle,
                                                      *layout->constraints);
@@ -3804,6 +3806,8 @@ namespace Legion {
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
+        if (!it->exists())
+          continue;
         if (field_space_node == NULL)
           field_space_node = forest->get_node(it->get_field_space());
         if (tree_id == 0)
