@@ -213,7 +213,8 @@ public:
       LayoutConstraintSet &constraints, Memory target, const RegionRequirement &req)
   {
     DefaultMapper::default_policy_select_constraints(ctx, constraints, target, req);
-    if (req.privilege_fields.find(FID_x) != req.privilege_fields.end())
+    if ((req.privilege_fields.find(FID_x) != req.privilege_fields.end()) &&
+        (constraints.specialized_constraint.kind != LEGION_COMPACT_SPECIALIZE))
       constraints.padding_constraint = PaddingConstraint(DomainPoint(1), DomainPoint(1));
   }
 };
