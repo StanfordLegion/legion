@@ -4751,6 +4751,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   if use_cmake then
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
+  legion_install_prefix = os.getenv("LEGION_INSTALL_PREFIX")
+  if legion_install_prefix then
+    flags:insert(legion_install_prefix .. "/lib")
+  end
   if os.getenv('CRAYPE_VERSION') then
     flags:insert("-Wl,-Bdynamic")
   end
