@@ -2274,7 +2274,7 @@ namespace Legion {
       inline LayoutConstraintRegistrar&
         add_constraint(const OrderingConstraint &constraint);
       inline LayoutConstraintRegistrar&
-        add_constraint(const SplittingConstraint &constraint);
+        add_constraint(const TilingConstraint &constraint);
       inline LayoutConstraintRegistrar&
         add_constraint(const FieldConstraint &constraint);
       inline LayoutConstraintRegistrar&

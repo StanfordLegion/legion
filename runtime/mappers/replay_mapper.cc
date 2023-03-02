@@ -866,15 +866,15 @@ namespace Legion {
         unsigned num_constraints;
         ignore_result(fread(&num_constraints, 
                             sizeof(num_constraints), 1, f));
-        layout.splitting_constraints.resize(num_constraints);
+        layout.tiling_constraints.resize(num_constraints);
         for (unsigned idx = 0; idx < num_constraints; idx++)
         {
-          SplittingConstraint &split = layout.splitting_constraints[idx];
-          ignore_result(fread(&split.kind, sizeof(split.kind), 1, f));
-          ignore_result(fread(&split.value, sizeof(split.value), 1, f));
-          unsigned chunks;
-          ignore_result(fread(&chunks, sizeof(chunks), 1, f));
-          split.chunks = (chunks != 0);
+          TilingConstraint &tile = layout.tiling_constraints[idx];
+          ignore_result(fread(&tile.dim, sizeof(tile.dim), 1, f));
+          ignore_result(fread(&tile.value, sizeof(tile.value), 1, f));
+          unsigned tiles;
+          ignore_result(fread(&tiles, sizeof(tiles), 1, f));
+          tile.tiles= (tiles != 0);
         }
       }
       {

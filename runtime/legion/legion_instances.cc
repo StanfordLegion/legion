@@ -751,11 +751,11 @@ namespace Legion {
             constraints->ordering_constraint.ordering.begin(); it !=
             constraints->ordering_constraint.ordering.end(); it++)
         LegionSpy::log_instance_ordering_constraint_dimension(inst_event, *it);
-      for (std::vector<SplittingConstraint>::const_iterator it = 
-            constraints->splitting_constraints.begin(); it !=
-            constraints->splitting_constraints.end(); it++)
-        LegionSpy::log_instance_splitting_constraint(inst_event,
-                                it->kind, it->value, it->chunks);
+      for (std::vector<TilingConstraint>::const_iterator it = 
+            constraints->tiling_constraints.begin(); it !=
+            constraints->tiling_constraints.end(); it++)
+        LegionSpy::log_instance_tiling_constraint(inst_event,
+                                it->dim, it->value, it->tiles);
       for (std::vector<DimensionConstraint>::const_iterator it = 
             constraints->dimension_constraints.begin(); it !=
             constraints->dimension_constraints.end(); it++)
@@ -3966,10 +3966,10 @@ namespace Legion {
     {
       // First look at the OrderingConstraint to Figure out what kind
       // of instance we are building here, SOA, AOS, or hybrid
-      // Make sure to check for splitting constraints if see sub-dimensions
-      if (!constraints.splitting_constraints.empty())
+      // Make sure to check for tiling constraints if see sub-dimensions
+      if (!constraints.tiling_constraints.empty())
         REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-            "Splitting layout constraints are not currently supported")
+            "Tiling layout constraints are not currently supported")
       const size_t num_dims = instance_domain->get_num_dims();
       OrderingConstraint &ord = constraints.ordering_constraint;
       if (!ord.ordering.empty())
@@ -3989,9 +3989,6 @@ namespace Legion {
             else
               field_idx = idx;
           }
-          else if (ord.ordering[idx] > LEGION_DIM_F)
-            REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-              "Splitting layout constraints are not currently supported")
           else
           {
             // Should never be duplicated
