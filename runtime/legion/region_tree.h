@@ -1387,7 +1387,8 @@ namespace Legion {
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
                            bool compact, void **piece_list = NULL,
-                           size_t *piece_list_size = NULL) = 0;
+                           size_t *piece_list_size = NULL,
+                           size_t *num_pieces = NULL) = 0;
       // Return the expression with a resource ref on the expression
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size) = 0;
@@ -1457,7 +1458,8 @@ namespace Legion {
                                const std::vector<FieldID> &field_ids,
                                const std::vector<size_t> &field_sizes,
                                bool compact, void **piece_list = NULL,
-                               size_t *piece_list_size = NULL) const;
+                               size_t *piece_list_size = NULL,
+                               size_t *num_pieces = NULL) const;
       template<int DIM, typename T>
       inline IndexSpaceExpression* create_layout_expression_internal(
                                RegionTreeForest *context,
@@ -1673,7 +1675,8 @@ namespace Legion {
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
                            bool compact, void **piece_list = NULL, 
-                           size_t *piece_list_size = NULL);
+                           size_t *piece_list_size = NULL,
+                           size_t *num_pieces = NULL);
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
@@ -2639,7 +2642,8 @@ namespace Legion {
                            const std::vector<FieldID> &field_ids,
                            const std::vector<size_t> &field_sizes,
                            bool compact, void **piece_list = NULL, 
-                           size_t *piece_list_size = NULL);
+                           size_t *piece_list_size = NULL,
+                           size_t *num_pieces = NULL);
       virtual IndexSpaceExpression* create_layout_expression(
                            const void *piece_list, size_t piece_list_size);
       virtual bool meets_layout_expression(IndexSpaceExpression *expr,
