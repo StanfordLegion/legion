@@ -25,6 +25,7 @@ template<typename FT, int N, typename T = coord_t> using AccessorRW = Legion::Fi
 template<typename FT, int N, typename T = coord_t> using AccessorWO = Legion::FieldAccessor<WRITE_ONLY, FT, N, T, Realm::AffineAccessor<FT, N, T> >;
 // No privileges necessary on padded accessors since you're allowed to read and write on any padded space
 template<typename FT, int N, typename T = coord_t> using AccessorPAD = Legion::PaddingAccessor<FT, N, T, Realm::AffineAccessor<FT, N, T> >;
+template<typename FT, int N, typename T = coord_t> using MultiAccessorRO = Legion::FieldAccessor< READ_ONLY, FT, N, T, Realm::MultiAffineAccessor<FT, N, T> >;
 
 // Number of points
 static constexpr int Np = 200;
@@ -76,7 +77,7 @@ void stencil_task(const Task *task,
 {
    assert(regions.size() == 3);
 
-   const AccessorRO<     int, 1>  acc_x_gh   (regions[0], FID_x);
+   const MultiAccessorRO<int, 1>  acc_x_gh   (regions[0], FID_x);
    const AccessorRO<     int, 1>  acc_x      (regions[1], FID_x);
    const AccessorPAD<    int, 1>  acc_pad    (regions[1], FID_x);
    const AccessorWO<  double, 1>  acc_y      (regions[2], FID_y);
