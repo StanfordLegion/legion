@@ -656,7 +656,6 @@ namespace Legion {
       return ((kind == other.kind) && (redop == other.redop) &&
         (max_pieces == other.max_pieces) && (max_overhead == other.max_overhead)
           && (collective == other.collective) 
-          && (scratch_padding == other.scratch_padding) 
           && (no_access == other.no_access) && (exact == other.exact));
     }
 
@@ -674,15 +673,6 @@ namespace Legion {
         return false;
       if (collective != other.collective)
         return false;
-      if (other.scratch_padding.get_dim() > 0)
-      {
-        if (scratch_padding.get_dim() != other.scratch_padding.get_dim())
-          return false;
-        if (scratch_padding.lo() < other.scratch_padding.lo())
-          return false;
-        if (scratch_padding.hi() < other.scratch_padding.hi())
-          return false;
-      }
       if (max_pieces > other.max_pieces)
         return false;
       if (max_overhead > other.max_overhead)
@@ -709,15 +699,6 @@ namespace Legion {
         return true;
       if (collective != other.collective)
         return true;
-      if (other.scratch_padding.get_dim() > 0)
-      {
-        if (scratch_padding.get_dim() != other.scratch_padding.get_dim())
-          return true;
-        if (scratch_padding.lo() < other.scratch_padding.lo())
-          return true;
-        if (scratch_padding.hi() < other.scratch_padding.hi())
-          return true;
-      }
       if (max_pieces != other.max_pieces)
         return true;
       if (max_overhead != other.max_overhead)
@@ -734,7 +715,6 @@ namespace Legion {
       SWAP_HELPER(SpecializedKind, kind)
       SWAP_HELPER(ReductionOpID, redop)
       SWAP_HELPER(Domain, collective)
-      SWAP_HELPER(Domain, scratch_padding)
       SWAP_HELPER(size_t, max_pieces)
       SWAP_HELPER(int, max_overhead)
       SWAP_HELPER(bool, no_access)
@@ -756,7 +736,6 @@ namespace Legion {
         rez.serialize(max_overhead);
       }
       rez.serialize(collective);
-      rez.serialize(scratch_padding);
       rez.serialize<bool>(no_access);
       rez.serialize<bool>(exact);
     }
@@ -776,7 +755,6 @@ namespace Legion {
         derez.deserialize(max_overhead);
       }
       derez.deserialize(collective);
-      derez.deserialize(scratch_padding);
       derez.deserialize<bool>(no_access);
       derez.deserialize<bool>(exact);
     }
@@ -1736,6 +1714,84 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Padding Constraint
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PaddingConstraint::PaddingConstraint(const Domain &del)
+      : delta(del)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PaddingConstraint::PaddingConstraint(const DomainPoint &lower,
+                                         const DomainPoint &upper)
+      : delta(Domain(lower, upper))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool PaddingConstraint::entails(const PaddingConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other.delta.get_dim() > 0)
+      {
+        if (delta.get_dim() != other.delta.get_dim())
+          return false;
+        for (int idx = 0; idx < delta.get_dim(); idx++)
+        {
+          if (delta.lo()[idx] < other.delta.lo()[idx])
+            return false;
+          if (delta.hi()[idx] < other.delta.hi()[idx])
+            return false;
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PaddingConstraint::conflicts(const PaddingConstraint &other) const
+    //--------------------------------------------------------------------------
+    {
+      if (other.delta.get_dim() > 0)
+      {
+        if (delta.get_dim() != other.delta.get_dim())
+          return true;
+        for (int idx = 0; idx < delta.get_dim(); idx++)
+        {
+          if (delta.lo()[idx] != other.delta.lo()[idx])
+            return true;
+          if (delta.hi()[idx] != other.delta.hi()[idx])
+            return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PaddingConstraint::swap(PaddingConstraint &rhs)
+    //--------------------------------------------------------------------------
+    {
+      SWAP_HELPER(Domain, delta)
+    }
+
+    //--------------------------------------------------------------------------
+    void PaddingConstraint::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(delta);
+    }
+
+    //--------------------------------------------------------------------------
+    void PaddingConstraint::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(delta);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Layout Constraint Set 
     /////////////////////////////////////////////////////////////
 
@@ -1821,6 +1877,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LayoutConstraintSet& LayoutConstraintSet::add_constraint(
+                                            const PaddingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      padding_constraint = constraint;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
     bool LayoutConstraintSet::operator==(const LayoutConstraintSet &other) const
     //--------------------------------------------------------------------------
     {
@@ -1828,6 +1893,7 @@ namespace Legion {
              && field_constraint == other.field_constraint
              && memory_constraint == other.memory_constraint
              && pointer_constraint == other.pointer_constraint
+             && padding_constraint == other.padding_constraint
              && ordering_constraint == other.ordering_constraint
              && splitting_constraints == other.splitting_constraints
              && dimension_constraints == other.dimension_constraints
@@ -1862,6 +1928,12 @@ namespace Legion {
       {
         if (failed != NULL)
           *failed = &other.pointer_constraint;
+        return false;
+      }
+      if (!padding_constraint.entails(other.padding_constraint))
+      {
+        if (failed != NULL)
+          *failed = &other.padding_constraint;
         return false;
       }
       if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
@@ -1984,6 +2056,12 @@ namespace Legion {
           *conflict = &pointer_constraint;
         return true;
       }
+      if (padding_constraint.conflicts(other.padding_constraint))
+      {
+        if (conflict != NULL)
+          *conflict = &padding_constraint;
+        return true;
+      }
       if (ordering_constraint.conflicts(other.ordering_constraint, total_dims))
       {
         if (conflict != NULL)
@@ -2058,6 +2136,8 @@ namespace Legion {
           return &ordering_constraint;
         case LEGION_POINTER_CONSTRAINT:
           return &pointer_constraint;
+        case LEGION_PADDING_CONSTRAINT:
+          return &padding_constraint;
         case LEGION_SPLITTING_CONSTRAINT:
           return &splitting_constraints[index];
         case LEGION_DIMENSION_CONSTRAINT:
@@ -2080,6 +2160,7 @@ namespace Legion {
       field_constraint.swap(rhs.field_constraint);
       memory_constraint.swap(rhs.memory_constraint);
       pointer_constraint.swap(rhs.pointer_constraint);
+      padding_constraint.swap(rhs.padding_constraint);
       ordering_constraint.swap(rhs.ordering_constraint);
       splitting_constraints.swap(rhs.splitting_constraints);
       dimension_constraints.swap(rhs.dimension_constraints);
@@ -2095,6 +2176,7 @@ namespace Legion {
       field_constraint.serialize(rez);
       memory_constraint.serialize(rez);
       pointer_constraint.serialize(rez);
+      padding_constraint.serialize(rez);
       ordering_constraint.serialize(rez);
 #define PACK_CONSTRAINTS(Type, constraints)                             \
       rez.serialize<size_t>(constraints.size());                        \
@@ -2118,6 +2200,7 @@ namespace Legion {
       field_constraint.deserialize(derez);
       memory_constraint.deserialize(derez);
       pointer_constraint.deserialize(derez);
+      padding_constraint.deserialize(derez);
       ordering_constraint.deserialize(derez);
 #define UNPACK_CONSTRAINTS(Type, constraints)                       \
       {                                                             \

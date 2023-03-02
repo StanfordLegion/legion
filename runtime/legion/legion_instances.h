@@ -299,6 +299,17 @@ namespace Legion {
                          bool tight_region_bounds = false) const;
       bool meets_expression(IndexSpaceExpression *expr, 
                             bool tight_bounds = false) const;
+    public:
+      void find_padded_reservations(const FieldMask &mask,
+                                    Operation *op, unsigned index);
+      void find_field_reservations(const FieldMask &mask,
+                                   std::vector<Reservation> &results);
+      static void handle_padded_reservation_request(Runtime *runtime,
+                                  Deserializer &derez, AddressSpaceID source);
+      void update_field_reservations(const FieldMask &mask,
+                                  const std::vector<Reservation> &reservations);
+      static void handle_padded_reservation_response(Runtime *runtime,
+                                                     Deserializer &derez);
     protected:
       void prune_gc_events(void);
       void pack_garbage_collection_state(Serializer &rez,AddressSpaceID target);
@@ -348,6 +359,7 @@ namespace Legion {
     private:
       // Events that have to trigger before we can remove our GC reference
       std::map<CollectableView*,CollectableInfo> gc_events;
+      std::map<unsigned,Reservation> *padded_reservations;
     };
 
     /**

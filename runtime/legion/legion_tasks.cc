@@ -3764,6 +3764,9 @@ namespace Legion {
           }
         }
       }
+      // If the variant has padded fields we need to get the atomic locks
+      if (variant_impl->needs_padding)
+        variant_impl->find_padded_locks(this, regions, physical_instances);
       // Now that we have our physical instances we can validate the variant
       if (!runtime->unsafe_mapper)
       {
@@ -4698,6 +4701,9 @@ namespace Legion {
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
                                         unmap_events, map_applied_conditions);
+        // Update the physical regions with any padding they might have
+        if (variant->needs_padding)
+          execution_context->record_padded_fields(variant);
       }
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
