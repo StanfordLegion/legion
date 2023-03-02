@@ -5,4 +5,5 @@
 /terra
 /src/rdir
 /.cmake.json
+/.legion_install_prefix.json
 /.rdir.json
