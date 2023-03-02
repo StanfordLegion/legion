@@ -49,7 +49,7 @@ HIP_TARGET	?= ROCM		# Set the default HIP target
 PREFIX		?= /usr		# Location of where to install Legion
 
 # Put the binary file name here
-OUTFILE		?= padded
+OUTFILE		?= padded_instances
 # List all the application source files here
 CC_SRC		?=		# .c files
 CXX_SRC		?= padded.cc	# .cc files
