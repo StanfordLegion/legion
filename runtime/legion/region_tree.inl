@@ -334,7 +334,8 @@ namespace Legion {
                                    const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    bool compact, void **piece_list,
-                                   size_t *piece_list_size) const
+                                   size_t *piece_list_size,
+                                   size_t *num_pieces) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -360,6 +361,8 @@ namespace Legion {
         assert((*piece_list) == NULL);
         assert(piece_list_size != NULL);
         assert((*piece_list_size) == 0);
+        assert(num_pieces != NULL);
+        assert((*num_pieces) == 0);
 #endif
         if (spec.max_overhead > 0)
         {
@@ -391,6 +394,7 @@ namespace Legion {
         }
         if (!piece_bounds.empty())
         {
+          *num_pieces = piece_bounds.size();
           *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
           *piece_list = malloc(*piece_list_size);
           Rect<DIM,T> *pieces = static_cast<Rect<DIM,T>*>(*piece_list);
@@ -1284,8 +1288,8 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact,
-                                    void **piece_list, size_t *piece_list_size)
+                                    bool compact, void **piece_list, 
+                                    size_t *piece_list_size, size_t *num_pieces)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
@@ -1293,7 +1297,7 @@ namespace Legion {
       if (space_ready.exists())
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
-                                    compact, piece_list, piece_list_size);
+                              compact, piece_list, piece_list_size, num_pieces);
     }
 
     //--------------------------------------------------------------------------
@@ -4890,7 +4894,7 @@ namespace Legion {
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     bool compact, void **piece_list,
-                                    size_t *piece_list_size)
+                                    size_t *piece_list_size, size_t *num_pieces)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
@@ -4898,7 +4902,7 @@ namespace Legion {
       if (space_ready.exists())
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
-                                    compact, piece_list, piece_list_size);
+                              compact, piece_list, piece_list_size, num_pieces);
     }
 
     //--------------------------------------------------------------------------
