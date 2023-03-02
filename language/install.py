@@ -398,8 +398,9 @@ def get_legion_install_prefix(legion_install_prefix, regent_dir, default=None):
         legion_install_prefix = load_json_config(config_filename)
         if legion_install_prefix is None:
             legion_install_prefix = default
-    assert isinstance(legion_install_prefix, str)
-    legion_install_prefix = os.path.abspath(legion_install_prefix)
+    if legion_install_prefix is not None:
+        assert isinstance(legion_install_prefix, str)
+        legion_install_prefix = os.path.abspath(legion_install_prefix)
     dump_json_config(config_filename, legion_install_prefix)
     return legion_install_prefix
 
