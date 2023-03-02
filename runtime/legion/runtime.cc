@@ -5813,9 +5813,16 @@ namespace Legion {
                                 bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
+      RegionTreeID tree_id = 0;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        tree_id = it->get_tree_id();
+        break;
+      }
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id =
-        regions.empty() ? 0 : regions[0].get_tree_id(); 
       if (tree_id != 0)
       {
         // Hold the lock while searching here
@@ -5917,9 +5924,16 @@ namespace Legion {
                             bool acquire, bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
+      RegionTreeID tree_id = 0;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        tree_id = it->get_tree_id();
+        break;
+      }
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id =
-        regions.empty() ? 0 : regions[0].get_tree_id(); 
       if (tree_id != 0)
       {
         // Hold the lock while searching here
@@ -6017,8 +6031,18 @@ namespace Legion {
     {
       if (regions.empty())
         return false;
+      RegionTreeID tree_id = 0;
+      for (std::vector<LogicalRegion>::const_iterator it =
+            regions.begin(); it != regions.end(); it++)
+      {
+        if (!it->exists())
+          continue;
+        tree_id = it->get_tree_id();
+        break;
+      }
+      if (tree_id == 0)
+        return false;
       std::deque<PhysicalManager*> candidates;
-      const RegionTreeID tree_id = regions[0].get_tree_id();
       {
         // Hold the lock while searching here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
@@ -23389,8 +23413,8 @@ namespace Legion {
                 "the runtime has been started with multiple runtime instances.") 
         const RtEvent done_event = the_runtime->perform_registration_callback(
             (void*)callback, buffer.get_ptr(), buffer.get_size(), 
-            true/*withargs*/, global, false/*preregistered*/, false/*dedup*/,
-            0/*dedup tag*/);
+            true/*withargs*/, global, false/*preregistered*/,
+            deduplicate, dedup_tag);
         if (done_event.exists() && !done_event.has_triggered())
         {
           // Block waiting for these to finish currently since we need
@@ -23647,7 +23671,9 @@ namespace Legion {
     /*static*/ ReductionOpID& Runtime::get_current_static_reduction_id(void)
     //--------------------------------------------------------------------------
     {
-      static ReductionOpID current_redop_id = LEGION_MAX_APPLICATION_REDOP_ID;
+      // Make sure to reserve space for the built-in reduction operators
+      static ReductionOpID current_redop_id = 
+        LEGION_MAX_APPLICATION_REDOP_ID + LEGION_REDOP_LAST;
       return current_redop_id;
     }
 

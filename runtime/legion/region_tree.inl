@@ -329,13 +329,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
-                                 const Realm::IndexSpace<DIM,T> &space,
-                                 const LayoutConstraintSet &constraints,
-                                 const std::vector<FieldID> &field_ids,
-                                 const std::vector<size_t> &field_sizes,
-                                 bool compact, LayoutConstraintKind *unsat_kind,
-                                 unsigned *unsat_index, void **piece_list,
-                                 size_t *piece_list_size) const
+                                   const Realm::IndexSpace<DIM,T> &space,
+                                   const LayoutConstraintSet &constraints,
+                                   const std::vector<FieldID> &field_ids,
+                                   const std::vector<size_t> &field_sizes,
+                                   bool compact, void **piece_list,
+                                   size_t *piece_list_size) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -365,19 +364,23 @@ namespace Legion {
         if (spec.max_overhead > 0)
         {
           std::vector<Realm::Rect<DIM,T> > covering;
-          if (!space.compute_covering(spec.max_pieces, spec.max_overhead,
+          if (space.compute_covering(spec.max_pieces, spec.max_overhead,
                                       covering))
           {
-            if (unsat_kind != NULL)
-              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
-            if (unsat_index != NULL)
-              *unsat_index = 0;
-            return NULL;
+            // Container problem is stupid
+            piece_bounds.resize(covering.size());
+            for (unsigned idx = 0; idx < covering.size(); idx++)
+              piece_bounds[idx] = covering[idx];
           }
-          // Container problem is stupid
-          piece_bounds.resize(covering.size());
-          for (unsigned idx = 0; idx < covering.size(); idx++)
-            piece_bounds[idx] = covering[idx];
+          else
+          {
+            // Just fill in with the compact rectangles for now
+            // This will likely fail the max pieces test later
+            for (Realm::IndexSpaceIterator<DIM,T> itr(space); 
+                  itr.valid; itr.step())
+              if (!itr.rect.empty())
+                piece_bounds.push_back(itr.rect);
+          }
         }
         else
         {
@@ -385,14 +388,6 @@ namespace Legion {
                 itr.valid; itr.step())
             if (!itr.rect.empty())
               piece_bounds.push_back(itr.rect);
-          if (spec.max_pieces < piece_bounds.size())
-          {
-            if (unsat_kind != NULL)
-              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
-            if (unsat_index != NULL)
-              *unsat_index = 0;
-            return NULL;
-          }
         }
         if (!piece_bounds.empty())
         {
@@ -541,8 +536,15 @@ namespace Legion {
           offset += offset_finder->second;
         std::map<FieldID,size_t>::const_iterator alignment_finder = 
           alignments.find(it->second);
-        const size_t field_alignment = (alignment_finder != alignments.end())
-          ? alignment_finder->second : 1;
+        // Hack to help out lazy users unwilling to specify alignment 
+        // constraints that are necessary for correctness
+        // If they haven't specified an alignment we align on the largest
+        // power of two that divides the size of the field, for more
+        // details see https://github.com/StanfordLegion/legion/issues/1384
+        // Cap at a maximum of 128 byte alignment for GPUs
+        const size_t field_alignment =
+          (alignment_finder != alignments.end()) ? alignment_finder->second : 1;
+          //std::min<size_t>(it->first & ~(it->first - 1), 128/*max alignment*/);
         if (field_alignment > 1)
         {
           offset = round_up(offset, field_alignment);
@@ -659,144 +661,6 @@ namespace Legion {
         fl.rel_offset = safe_reuse ? field_offsets[it->second] : 0;
         fl.size_in_bytes = it->first;
       }
-#if 0
-      // We have a two different implementations of how to compute the layout 
-      // 1. In cases where we either have just one piece or we know we're
-      //    doing AOS then we know the alignment and fsize will be the same
-      //    across all the pieces, therefore we can share piece lists
-      // 2. In more general cases, we can have SOA or hybrid with multiple
-      //    pieces so we can't deduplicate piece lists safely given Realm's
-      //    current encoding so instead we build a piece list per field and
-      //    build up the representation for each piece individually
-
-      // This is formerly case 2 that would lay out SOA and hybrid
-      // layouts for each piece individually rather than grouping
-      // pieces together for each field
-      {
-        // We have multiple pieces and we're not AOS so the per-field
-        // offsets can be different in each piece dependent upon the
-        // size of the piece and which dimensions are before the fields
-        // In this case we're going to have one piece list for each field
-        for (unsigned idx = 0; idx < zip_fields.size(); idx++)
-        {
-          layout->piece_lists[idx].pieces.reserve(piece_bounds.size());
-          const std::pair<size_t,FieldID> &field = zip_fields[idx];
-          Realm::InstanceLayoutGeneric::FieldLayout &fl = 
-            layout->fields[field.second];
-          fl.list_idx = idx;
-          fl.rel_offset = 0;
-          fl.size_in_bytes = field.first;
-        }
-        // We'll compute each piece infidivudaly and the piece list per field
-        for (typename std::vector<Rect<DIM,T> >::const_iterator pit =
-              piece_bounds.begin(); pit != piece_bounds.end(); pit++)
-        {
-          const Rect<DIM,T> &bounds = *pit;
-          int field_index = -1;
-          size_t elements_between_fields = 1;
-          for (unsigned idx = 0; order.ordering.size(); idx++)
-          {
-            const DimensionKind dim = order.ordering[idx];
-            if (dim == DIM_F)
-            {
-              field_index = idx;
-              break;
-            }
-#ifdef DEBUG_LEGION
-            assert(int(dim) < DIM);
-#endif
-            elements_between_fields *= (bounds.hi[dim] - bounds.lo[dim] + 1);
-          }
-#ifdef DEBUG_LEGION
-          assert(field_index >= 0);
-#endif
-          // This code borrows from choose_instance_layout but
-          // there are subtle differences to handle Legion's layout constraints
-          // What we want to compute is the size of the field dimension
-          // in a way that guarantees that all fields maintain their alignments
-          size_t fsize = 0;
-          size_t falign = 1;
-          // We can't make the piece lists yet because we don't know the 
-          // extent of the field dimension needed to ensure alignment 
-          std::map<FieldID, size_t> field_offsets;
-          for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
-                zip_fields.begin(); it != zip_fields.end(); it++)
-          {
-            // if not specified, field goes at the end of all known fields
-            // (or a bit past if alignment is a concern)
-            size_t offset = fsize;
-            std::map<FieldID,off_t>::const_iterator offset_finder = 
-              offsets.find(it->second);
-            if (offset_finder != offsets.end())
-              offset += offset_finder->second;
-            std::map<FieldID,size_t>::const_iterator alignment_finder = 
-              alignments.find(it->second);
-            const size_t field_alignment = 
-              (alignment_finder != alignments.end()) ? 
-                alignment_finder->second : 1;
-            if (field_alignment > 1)
-            {
-              offset = round_up(offset, field_alignment);
-              if ((falign % field_alignment) != 0)
-                falign = lcm(falign, field_alignment);
-            }
-            // increase size and alignment if needed
-            fsize = max(fsize, offset + it->first * elements_between_fields);
-            field_offsets[it->second] = offset;
-          }
-          if (falign > 1)
-          {
-            // group size needs to be rounded up to match group alignment
-            fsize = round_up(fsize, falign);
-            // overall instance alignment layout must be compatible with group
-            layout->alignment_reqd = lcm(layout->alignment_reqd, falign);
-          }
-          // starting point for piece is first aligned location above
-          // existing pieces
-          const size_t piece_start = round_up(layout->bytes_used, falign);
-          unsigned fidx = 0;
-          for (std::vector<std::pair<size_t,FieldID> >::const_iterator it = 
-                zip_fields.begin(); it != zip_fields.end(); it++, fidx++)
-          {
-            // create the piece
-            Realm::AffineLayoutPiece<DIM,T> *piece = 
-              new Realm::AffineLayoutPiece<DIM,T>;
-            piece->bounds = bounds; 
-            piece->offset = piece_start + field_offsets[it->second];
-            size_t stride = it->first;
-            for (std::vector<DimensionKind>::const_iterator dit = 
-                  order.ordering.begin(); dit != order.ordering.end(); dit++)
-            {
-              if ((*dit) != DIM_F)
-              {
-#ifdef DEBUG_LEGION
-                assert(int(*dit) < DIM);
-#endif
-                piece->strides[*dit] = stride;
-                piece->offset -= bounds.lo[*dit] * stride;
-                stride *= (bounds.hi[*dit] - bounds.lo[*dit] + 1);
-              }
-              else
-                // Reset the stride to the fsize for the next dimension
-                // since it already incorporates everything prior to it
-                stride = fsize;
-            }
-            layout->piece_lists[fidx].pieces.push_back(piece);
-          }
-          // Lastly we need to update the bytes used for this piece
-          size_t piece_bytes = fsize;
-          for (unsigned idx = field_index+1; idx < order.ordering.size(); idx++)
-          {
-            const DimensionKind dim = order.ordering[idx];
-#ifdef DEBUG_LEGION
-            assert(int(dim) < DIM);
-#endif
-            piece_bytes *= (bounds.hi[dim] - bounds.lo[dim] + 1);
-          }
-          layout->bytes_used = piece_start + piece_bytes;
-        }
-      }
-#endif
       return layout;
     }
 
@@ -1409,10 +1273,8 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact, 
-                                    LayoutConstraintKind *unsat_kind,
-                                    unsigned *unsat_index, void **piece_list,
-                                    size_t *piece_list_size)
+                                    bool compact,
+                                    void **piece_list, size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_is;
@@ -1420,7 +1282,7 @@ namespace Legion {
       if (space_ready.exists())
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
-                 compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+                                    compact, piece_list, piece_list_size);
     }
 
     //--------------------------------------------------------------------------
@@ -5050,9 +4912,7 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
-                                    bool compact, 
-                                    LayoutConstraintKind *unsat_kind,
-                                    unsigned *unsat_index, void **piece_list, 
+                                    bool compact, void **piece_list,
                                     size_t *piece_list_size)
     //--------------------------------------------------------------------------
     {
@@ -5061,7 +4921,7 @@ namespace Legion {
       if (space_ready.exists())
         space_ready.wait();
       return create_layout_internal(local_is, constraints,field_ids,field_sizes,
-                 compact, unsat_kind, unsat_index, piece_list, piece_list_size);
+                                    compact, piece_list, piece_list_size);
     }
 
     //--------------------------------------------------------------------------

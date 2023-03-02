@@ -18709,6 +18709,8 @@ namespace Legion {
                               "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                               "FORGET THEM?!?", parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id())
+            requirement.privilege_fields.insert(
+                launcher.file_fields.begin(), launcher.file_fields.end());
             break;
           }
         case LEGION_EXTERNAL_HDF5_FILE:
@@ -18726,6 +18728,10 @@ namespace Legion {
                             "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                             "FORGET THEM?!?", parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id())
+            for (std::map<FieldID,std::vector<const char*> >::const_iterator
+                  it = launcher.field_files.begin();
+                  it != launcher.field_files.end(); it++)
+              requirement.privilege_fields.insert(it->first);
             const OrderingConstraint &input_constraint = 
               launcher.constraints.ordering_constraint;
             const int dims = launcher.parent.index_space.get_dim();
@@ -18801,7 +18807,7 @@ namespace Legion {
       // Create the result and the point attach operations
       ExternalResourcesImpl *result = new ExternalResourcesImpl(ctx,
           indexes.size(), upper_bound, launch_bounds, launcher.parent,
-          launcher.privilege_fields);
+          requirement.privilege_fields);
       points.resize(indexes.size());
       for (unsigned idx = 0; idx < indexes.size(); idx++)
       {

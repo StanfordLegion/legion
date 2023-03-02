@@ -3588,11 +3588,27 @@ namespace Legion {
         }
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, unsat_kind, unsat_index, 
-             &piece_list, &piece_list_size);
-        // If constraints were unsatisfied then return now
-        if (realm_layout == NULL)
-          return NULL;
+             field_sizes, compact, &piece_list, &piece_list_size);
+#ifdef DEBUG_LEGION
+        assert(realm_layout != NULL);
+#endif
+        // If we were doing a compact layout then Check that we met 
+        // the constraints for efficiency and number of pieces
+        if (compact)
+        {
+          const SpecializedConstraint &spec = 
+            constraints.specialized_constraint;
+          if (spec.max_pieces < piece_list_size)
+          {
+            if (unsat_kind != NULL)
+              *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
+            if (unsat_index != NULL)
+              *unsat_index = 0;
+            if (footprint != NULL)
+              *footprint = realm_layout->bytes_used;
+            return NULL;
+          }
+        }
       }
       // Clone the realm layout each time since (realm will take ownership 
       // after every instance call, so we need a new one each time)
@@ -3754,7 +3770,9 @@ namespace Legion {
         // Log the logical regions and fields that make up this instance
         for (std::vector<LogicalRegion>::const_iterator it =
               regions.begin(); it != regions.end(); it++)
-          runtime->profiler->record_physical_instance_region(unique_event, *it);
+          if (it->exists())
+            runtime->profiler->record_physical_instance_region(unique_event, 
+                                                               *it);
         runtime->profiler->record_physical_instance_layout(unique_event,
                                                      layout->owner->handle,
                                                      *layout->constraints);
@@ -3804,11 +3822,10 @@ namespace Legion {
         }
         realm_layout =
           instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, unsat_kind, unsat_index, 
-             &piece_list, &piece_list_size);
-        // If constraints were unsatisfied then return now
-        if (realm_layout == NULL)
-          return NULL;
+             field_sizes, compact, &piece_list, &piece_list_size);
+#ifdef DEBUG_LEGION
+        assert(realm_layout != NULL);
+#endif
       }
       const size_t instance_footprint = realm_layout->bytes_used;
       // Save the footprint size if we need to
@@ -3926,6 +3943,8 @@ namespace Legion {
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
       {
+        if (!it->exists())
+          continue;
         if (field_space_node == NULL)
           field_space_node = forest->get_node(it->get_field_space());
         if (tree_id == 0)

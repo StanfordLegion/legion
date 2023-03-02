@@ -4573,7 +4573,7 @@ class State(object):
                 count -= point.thing.size #type: ignore
             if count > max_count:
                 max_count = count
-        return max_count
+        return max(max_count, 1)
 
     @typeassert(timepoints=list, owners=list, count=int)
     def calculate_utilization_data(self, timepoints: List[TimePoint], 
@@ -4763,6 +4763,11 @@ class State(object):
             group = node + " (" + "Channel)"
             if group in timepoints_dict:
                     stats_structure[node].append(group)
+
+        # remove nodes whose value is empty
+        for node in nodes:
+            if len(stats_structure[node]) == 0:
+                del stats_structure[node]
 
         json_file_name = os.path.join(output_dirname, "json", "utils.json")
 

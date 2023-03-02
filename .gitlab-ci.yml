@@ -21,18 +21,6 @@ cache: &global_cache
 
 
 # Local variables (included on a case-by-case basis in each job):
-.gcc5: &gcc5
-  CC:  "gcc-5"
-  CXX: "g++-5"
-  F90: "gfortran-5"
-.gcc6: &gcc6
-  CC:  "gcc-6"
-  CXX: "g++-6"
-  F90: "gfortran-6"
-.gcc7: &gcc7
-  CC:  "gcc-7"
-  CXX: "g++-7"
-  F90: "gfortran-7"
 .gcc8: &gcc8
   CC:  "gcc-8"
   CXX: "g++-8"
@@ -338,22 +326,6 @@ before_script:
           fi
         fi
       fi
-      if [[ "$REALM_NETWORKS" == mpi || "$REALM_NETWORKS" == ucx ]]; then
-        # MPI and UCX backends require CMake 3.9 - grab it here so the default
-        #  can remain an older version
-        wget -nv https://github.com/Kitware/CMake/releases/download/v3.9.6/cmake-3.9.6-Linux-x86_64.tar.gz
-        echo "062bf45bee36ce7c2a55ae26b8b5324720f370d420a05cba91b9448c64ffdbea  cmake-3.9.6-Linux-x86_64.tar.gz" | shasum --check
-        tar -zxf cmake-3.9.6-Linux-x86_64.tar.gz
-        PATH=`pwd`/cmake-3.9.6-Linux-x86_64/bin:$PATH
-      fi
-      if [[ "$EMBED_GASNET" == 1 ]]; then
-        # embed GASNet requires CMake 3.11 - grab it here so the default can remain
-        #  an older version
-        wget -nv https://github.com/Kitware/CMake/releases/download/v3.11.4/cmake-3.11.4-Linux-x86_64.tar.gz
-        echo "6dab016a6b82082b8bcd0f4d1e53418d6372015dd983d29367b9153f1a376435  cmake-3.11.4-Linux-x86_64.tar.gz" | shasum --check
-        tar -zxf cmake-3.11.4-Linux-x86_64.tar.gz
-        PATH=`pwd`/cmake-3.11.4-Linux-x86_64/bin:$PATH
-      fi
       if [[ "$REALM_NETWORKS" == ucx ]]; then
         apt-get install -y autoconf automake m4 libtool
         git clone https://github.com/openucx/ucx ucx-git
@@ -393,13 +365,6 @@ before_script:
     fi
   - |
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
-      # Kokkos requires cmake 3.16 - grab it here so the default can remain
-      #  an older version
-      wget -nv https://github.com/Kitware/CMake/releases/download/v3.16.7/cmake-3.16.7-Linux-x86_64.tar.gz
-      echo "f403724afa170ff54af3c6ea1afa335101f2970a12215a72630fba0166cd8b61  cmake-3.16.7-Linux-x86_64.tar.gz" | shasum --check
-      tar -zxf cmake-3.16.7-Linux-x86_64.tar.gz
-      PATH=`pwd`/cmake-3.16.7-Linux-x86_64/bin:$PATH
-
       # git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
       # FIXME (Wei): since we are using the dev branch, pick a stable hash for now
       #   remove it once the dev branch has been merged into master
@@ -546,27 +511,6 @@ before_script:
   # docker puts both 32 and 64 bit libcuda.so's in LD_LIBRARY_PATH, but that confuses Kokkos's cmake
   LD_LIBRARY_PATH: "/usr/local/nvidia/lib64"
 
-.p100_cuda80: &p100_cuda80
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-8.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-8.0"
-  # cuda 8.0 does not come with thrust
-  USE_COMPLEX: "0"
-  # have to tell cudafe to expect c++11 stuff
-  NVCC_FLAGS: "-std=c++11"
-
-.p100_cuda90: &p100_cuda90
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-9.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.0"
-
-.p100_cuda92: &p100_cuda92
-  <<: *p100_base
-  CUDA: "/usr/local/cuda-9.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-9.2"
-  # cuda 9.2 has bugs in thrust that break complex reduction ops
-  USE_COMPLEX: "0"
-
 .p100_cuda102: &p100_cuda102
   <<: *p100_base
   CUDA: "/usr/local/cuda-10.2"
@@ -590,12 +534,10 @@ before_script:
 ###
 
 # Each job will run in a fresh container with this image.
-.image_1804: &image_1804
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-18.04:230131
 .image_2004: &image_2004
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:230131
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:230203
 .image_2204: &image_2204
-  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:230131
+  image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-22.04:230203
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 .image_kokkos_openmp: &image_kokkos_openmp
   image: registry.gitlab.com/stanfordlegion/legion/gitlab-ci-20.04:210923
@@ -903,7 +845,7 @@ gcc9_cxx11_release_gasnetex_ucx_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
     <<: [*gcc9, *terra12, *release, *cxx11_normal, *gasnetex_ucx, *regent, *incremental,  *short]
-#   * MPI
+#   * MPI and multi-node legion prof
 gcc9_cxx11_release_mpi_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
@@ -911,11 +853,11 @@ gcc9_cxx11_release_mpi_legion:
 gcc9_cxx11_debug_mpi_cmake_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *short, *shared]
-gcc9_cxx11_debug_mpi_regent:
+    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *cmake, *legion, *ctest, *shared]
+gcc9_cxx11_release_mpi_prof_regent:
   <<: [*linux_compute, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx11_normal, *mpi, *regent, *incremental]
+    <<: [*gcc9, *terra12, *release, *cxx11_normal, *mpi, *regent, *incremental, *prof, *short]
 #   * UCX
 gcc9_cxx11_release_ucx_legion:
  <<: [*linux, *image_2004, *tests]
@@ -1216,41 +1158,23 @@ gcc9_cxx11_hardened_regent:
   variables:
     <<: [*gcc9, *terra12, *release, *cxx11_hardened, *regent, *parallel]
 
-# GCC 7 with C++ 14
-gcc7_cxx14_debug_legion:
-  <<: [*linux, *image_1804, *tests]
-  variables:
-    <<: [*gcc7, *terra10, *debug, *cxx14_normal, *legion]
-gcc7_cxx14_release_legion:
-  <<: [*linux, *image_1804, *tests]
-  variables:
-    <<: [*gcc7, *terra10, *release, *cxx14_normal, *legion]
-gcc7_cxx14_debug_regent:
-  <<: [*linux, *image_1804, *tests]
-  variables:
-    <<: [*gcc7, *terra10, *debug, *cxx14_normal, *regent]
-gcc7_cxx14_release_regent_pretty:
-  <<: [*linux, *image_1804, *tests]
-  variables:
-    <<: [*gcc7, *terra10, *release, *cxx14_normal, *regent_pretty]
-
-# GCC 9 with C++ 17
-gcc9_cxx17_debug_legion:
+# GCC 9 with C++ 14
+gcc9_cxx14_debug_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *legion]
-gcc9_cxx17_release_legion:
+    <<: [*gcc9, *terra12, *debug, *cxx14_normal, *legion]
+gcc9_cxx14_release_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx17_normal, *legion]
-gcc9_cxx17_debug_regent:
+    <<: [*gcc9, *terra12, *release, *cxx14_normal, *legion]
+gcc9_cxx14_debug_regent:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *debug, *cxx17_normal, *regent]
-gcc9_cxx17_release_regent_pretty:
+    <<: [*gcc9, *terra12, *debug, *cxx14_normal, *regent]
+gcc9_cxx14_release_regent_pretty:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*gcc9, *terra12, *release, *cxx17_normal, *regent_pretty]
+    <<: [*gcc9, *terra12, *release, *cxx14_normal, *regent_pretty]
 
 # GCC 10 with C++ 17
 gcc10_cxx17_debug_legion:
@@ -1329,18 +1253,6 @@ clang14_cxx20_debug_regent:
     <<: [*clang14, *terra14, *debug, *cxx20_normal, *regent]
 
 # CUDA tests:
-p100_cuda80_gcc5_cxx11_release_cuda_legion:
-  <<: [*p100, *tests]
-  variables:
-    <<: [*gcc5, *release, *cxx11_normal, *p100_cuda80, *legion, *cmake, *ctest, *shared]
-p100_cuda90_gcc6_cxx11_release_cuda_legion:
-  <<: [*p100, *tests]
-  variables:
-    <<: [*gcc6, *release, *cxx11_normal, *p100_cuda90, *legion, *cmake, *ctest, *shared]
-p100_cuda92_gcc7_cxx11_release_cuda_legion:
-  <<: [*p100, *tests]
-  variables:
-    <<: [*gcc7, *release, *cxx11_normal, *p100_cuda92, *legion, *cmake, *ctest, *shared]
 p100_cuda102_gcc8_cxx11_release_cuda_legion:
   <<: [*p100, *tests]
   variables:
@@ -1402,20 +1314,20 @@ p100_cuda112_gcc9_cxx14_release_ucx_cuda_regent:
 clang12_cxx17_debug_kokkos_legion:
   <<: [*linux, *image_2004, *tests]
   variables:
-    <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion]
+    <<: [*clang12, *terra12, *debug, *cxx17_normal, *kokkos, *cmake, *legion, *ctest]
 # FIXME (Elliott): I can't get this job to work in the new 22.04 image, so just leave the old image for now
 clang10_cxx17_debug_kokkos_openmp_legion:
   <<: [*linux, *image_kokkos_openmp, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+    <<: [*clang10, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
 # clang14_cxx17_debug_kokkos_openmp_legion:
 #   <<: [*linux, *image_2204, *tests]
 #   variables:
-#     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion]
+#     <<: [*clang14, *terra14, *debug, *cxx17_normal, *kokkos, *openmp, *cmake, *legion, *ctest]
 p100_cuda112_clang10_cxx17_debug_kokkos_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion]
+    <<: [*clang10, *debug, *cxx17_normal, *p100_cuda112, *kokkos, *cmake, *legion, *ctest]
 p100_cuda112_clang10_cxx17_debug_kokkos_cuda_openmp_legion:
   <<: [*p100, *tests]
   variables:
@@ -1430,10 +1342,13 @@ p100_cuda112_gcc9_cxx17_debug_shared_kokkos_cuda_openmp_legion:
     <<: [*gcc9, *debug, *shared, *cxx17_normal, *p100_cuda112, *kokkos, *openmp, *cmake, *legion, *ctest, *short]
 
 # HPCSDK (nvc++) tests:
-hpcsdk2211_cxx11_release_legion:
+# Make all HPC SDK tests use cmake since nvc++ is really slow and can't handle doing compile+link
+# for all tests without exceeding the two hour timeout, this means we're missing coverage of building
+# with make for nvc++ but we'll just have to live with that
+hpcsdk2211_cxx11_release_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:
-    <<: [*hpcsdk2211, *release, *cxx11_normal, *legion]
+    <<: [*hpcsdk2211, *release, *cxx11_normal, *cmake, *legion, *ctest]
 hpcsdk2211_cxx11_debug_cmake_legion:
   <<: [*linux_avx, *image_hpcsdk, *tests]
   variables:

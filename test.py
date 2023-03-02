@@ -1066,7 +1066,7 @@ def run_tests(test_modules=None,
         tmp_dir = tempfile.mkdtemp(dir=root_dir)
     else:
         if os.path.exists(tmp_dir):
-            shutils.rmtree(tmp_dir)
+            shutil.rmtree(tmp_dir)
         os.mkdir(tmp_dir)
 
     if verbose:
@@ -1126,6 +1126,10 @@ def run_tests(test_modules=None,
             if use_prof:
                 run_test_legion_prof_mypy(root_dir)
             if use_cmake:
+                # We should always be using ctest if we're building with
+                # cmake, except for some unusual cases with Regent
+                # (ask @eslaught for details about Regent cases)
+                assert test_ctest or test_regent
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
                     test_regent, test_legion_cxx, test_external1,
