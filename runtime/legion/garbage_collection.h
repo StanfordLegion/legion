@@ -306,7 +306,7 @@ namespace Legion {
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(AutoLock &gc, State to_check);
-      virtual void initialize_downgrade_state(AddressSpaceID owner);
+      virtual void accumulate_local_references(void);
       void check_for_downgrade(AddressSpaceID downgrade_owner); 
       void process_downgrade_request(AddressSpaceID owner, State to_check);
       bool process_downgrade_response(AddressSpaceID notready,
@@ -414,7 +414,7 @@ namespace Legion {
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(AutoLock &gc, State to_check);
-      virtual void initialize_downgrade_state(AddressSpaceID owner);
+      virtual void accumulate_local_references(void);
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;

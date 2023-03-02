@@ -936,12 +936,16 @@ namespace Legion {
           runtime->send_did_downgrade_request(owner_space, rez);
           remaining_responses++;
         }
-        initialize_downgrade_state(owner);
+        // Initialize the downgrade state
+        notready_owner = owner;
+        total_sent_references = 0;
+        total_received_references = 0;
         if (remaining_responses == 0)
         {
           // Send the response now
           if (owner != local_space)
           {
+            accumulate_local_references();
             const AddressSpaceID target = get_downgrade_target(owner);
             Serializer rez;
             {
@@ -983,12 +987,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::initialize_downgrade_state(AddressSpaceID own)
+    void DistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
-      notready_owner = own;
-      total_sent_references = sent_global_references;
-      total_received_references = received_global_references;
+      total_sent_references += sent_global_references;
+      total_received_references += received_global_references;
     }
 
     //--------------------------------------------------------------------------
@@ -1088,6 +1091,8 @@ namespace Legion {
       }
       if (--remaining_responses == 0)
       {
+        // Accumulate our local sent and received references
+        accumulate_local_references();
         if (downgrade_owner == local_space)
         {
           // See if it safe to downgrade
@@ -1732,18 +1737,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::initialize_downgrade_state(
-                                                           AddressSpaceID owner)
+    void ValidDistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
       if (current_state == VALID_REF_STATE)
       {
-        notready_owner = owner;
-        total_sent_references = sent_valid_references;
-        total_received_references = received_valid_references;
+        total_sent_references += sent_valid_references;
+        total_received_references += received_valid_references;
       }
       else
-        DistributedCollectable::initialize_downgrade_state(owner);
+        DistributedCollectable::accumulate_local_references();
     }
 
   }; // namespace Internal 
