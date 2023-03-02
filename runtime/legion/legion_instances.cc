@@ -3586,9 +3586,10 @@ namespace Legion {
           default:
             break;
         }
+        size_t num_pieces = 0;
         realm_layout =
-          instance_domain->create_layout(constraints, field_set, 
-             field_sizes, compact, &piece_list, &piece_list_size);
+          instance_domain->create_layout(constraints, field_set,
+             field_sizes, compact, &piece_list, &piece_list_size, &num_pieces);
 #ifdef DEBUG_LEGION
         assert(realm_layout != NULL);
 #endif
@@ -3598,7 +3599,7 @@ namespace Legion {
         {
           const SpecializedConstraint &spec = 
             constraints.specialized_constraint;
-          if (spec.max_pieces < piece_list_size)
+          if (spec.max_pieces < num_pieces)
           {
             if (unsat_kind != NULL)
               *unsat_kind = LEGION_SPECIALIZED_CONSTRAINT;
