@@ -4748,12 +4748,11 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
-  if use_cmake then
-    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
-  end
-  legion_install_prefix = os.getenv("LEGION_INSTALL_PREFIX")
+  local legion_install_prefix = os.getenv("LEGION_INSTALL_PREFIX")
   if legion_install_prefix then
-    flags:insert(legion_install_prefix .. "/lib")
+    lib_dir = legion_install_prefix .. "/lib"
+  elseif use_cmake then
+    lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
   if os.getenv('CRAYPE_VERSION') then
     flags:insert("-Wl,-Bdynamic")
