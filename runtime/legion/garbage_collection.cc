@@ -1129,13 +1129,26 @@ namespace Legion {
         else
         {
           const AddressSpaceID target = get_downgrade_target(downgrade_owner);
+          // We had to release the lock to send the requests to our upstream
+          // nodes so we need to check again to see if it is still safe to
+          // perform the downgrade on this node or not atomically with 
+          // accumulating our sent and received references
           Serializer rez;
+          if (can_downgrade())
           {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(notready_owner);
             rez.serialize(total_sent_references);
             rez.serialize(total_received_references);
+          }
+          else
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(local_space);
+            rez.serialize<uint64_t>(0); // sent global references
+            rez.serialize<uint64_t>(0); // received global references
           }
           runtime->send_did_downgrade_response(target, rez);
         }
