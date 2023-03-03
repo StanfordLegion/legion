@@ -4782,7 +4782,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     end
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
-  if use_cmake then
+  if legion_install_prefix or use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
   if gpuhelper.check_gpu_available() then
