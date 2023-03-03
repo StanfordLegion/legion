@@ -4835,7 +4835,7 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
       end
     end
     -- In separate compilation, need to make sure all globals get exported.
-    if base.config["separate"] then
+    if std.config["separate"] then
       task_impl[task:get_task_id().name] = task:get_task_id()
       task_impl[task:get_mapper_id().name] = task:get_mapper_id()
       task_impl[task:get_mapping_tag_id().name] = task:get_mapping_tag_id()
