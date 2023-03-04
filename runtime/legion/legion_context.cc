@@ -2280,31 +2280,13 @@ namespace Legion {
         FutureInstance *instance = manager->create_future_instance(owner_task,
             owner_task->get_unique_op_id(), ready,size, true/*eager*/);
         // create an external instance for the current allocation
-        const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-        const std::vector<size_t> sizes(1, 1);
-        const int dim_order[1] = { 0 };
-        const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-        const Realm::IndexSpace<1,coord_t> rect_space(
-            Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-                                   Realm::Point<1,coord_t>(size - 1)));
-        Realm::InstanceLayoutGeneric *ilg =
-          Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
-              rect_space, constraints, dim_order);
-        PhysicalInstance source_instance;
         const Realm::ExternalMemoryResource resource(
             reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
-        const ApEvent src_ready(
-            PhysicalInstance::create_external_instance(
-              source_instance, resource.suggested_memory(), ilg, 
-              resource, Realm::ProfilingRequestSet()));
-        FutureInstance source(value, size, src_ready, runtime, false/*eager*/,
-            false/*external*/, false/*own alloc*/, source_instance);
+        FutureInstance source(value, size, ApEvent::NO_AP_EVENT, runtime,
+                              false/*own allocation*/, &resource);
         // issue the copy between them
         Runtime::trigger_event(NULL, ready, 
             instance->copy_from(&source, owner_task));
-        done = Runtime::protect_event(ready);
-        // deferred delete the external instance source
-        source_instance.destroy(done);
         return instance;
       }
       else
