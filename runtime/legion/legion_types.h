@@ -240,7 +240,7 @@ namespace Legion {
   class FieldConstraint;
   class PaddingConstraint;
   class OrderingConstraint;
-  class SplittingConstraint;
+  class TilingConstraint;
   class DimensionConstraint;
   class AlignmentConstraint;
   class OffsetConstraint;

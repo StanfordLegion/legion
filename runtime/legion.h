@@ -2274,7 +2274,7 @@ namespace Legion {
       inline LayoutConstraintRegistrar&
         add_constraint(const OrderingConstraint &constraint);
       inline LayoutConstraintRegistrar&
-        add_constraint(const SplittingConstraint &constraint);
+        add_constraint(const TilingConstraint &constraint);
       inline LayoutConstraintRegistrar&
         add_constraint(const FieldConstraint &constraint);
       inline LayoutConstraintRegistrar&
@@ -3360,7 +3360,7 @@ namespace Legion {
       PieceIterator(const PieceIterator &rhs);
       PieceIterator(PieceIterator &&rhs);
       PieceIterator(const PhysicalRegion &region, FieldID fid,
-                    bool privilege_only,
+                    bool privilege_only = true,
                     bool silence_warnings = false,
                     const char *warning_string = NULL);
       ~PieceIterator(void);

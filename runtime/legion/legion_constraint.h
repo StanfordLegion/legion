@@ -36,7 +36,7 @@ namespace Legion {
   __op__(MEMORY CONSTRAINT, "Memory") \
   __op__(FIELD_CONSTRAINT, "Field") \
   __op__(ORDERING_CONSTRAINT, "Ordering") \
-  __op__(SPLITTING_CONSTRAINT, "Splitting") \
+  __op__(TILING_CONSTRAINT, "Tiling") \
   __op__(DIMENSION_CONSTRAINT, "Dimension") \
   __op__(ALIGNMENT_CONSTRAINT, "Alignment") \
   __op__(OFFSET_CONSTRAINT, "Offset") \
@@ -255,7 +255,7 @@ namespace Legion {
         { return NULL; }
       virtual OrderingConstraint* as_ordering_constraint(void)
         { return NULL; }
-      virtual SplittingConstraint* as_splitting_constraint(void)
+      virtual TilingConstraint* as_tiling_constraint(void)
         { return NULL; }
       virtual DimensionConstraint* as_dimension_constraint(void)
         { return NULL; } 
@@ -276,8 +276,8 @@ namespace Legion {
         as_field_constraint(void) const { return NULL; }
       virtual const OrderingConstraint* 
         as_ordering_constraint(void) const { return NULL; }
-      virtual const SplittingConstraint* 
-        as_splitting_constraint(void) const { return NULL; }
+      virtual const TilingConstraint* 
+        as_tiling_constraint(void) const { return NULL; }
       virtual const DimensionConstraint* 
         as_dimension_constraint(void) const { return NULL; }
       virtual const AlignmentConstraint* 
@@ -456,14 +456,6 @@ namespace Legion {
      * almost certainly be to specify a total order. Users
      * can also specify whether or not the related constraints
      * are contiguous with each other.
-     *
-     * It is important to note that users cannot mix full
-     * dimensions with split dimensions. For example, either
-     * 'DIM_X' can be used or 'INNER_DIM_X' and 'OUTER_DIM_X'
-     * but never both at the same time. The 'INNER' and 
-     * 'OUTER' dims may only be specified in a dimension
-     * constraint if there is an associated split constraint
-     * saying how to split the logical dimension.
      */
     class OrderingConstraint : public LayoutConstraint {
     public:
@@ -498,44 +490,43 @@ namespace Legion {
     };
 
     /**
-     * \class SplittingConstraint
-     * Specify how to split a normal index space dimension into
-     * an inner and outer dimension. The split can be specified
-     * in one of two ways: either by saying how many chunks to
-     * break the dimension into, or by specifying a splitting
-     * factor that will create as many chunks as necessary.
+     * \class TilingConstraint 
+     * Specify how to tile a dimension of an index space, The tile can 
+     * be specified in one of two ways: either by saying how many tiles
+     * to break the dimension into, or by specifying a tiling
+     * factor that will create as many tiles as necessary.
      * These two constructors provide both top-down and bottom-up
      * ways of saying how to break a dimension apart.
      */
-    class SplittingConstraint : public LayoutConstraint { 
+    class TilingConstraint : public LayoutConstraint { 
     public:
       static const LayoutConstraintKind constraint_kind = 
-                                            LEGION_SPLITTING_CONSTRAINT;
+                                            LEGION_TILING_CONSTRAINT;
     public:
-      SplittingConstraint(void);
-      SplittingConstraint(DimensionKind dim); // chunks
-      SplittingConstraint(DimensionKind dim, size_t value);
+      TilingConstraint(void);
+      TilingConstraint(DimensionKind dim); // tiles
+      TilingConstraint(DimensionKind dim, size_t value, bool tiles = false);
     public:
-      inline bool operator==(const SplittingConstraint &o) const
-      { return kind == o.kind && value == o.value && chunks == o.chunks; }
+      inline bool operator==(const TilingConstraint &o) const
+      { return dim == o.dim && value == o.value && tiles == o.tiles; }
     public:
       virtual LayoutConstraintKind get_constraint_kind(void) const
         { return constraint_kind; }
-      virtual SplittingConstraint* as_splitting_constraint(void) 
+      virtual TilingConstraint* as_tiling_constraint(void) 
         { return this; }
-      virtual const SplittingConstraint* as_splitting_constraint(void) const
+      virtual const TilingConstraint* as_tiling_constraint(void) const
         { return this; }
     public:
-      bool entails(const SplittingConstraint &other) const;
-      bool conflicts(const SplittingConstraint &other) const;
+      bool entails(const TilingConstraint &other) const;
+      bool conflicts(const TilingConstraint &other) const;
     public:
-      void swap(SplittingConstraint &rhs);
+      void swap(TilingConstraint &rhs);
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      DimensionKind kind;
+      DimensionKind dim;
       size_t value;
-      bool chunks;
+      bool tiles;
     };
 
     /**
@@ -733,7 +724,7 @@ namespace Legion {
       LayoutConstraintSet&
         add_constraint(const OrderingConstraint &constraint);
       LayoutConstraintSet&
-        add_constraint(const SplittingConstraint &constraint);
+        add_constraint(const TilingConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const DimensionConstraint &constraint);
       LayoutConstraintSet&
@@ -769,7 +760,7 @@ namespace Legion {
       PointerConstraint                pointer_constraint;
       PaddingConstraint                padding_constraint;
       OrderingConstraint               ordering_constraint;
-      std::vector<SplittingConstraint> splitting_constraints;
+      std::vector<TilingConstraint>    tiling_constraints;
       std::vector<DimensionConstraint> dimension_constraints;
       std::vector<AlignmentConstraint> alignment_constraints; 
       std::vector<OffsetConstraint>    offset_constraints;

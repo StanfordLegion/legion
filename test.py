@@ -71,6 +71,7 @@ legion_cxx_tests = [
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
+    ['examples/tiling/tiling', []],
     # Comment this test out until it works everywhere
     #['examples/implicit_top_task/implicit_top_task', []],
 

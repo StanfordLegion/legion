@@ -18678,7 +18678,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
-                           add_constraint(const SplittingConstraint &constraint)
+                              add_constraint(const TilingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
       layout_constraints.add_constraint(constraint);
@@ -21277,7 +21277,7 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::OrderingConstraint OrderingConstraint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::SplittingConstraint SplittingConstraint;
+    typedef Legion::TilingConstraint TilingConstraint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::DimensionConstraint DimensionConstraint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

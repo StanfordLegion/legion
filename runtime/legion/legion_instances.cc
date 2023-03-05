@@ -763,11 +763,11 @@ namespace Legion {
             constraints->ordering_constraint.ordering.begin(); it !=
             constraints->ordering_constraint.ordering.end(); it++)
         LegionSpy::log_instance_ordering_constraint_dimension(inst_event, *it);
-      for (std::vector<SplittingConstraint>::const_iterator it = 
-            constraints->splitting_constraints.begin(); it !=
-            constraints->splitting_constraints.end(); it++)
-        LegionSpy::log_instance_splitting_constraint(inst_event,
-                                it->kind, it->value, it->chunks);
+      for (std::vector<TilingConstraint>::const_iterator it = 
+            constraints->tiling_constraints.begin(); it !=
+            constraints->tiling_constraints.end(); it++)
+        LegionSpy::log_instance_tiling_constraint(inst_event,
+                                it->dim, it->value, it->tiles);
       for (std::vector<DimensionConstraint>::const_iterator it = 
             constraints->dimension_constraints.begin(); it !=
             constraints->dimension_constraints.end(); it++)
@@ -4160,10 +4160,6 @@ namespace Legion {
     {
       // First look at the OrderingConstraint to Figure out what kind
       // of instance we are building here, SOA, AOS, or hybrid
-      // Make sure to check for splitting constraints if see sub-dimensions
-      if (!constraints.splitting_constraints.empty())
-        REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-            "Splitting layout constraints are not currently supported")
       const size_t num_dims = instance_domain->get_num_dims();
       OrderingConstraint &ord = constraints.ordering_constraint;
       if (!ord.ordering.empty())
@@ -4183,9 +4179,6 @@ namespace Legion {
             else
               field_idx = idx;
           }
-          else if (ord.ordering[idx] > LEGION_DIM_F)
-            REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-              "Splitting layout constraints are not currently supported")
           else
           {
             // Should never be duplicated
@@ -4282,6 +4275,38 @@ namespace Legion {
       assert(ord.contiguous);
       assert(ord.ordering.size() == (num_dims + 1));
 #endif
+      // Check the tiling constraints
+      if (!constraints.tiling_constraints.empty())
+      {
+        // Check to make sure we're not asking for a compact-sparse instance
+        switch (constraints.specialized_constraint.get_kind())
+        {
+          case LEGION_COMPACT_SPECIALIZE:
+          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_LAYOUT_CONSTRAINT,
+                "Illegal tiling constraints specified for compact-sparse "
+                "instance creation. Tiling constraints can only be specified "
+                "on affine instances currently. If you have a compelling use "
+                "case for tiling the pieces of an compact-sparse instance "
+                "please report it to the Legion developer's mailing list.")
+          default:
+            break;
+        }
+        // Make sure that each of the dimensions are valid and aren't duplicated
+        std::vector<bool> observed(num_dims, false);
+        for (std::vector<TilingConstraint>::iterator it =
+              constraints.tiling_constraints.begin(); it !=
+              constraints.tiling_constraints.end(); /*nothing*/)
+        {
+          if ((it->dim < num_dims) && !observed[it->dim])
+          {
+            observed[it->dim] = true;
+            it++;
+          }
+          else
+            it = constraints.tiling_constraints.erase(it);
+        }
+      }
       // From this we should be able to compute the field groups 
       // Use the FieldConstraint to put any fields in the proper order
       const std::vector<FieldID> &field_set = 
