@@ -14676,7 +14676,7 @@ namespace Legion {
              && ordering_constraint == rhs.ordering_constraint
              && alignment_constraints == rhs.alignment_constraints
              && dimension_constraints == rhs.dimension_constraints
-             && splitting_constraints == rhs.splitting_constraints
+             && tiling_constraints == rhs.tiling_constraints
              && offset_constraints == rhs.offset_constraints
              && pointer_constraint == rhs.pointer_constraint;
     }
@@ -14692,7 +14692,7 @@ namespace Legion {
              && ordering_constraint == rhs.ordering_constraint
              && alignment_constraints == rhs.alignment_constraints
              && dimension_constraints == rhs.dimension_constraints
-             && splitting_constraints == rhs.splitting_constraints
+             && tiling_constraints == rhs.tiling_constraints
              && offset_constraints == rhs.offset_constraints
              && pointer_constraint == rhs.pointer_constraint;
     }
@@ -14903,14 +14903,14 @@ namespace Legion {
       }
       if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
         return false;
-      for (std::vector<SplittingConstraint>::const_iterator it = 
-            other.splitting_constraints.begin(); it !=
-            other.splitting_constraints.end(); it++)
+      for (std::vector<TilingConstraint>::const_iterator it = 
+            other.tiling_constraints.begin(); it !=
+            other.tiling_constraints.end(); it++)
       {
         bool entailed = false;
-        for (unsigned idx = 0; idx < splitting_constraints.size(); idx++)
+        for (unsigned idx = 0; idx < tiling_constraints.size(); idx++)
         {
-          if (splitting_constraints[idx].entails(*it))
+          if (tiling_constraints[idx].entails(*it))
           {
             entailed = true;
             break;

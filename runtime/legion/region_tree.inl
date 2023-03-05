@@ -355,7 +355,72 @@ namespace Legion {
       if (space.dense() || !compact)
       {
         if (!space.bounds.empty())
-          piece_bounds.push_back(space.bounds);
+        {
+          // Check to see if we have any tiling constraints
+          if (!constraints.tiling_constraints.empty())
+          {
+#ifdef DEBUG_LEGION
+            assert(piece_list != NULL);
+            assert((*piece_list) == NULL);
+            assert(piece_list_size != NULL);
+            assert((*piece_list_size) == 0);
+            assert(num_pieces != NULL);
+            assert((*num_pieces) == 0);
+#endif
+            // First get the tile bounds
+            Point<DIM,T> tile_size;
+            for (int i = 0; i < DIM; i++)
+              tile_size[i] = (space.bounds.hi[i] - space.bounds.lo[i]) + 1;
+            for (std::vector<TilingConstraint>::const_iterator it =
+                  constraints.tiling_constraints.begin(); it !=
+                  constraints.tiling_constraints.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(it->dim < DIM);
+#endif
+              if (it->tiles)
+                tile_size[it->dim] = 
+                  (tile_size[it->dim] + it->value - 1) / it->value;
+              else
+                tile_size[it->dim] = it->value;
+            }
+            // Now we've got the tile size, walk over the dimensions 
+            // in order to produce the tiles as pieces
+            Point<DIM,T> offset = space.bounds.lo;
+            // Iterate until we've tiled the entire space
+            bool done = false;
+            while (!done)
+            {
+              // Check to make sure the next tile is in bounds
+              Rect<DIM,T> piece(offset, 
+                  offset + tile_size - Point<DIM,T>::ONES());
+              // Intersect with the original bounds to not overflow
+              piece = space.bounds.intersection(piece);
+#ifdef DEBUG_LEGION
+              assert(!piece.empty());
+#endif
+              piece_bounds.push_back(piece);
+              // Step the offset to the next location
+              done = true;
+              for (std::vector<TilingConstraint>::const_iterator it =
+                    constraints.tiling_constraints.begin(); it !=
+                    constraints.tiling_constraints.end(); it++)
+              {
+                offset[it->dim] += tile_size[it->dim];
+                if (offset[it->dim] <= space.bounds.hi[it->dim])
+                {
+                  // Still in bounds so we can keep traversing
+                  done = false;
+                  break;
+                }
+                else // No longer in bounds, so ripple carry add
+                  offset[it->dim] = space.bounds.lo[it->dim];
+              }
+            }
+          }
+          else
+            piece_bounds.push_back(space.bounds);
+        }
       }
       else
       {
@@ -396,15 +461,6 @@ namespace Legion {
             if (!itr.rect.empty())
               piece_bounds.push_back(itr.rect);
         }
-        if (!piece_bounds.empty())
-        {
-          *num_pieces = piece_bounds.size();
-          *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
-          *piece_list = malloc(*piece_list_size);
-          Rect<DIM,T> *pieces = static_cast<Rect<DIM,T>*>(*piece_list);
-          for (unsigned idx = 0; idx < piece_bounds.size(); idx++)
-            pieces[idx] = piece_bounds[idx];
-        }
       }
 
       // If the bounds are empty we can use the same piece list for all fields
@@ -420,6 +476,15 @@ namespace Legion {
           fl.size_in_bytes = field_sizes[idx];
         }
         return layout;
+      }
+      else if (piece_bounds.size() > 1)
+      {
+        *num_pieces = piece_bounds.size();
+        *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
+        *piece_list = malloc(*piece_list_size);
+        Rect<DIM,T> *pieces = static_cast<Rect<DIM,T>*>(*piece_list);
+        for (unsigned idx = 0; idx < piece_bounds.size(); idx++)
+          pieces[idx] = piece_bounds[idx];
       }
       const OrderingConstraint &order = constraints.ordering_constraint;  
 #ifdef DEBUG_LEGION

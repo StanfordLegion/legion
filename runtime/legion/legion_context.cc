@@ -13186,13 +13186,13 @@ namespace Legion {
         hasher.hash(*it, "Ordering Constraint ordering");
       hasher.hash(constraints.ordering_constraint.contiguous,
           "Ordering Constraint contiguous");
-      for (std::vector<SplittingConstraint>::const_iterator it =
-            constraints.splitting_constraints.begin(); it !=
-            constraints.splitting_constraints.end(); it++)
+      for (std::vector<TilingConstraint>::const_iterator it =
+            constraints.tiling_constraints.begin(); it !=
+            constraints.tiling_constraints.end(); it++)
       {
-        hasher.hash(it->kind, "Splitting Constraint kind");
-        hasher.hash(it->value, "Splitting Constraint value");
-        hasher.hash(it->chunks, "Splitting Constraint chunks");
+        hasher.hash(it->dim, "Tiling Constraint dim");
+        hasher.hash(it->value, "Tiling Constraint value");
+        hasher.hash(it->tiles, "Tiling Constraint tiles");
       }
       for (std::vector<DimensionConstraint>::const_iterator it =
             constraints.dimension_constraints.begin(); it !=

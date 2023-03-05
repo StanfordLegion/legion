@@ -1399,11 +1399,11 @@ namespace Legion {
                       inst_event.id, dim);
       }
 
-      static inline void log_instance_splitting_constraint(LgEvent inst_event,
-                              DimensionKind dim, size_t value, bool chunks)
+      static inline void log_instance_tiling_constraint(LgEvent inst_event,
+                              DimensionKind dim, size_t value, bool tiles)
       {
         log_spy.print("Instance Splitting Constraint " IDFMT " %d %zd %d",
-                      inst_event.id, dim, value, (chunks ? 1 : 0));
+                      inst_event.id, dim, value, (tiles ? 1 : 0));
       }
 
       static inline void log_instance_dimension_constraint(LgEvent inst_event,
