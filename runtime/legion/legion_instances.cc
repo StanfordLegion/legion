@@ -3966,10 +3966,6 @@ namespace Legion {
     {
       // First look at the OrderingConstraint to Figure out what kind
       // of instance we are building here, SOA, AOS, or hybrid
-      // Make sure to check for tiling constraints if see sub-dimensions
-      if (!constraints.tiling_constraints.empty())
-        REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-            "Tiling layout constraints are not currently supported")
       const size_t num_dims = instance_domain->get_num_dims();
       OrderingConstraint &ord = constraints.ordering_constraint;
       if (!ord.ordering.empty())
@@ -4085,6 +4081,38 @@ namespace Legion {
       assert(ord.contiguous);
       assert(ord.ordering.size() == (num_dims + 1));
 #endif
+      // Check the tiling constraints
+      if (!constraints.tiling_constraints.empty())
+      {
+        // Check to make sure we're not asking for a compact-sparse instance
+        switch (constraints.specialized_constraint.get_kind())
+        {
+          case LEGION_COMPACT_SPECIALIZE:
+          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_LAYOUT_CONSTRAINT,
+                "Illegal tiling constraints specified for compact-sparse "
+                "instance creation. Tiling constraints can only be specified "
+                "on affine instances currently. If you have a compelling use "
+                "case for tiling the pieces of an compact-sparse instance "
+                "please report it to the Legion developer's mailing list.")
+          default:
+            break;
+        }
+        // Make sure that each of the dimensions are valid and aren't duplicated
+        std::vector<bool> observed(num_dims, false);
+        for (std::vector<TilingConstraint>::iterator it =
+              constraints.tiling_constraints.begin(); it !=
+              constraints.tiling_constraints.end(); /*nothing*/)
+        {
+          if ((it->dim < num_dims) && !observed[it->dim])
+          {
+            observed[it->dim] = true;
+            it++;
+          }
+          else
+            it = constraints.tiling_constraints.erase(it);
+        }
+      }
       // From this we should be able to compute the field groups 
       // Use the FieldConstraint to put any fields in the proper order
       const std::vector<FieldID> &field_set = 
