@@ -3303,7 +3303,7 @@ namespace Legion {
       PieceIterator(const PieceIterator &rhs);
       PieceIterator(PieceIterator &&rhs);
       PieceIterator(const PhysicalRegion &region, FieldID fid,
-                    bool privilege_only,
+                    bool privilege_only = true,
                     bool silence_warnings = false,
                     const char *warning_string = NULL);
       ~PieceIterator(void);
