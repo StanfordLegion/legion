@@ -179,7 +179,7 @@ main(int argc, char **argv) {
     initial_layout = Runtime::preregister_layout(registrar);
   }
 
-  // Create a tiled layout over 2 of the three dimensions
+  // Create a tiled layout over two of the three dimensions
   // You can tile over any or all dimensions
   LayoutConstraintID tiled_layout;
   {

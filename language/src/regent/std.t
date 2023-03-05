@@ -4748,7 +4748,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
-  if use_cmake then
+  local legion_install_prefix = os.getenv("LEGION_INSTALL_PREFIX")
+  if legion_install_prefix then
+    lib_dir = legion_install_prefix .. "/lib"
+  elseif use_cmake then
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
   if os.getenv('CRAYPE_VERSION') then
@@ -4779,7 +4782,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     end
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
-  if use_cmake then
+  if legion_install_prefix or use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
   if gpuhelper.check_gpu_available() then
@@ -4832,7 +4835,7 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
       end
     end
     -- In separate compilation, need to make sure all globals get exported.
-    if base.config["separate"] then
+    if std.config["separate"] then
       task_impl[task:get_task_id().name] = task:get_task_id()
       task_impl[task:get_mapper_id().name] = task:get_mapper_id()
       task_impl[task:get_mapping_tag_id().name] = task:get_mapping_tag_id()
