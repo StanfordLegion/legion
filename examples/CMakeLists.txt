@@ -41,11 +41,8 @@ add_subdirectory(inline_tasks)
 add_subdirectory(local_function_tasks)
 add_subdirectory(layout_constraints)
 add_subdirectory(provenance)
-<<<<<<< HEAD
-add_subdirectory(padded_instances)
-=======
 add_subdirectory(tiling)
->>>>>>> master
+add_subdirectory(padded_instances)
 
 if(Legion_MPI_INTEROP)
   add_subdirectory(mpi_interop)
