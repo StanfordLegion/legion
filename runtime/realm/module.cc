@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,14 +78,19 @@ REGISTER_REALM_MODULE_STATIC(Realm::LLVMJit::LLVMJitModule);
 REGISTER_REALM_MODULE_STATIC(Realm::HDF5::HDF5Module);
 #endif
 
+#if defined REALM_USE_UCX
+#include "realm/ucx/ucp_module.h"
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::UCPModule, "ucx", 1);
+#endif
+
 #ifdef REALM_USE_GASNET1
 #include "realm/gasnet1/gasnet1_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module, "gasnet1", 1);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNet1Module, "gasnet1", 2);
 #endif
 
 #ifdef REALM_USE_GASNETEX
 #include "realm/gasnetex/gasnetex_module.h"
-REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule, "gasnetex", 2);
+REGISTER_REALM_NETWORK_MODULE_STATIC(Realm::GASNetEXModule, "gasnetex", 3);
 #endif
 
 #if defined REALM_USE_MPI

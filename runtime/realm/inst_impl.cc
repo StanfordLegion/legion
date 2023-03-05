@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -114,28 +114,22 @@ namespace Realm {
 
   void *CompiledInstanceLayout::allocate_memory(size_t bytes)
   {
-    // TODO: allocate where GPUs can see it
-    assert(program_base == 0);
-#ifdef REALM_ON_WINDOWS
-    program_base = _aligned_malloc(bytes, 16);
-    assert(program_base != 0);
-#else
-    int ret = posix_memalign(&program_base, 16, bytes);
-    assert(ret == 0);
-#endif
     program_size = bytes;
+    program_base = runtime_singleton->repl_heap.alloc_obj(bytes, 16);
+    assert(program_base != 0);
     return program_base;
+  }
+
+  void CompiledInstanceLayout::commit_updates()
+  {
+    runtime_singleton->repl_heap.commit_writes(program_base, program_size);
   }
 
   void CompiledInstanceLayout::reset()
   {
-    if(program_base) {
-#ifdef REALM_ON_WINDOWS
-      _aligned_free(program_base);
-#else
-      free(program_base);
-#endif
-    }
+    if(program_base)
+      runtime_singleton->repl_heap.free_obj(program_base);
+
     program_base = 0;
     program_size = 0;
     fields.clear();
@@ -412,6 +406,8 @@ namespace Realm {
       pf.inst_usage_mask = piece_list_masks[it->second.list_idx];
       pf.field_offset = it->second.rel_offset;
     }
+
+    p.commit_updates();
   }
 
 

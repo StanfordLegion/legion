@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, Los Alamos National Laboratory
+-- Copyright 2023 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -54,7 +54,9 @@ function common.generate_atomic_update(op, typ)
   local opname
   if op == "+" then
     if typ:isfloat() then
-      opname = "fadd"
+      if terralib.llvmversion >= 90 then
+        opname = "fadd"
+      end
     else
       opname = "add"
     end

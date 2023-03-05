@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2023 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -73,13 +73,19 @@ else:
     cmake = load_json_config(cmake_config_filename)
 cmake_build_dir = os.path.join(regent_dir, 'build')
 
+legion_install_prefix_filename = os.path.join(regent_dir, '.legion_install_prefix.json')
+legion_install_prefix = None
+if os.path.exists(legion_install_prefix_filename):
+    legion_install_prefix = load_json_config(legion_install_prefix_filename)
+
 include_path = (
     (os.environ['INCLUDE_PATH'].split(';')
      if 'INCLUDE_PATH' in os.environ else []) +
     [bindings_dir,
      runtime_dir,
     ] +
-    ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []))
+    ([os.path.join(cmake_build_dir, 'runtime')] if cmake else []) +
+    ([os.path.join(legion_install_prefix, 'include')] if legion_install_prefix is not None else []))
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)
 if hip_include_dir is not None:
@@ -97,8 +103,14 @@ if os_name == 'Darwin':
 lib_path = (
     (os.environ[LD_LIBRARY_PATH].split(':')
      if LD_LIBRARY_PATH in os.environ else []) +
-    [os.path.join(terra_dir, 'build'),
-     (os.path.join(cmake_build_dir, 'lib') if cmake else bindings_dir)])
+    [os.path.join(terra_dir, 'build')])
+
+if legion_install_prefix is not None:
+    lib_path += [os.path.join(legion_install_prefix, 'lib')]
+elif cmake:
+    lib_path += [os.path.join(cmake_build_dir, 'lib')]
+else:
+    lib_path += [bindings_dir]
 
 def root_dir():
     return os.path.dirname(runtime_dir)
@@ -152,6 +164,9 @@ def regent(args, env={}, cwd=None, **kwargs):
         'CMAKE_BUILD_DIR': cmake_build_dir,
         'USE_RDIR': use_rdir,
     }
+
+    if legion_install_prefix is not None:
+        terra_env['LEGION_INSTALL_PREFIX'] = legion_install_prefix
 
     if cuda_dir is not None:
         terra_env['CUDA_HOME'] = cuda_dir

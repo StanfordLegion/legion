@@ -1,4 +1,4 @@
-# Copyright 2022 Stanford University
+# Copyright 2023 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ TESTS += sparse_construct
 TESTS += memmodel
 TESTS += extres_alias
 TESTS += reservations
+TESTS += multiaffine
 
 # can set arguments to be passed to a test when running
 TESTARGS_ctxswitch := -ll:io 1 -t 30 -i 10000
@@ -114,9 +115,11 @@ $(REALM_LIB) : $(REALM_OBJS)
 ifeq ($(strip $(USE_CUDA)),1)
 EXTRAOBJS_memspeed := memspeed_gpu.o
 EXTRAOBJS_simple_reduce := simple_reduce_gpu.o
-TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce)
+EXTRAOBJS_multiaffine := multiaffine_gpu.o
+TEST_OBJS += $(EXTRAOBJS_memspeed) $(EXTRAOBJS_simple_reduce) $(EXTRAOBJS_multiaffine)
 memspeed : memspeed_gpu.o
 simple_reduce : simple_reduce_gpu.o
+multiaffine : multiaffine_gpu.o
 
 %.o : %.cu $(REALM_DEFINES_HEADER) $(LEGION_DEFINES_HEADER)
 	$(NVCC) -o $@ -c $< $(INC_FLAGS) $(NVCC_FLAGS)

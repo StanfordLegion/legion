@@ -71,6 +71,12 @@ pub struct ProjectionID(u32);
 pub struct ContextID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct ReplicationID(u32);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct ShardID(u32);
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 pub struct UniqueID(pub u64);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
@@ -367,6 +373,12 @@ pub enum Record {
     PointPoint { point1: UniqueID, point2: UniqueID },
     #[serde(rename = "Index Point")]
     IndexPoint { index: UniqueID, point_id: UniqueID, point: Point },
+    #[serde(rename = "Replicate Task")]
+    ReplicateTask { uid: UniqueID, repl_id: ReplicationID, control_replicated: bool },
+    #[serde(rename = "Replicate Shard")]
+    ReplicateShard { repl_id: ReplicationID, sid: ShardID, uid: UniqueID },
+    #[serde(rename = "Owner Shard")]
+    OwnerShard { uid: UniqueID, sid: ShardID },
     #[serde(rename = "Intra Space Dependence")]
     IntraSpace { point_id: UniqueID, point: Point },
     #[serde(rename = "Operation Index")]
@@ -435,6 +447,10 @@ pub enum Record {
     Proc { pid: ProcID, kind: u64 },
     #[serde(rename = "Memory")]
     Mem { mid: MemID, capacity: u64, kind: u64 },
+
+    // Patterns for things rust is too stupid to understand
+    #[serde(rename = "Collective Rendezvous")]
+    CollectiveRendezvous { uid: UniqueID, req: u32, index: u32 },
 }
 
 #[cfg(test)]

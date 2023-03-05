@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -232,6 +232,8 @@ namespace Legion {
     coord_t get_index(void) const;
     __CUDA_HD__
     int get_dim(void) const;
+    __CUDA_HD__
+    inline bool exists(void) const { return (get_dim() > 0); }
 
     template <int DIM>
     LegionRuntime::Arrays::Point<DIM> get_point(void) const; 
@@ -379,7 +381,7 @@ namespace Legion {
       DomainPoint p;
       // Note: GCC 4.9 breaks even with C++11, so for now peg this on
       // C++14 until we deprecate GCC 4.9 support.
-#if __cplusplus >= 201402L
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
       // Realm's iterators are copyable by value so we can just always
       // copy them in and out of some buffers
       static_assert(std::is_trivially_copyable<

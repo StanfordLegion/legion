@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,6 +81,10 @@ namespace Realm {
       // used during compilation to request memory to store instructions
       //  in - can only be used once
       virtual void *allocate_memory(size_t bytes) = 0;
+
+      // after any changes to the contents of the memory, this must be
+      //  called to ensure all devices see the changes
+      virtual void commit_updates() = 0;
 
       struct PerField {
 	const PieceLookup::Instruction *start_inst;

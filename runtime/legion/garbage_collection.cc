@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -60,7 +60,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (collective_mapping != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(collective_mapping->contains(owner_space));
+#endif
         collective_mapping->add_reference();
+      }
       if (do_registration)
         register_with_runtime();
     }
@@ -931,12 +936,16 @@ namespace Legion {
           runtime->send_did_downgrade_request(owner_space, rez);
           remaining_responses++;
         }
-        initialize_downgrade_state(owner);
+        // Initialize the downgrade state
+        notready_owner = owner;
+        total_sent_references = 0;
+        total_received_references = 0;
         if (remaining_responses == 0)
         {
           // Send the response now
           if (owner != local_space)
           {
+            accumulate_local_references();
             const AddressSpaceID target = get_downgrade_target(owner);
             Serializer rez;
             {
@@ -978,12 +987,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::initialize_downgrade_state(AddressSpaceID own)
+    void DistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
-      notready_owner = own;
-      total_sent_references = sent_global_references;
-      total_received_references = received_global_references;
+      total_sent_references += sent_global_references;
+      total_received_references += received_global_references;
     }
 
     //--------------------------------------------------------------------------
@@ -1083,6 +1091,8 @@ namespace Legion {
       }
       if (--remaining_responses == 0)
       {
+        // Accumulate our local sent and received references
+        accumulate_local_references();
         if (downgrade_owner == local_space)
         {
           // See if it safe to downgrade
@@ -1119,13 +1129,26 @@ namespace Legion {
         else
         {
           const AddressSpaceID target = get_downgrade_target(downgrade_owner);
+          // We had to release the lock to send the requests to our upstream
+          // nodes so we need to check again to see if it is still safe to
+          // perform the downgrade on this node or not atomically with 
+          // accumulating our sent and received references
           Serializer rez;
+          if (can_downgrade())
           {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(notready_owner);
             rez.serialize(total_sent_references);
             rez.serialize(total_received_references);
+          }
+          else
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(local_space);
+            rez.serialize<uint64_t>(0); // sent global references
+            rez.serialize<uint64_t>(0); // received global references
           }
           runtime->send_did_downgrade_response(target, rez);
         }
@@ -1727,18 +1750,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ValidDistributedCollectable::initialize_downgrade_state(
-                                                           AddressSpaceID owner)
+    void ValidDistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
       if (current_state == VALID_REF_STATE)
       {
-        notready_owner = owner;
-        total_sent_references = sent_valid_references;
-        total_received_references = received_valid_references;
+        total_sent_references += sent_valid_references;
+        total_received_references += received_valid_references;
       }
       else
-        DistributedCollectable::initialize_downgrade_state(owner);
+        DistributedCollectable::accumulate_local_references();
     }
 
   }; // namespace Internal 

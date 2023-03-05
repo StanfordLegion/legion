@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,12 +43,12 @@ namespace Legion {
     class PhysicalInstance {
     public:
       PhysicalInstance(void);
-      PhysicalInstance(const PhysicalInstance &rhs);
       PhysicalInstance(PhysicalInstance &&rhs);
+      PhysicalInstance(const PhysicalInstance &rhs);
       ~PhysicalInstance(void);
     public:
-      PhysicalInstance& operator=(const PhysicalInstance &rhs); 
       PhysicalInstance& operator=(PhysicalInstance &&rhs);
+      PhysicalInstance& operator=(const PhysicalInstance &rhs); 
     public:
       bool operator<(const PhysicalInstance &rhs) const;
       bool operator==(const PhysicalInstance &rhs) const;
@@ -77,7 +77,6 @@ namespace Legion {
       bool is_virtual_instance(void) const;
       bool is_reduction_instance(void) const;
       bool is_external_instance(void) const;
-      bool is_collective_instance(void) const;
     public:
       bool has_field(FieldID fid) const;
       void has_fields(std::map<FieldID,bool> &fids) const;
@@ -95,14 +94,52 @@ namespace Legion {
                    const LayoutConstraint **failed_constraint = NULL) const;
     public:
       static PhysicalInstance get_virtual_instance(void);
-    protected:
+    private:
+      friend class CollectiveView;
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the runtime can make an instance like this
       PhysicalInstance(PhysicalInstanceImpl impl);
-    protected:   
+    private:
       PhysicalInstanceImpl impl;
       friend std::ostream& operator<<(std::ostream& os,
 				      const PhysicalInstance& p);
+    };
+
+    /**
+     * \class CollectiveView
+     * A collective view is simply a group of physical instances 
+     * that the runtime knows all have the same data replicated
+     * across the different copies. Collective views only show
+     * up when the mapper is asked to pick a source instances 
+     * from a collective group.
+     */
+    class CollectiveView {
+    public:
+      CollectiveView(void);
+      CollectiveView(CollectiveView &&rhs);
+      CollectiveView(const CollectiveView &rhs);
+      ~CollectiveView(void);
+    public:
+      CollectiveView& operator=(CollectiveView &&rhs);
+      CollectiveView& operator=(const CollectiveView&rhs); 
+    public:
+      bool operator<(const CollectiveView &rhs) const;
+      bool operator==(const CollectiveView &rhs) const;
+      bool operator!=(const CollectiveView &rhs) const;
+    public:
+      void find_instances_in_memory(Memory memory,
+                                    std::vector<PhysicalInstance> &insts) const;
+      void find_instances_nearest_memory(Memory memory,
+                                    std::vector<PhysicalInstance> &insts,
+                                    bool bandwidth = true) const;
+    private:
+      FRIEND_ALL_RUNTIME_CLASSES
+      // Only the runtime can make an instance like this
+      CollectiveView(CollectiveViewImpl impl);
+    private:
+      CollectiveViewImpl impl;
+      friend std::ostream& operator<<(std::ostream& os,
+				      const CollectiveView& p);
     };
 
     /**
@@ -358,6 +395,11 @@ namespace Legion {
        *     operations to mutate the priority of the parent task
        *     then the mapper can use this field to alter the 
        *     priority of the parent task
+       *
+       * check_collective_regions:empty
+       *     For index space tasks, provide the indexes of any region 
+       *     requirements that the runtime should check for collective
+       *     mappings between the point tasks.
        */
       struct TaskOptions {
         Processor                              initial_proc; // = current
@@ -368,6 +410,7 @@ namespace Legion {
         bool                                   memoize;  // = false
         bool                                   replicate;    // = false
         TaskPriority                           parent_priority; // = current
+        std::set<unsigned>                     check_collective_regions;
       };
       //------------------------------------------------------------------------
       virtual void select_task_options(const MapperContext    ctx,
@@ -550,6 +593,7 @@ namespace Legion {
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> > valid_instances;
+        std::vector<std::vector<CollectiveView> >   valid_collectives;
         std::vector<unsigned>                       premapped_regions;
       };
       struct MapTaskOutput {
@@ -603,7 +647,7 @@ namespace Legion {
        * provide an optional 'shard_domain' value to describe the set of points.
        * If this is provided the runtime does not introspect it other than to
        * check that its dimensionality matches that of the points. This value
-       * is then passed as the 'shard_domain' argument to all invocation of a 
+       * is then passed as the 'shard_domain' argument to all invocations of a
        * sharding functor for operations launched by these shards.
        */
       struct MapReplicateTaskOutput {
@@ -666,6 +710,7 @@ namespace Legion {
       struct PostMapInput {
         std::vector<std::vector<PhysicalInstance> >     mapped_regions;
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
+        std::vector<std::vector<CollectiveView> >       valid_collectives;
       };
       struct PostMapOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances;
@@ -695,6 +740,7 @@ namespace Legion {
       struct SelectTaskSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
         unsigned                                region_req_index;
       };
       struct SelectTaskSrcOutput {
@@ -714,7 +760,7 @@ namespace Legion {
         PhysicalInstance                        destination_instance;
       };
       struct CreateTaskTemporaryOutput {
-        PhysicalInstance                        temporary_instance;
+        PhysicalInstance                        temporary_instance; 
       };
 
       /**
@@ -825,6 +871,7 @@ namespace Legion {
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        std::vector<CollectiveView>             valid_collectives;
       };
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
@@ -857,6 +904,7 @@ namespace Legion {
       struct SelectInlineSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
       };
       struct SelectInlineSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -950,6 +998,10 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >   dst_instances;
         std::vector<std::vector<PhysicalInstance> >   src_indirect_instances;
         std::vector<std::vector<PhysicalInstance> >   dst_indirect_instances;
+        std::vector<std::vector<CollectiveView> >     src_collectives;
+        std::vector<std::vector<CollectiveView> >     dst_collectives;
+        std::vector<std::vector<CollectiveView> >     src_indirect_collectives;
+        std::vector<std::vector<CollectiveView> >     dst_indirect_collectives;
       };
       struct MapCopyOutput {
         std::vector<std::vector<PhysicalInstance> >   src_instances;
@@ -995,6 +1047,7 @@ namespace Legion {
       struct SelectCopySrcInput {
         PhysicalInstance                              target;
         std::vector<PhysicalInstance>                 source_instances;
+        std::vector<CollectiveView>                   collective_views;
         bool                                          is_src;
         bool                                          is_dst;
         bool                                          is_src_indirect;
@@ -1114,6 +1167,7 @@ namespace Legion {
       struct SelectCloseSrcInput {
         PhysicalInstance                            target;
         std::vector<PhysicalInstance>               source_instances;
+        std::vector<CollectiveView>                 collective_views;
       };
       struct SelectCloseSrcOutput {
         std::deque<PhysicalInstance>                chosen_ranking;
@@ -1309,6 +1363,7 @@ namespace Legion {
       struct SelectReleaseSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
       };
       struct SelectReleaseSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -1402,7 +1457,7 @@ namespace Legion {
        * where a previous index space launch filled in the field containing
        * the colors). In these cases , the mapper may want to specify that
        * the mapping for the projection operation should not be done with
-       * respect to the region being partitioning, but for each fo the
+       * respect to the region being partitioning, but for each of the
        * subregions of a complete partition of the logical region. This
        * mapper call permits the mapper to decide whether to make the 
        * partition operation an 'index' operation over the color space
@@ -1452,6 +1507,7 @@ namespace Legion {
        */
       struct MapPartitionInput {
         std::vector<PhysicalInstance>           valid_instances; 
+        std::vector<CollectiveView>             valid_collectives;
       };
       struct MapPartitionOutput {
         std::vector<PhysicalInstance>           chosen_instances;
@@ -1484,6 +1540,7 @@ namespace Legion {
       struct SelectPartitionSrcInput {
         PhysicalInstance                        target;
         std::vector<PhysicalInstance>           source_instances;
+        std::vector<CollectiveView>             collective_views;
       };
       struct SelectPartitionSrcOutput {
         std::deque<PhysicalInstance>            chosen_ranking;
@@ -2229,7 +2286,7 @@ namespace Legion {
       bool acquire_instance(MapperContext ctx, 
                                       const PhysicalInstance &instance) const;
       bool acquire_instances(MapperContext ctx,
-                          const std::vector<PhysicalInstance> &instances) const;
+                             const std::vector<PhysicalInstance> &insts) const;
       bool acquire_and_filter_instances(MapperContext ctx,
                                 std::vector<PhysicalInstance> &instances,
                                 bool filter_acquired_instance = false) const;

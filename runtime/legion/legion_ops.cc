@@ -1,5 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
- * close_op->initialize(context, req, 
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1183,7 +1182,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::activate_operation(void)
+    void Operation::activate(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1205,13 +1204,12 @@ namespace Legion {
       early_commit_request = false;
       track_parent = false;
       parent_ctx = NULL;
-      need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
-      resolved_event = Runtime::create_rt_user_event();
-      completion_event = Runtime::create_ap_user_event(NULL);
+      resolved_event = RtUserEvent::NO_RT_USER_EVENT;
       if (runtime->resilient_mode)
         commit_event = Runtime::create_rt_user_event(); 
       execution_fence_event = ApEvent::NO_AP_EVENT;
+      completion_event = ApUserEvent::NO_AP_USER_EVENT;
       trace = NULL;
       tracing = false;
       trace_local_id = (unsigned)-1;
@@ -1219,18 +1217,17 @@ namespace Legion {
       provenance = NULL;
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
-      assert(resolved_event.exists());
-      assert(completion_event.exists());
       if (runtime->resilient_mode)
         assert(commit_event.exists());
 #endif 
     }
     
     //--------------------------------------------------------------------------
-    void Operation::deactivate_operation(void)
+    void Operation::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(!freeop);
       assert(activated);
 #endif
       activated = false;
@@ -1253,10 +1250,9 @@ namespace Legion {
         Runtime::trigger_event(mapped_event);
       if (!resolved)
         Runtime::trigger_event(resolved_event);
-      if (need_completion_trigger)
-        Runtime::trigger_event(NULL, completion_event);
       if (!commit_event.has_triggered())
         Runtime::trigger_event(commit_event);
+      completion_effects.clear();
       if ((provenance != NULL) && provenance->remove_reference())
         delete provenance;
     }
@@ -1272,7 +1268,8 @@ namespace Legion {
     Mappable* Operation::get_mappable(void)
     //--------------------------------------------------------------------------
     {
-      return parent_ctx->get_task();
+      // should never be called on this class
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1361,13 +1358,6 @@ namespace Legion {
 #endif
       trace = t; 
       tracing = trace->initialize_op_tracing(this, dependences);
-    }
-
-    //--------------------------------------------------------------------------
-    void Operation::set_trace_local_id(size_t id)
-    //--------------------------------------------------------------------------
-    {
-      trace_local_id = id;
     }
 
     //--------------------------------------------------------------------------
@@ -1483,6 +1473,9 @@ namespace Legion {
         std::vector<FieldID> valid_fields;
         node->get_field_set(valid_mask, parent_ctx, valid_fields);
         InstanceManager *manager = inst.get_manager();
+        const LgEvent inst_event = 
+            manager->is_virtual_manager() ? LgEvent::NO_LG_EVENT :
+            manager->as_physical_manager()->get_unique_event();
         if (runtime->legion_spy_enabled)
         {
           for (std::vector<FieldID>::const_iterator it =
@@ -1490,15 +1483,15 @@ namespace Legion {
           {
             if (postmapping)
               LegionSpy::log_post_mapping_decision(unique_op_id, index, *it,
-                                                   manager->get_unique_event());
+                                                   inst_event);
             else
               LegionSpy::log_mapping_decision(unique_op_id, index, *it,
-                                              manager->get_unique_event());
+                                              inst_event);
           }
         }
         if ((runtime->profiler != NULL) && !manager->is_virtual_manager())
-          runtime->profiler->record_physical_instance_use(
-              manager->get_unique_event(), unique_op_id, index, valid_fields);
+          runtime->profiler->record_physical_instance_use(inst_event,
+                                      unique_op_id, index, valid_fields);
       }
     }
 
@@ -1540,13 +1533,20 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
-      assert(completion_event.exists());
 #endif
       parent_ctx = ctx;
       track_parent = track;
       if (track_parent)
-        context_index = 
-          parent_ctx->register_new_child_operation(this, dependences);
+      {
+        context_index = parent_ctx->register_new_child_operation(this,
+                                          resolved_event, dependences);
+        // If we don't have a resolved event then we can consider
+        // speculation already resolved
+        if (!resolved_event.exists())
+          resolved = true;
+      }
+      else // Untracked operations will never resolve speculation
+        resolved = true;
       for (unsigned idx = 0; idx < regs; idx++)
         unverified_regions.insert(idx);
       provenance = prov;
@@ -1693,6 +1693,8 @@ namespace Legion {
     void Operation::trigger_resolution(void)
     //--------------------------------------------------------------------------
     {
+      // Shoudl resolve speculation in derived classes
+      assert(false);
       resolve_speculation();
     } 
 
@@ -1727,10 +1729,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::select_sources(const unsigned index,
-                                   const InstanceRef &target,
-                                   const InstanceSet &sources,
-                                   std::vector<unsigned> &ranking)
+    void Operation::select_sources(const unsigned index,PhysicalManager *target,
+                                   const std::vector<InstanceView*> &sources,
+                                   std::vector<unsigned> &ranking,
+                                   std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -1738,36 +1740,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* Operation::find_or_create_collective_instance(
-                                  MappingCallKind call_kind, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index, 
-                                  DomainPoint &collective_point)
+    size_t Operation::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      // we do not do anything here in this case
-      return NULL;
+      return 1;
     }
 
     //--------------------------------------------------------------------------
-    bool Operation::finalize_collective_instance(MappingCallKind call,
-                                              unsigned total_calls, bool succes)
+    bool Operation::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                bool &first_local)
     //--------------------------------------------------------------------------
     {
-      // should only be called for inherited types
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool Operation::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called in derived types
       assert(false);
       return false;
     }
 
     //--------------------------------------------------------------------------
-    void Operation::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    RtEvent Operation::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
     //--------------------------------------------------------------------------
     {
-      // Nothing to do here for this case
+      // Should only be called in derived types
+      assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -1780,35 +1787,42 @@ namespace Legion {
       assert(reported.exists());
       assert(!reported.has_triggered());
 #endif
+      std::string prov_str;
+      Provenance *provenance = get_provenance();
+      if (provenance != NULL) {
+        std::stringstream prov_ss;
+        prov_ss << ", provenance: " << provenance->human_str();
+        prov_str = prov_ss.str();
+      }
       // Read-only or reduction usage of uninitialized data is always an error
       if (IS_READ_ONLY(usage))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
-                      "Region requirement %d of operation %s (UID %lld) in "
+                      "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d) with "
                       "read-only privileges", index, get_logging_name(), 
-                      get_unique_op_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id(), field_string, 
-                      handle.get_index_space().get_id(),
+                      get_unique_op_id(), prov_str.c_str(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
                       handle.get_tree_id())
       else if (IS_REDUCE(usage))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
-                      "Region requirement %d of operation %s (UID %lld) in "
+                      "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d) with "
                       "reduction privileges", index, get_logging_name(), 
-                      get_unique_op_id(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id(), field_string, 
-                      handle.get_index_space().get_id(),
+                      get_unique_op_id(), prov_str.c_str(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
                       handle.get_tree_id())
       else // Read-write usage is just a warning
         REPORT_LEGION_WARNING(LEGION_WARNING_UNINITIALIZED_USE,
-                      "Region requirement %d of operation %s (UID %lld) in "
+                      "Region requirement %d of operation %s (UID %lld%s) in "
                       "parent task %s (UID %lld) is using uninitialized data "
                       "for field(s) %s of logical region (%d,%d,%d)", index, 
-                      get_logging_name(), get_unique_op_id(),
+                      get_logging_name(), get_unique_op_id(), prov_str.c_str(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                       field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
@@ -1881,13 +1895,6 @@ namespace Legion {
     {
       // Should only be called for inherited types
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent Operation::compute_init_precondition(const TraceInfo &info)
-    //--------------------------------------------------------------------------
-    {
-      return execution_fence_event;
     }
 
     //--------------------------------------------------------------------------
@@ -1975,8 +1982,9 @@ namespace Legion {
       // Now see if we are ready to complete this operation
       if (!mapped_event.has_triggered() || !resolved_event.has_triggered())
       {
-        RtEvent trigger_pre = 
-          Runtime::merge_events(mapped_event, resolved_event);
+        RtEvent trigger_pre = mapped_event;
+        if (resolved_event.exists())
+          trigger_pre = Runtime::merge_events(mapped_event, resolved_event);
         if (trigger_pre.exists() && !trigger_pre.has_triggered())
           parent_ctx->add_to_trigger_completion_queue(this, trigger_pre);
         else
@@ -1992,6 +2000,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!resolved);
+      assert(resolved_event.exists());
 #endif
       resolved = true;
       Runtime::trigger_event(resolved_event, wait_on);
@@ -2049,11 +2058,37 @@ namespace Legion {
             trigger_commit_invoked = true;
         }
       }
-      if (need_completion_trigger)
+#ifdef LEGION_SPY
+      // Operations with regions and tasks do their own logging
+      const OpKind op_kind = get_operation_kind();
+      if ((op_kind != TASK_OP_KIND) && (op_kind != MAP_OP_KIND) &&
+          (op_kind != ACQUIRE_OP_KIND) && (op_kind != RELEASE_OP_KIND) &&
+          (op_kind != DEPENDENT_PARTITION_OP_KIND) &&
+          (op_kind != ATTACH_OP_KIND) && (op_kind != DETACH_OP_KIND))
       {
-        Runtime::trigger_event(NULL, completion_event);
-        need_completion_trigger = false;
+        ApEvent effects_done;
+        if (!completion_effects.empty())
+          effects_done = Runtime::merge_events(NULL, completion_effects);
+        if (completion_event.exists())
+          Runtime::trigger_event(NULL, completion_event, effects_done);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        completion_event);
       }
+      else
+#endif
+      {
+        // At this point we're completed so there should be no more effects
+        // arriving and we can read the completion_effects with the lock
+        if (completion_event.exists())
+        {
+          if (!completion_effects.empty())
+            Runtime::trigger_event(NULL, completion_event,
+                Runtime::merge_events(NULL, completion_effects));
+          else
+            Runtime::trigger_event(NULL, completion_event);
+        }
+      }
+
       // finally notify all the operations we dependended on
       // that we validated their regions note we don't need
       // the lock since this was all set when we did our mapping analysis
@@ -2070,6 +2105,71 @@ namespace Legion {
       // commit this operation
       if (need_trigger)
         trigger_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent Operation::get_completion_event(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(!completed);
+#endif
+      if (!completion_event.exists())
+        completion_event = Runtime::create_ap_user_event(NULL);
+      return completion_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      if (!effect.exists())
+        return;
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(!completed);
+#endif
+      completion_effects.insert(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (!effect.exists())
+        return;
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(!completed);
+#endif
+      completion_effects.insert(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::record_completion_effects(const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      if (effects.empty())
+        return;
+      AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+      assert(!completed);
+#endif
+      for (std::set<ApEvent>::const_iterator it =
+            effects.begin(); it != effects.end(); it++)
+        if (it->exists())
+          completion_effects.insert(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::find_completion_effects(std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!completion_effects.empty())
+        effects.insert(completion_effects.begin(), completion_effects.end());
     }
 
     //--------------------------------------------------------------------------
@@ -2173,10 +2273,18 @@ namespace Legion {
       mapping_tracker = new MappingDependenceTracker();
       // Register ourselves with our trace if there is one
       // This will also add any necessary dependences
-      if (trace != NULL)
-        trace->register_operation(this, gen);
+      if ((trace != NULL) && !is_tracing_fence())
+        trace_local_id = trace->register_operation(this, gen);
+      // TODO: this is a hack until we can properly move tracing 
+      // into the mapping stage from the dependence analysis stage
+      MemoizableOp *memo = get_memoizable();
+      if (memo != NULL)
+      {
+        memo->initialize_memoizable();
+        if (memo->is_replaying())
+          return;
+      }
       parent_ctx->invalidate_trace_cache(trace, this);
-
       // See if we have any fence dependences
       execution_fence_event = parent_ctx->register_implicit_dependences(this);
     }
@@ -2185,13 +2293,25 @@ namespace Legion {
     void Operation::end_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      // There are some cases right now where we can shard off a task that
+      // is being replayed and it will clean everything up before we even
+      // get to call this function, so handle that case for now, although
+      // this should go away as we move to making replay decisions in the
+      // mapping stage of the pipeline
+      if (mapping_tracker == NULL)
+        return;
 #ifdef DEBUG_LEGION
       assert(mapping_tracker != NULL);
 #endif
       // Cannot touch anything not on our stack after this call
       MappingDependenceTracker *tracker = mapping_tracker;
       mapping_tracker = NULL;
-      tracker->issue_stage_triggers(this, runtime, must_epoch);
+      // TODO: this is a hack until we can properly move tracing 
+      // into the mapping stage from the dependence analysis stage
+      MemoizableOp *memo = get_memoizable();
+      // Skip all the triggers for things that are replaying
+      if ((memo == NULL) || !memo->is_replaying())
+        tracker->issue_stage_triggers(this, runtime, must_epoch);
       delete tracker;
     }
 
@@ -2331,7 +2451,6 @@ namespace Legion {
           {
             outgoing[op] = op_gen;
             tracker->add_mapping_dependence(mapped_event);
-            tracker->add_resolution_dependence(resolved_event);
             // Record that we have a commit dependence on the
             // registering operation
             if (runtime->resilient_mode)
@@ -2465,82 +2584,158 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::prepare_for_mapping(const InstanceRef &ref,
+    /*static*/ void Operation::prepare_for_mapping(PhysicalManager *manager,
                                                    MappingInstance &instance) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!ref.is_virtual_ref());
-#endif
-      instance = ref.get_mapping_instance();
+      instance = MappingInstance(manager);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
-                                      std::vector<MappingInstance> &input_valid)
+    /*static*/ void Operation::prepare_for_mapping(
+                                    const std::vector<InstanceView*> &views,
+                                    std::vector<MappingInstance> &input_valid,
+                                    std::vector<MappingCollective> &collectives)
     //--------------------------------------------------------------------------
     {
-      unsigned offset = input_valid.size();
-      input_valid.resize(offset + valid.size());
-      for (unsigned idx = 0; idx < valid.size(); idx++)
+      for (unsigned idx = 0; idx < views.size(); idx++)
       {
-        const InstanceRef &ref = valid[idx];
-#ifdef DEBUG_LEGION
-        assert(!ref.is_virtual_ref());
-#endif
-        MappingInstance &inst = input_valid[offset+idx];
-        inst = ref.get_mapping_instance();
+        if (views[idx]->is_individual_view())
+        {
+          IndividualView *view = views[idx]->as_individual_view();
+          input_valid.emplace_back(MappingInstance(view->get_manager()));
+        }
+        else
+        {
+          CollectiveView *view = views[idx]->as_collective_view();
+          collectives.emplace_back(MappingCollective(view));
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
-                                      const std::set<Memory> &visible_filter,
-                                      std::vector<MappingInstance> &input_valid)
+                              const FieldMaskSet<ReplicatedView> &collectives,
+                              std::vector<MappingInstance> &input_valid,
+                              std::vector<MappingCollective> &collectives_valid)
     //--------------------------------------------------------------------------
     {
-      unsigned offset = input_valid.size();
-      input_valid.reserve(offset+valid.size());
-      unsigned next_index = offset;
-      for (unsigned idx = 0; idx < valid.size(); idx++)
+      if (!valid.empty())
       {
-        const InstanceRef &ref = valid[idx];
-        PhysicalManager *manager = ref.get_physical_manager();
-        if (!manager->has_visible_from(visible_filter))
-          continue;
-        input_valid.resize(next_index+1);
-        MappingInstance &inst = input_valid[next_index++];
-        inst = ref.get_mapping_instance();
+        unsigned offset = input_valid.size();
+        input_valid.resize(offset + valid.size());
+        for (unsigned idx = 0; idx < valid.size(); idx++)
+        {
+          const InstanceRef &ref = valid[idx];
+#ifdef DEBUG_LEGION
+          assert(!ref.is_virtual_ref());
+#endif
+          MappingInstance &inst = input_valid[offset+idx];
+          inst = ref.get_mapping_instance();
+        }
+      }
+      if (!collectives.empty())
+      {
+        collectives_valid.reserve(
+            collectives_valid.size() + collectives.size());
+        for (FieldMaskSet<ReplicatedView>::const_iterator it =
+              collectives.begin(); it != collectives.end(); it++)
+          collectives_valid.emplace_back(MappingCollective(it->first));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Operation::prepare_for_mapping(const InstanceSet &valid,
+                              const FieldMaskSet<ReplicatedView> &collectives,
+                              const std::set<Memory> &visible_filter,
+                              std::vector<MappingInstance> &input_valid,
+                              std::vector<MappingCollective> &collectives_valid)
+    //--------------------------------------------------------------------------
+    {
+      if (!valid.empty())
+      {
+        unsigned offset = input_valid.size();
+        input_valid.reserve(offset+valid.size());
+        unsigned next_index = offset;
+        for (unsigned idx = 0; idx < valid.size(); idx++)
+        {
+          const InstanceRef &ref = valid[idx];
+          PhysicalManager *manager = ref.get_physical_manager();
+          if (!manager->has_visible_from(visible_filter))
+            continue;
+          input_valid.resize(next_index+1);
+          MappingInstance &inst = input_valid[next_index++];
+          inst = ref.get_mapping_instance();
+        }
+      }
+      if (!collectives.empty())
+      {
+        collectives_valid.reserve(
+            collectives_valid.size() + collectives.size());
+        for (FieldMaskSet<ReplicatedView>::const_iterator it =
+              collectives.begin(); it != collectives.end(); it++)
+          collectives_valid.emplace_back(MappingCollective(it->first));
       }
     }
 
     //--------------------------------------------------------------------------
     void Operation::compute_ranking(MapperManager *mapper,
-                              const std::deque<MappingInstance> &output,
-                              const InstanceSet &sources,
-                              std::vector<unsigned> &ranking) const
+                    const std::deque<MappingInstance> &output,
+                    const std::vector<InstanceView*> &sources,
+                    std::vector<unsigned> &ranking,
+                    std::map<unsigned,PhysicalManager*> &collective_insts) const
     //--------------------------------------------------------------------------
     {
       ranking.reserve(output.size());
       for (std::deque<MappingInstance>::const_iterator it = 
             output.begin(); it != output.end(); it++)
       {
-        const InstanceManager *manager = it->impl;
+        const InstanceManager *man = it->impl;
+        if (!man->is_physical_manager())
+          continue;
+        PhysicalManager *manager = man->as_physical_manager();
         bool found = false;
+        bool has_collectives = false;
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
-          if (manager == sources[idx].get_manager())
+          if (!sources[idx]->is_individual_view())
+          {
+            has_collectives = true;
+            continue;
+          }
+          IndividualView *src = sources[idx]->as_individual_view();
+          if (src->get_manager() == manager)
           {
             found = true;
             ranking.push_back(idx);
             break;
           }
         }
+        if (!found && has_collectives)
+        {
+          for (unsigned idx = 0; idx < sources.size(); idx++)
+          {
+            if (!sources[idx]->is_collective_view())
+              continue;
+            CollectiveView *src = sources[idx]->as_collective_view();
+            if (src->contains(manager))
+            {
+              found = true;
+              // Only need to save the first instance from each collective
+              if (collective_insts.find(idx) == collective_insts.end())
+              {
+                ranking.push_back(idx);
+                collective_insts[idx] = manager;
+                break;
+              }
+            }
+          }
+        }
         // Ignore any instances which are not in the original set of sources
         if (!found)
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_INVALID_INSTANCE,
               "Ignoring invalid instance output from mapper %s for "
-              "select copy sources call on Operation %s (UID %lld)",
+              "select sources call on %s (UID %lld)",
               mapper->get_mapper_name(), get_logging_name(), get_unique_op_id())
       }
     }
@@ -2565,7 +2760,7 @@ namespace Legion {
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize(parent_ctx->did);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
@@ -2606,7 +2801,6 @@ namespace Legion {
                       Operation *op, Runtime *runtime, MustEpochOp *must_epoch)
     //--------------------------------------------------------------------------
     {
-      bool resolve_now = true;
       bool trigger_now = false;
       RtEvent map_precondition;
       if (!mapping_dependences.empty())
@@ -2621,18 +2815,6 @@ namespace Legion {
       else if (!map_precondition.has_triggered())
         must_epoch->add_mapping_dependence(map_precondition);
 
-      if (!resolution_dependences.empty())
-      {
-        RtEvent resolve_precondition = 
-          Runtime::merge_events(resolution_dependences);
-        if (!resolve_precondition.has_triggered())
-        {
-          op->get_context()->add_to_resolution_queue(op, resolve_precondition);
-          resolve_now = false;
-        }
-      }
-      if (resolve_now)
-        op->trigger_resolution();
       if (trigger_now)
         op->trigger_ready();
     }
@@ -2654,6 +2836,709 @@ namespace Legion {
       }
       return true;
     }
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveViewCreatorBase
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::RendezvousResult::RendezvousResult(
+                  CollectiveViewCreatorBase *own, const PendingRendezvousKey &k,
+                  const InstanceSet &insts, InnerContext *ctx)
+      : owner(own), physical_ctx(ctx), key(k), instances(init_instances(insts)),
+        ready(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LegionVector<std::pair<DistributedID,FieldMask> >
+        CollectiveViewCreatorBase::RendezvousResult::init_instances(
+                                                       const InstanceSet &insts)
+    //--------------------------------------------------------------------------
+    {
+      LegionVector<std::pair<DistributedID,FieldMask> > result(insts.size());
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        result[idx].first = ref.get_manager()->did;
+        result[idx].second = ref.get_valid_fields();
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::RendezvousResult::~RendezvousResult(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::RendezvousResult::matches(
+                                                 const InstanceSet &insts) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        if (instances[idx].first != ref.get_manager()->did)
+          return false;
+        if (instances[idx].second != ref.get_valid_fields())
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::RendezvousResult::finalize_rendezvous(
+       CollectiveMapping *mapping, const FieldMaskSet<CollectiveResult> &views,
+       const std::map<DistributedID,size_t> &counts, Runtime *runtime,
+       bool first, size_t local_analyses)
+    //--------------------------------------------------------------------------
+    {
+      mapping->add_reference(target_mappings.size());
+      for (unsigned idx = 0; idx < target_mappings.size(); idx++)
+        *target_mappings[idx] = mapping;
+      for (unsigned idx = 0; idx < target_first_locals.size(); idx++)
+      {
+        *target_first_locals[idx] = first;
+        first = false;
+      }
+      std::vector<RtEvent> ready_events;
+      LegionVector<FieldMaskSet<InstanceView> > result_views(instances.size()); 
+      std::map<InstanceView*,size_t> collective_arrivals;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const DistributedID inst_did = instances[idx].first;
+        const FieldMask &mask = instances[idx].second;
+        for (FieldMaskSet<CollectiveResult>::const_iterator vit =
+              views.begin(); vit != views.end(); vit++)
+        {
+          const FieldMask overlap = mask & vit->second;
+          if (!overlap)
+            continue;
+          if (!std::binary_search(vit->first->individual_dids.begin(),
+                vit->first->individual_dids.end(), inst_did))
+            continue;
+          // Successfully found one of the views
+          // Wait until it is safe to request it
+          if (vit->first->ready_event.exists() &&
+              !vit->first->ready_event.has_triggered())
+            vit->first->ready_event.wait();
+          if (vit->first->collective_did > 0)
+          {
+            RtEvent ready;
+            CollectiveView *view = static_cast<CollectiveView*>(
+                runtime->find_or_request_logical_view(
+                  vit->first->collective_did, ready));
+            if (ready.exists())
+              ready_events.push_back(ready);
+            result_views[idx].insert(view, overlap);
+            // Now count how many local arrivals we have for 
+            // instances on the same address space
+            size_t local_arrivals = 0;
+            const AddressSpaceID inst_space = 
+              runtime->determine_owner(inst_did);
+            for (std::vector<DistributedID>::const_iterator it =
+                  vit->first->individual_dids.begin(); it !=
+                  vit->first->individual_dids.end(); it++)
+            {
+              if (inst_space != runtime->determine_owner(*it))
+                continue;
+              std::map<DistributedID,size_t>::const_iterator
+                count_finder = counts.find(*it);
+              if (count_finder != counts.end())
+                local_arrivals += count_finder->second;
+              else
+                local_arrivals++;
+            }
+            collective_arrivals[view] = local_arrivals;
+          }
+          else
+          {
+            // No collective instance matches here so we can just
+            // get the normal view for the instance
+#ifdef DEBUG_LEGION
+            assert(vit->first->individual_dids.size() == 1);
+#endif
+            // Manager should still be here
+            DistributedID inst_did = vit->first->individual_dids.back();
+            PhysicalManager *manager = static_cast<PhysicalManager*>(
+                runtime->find_distributed_collectable(inst_did));
+            std::vector<PhysicalManager*> instances(1, manager);
+            std::vector<IndividualView*> views;
+            physical_ctx->convert_individual_views(instances, views);
+            IndividualView *view = views.back();
+            result_views[idx].insert(view, overlap);
+            // Note we don't use the count of the instance uses here
+            // but instead use our local number of local analyses since this
+            // is an individual view and not a collective view
+            collective_arrivals[view] = local_analyses;
+          }
+        }
+#ifdef DEBUG_LEGION
+        // Should have seen all the fields at this point
+        assert(result_views[idx].get_valid_mask() == mask);
+#endif
+      }
+      for (int idx = target_views.size()-1; idx >= 0; idx--)
+      {
+        if (idx == 0)
+        {
+          target_views[idx]->swap(result_views);
+          target_arrivals[idx]->swap(collective_arrivals);
+        }
+        else
+        {
+          *target_views[idx] = result_views;
+          *target_arrivals[idx] = collective_arrivals;
+        }
+      }
+      // Remove this before we wake up the analyses
+      const bool delete_now = owner->remove_pending_rendezvous(this);
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+      return delete_now;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+       const std::vector<DistributedID> &dids, DistributedID did, RtEvent ready)
+      : individual_dids(dids.begin(), dids.end()), collective_did(did),
+        ready_event(ready)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+            std::vector<DistributedID> &&dids, DistributedID did, RtEvent ready)
+      : individual_dids(dids), collective_did(did), ready_event(ready)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+                                                         DistributedID inst_did)
+      : individual_dids(1, inst_did), collective_did(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::CollectiveResult::CollectiveResult(
+            const std::vector<DistributedID> &dids)
+      : individual_dids(dids), collective_did(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::CollectiveResult::matches(
+                                   const std::vector<DistributedID> &dids) const
+    //--------------------------------------------------------------------------
+    {
+      if (dids.size() != individual_dids.size())
+        return false;
+      for (unsigned idx = 0; idx < dids.size(); idx++)
+        if (dids[idx] != individual_dids[idx])
+          return false;
+      return true;
+    } 
+
+    //--------------------------------------------------------------------------
+    CollectiveViewCreatorBase::RendezvousResult* 
+                        CollectiveViewCreatorBase::find_or_create_rendezvous(
+                        unsigned index, unsigned analysis, LogicalRegion region,
+                        const InstanceSet &targets, InnerContext *physical_ctx,
+                        CollectiveMapping *&analysis_mapping, bool &first_local,
+                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                        std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      RendezvousResult *result = NULL;
+      // Find or create a rendezvous result and record for this context
+      const PendingRendezvousKey key(index, analysis, region);
+      AutoLock c_lock(collective_lock);
+      std::vector<RendezvousResult*> &pending = pending_rendezvous[key];
+      for (std::vector<RendezvousResult*>::const_iterator it =
+            pending.begin(); it != pending.end(); it++)
+      {
+        if (!(*it)->matches(targets))
+          continue;
+        result = (*it);
+        break;
+      }
+      if (result == NULL)
+      {
+        result = new RendezvousResult(this, key, targets, physical_ctx);
+        // Reference for pending_rendezvous
+        result->add_reference();
+        pending.push_back(result);
+      }
+      // Record all our targets in the result
+      result->target_mappings.push_back(&analysis_mapping);
+      result->target_first_locals.push_back(&first_local);
+      result->target_views.push_back(&target_views);
+      result->target_arrivals.push_back(&collective_arrivals);
+      // Reference for ourselves
+      result->add_reference();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveViewCreatorBase::remove_pending_rendezvous(
+                                                       RendezvousResult *result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock c_lock(collective_lock);
+      std::map<PendingRendezvousKey,std::vector<RendezvousResult*> >::iterator
+        finder = pending_rendezvous.find(result->key);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_rendezvous.end());
+#endif
+      for (std::vector<RendezvousResult*>::iterator it =
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if ((*it) != result)
+          continue;
+        finder->second.erase(it);
+        break;
+      }
+      if (finder->second.empty())
+        pending_rendezvous.erase(finder);
+      return result->remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveViewCreatorBase::finalize_collective_mapping(
+        Runtime *runtime, CollectiveMapping *mapping, AddressSpaceID owner,
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> > &results,
+        const std::map<DistributedID,size_t> &counts,
+        const FieldMaskSet<CollectiveResult> &views)
+    //--------------------------------------------------------------------------
+    {
+      // Next figure out which targets to send the results to
+      std::vector<AddressSpaceID> targets;
+      if (mapping->contains(runtime->address_space))
+        mapping->get_children(owner, runtime->address_space, targets); 
+      else
+        targets.push_back(owner);
+      // Send out the results to the next participants
+      if (!targets.empty())
+      {
+        // These help out with building broadcasting trees so not all
+        // the realm event registrations go to the same node
+        std::map<CollectiveResult*,RtEvent> local_registered_events;
+        std::map<CollectiveResult*,RtEvent> local_ready_events;
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              targets.begin(); it != targets.end(); it++)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            mapping->pack(rez);
+            rez.serialize(owner);
+            rez.serialize<size_t>(results.size());
+            for (unsigned idx = 0; idx < results.size(); idx++)
+            {
+              rez.serialize(results[idx].first);
+              rez.serialize(results[idx].second);
+            }
+            rez.serialize<size_t>(counts.size());
+            for (std::map<DistributedID,size_t>::const_iterator cit =
+                  counts.begin(); cit != counts.end(); cit++)
+            {
+              rez.serialize(cit->first);
+              rez.serialize(cit->second);
+            }
+            rez.serialize<size_t>(views.size());
+            for (FieldMaskSet<CollectiveResult>::const_iterator vit =
+                  views.begin(); vit != views.end(); vit++)
+            {
+              rez.serialize(vit->first->collective_did);
+              rez.serialize<size_t>(vit->first->individual_dids.size());
+              for (unsigned idx = 0; 
+                    idx < vit->first->individual_dids.size(); idx++)
+                rez.serialize(vit->first->individual_dids[idx]);
+              if (!vit->first->ready_event.exists())
+              {
+                std::map<CollectiveResult*,RtEvent>::const_iterator finder =
+                  local_ready_events.find(vit->first);
+                if (finder == local_ready_events.end())
+                {
+                  const RtUserEvent local = Runtime::create_rt_user_event();
+                  Runtime::trigger_event(local, vit->first->ready_event);
+                  local_ready_events[vit->first] = local;
+                  rez.serialize(local);
+                }
+                else
+                  rez.serialize(finder->second);
+              }
+              else
+                rez.serialize(vit->first->ready_event);
+              rez.serialize(vit->second);
+            }
+          }
+          runtime->send_collective_finalize_mapping(*it, rez);
+        }
+      }
+      // Now handle all of the local results
+      if (targets.empty() || (targets.back() != owner))
+      {
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+          result_it = results.begin();
+        // Skip the non-local results
+        while (result_it->first != runtime->address_space)
+          result_it++;
+#ifdef DEBUG_LEGION
+        assert(result_it != results.end());
+#endif
+        // Count how many local analyses we have here in case we need it
+        size_t local_analyses = 0;
+        std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+          local_it = result_it;
+        while (local_it->first == runtime->address_space)
+        {
+          local_analyses += local_it->second->target_mappings.size();
+          if (++local_it == results.end())
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(local_analyses > 0);
+#endif
+        while (result_it->first == runtime->address_space)
+        {
+          bool first = true;
+          if (result_it->second->finalize_rendezvous(mapping, views,
+                            counts, runtime, first, local_analyses))
+            delete result_it->second;
+          first = false;
+          if (++result_it == results.end())
+            break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/
+        void CollectiveViewCreatorBase::handle_finalize_collective_mapping(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+      CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+      mapping->add_reference();
+      AddressSpaceID owner;
+      derez.deserialize(owner);
+      size_t num_results;
+      derez.deserialize(num_results);
+      std::vector<std::pair<AddressSpaceID,RendezvousResult*> > 
+        results(num_results);
+      for (unsigned idx = 0; idx < num_results; idx++)
+      {
+        derez.deserialize(results[idx].first);
+        derez.deserialize(results[idx].second);
+      }
+      size_t num_counts;
+      derez.deserialize(num_counts);
+      std::map<DistributedID,size_t> counts;
+      for (unsigned idx = 0; idx < num_counts; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        derez.deserialize(counts[did]);
+      }
+      size_t num_views;
+      derez.deserialize(num_views);
+      FieldMaskSet<CollectiveResult> views;
+      for (unsigned idx = 0; idx < num_views; idx++)
+      {
+        DistributedID collective_did;
+        derez.deserialize(collective_did);
+        size_t num_dids;
+        derez.deserialize(num_dids);
+        std::vector<DistributedID> individual_dids(num_dids);
+        for (unsigned idx = 0; idx < num_dids; idx++)
+          derez.deserialize(individual_dids[idx]);
+        RtEvent view_ready;
+        derez.deserialize(view_ready);
+        CollectiveResult *view = new CollectiveResult(
+            std::move(individual_dids), collective_did, view_ready);
+        view->add_reference();
+        FieldMask mask;
+        derez.deserialize(mask);
+        views.insert(view, mask);
+      }
+      finalize_collective_mapping(runtime, mapping, owner,results,counts,views);
+      for (FieldMaskSet<CollectiveResult>::const_iterator it =
+            views.begin(); it != views.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      if (mapping->remove_reference())
+        delete mapping;
+    } 
+
+    ///////////////////////////////////////////////////////////// 
+    // CollectiveViewCreator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveViewCreator<OP>::CollectiveViewCreator(Runtime *rt)
+      : OP(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    CollectiveViewCreator<OP>::CollectiveViewCreator(
+                                           const CollectiveViewCreator<OP> &rhs)
+      : OP(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      OP::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      OP::deactivate(freeop);
+#ifdef DEBUG_LEGION
+      assert(pending_rendezvous.empty());
+      assert(pending_collectives.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    RtEvent CollectiveViewCreator<OP>::convert_collective_views(unsigned index,
+                        unsigned analysis, LogicalRegion region, 
+                        const InstanceSet &targets, InnerContext *physical_ctx,
+                        CollectiveMapping *&analysis_mapping, bool &first_local,
+                        LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                        std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      // Find or create a rendezvous result and for this request
+      RendezvousResult *result = find_or_create_rendezvous(index, 
+          analysis, region, targets, physical_ctx, analysis_mapping, 
+          first_local, target_views, collective_arrivals);
+      // Now perform the rendezvous for this result
+      rendezvous_collective_mapping(index, analysis, region, result,
+          this->runtime->address_space, result->instances);
+      const RtEvent ready = result->ready;
+      if (result->remove_reference())
+        delete result;
+      return ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::rendezvous_collective_mapping(
+         unsigned requirement_index, unsigned analysis, LogicalRegion region,
+         RendezvousResult *result, AddressSpaceID source, 
+         const LegionVector<std::pair<DistributedID,FieldMask> > &insts)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LogicalRegion,CollectiveRendezvous> to_construct;
+      const RendezvousKey key(requirement_index, analysis);
+      {
+        AutoLock c_lock(collective_lock);
+        std::map<RendezvousKey,PendingCollective>::iterator finder =
+          pending_collectives.find(key);
+        if (finder == pending_collectives.end())
+          finder = pending_collectives.insert(
+              std::make_pair(key,
+                PendingCollective(this->get_collective_points()))).first;
+        CollectiveRendezvous &collective = finder->second.rendezvous[region];
+        bool found = false;
+        for (std::vector<std::pair<AddressSpaceID,
+                                   RendezvousResult*> >::const_iterator it =
+              collective.results.begin(); it != collective.results.end(); it++)
+        {
+          if (it->first != source)
+            continue;
+          if (it->second != result)
+            continue;
+          found = true;
+          break;
+        }
+        if (!found)
+          collective.results.emplace_back(std::make_pair(source, result));
+        // Now update the counts for all the instances
+        for (LegionVector<std::pair<DistributedID,FieldMask> >::const_iterator
+              it = insts.begin(); it != insts.end(); it++)
+        {
+          LegionMap<DistributedID,FieldMask>::iterator group_finder =
+            collective.groups.find(it->first);
+          if (group_finder != collective.groups.end())
+          {
+            if (group_finder->second == it->second)
+            {
+              // Bump the counts
+              std::map<DistributedID,size_t>::iterator count_finder =
+                collective.counts.find(it->first);
+              if (count_finder == collective.counts.end())
+                collective.counts[it->first] = 2;
+              else
+                count_finder->second++;
+            }
+            else
+              // If you ever hit this then heaven help you
+              // The user has done something really out there and
+              // is using the same instance with different sets of
+              // fields for multiple point ops/tasks in the same 
+              // index space operation. All the tricks we do to 
+              // compute the collective arrivals are not going to
+              // work in this case so the arrival counts will need 
+              // to look something like:
+              //   std::map<InstanceView*,LegionMap<size_t,FieldMask> >
+              REPORT_LEGION_FATAL(
+                  LEGION_FATAL_COLLECTIVE_PARTIAL_FIELD_OVERLAP,
+                  "Operation %s (UID %lld) in context %s (UID %lld) "
+                  "requested a very strange pattern for collective "
+                  "instance rendezvous with different points asking to "
+                  "rendezvous with different field sets on the same "
+                  "physical instance. This isn't currently supported. "
+                  "Please report your use case to the Legion "
+                  "developer's mailing list.", this->get_logging_name(),
+                  this->get_unique_op_id(), 
+                  this->parent_ctx->get_task_name(),
+                  this->parent_ctx->get_unique_id())
+          }
+          else // No need to update counts since empty implies only one
+            collective.groups[it->first] = it->second;
+        }
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining_arrivals > 0);
+#endif
+        if (--finder->second.remaining_arrivals == 0)
+        {
+          to_construct.swap(finder->second.rendezvous);
+          pending_collectives.erase(finder);
+        }
+      }
+      if (!to_construct.empty())
+        construct_collective_mapping(key, to_construct);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
+    void CollectiveViewCreator<OP>::construct_collective_mapping(
+                       const RendezvousKey &key,
+                       std::map<LogicalRegion,CollectiveRendezvous> &rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      const RegionTreeID tid = rendezvous.begin()->first.get_tree_id();
+      InnerContext *physical_ctx = 
+        this->find_physical_context(key.region_index);
+      Runtime *runtime = this->runtime;
+      for (std::map<LogicalRegion,CollectiveRendezvous>::iterator rit =
+            rendezvous.begin(); rit != rendezvous.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        // All the regions should be from the same region tree
+        assert(tid == rit->first.get_tree_id());
+#endif
+        LegionList<FieldSet<DistributedID> > field_sets;
+        compute_field_sets(FieldMask(), rit->second.groups, field_sets);
+        FieldMaskSet<CollectiveResult> results;
+        std::vector<RtEvent> ready_events;
+        for (LegionList<FieldSet<DistributedID> >::const_iterator it =
+              field_sets.begin(); it != field_sets.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(!it->elements.empty());
+#endif
+          if (it->elements.size() > 1)
+          {
+            const std::vector<DistributedID> instances(it->elements.begin(),
+                                                       it->elements.end());
+            // Use the right physical context to find or create the collective
+            // view in case there have been any virtual mappings
+            RtEvent ready;
+            InnerContext::CollectiveResult *result = 
+              physical_ctx->find_or_create_collective_view(tid,instances,ready);
+            if (ready.exists())
+              ready_events.push_back(ready);
+            // References already added by method so deduplicate references
+            if (!results.insert(result, it->set_mask))
+              result->remove_reference();
+          }
+          else
+          {
+            // If there is just one instance then we send back a 
+            // collective did of zero to indicate to just use the 
+            // normal single view
+            CollectiveResult *result = 
+              new CollectiveResult(*it->elements.begin());
+            if (results.insert(result, it->set_mask))
+              result->add_reference();
+          }
+        }
+        // Send the resulting views back out to all the RendezvousResults
+        std::sort(rit->second.results.begin(), rit->second.results.end());
+        // First build the collective mapping
+        std::vector<AddressSpaceID> unique_spaces;
+        for (std::vector<std::pair<AddressSpaceID,RendezvousResult*> >::iterator
+              it = rit->second.results.begin(); 
+              it != rit->second.results.end(); it++)
+        {
+          if (unique_spaces.empty() || (unique_spaces.back() != it->first))
+            unique_spaces.push_back(it->first);
+        }
+        CollectiveMapping *mapping =
+          new CollectiveMapping(unique_spaces, runtime->legion_collective_radix);
+        mapping->add_reference();
+        // Determine the owner for this collective mapping
+        AddressSpaceID owner = mapping->contains(runtime->address_space) ?
+          runtime->address_space : mapping->find_nearest(runtime->address_space);
+        // Make sure all the results are ready before we send them out
+        if (!ready_events.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists() && !wait_on.has_triggered())
+            wait_on.wait();
+        }
+        finalize_collective_mapping(runtime, mapping, owner,
+            rit->second.results, rit->second.counts, results);
+        if (mapping->remove_reference())
+          delete mapping;
+        for (FieldMaskSet<CollectiveResult>::const_iterator it =
+              results.begin(); it != results.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+      }
+    }
+
+    // Explicit instantiations
+    template class CollectiveViewCreator<Operation>;
+    template class CollectiveViewCreator<MapOp>;
+    template class CollectiveViewCreator<AttachOp>;
+    template class CollectiveViewCreator<DetachOp>;
+    template class CollectiveViewCreator<AcquireOp>;
+    template class CollectiveViewCreator<ReleaseOp>;
+    template class CollectiveViewCreator<TaskOp>;
 
     ///////////////////////////////////////////////////////////// 
     // External Op 
@@ -2847,23 +3732,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PredicateImpl::activate_predicate(void)
+    void PredicateImpl::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       predicate_resolved = false;
       collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
       predicate_references = 0;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
+      true_guard = PredUserEvent::NO_PRED_USER_EVENT;
+      false_guard = PredUserEvent::NO_PRED_USER_EVENT;
       can_result_future_complete = false;
     }
 
     //--------------------------------------------------------------------------
-    void PredicateImpl::deactivate_predicate(void)
+    void PredicateImpl::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(freeop);
 #ifdef DEBUG_LEGION
       assert(predicate_references == 0);
 #endif
@@ -2975,54 +3860,38 @@ namespace Legion {
     PredEvent PredicateImpl::get_true_guard(void)
     //--------------------------------------------------------------------------
     {
-      bool trigger = false;
-      bool poison = false;
-      PredEvent result;
+      AutoLock o_lock(op_lock);
+      if (!true_guard.exists())
       {
-        AutoLock o_lock(op_lock);
-        if (!true_guard.exists())
-          true_guard = Runtime::create_pred_event();
-        result = true_guard;
+        true_guard = Runtime::create_pred_event();
         if (predicate_resolved)
         {
           if (predicate_value)
-            trigger = true;
+            Runtime::trigger_event(true_guard);
           else
-            poison = true;
+            Runtime::poison_event(true_guard);
         }
       }
-      if (trigger)
-        Runtime::trigger_event(result);
-      else if (poison)
-        Runtime::poison_event(result);
-      return result;
+      return true_guard;
     }
 
     //--------------------------------------------------------------------------
     PredEvent PredicateImpl::get_false_guard(void)
     //--------------------------------------------------------------------------
     {
-      bool trigger = false;
-      bool poison = false;
-      PredEvent result;
+      AutoLock o_lock(op_lock);
+      if (!false_guard.exists())
       {
-        AutoLock o_lock(op_lock);
-        if (!false_guard.exists())
-          false_guard = Runtime::create_pred_event();
-        result = false_guard;
+        false_guard = Runtime::create_pred_event();
         if (predicate_resolved)
         {
           if (predicate_value)
-            poison = true;
+            Runtime::poison_event(false_guard);
           else
-            trigger = true;
+            Runtime::trigger_event(false_guard);
         }
       }
-      if (trigger)
-        Runtime::trigger_event(result);
-      else if (poison)
-        Runtime::poison_event(result);
-      return result;
+      return false_guard;
     }
 
     //--------------------------------------------------------------------------
@@ -3030,34 +3899,31 @@ namespace Legion {
                                              PredEvent &false_result)
     //--------------------------------------------------------------------------
     {
-      bool handle_true = false;
-      bool handle_false = false;
+      AutoLock o_lock(op_lock);
+      if (!true_guard.exists())
       {
-        AutoLock o_lock(op_lock);
-        if (!true_guard.exists())
-          true_guard = Runtime::create_pred_event();
-        true_result = true_guard;
-        if (!false_guard.exists())
-          false_guard = Runtime::create_pred_event();
-        false_result = false_guard;
+        true_guard = Runtime::create_pred_event();
         if (predicate_resolved)
         {
           if (predicate_value)
-            handle_true = true;
+            Runtime::trigger_event(true_guard);
           else
-            handle_false = true;
+            Runtime::poison_event(true_guard);
         }
       }
-      if (handle_true)
+      true_result = true_guard;
+      if (!false_guard.exists())
       {
-        Runtime::trigger_event(true_result);
-        Runtime::poison_event(false_result);
+        false_guard = Runtime::create_pred_event();
+        if (predicate_resolved)
+        {
+          if (predicate_value)
+            Runtime::poison_event(false_guard);
+          else
+            Runtime::trigger_event(false_guard);
+        }
       }
-      else if (handle_false)
-      {
-        Runtime::poison_event(true_result);
-        Runtime::trigger_event(false_result);
-      }
+      false_result = false_guard;
     }
 
     //--------------------------------------------------------------------------
@@ -3092,7 +3958,7 @@ namespace Legion {
       bool need_trigger = true;
       // Make a copy of the waiters since we could get cleaned up in parallel
       std::map<PredicateWaiter*,GenerationID> copy_waiters;
-      PredEvent to_trigger, to_poison;
+      PredUserEvent to_trigger, to_poison;
       {
         AutoLock o_lock(op_lock);
         if ((pred_gen == get_generation()) && !predicate_resolved)
@@ -3131,37 +3997,150 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Speculative Operation 
+    // Memoizable Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    SpeculativeOp::SpeculativeOp(Runtime *rt)
+    MemoizableOp::MemoizableOp(Runtime *rt)
       : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::activate_speculative(void)
+    MemoizableOp::~MemoizableOp(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-      speculation_state = PENDING_ANALYSIS_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoizableOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      Operation::activate();
+      tpl = NULL;
+      memo_state = NO_MEMO;
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoizableOp::deactivate(bool freeop)
+    //--------------------------------------------------------------------------
+    {
+      Operation::deactivate(freeop);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoizableOp::invoke_memoize_operation(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+      assert(!runtime->no_tracing);
+      assert(!runtime->no_physical_tracing);
+#endif
+      Mappable *mappable = get_mappable();
+      if (mappable != NULL)
+      {
+        Mapper::MemoizeInput  input;
+        Mapper::MemoizeOutput output;
+        input.trace_id = trace->get_trace_id();
+        output.memoize = false;
+        Processor mapper_proc = parent_ctx->get_executing_processor();
+        MapperManager *mapper = runtime->find_mapper(mapper_proc, 
+                                                     mappable->map_id);
+#ifdef DEBUG_LEGION
+        assert(mappable != NULL);
+#endif
+        mapper->invoke_memoize_operation(mappable, &input, &output);
+        if (output.memoize)
+          memo_state = MEMO_REQ;
+      }
+      else // Assume that all operations which are not mappable can be memoized
+        memo_state = MEMO_REQ;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoizableOp::record_complete_replay(
+               const TraceInfo &trace_info, RtEvent ready, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_recording())
+        return ready;
+      // Defer this until the precondition is ready
+      if (ready.exists() && !ready.has_triggered())
+      {
+        DeferRecordCompleteReplay args(this, precondition, trace_info, 
+            this->get_unique_op_id());
+        this->runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_WORK_PRIORITY, ready);
+        return args.done;
+      }
+      std::set<ApEvent> effects;
+      this->find_completion_effects(effects);
+      ApEvent postcondition;
+      if (!effects.empty())
+        postcondition = Runtime::merge_events(&trace_info, effects);
+      std::set<RtEvent> applied;
+      trace_info.record_complete_replay(precondition, postcondition, applied);
+      if (!applied.empty())
+        return Runtime::merge_events(applied);
+      return RtEvent::NO_RT_EVENT; 
+    }
+
+    //--------------------------------------------------------------------------
+    MemoizableOp::DeferRecordCompleteReplay::DeferRecordCompleteReplay(
+       MemoizableOp *m, ApEvent pre, const TraceInfo &info, UniqueID provenance)
+        : LgTaskArgs<DeferRecordCompleteReplay>(provenance),
+          memo(m), precondition(pre), trace_info(new TraceInfo(info)),
+          done(Runtime::create_rt_user_event())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void MemoizableOp::handle_record_complete_replay(const void *args) 
+    //--------------------------------------------------------------------------
+    {
+      const DeferRecordCompleteReplay *dargs = 
+        (const DeferRecordCompleteReplay*)args;
+      Runtime::trigger_event(dargs->done,
+          dargs->memo->record_complete_replay(*(dargs->trace_info),
+            RtEvent::NO_RT_EVENT, dargs->precondition));
+      delete dargs->trace_info;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Predicated Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PredicatedOp::PredicatedOp(Runtime *rt)
+      : MemoizableOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void PredicatedOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      MemoizableOp::activate();
+      predication_state = PENDING_ANALYSIS_STATE;
       predicate = NULL;
-      speculate_mapping_only = false;
-      received_trigger_resolution = false;
+      true_guard = PredEvent::NO_PRED_EVENT;
+      false_guard = PredEvent::NO_PRED_EVENT;
       predicate_waiter = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::deactivate_speculative(void)
+    void PredicatedOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      MemoizableOp::deactivate(freeop);
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::initialize_speculation(InnerContext *ctx, bool track,
+    void PredicatedOp::initialize_predication(InnerContext *ctx, bool track,
         unsigned regions, const std::vector<StaticDependence> *dependences,
         const Predicate &p, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -3169,17 +4148,17 @@ namespace Legion {
       initialize_operation(ctx, track, regions, provenance, dependences);
       if (p == Predicate::TRUE_PRED)
       {
-        speculation_state = RESOLVE_TRUE_STATE;
+        predication_state = RESOLVE_TRUE_STATE;
         predicate = NULL;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        speculation_state = RESOLVE_FALSE_STATE;
+        predication_state = RESOLVE_FALSE_STATE;
         predicate = NULL;
       }
       else
       {
-        speculation_state = PENDING_ANALYSIS_STATE;
+        predication_state = PENDING_ANALYSIS_STATE;
         predicate = p.impl;
         predicate->add_predicate_reference();
         if (runtime->legion_spy_enabled)
@@ -3189,26 +4168,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::register_predicate_dependence(void)
-    //--------------------------------------------------------------------------
-    {
-      if (predicate != NULL)
-      {
-        register_dependence(predicate, predicate->get_generation()); 
-        // Now we can remove our predicate reference
-        predicate->remove_predicate_reference();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool SpeculativeOp::is_predicated_op(void) const
+    bool PredicatedOp::is_predicated_op(void) const
     //--------------------------------------------------------------------------
     {
       return (predicate != NULL);
     }
 
     //--------------------------------------------------------------------------
-    bool SpeculativeOp::get_predicate_value(Processor proc)
+    bool PredicatedOp::get_predicate_value(void)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_event = RtEvent::NO_RT_EVENT;
@@ -3216,9 +4183,9 @@ namespace Legion {
       bool result = false; 
       {
         AutoLock o_lock(op_lock);
-        if (speculation_state == RESOLVE_TRUE_STATE)
+        if (predication_state == RESOLVE_TRUE_STATE)
           result = true;
-        else if (speculation_state == RESOLVE_FALSE_STATE)
+        else if (predication_state == RESOLVE_FALSE_STATE)
           result = false;
         else
         {
@@ -3234,10 +4201,10 @@ namespace Legion {
         wait_event.wait();
         // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_LEGION
-        assert((speculation_state == RESOLVE_TRUE_STATE) ||
-               (speculation_state == RESOLVE_FALSE_STATE));
+        assert((predication_state == RESOLVE_TRUE_STATE) ||
+               (predication_state == RESOLVE_FALSE_STATE));
 #endif
-        if (speculation_state == RESOLVE_TRUE_STATE)
+        if (predication_state == RESOLVE_TRUE_STATE)
           result = true;
         else
           result = false;
@@ -3246,230 +4213,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::execute_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out
-      if (predicate == NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert((speculation_state == RESOLVE_TRUE_STATE) ||
-               (speculation_state == RESOLVE_FALSE_STATE));
-#endif
-        if (speculation_state == RESOLVE_FALSE_STATE)
-        {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_predicated_false_op(unique_op_id);
-          resolve_false(false/*speculated*/, false/*launched*/);
-        }
-        else
-        {
-          resolve_true(false/*speculated*/, false/*launched*/);
-          Operation::execute_dependence_analysis();
-        }
-        return;
-      }
-      // Register ourselves as a waiter on the predicate value
-      // If the predicate hasn't resolved yet, then we can ask the
-      // mapper if it would like us to speculate on the value.
-      // Then take the lock and set up our state.
-      bool value, speculated = false;
-      bool valid = predicate->register_waiter(this, get_generation(), value);
-      // We don't support speculation for legion spy validation runs
-      // as it doesn't really understand the event graphs that get
-      // generated because of the predication events
-#ifndef LEGION_SPY
-      if (!valid)
-        speculated = query_speculate(value, speculate_mapping_only);
-#endif
-      // Now hold the lock and figure out what we should do
-      bool continue_true = false;
-      bool continue_false = false;
-      bool launch_speculation = false;
-      RtEvent wait_on;
-      {
-        AutoLock o_lock(op_lock);
-        switch (speculation_state)
-        {
-          case PENDING_ANALYSIS_STATE:
-            {
-              if (valid)
-              {
-                if (value)
-                {
-                  speculation_state = RESOLVE_TRUE_STATE;
-                  continue_true = true;
-                }
-                else
-                {
-                  speculation_state = RESOLVE_FALSE_STATE;
-                  continue_false = true;
-                }
-              }
-              else if (speculated)
-              {
-                // Always launch in the speculated state
-                launch_speculation = true;
-                if (value)
-                  speculation_state = SPECULATE_TRUE_STATE;
-                else
-                  speculation_state = SPECULATE_FALSE_STATE;
-              }
-              // Otherwise just stay in pending analysis state
-              // and wait for the result of the predicate
-              else
-              {
-                if (!predicate_waiter.exists())
-                  predicate_waiter = Runtime::create_rt_user_event();
-                wait_on = predicate_waiter;
-              }
-              break;
-            }
-          case RESOLVE_TRUE_STATE:
-            {
-              // Someone else has already resolved us to true so
-              // we are good to go
-              continue_true = true;
-              break;
-            }
-          case RESOLVE_FALSE_STATE:
-            {
-              // Someone else has already resolved us to false so
-              // do the opposite thing
-              continue_false = true;
-              break;
-            }
-          default:
-            assert(false); // shouldn't be in the other states
-        }
-      }
-      // Handle the waiting case if necessary
-      if (wait_on.exists())
-      {
-        wait_on.wait();
-        // Now retake the lock and see if anything changed
-        AutoLock o_lock(op_lock);
-        switch (speculation_state)
-        {
-          case RESOLVE_TRUE_STATE:
-            {
-              continue_true = true;
-              break;
-            }
-          case RESOLVE_FALSE_STATE:
-            {
-              continue_false = true;
-              break;
-            }
-          default:
-            assert(false); // should not be in any other states
-        }
-      }
-      // At most one of these should be true
-#ifdef DEBUG_LEGION
-      assert(!continue_true || !continue_false);
-#endif
-      if (continue_true)
-        resolve_true(speculated, false/*launched*/);
-      else if (continue_false)
-      {
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_predicated_false_op(unique_op_id);
-        // Can remove our predicate reference since we don't need it anymore
-        predicate->remove_predicate_reference();
-        resolve_false(speculated, false/*launched*/);
-      }
-#ifdef DEBUG_LEGION
-      else
-        assert(launch_speculation);
-#endif
-      if (continue_true || launch_speculation)
-        Operation::execute_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
-    void SpeculativeOp::trigger_resolution(void)
-    //--------------------------------------------------------------------------
-    {
-      // Quick out
-      if (predicate == NULL)
-      {
-        resolve_speculation();
-        return;
-      }
-      bool need_trigger;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(!received_trigger_resolution);
-#endif
-        received_trigger_resolution = true;
-        need_trigger = (speculation_state == RESOLVE_TRUE_STATE) ||
-                        (speculation_state == RESOLVE_FALSE_STATE);
-      }
-      if (need_trigger)
-        resolve_speculation();
-    }
-
-    //--------------------------------------------------------------------------
-    void SpeculativeOp::notify_predicate_value(GenerationID pred_gen,bool value)
+    void PredicatedOp::notify_predicate_value(GenerationID pred_gen, bool value)
     //--------------------------------------------------------------------------
     {
       bool continue_true = false;
       bool continue_false = false;
-      bool need_trigger = false;
-      bool need_resolve = false;
+      bool trigger_waiter = false;
+      bool retrigger = false;
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
         assert(pred_gen == get_generation());
 #endif
-        need_trigger = predicate_waiter.exists();
-        need_resolve = received_trigger_resolution;
-        switch (speculation_state)
+        trigger_waiter = predicate_waiter.exists();
+        switch (predication_state)
         {
           case PENDING_ANALYSIS_STATE:
             {
-              if (value)
-                speculation_state = RESOLVE_TRUE_STATE;
-              else
-                speculation_state = RESOLVE_FALSE_STATE;
+              // Nothing to do but record the new state
               break;
             }
-          case SPECULATE_TRUE_STATE:
+          case WAITING_MAPPING_STATE:
             {
-              if (value) // We guessed right
-              {
-                speculation_state = RESOLVE_TRUE_STATE;
-                continue_true = true;
-              }
-              else
-              {
-                // We guessed wrong
-                speculation_state = RESOLVE_FALSE_STATE;
-                continue_false = true;
-              }
+              // Send this back through the normal path
+              retrigger = true;
               break;
             }
-          case SPECULATE_FALSE_STATE:
+          case SPECULATIVE_MAPPING_STATE:
             {
               if (value)
-              {
-                speculation_state = RESOLVE_TRUE_STATE;
                 continue_true = true;
-              }
               else
-              {
-                speculation_state = RESOLVE_FALSE_STATE;
                 continue_false = true;
-              }
               break;
             }
           default:
-            assert(false); // shouldn't be in any of the other states
+            assert(false); // should not be in any resolved states
         }
+        if (value)
+          predication_state = RESOLVE_TRUE_STATE;
+        else
+          predication_state = RESOLVE_FALSE_STATE;
       }
-      if (need_trigger)
+      if (trigger_waiter)
         Runtime::trigger_event(predicate_waiter);
       if (continue_true)
         resolve_true(true/*speculated*/, true/*launched*/);
@@ -3479,8 +4265,8 @@ namespace Legion {
           LegionSpy::log_predicated_false_op(unique_op_id);
         resolve_false(true/*speculated*/, true/*launched*/);
       }
-      if (need_resolve)
-        resolve_speculation();
+      if (retrigger)
+        trigger_ready();
     }
 
     /////////////////////////////////////////////////////////////
@@ -3599,7 +4385,8 @@ namespace Legion {
       const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
             mapped_event, ready_event, term_event, true/*mapped*/, ctx,
-            map_id, tag, false/*leaf*/, false/*virtual mapped*/, runtime));
+            map_id, tag, false/*leaf*/, false/*virtual mapped*/,
+            true/*collective for replication*/, runtime));
       termination_event = term_event;
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -3665,7 +4452,7 @@ namespace Legion {
     void MapOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       parent_ctx = NULL;
       remap_region = false;
       mapper = NULL;
@@ -3679,16 +4466,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::deactivate_map_op(void)
+    void MapOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       // Remove our reference to the region
       region = PhysicalRegion();
       grants.clear();
       wait_barriers.clear();
-      arrive_barriers.clear();
-      privilege_path.clear();
+      arrive_barriers.clear(); privilege_path.clear();
       version_info.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
@@ -3707,15 +4493,9 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MapOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_map_op(); 
       // Now return this operation to the queue
-      runtime->free_map_op(this);
+      if (freeop)
+        runtime->free_map_op(this);
     } 
 
     //--------------------------------------------------------------------------
@@ -3806,7 +4586,7 @@ namespace Legion {
     void MapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // If we have any wait preconditions from phase barriers or 
       // grants then we use them to compute a precondition for doing
       // any copies or anything else for this operation
@@ -3824,40 +4604,23 @@ namespace Legion {
             init_precondition = sync_precondition;
         }
       }
+      bool record_valid = true;
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
-      ApEvent effects_done;
-      if (remap_region)
+      if (!remap_region)
       {
-        region.impl->get_references(mapped_instances);
-        effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
-                                                requirement, version_info,
-                                                this, 0/*idx*/, 
-                                                init_precondition,
-                                                termination_event,
-                                                mapped_instances, 
-                                                source_instances,
-                                                trace_info,
-                                                map_applied_conditions
-#ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
-#endif
-                                                );
-      }
-      else
-      { 
         // Now we've got the valid instances so invoke the mapper
-        const bool record_valid = 
-          invoke_mapper(mapped_instances, source_instances);
+        record_valid = invoke_mapper(mapped_instances, source_instances);
         // First mapping so set the references now
         region.impl->set_references(mapped_instances);
-        // Then we can register our mapped instances
-        effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
+      }
+      else
+        region.impl->get_references(mapped_instances);
+      // Then we can register our mapped instances
+      ApEvent map_complete_event =
+        runtime->forest->physical_perform_updates_and_registration(
                                                 requirement, version_info,
                                                 this, 0/*idx*/,
                                                 init_precondition,
@@ -3870,8 +4633,8 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
+                                                false/*no dynamic rendezvous*/,
                                                 record_valid);
-      }
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
       {
@@ -3879,24 +4642,8 @@ namespace Legion {
         dump_physical_state(&requirement, 0);
       } 
 #endif
-      ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
-      if (mapped_instances.size() > 1)
-      {
-        std::set<ApEvent> mapped_events;
-        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-          mapped_events.insert(mapped_instances[idx].get_ready_event());
-        map_complete_event = Runtime::merge_events(&trace_info, mapped_events);
-      }
-      else if (!mapped_instances.empty())
-        map_complete_event = mapped_instances[0].get_ready_event();
       log_mapping_decision(0/*idx*/, requirement, mapped_instances);
-#ifdef LEGION_SPY
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
-                                        termination_event);
-#endif
-      if (!effects_done.exists())
-        effects_done = termination_event; 
+
       if (!atomic_locks.empty() || !arrive_barriers.empty())
       {
         // They've already been sorted in order 
@@ -3907,7 +4654,7 @@ namespace Legion {
                 Runtime::acquire_ap_reservation(it->first, it->second,
                                                 map_complete_event);
           // We can also issue the release condition on our termination
-          Runtime::release_reservation(it->first, effects_done);
+          Runtime::release_reservation(it->first, termination_event);
         }
         for (std::vector<PhaseBarrier>::iterator it = 
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
@@ -3916,9 +4663,16 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        effects_done);    
+                                        termination_event);    
         }
       }
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
+                                        ready_event);
+#endif
+      // Map operations do not wait for the unmapping to be considered complete
+      record_completion_effect(map_complete_event);
       // We can trigger the ready event now that we know its precondition
       Runtime::trigger_event(NULL, ready_event, map_complete_event);
       // Now we can trigger the mapping event and indicate
@@ -3929,7 +4683,7 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
+      complete_mapping(finalize_complete_mapping(mapping_applied));
       // Note that completing mapping and execution should
       // be enough to trigger the completion operation call
       // Trigger an early commit of this operation
@@ -3941,13 +4695,7 @@ namespace Legion {
       // This means that any attempts to restart an inline mapping
       // will result in the entire task needing to be restarted.
       request_early_commit();
-      // If we have any copy-out effects from this inline mapping, we'll
-      // need to keep it around long enough for the parent task in case
-      // it decides that it needs to
-      if (!request_early_complete(effects_done))
-        complete_execution(Runtime::protect_event(effects_done));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -4013,10 +4761,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::select_sources(const unsigned index,
-                               const InstanceRef &target,
-                               const InstanceSet &sources,
-                               std::vector<unsigned> &ranking)
+    void MapOp::select_sources(const unsigned index, PhysicalManager *target,
+                               const std::vector<InstanceView*> &sources,
+                               std::vector<unsigned> &ranking,
+                               std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4024,7 +4772,8 @@ namespace Legion {
 #endif
       Mapper::SelectInlineSrcInput input;
       Mapper::SelectInlineSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
       {
@@ -4032,7 +4781,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     } 
 
     //--------------------------------------------------------------------------
@@ -4059,13 +4808,6 @@ namespace Legion {
       }
       else
         atomic_locks[lock] = exclusive;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent MapOp::get_program_order_event(void) const
-    //--------------------------------------------------------------------------
-    {
-      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -4314,18 +5056,20 @@ namespace Legion {
       if (mapper->request_valid_instances)
       {
         InstanceSet valid_instances;
+        FieldMaskSet<ReplicatedView> collectives;
         runtime->forest->physical_premap_region(this, 0/*idx*/, requirement,
-                      version_info, valid_instances, map_applied_conditions);
+            version_info, valid_instances, collectives, map_applied_conditions);
         if (!requirement.is_no_access())
         {
           std::set<Memory> visible_memories;
           runtime->find_visible_memories(parent_ctx->get_executing_processor(),
                                          visible_memories);
-          prepare_for_mapping(valid_instances, visible_memories,
-                              input.valid_instances);
+          prepare_for_mapping(valid_instances, collectives, visible_memories,
+                              input.valid_instances, input.valid_collectives);
         }
         else
-          prepare_for_mapping(valid_instances, input.valid_instances);
+          prepare_for_mapping(valid_instances, collectives,
+              input.valid_instances, input.valid_collectives);
       }
       mapper->invoke_map_inline(this, &input, &output);
       copy_fill_priority = output.copy_fill_priority;
@@ -4508,10 +5252,10 @@ namespace Legion {
           runtime->find_layout_constraints(layout_constraint_id);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          InstanceManager *manager = chosen_instances[idx].get_manager();
+          PhysicalManager *manager = 
+            chosen_instances[idx].get_physical_manager();
           const LayoutConstraint *conflict_constraint = NULL;
-          if (manager->conflicts(constraints, get_shard_point(), 
-                                 &conflict_constraint))
+          if (manager->conflicts(constraints, &conflict_constraint))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected "
                           "instance for inline mapping (ID %lld) in task %s "
@@ -4621,14 +5365,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    DomainPoint MapOp::get_shard_point(void) const
-    //--------------------------------------------------------------------------
-    {
-      // We have no shard point in the non control replicated case
-      return DomainPoint();
-    }
-
     /////////////////////////////////////////////////////////////
     // External Copy 
     /////////////////////////////////////////////////////////////
@@ -4729,7 +5465,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
-      : ExternalCopy(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalCopy(), PredicatedOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -4737,7 +5473,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(const CopyOp &rhs)
-      : ExternalCopy(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalCopy(), PredicatedOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4765,12 +5501,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_predication(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
                              launcher.predicate, provenance);
-      initialize_memoizable();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -4905,7 +5640,7 @@ namespace Legion {
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
-        grants[idx].impl->register_operation(completion_event);
+        grants[idx].impl->register_operation(get_completion_event());
       wait_barriers = launcher.wait_barriers;
 #ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -5284,25 +6019,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::activate_copy(void)
+    void CopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative();
-      activate_memoizable();
+      PredicatedOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
-      predication_guard = PredEvent::NO_PRED_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::deactivate_copy(void)
+    void CopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      PredicatedOp::deactivate(false/*free*/);
       // Clear out our region tree state
       src_requirements.clear();
       dst_requirements.clear();
@@ -5345,22 +6078,9 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_copy(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_copy(); 
       // Return this operation to the runtime
-      runtime->free_copy_op(this);
+      if (freeop)
+        runtime->free_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -5575,14 +6295,12 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       src_versions.resize(src_requirements.size());
       dst_versions.resize(dst_requirements.size());
     }
 
     //--------------------------------------------------------------------------
-    bool CopyOp::query_speculate(bool &value, bool &mapping_only)
+    bool CopyOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
@@ -5594,16 +6312,8 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_copy_speculate(this, &output);
-      if (!output.speculate)
+      if (!output.speculate || !output.speculate_mapping_only)
         return false;
-      value = output.speculative_value;
-      mapping_only = output.speculate_mapping_only;
-      // Make our predicate guard
-#ifdef DEBUG_LEGION
-      assert(!predication_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      predication_guard = predicate->get_true_guard();
       // If we're speculating then we make all the destination
       // privileges that are write-discard read-write instead so
       // that we get the earlier version of the data in case we
@@ -5640,7 +6350,6 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -5707,19 +6416,17 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const TraceInfo trace_info(this, true/*initialize*/);
-      std::vector<InstanceSet> valid_src_instances(src_requirements.size());
-      std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
-      std::vector<InstanceSet> valid_gather_instances(
-                                          src_indirect_requirements.size());
-      std::vector<InstanceSet> valid_scatter_instances(
-                                          dst_indirect_requirements.size());
+      const TraceInfo trace_info(this);
       Mapper::MapCopyInput input;
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
       input.dst_instances.resize(dst_requirements.size());
       input.src_indirect_instances.resize(src_indirect_requirements.size());
       input.dst_indirect_instances.resize(dst_indirect_requirements.size());
+      input.src_collectives.resize(src_requirements.size());
+      input.dst_collectives.resize(dst_requirements.size());
+      input.src_indirect_collectives.resize(src_indirect_requirements.size());
+      input.dst_indirect_collectives.resize(dst_indirect_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
@@ -5744,19 +6451,22 @@ namespace Legion {
         // First go through and do the traversals to find the valid instances
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          InstanceSet &valid_instances = valid_src_instances[idx];
+          InstanceSet valid_instances;
+          FieldMaskSet<ReplicatedView> collectives;
           runtime->forest->physical_premap_region(this, idx, 
                                                   src_requirements[idx],
                                                   src_versions[idx],
-                                                  valid_instances,
+                                                  valid_instances, collectives,
                                                   map_applied_conditions);
           // Convert these to the valid set of mapping instances
           // No need to filter for copies
-          prepare_for_mapping(valid_instances, input.src_instances[idx]);
+          prepare_for_mapping(valid_instances, collectives,
+              input.src_instances[idx], input.src_collectives[idx]);
         }
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
-          InstanceSet &valid_instances = valid_dst_instances[idx];
+          InstanceSet valid_instances;
+          FieldMaskSet<ReplicatedView> collectives;
           // Little bit of a hack here, if we are going to do a reduction
           // explicit copy, switch the privileges to read-write when doing
           // the registration since we know we are using normal instances
@@ -5767,10 +6477,11 @@ namespace Legion {
                                                   idx+src_requirements.size(),
                                                   dst_requirements[idx],
                                                   dst_versions[idx],
-                                                  valid_instances,
+                                                  valid_instances, collectives,
                                                   map_applied_conditions);
           // No need to filter for copies
-          prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+          prepare_for_mapping(valid_instances, collectives,
+              input.dst_instances[idx], input.dst_collectives[idx]);
           // Switch the privileges back when we are done
           if (is_reduce_req)
             dst_requirements[idx].privilege = LEGION_REDUCE;
@@ -5781,16 +6492,18 @@ namespace Legion {
             src_requirements.size() + dst_requirements.size();
           for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           {
-            InstanceSet &valid_instances = valid_gather_instances[idx];
+            InstanceSet valid_instances;
+            FieldMaskSet<ReplicatedView> collectives;
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 src_indirect_requirements[idx],
                                                 gather_versions[idx],
-                                                valid_instances,
+                                                valid_instances, collectives,
                                                 map_applied_conditions);
             // Convert these to the valid set of mapping instances
             // No need to filter for copies
-            prepare_for_mapping(valid_instances, 
-                                input.src_indirect_instances[idx]);
+            prepare_for_mapping(valid_instances, collectives,
+                                input.src_indirect_instances[idx],
+                                input.src_indirect_collectives[idx]);
           }
         }
         if (!dst_indirect_requirements.empty())
@@ -5799,16 +6512,18 @@ namespace Legion {
             dst_requirements.size() + src_indirect_requirements.size();
           for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           {
-            InstanceSet &valid_instances = valid_scatter_instances[idx];
+            InstanceSet valid_instances;
+            FieldMaskSet<ReplicatedView> collectives;
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 dst_indirect_requirements[idx],
                                                 scatter_versions[idx],
-                                                valid_instances,
+                                                valid_instances, collectives,
                                                 map_applied_conditions);
             // Convert these to the valid set of mapping instances
             // No need to filter for copies
-            prepare_for_mapping(valid_instances, 
-                                input.dst_indirect_instances[idx]);
+            prepare_for_mapping(valid_instances, collectives,
+                                input.dst_indirect_instances[idx],
+                                input.dst_indirect_collectives[idx]);
           }
         }
       }
@@ -5833,9 +6548,8 @@ namespace Legion {
         dst_indirect_records.resize(dst_indirect_requirements.size());
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      ApEvent init_precondition = compute_init_precondition(trace_info);
+      ApEvent init_precondition = compute_sync_precondition(trace_info);
       // Register the source and destination regions
-      std::set<ApEvent> copy_complete_events;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         InstanceSet src_targets, dst_targets, gather_targets, scatter_targets;
@@ -5843,27 +6557,31 @@ namespace Legion {
         // and add it to the set of copy complete events
         const ApUserEvent local_postcondition = 
           Runtime::create_ap_user_event(&trace_info);
-        copy_complete_events.insert(local_postcondition); 
+        std::vector<PhysicalManager*> src_sources;
+        record_completion_effect(local_postcondition);
         // Convert the src_targets and dst_targets first so we can do any
         // exchanges for collective points
         // The common case 
         int src_virtual = -1;
         // Do the conversion and check for errors
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         src_virtual = 
           perform_conversion<SRC_REQ>(idx, src_requirements[idx],
                                       output.src_instances[idx],
-                                      src_targets,
-                                      IS_REDUCE(dst_requirements[idx]));
+                                      output.src_source_instances[idx],
+                                      src_sources, src_targets, is_reduce_req);
         log_mapping_decision(idx, src_requirements[idx], src_targets);
         const size_t dst_idx = src_requirements.size() + idx;
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
         // the registration since we know we are using normal instances
-        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_READ_WRITE;
+        std::vector<PhysicalManager*> dst_sources;
         perform_conversion<DST_REQ>(idx, dst_requirements[idx],
-                                    output.dst_instances[idx], dst_targets);
+                                    output.dst_instances[idx], 
+                                    output.dst_source_instances[idx],
+                                    dst_sources, dst_targets);
         log_mapping_decision(dst_idx, dst_requirements[idx], dst_targets);
         // Do any exchanges needed for collective cooperation
         const bool src_indirect = (idx < src_indirect_requirements.size());
@@ -5872,6 +6590,7 @@ namespace Legion {
           Runtime::create_ap_user_event(&trace_info) : 
           ApUserEvent::NO_AP_USER_EVENT;
         ApEvent collective_precondition, collective_postcondition;
+        ApEvent src_ready, dst_ready, gather_ready, scatter_ready;
         // Track applied conditions special for copy-across
         std::set<RtEvent> perform_ready_events;
         if (src_indirect)
@@ -5880,8 +6599,7 @@ namespace Legion {
           RtEvent exchange_done = exchange_indirect_records(idx, 
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, src_targets,
-              src_requirements[idx], index_point, 
-              src_indirect_records[idx], true/*source*/);
+              src_requirements[idx], src_indirect_records[idx], true/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -5893,8 +6611,7 @@ namespace Legion {
           RtEvent exchange_done = exchange_indirect_records(idx, 
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, dst_targets,
-              dst_requirements[idx], index_point, 
-              dst_indirect_records[idx], false/*source*/);
+              dst_requirements[idx], dst_indirect_records[idx],false/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -5905,13 +6622,9 @@ namespace Legion {
           PhysicalTraceInfo src_info(trace_info, idx, false/*update validity*/);
           const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
                                      output.untracked_valid_srcs.end());
-          std::vector<PhysicalManager*> src_sources;
           const RegionRequirement &src_req = src_requirements[idx];
-          if (!output.src_source_instances[idx].empty())
-            runtime->forest->physical_convert_sources(this, src_req,
-             output.src_source_instances[idx], src_sources, 
-             !runtime->unsafe_mapper ? &acquired_instances : NULL);
-          runtime->forest->physical_perform_updates_and_registration(
+          src_ready =
+            runtime->forest->physical_perform_updates_and_registration(
                                               src_req, src_versions[idx],
                                               this, idx,
                                               init_precondition,
@@ -5926,6 +6639,7 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
+                                              false/*check collective*/,
                                               record_valid);
         }
         else
@@ -5954,12 +6668,7 @@ namespace Legion {
         // Don't track target views of copy across operations here,
         // as they will do later when the realm copies are recorded.
         PhysicalTraceInfo dst_info(trace_info,dst_idx,false/*update_validity*/);
-        std::vector<PhysicalManager*> dst_sources;
-        if (!output.dst_source_instances[idx].empty())
-          runtime->forest->physical_convert_sources(this, dst_requirements[idx],
-             output.dst_source_instances[idx], dst_sources, 
-             !runtime->unsafe_mapper ? &acquired_instances : NULL);
-        ApEvent effects_done = 
+        dst_ready =
           runtime->forest->physical_perform_updates_and_registration(
                                           dst_requirements[idx],
                                           dst_versions[idx], this,
@@ -5978,14 +6687,13 @@ namespace Legion {
                                           get_logging_name(),
                                           unique_op_id,
 #endif
+                                          false/*check collective*/,
                                           true/*record valid*/,
                       // Only check initialized if we don't have an indirection.
                       // If we have an indirection then it is impossible to know
                       // if we writing everything or not
                                     (idx >= src_indirect_requirements.size()) &&
                                      (idx >= dst_indirect_requirements.size()));
-        if (effects_done.exists())
-          copy_complete_events.insert(effects_done);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE; 
@@ -5996,21 +6704,18 @@ namespace Legion {
             gather_instances[0] = output.src_indirect_instances[idx];
           else
             gather_instances.clear();
+          std::vector<PhysicalManager*> gather_sources;
           perform_conversion<GATHER_REQ>(idx, src_indirect_requirements[idx],
-                                         gather_instances, gather_targets);
+                                     gather_instances,
+                                     output.src_indirect_source_instances[idx],
+                                     gather_sources, gather_targets);
           // Now do the registration
           const size_t gather_idx = src_requirements.size() + 
             dst_requirements.size() + idx;
           PhysicalTraceInfo gather_info(trace_info, gather_idx);
           const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
                                     == output.untracked_valid_ind_srcs.end());
-          std::vector<PhysicalManager*> gather_sources;
-          if (!output.src_indirect_source_instances[idx].empty())
-            runtime->forest->physical_convert_sources(this, 
-                src_indirect_requirements[idx], 
-                output.src_indirect_source_instances[idx], gather_sources, 
-                !runtime->unsafe_mapper ? &acquired_instances : NULL);
-          ApEvent effects_done = 
+          gather_ready =
             runtime->forest->physical_perform_updates_and_registration(
                                        src_indirect_requirements[idx],
                                        gather_versions[idx], this,
@@ -6025,9 +6730,8 @@ namespace Legion {
                                        get_logging_name(),
                                        unique_op_id,
 #endif
+                                       false/*check collective*/,
                                        record_valid);
-          if (effects_done.exists())
-            copy_complete_events.insert(effects_done);
           log_mapping_decision(gather_idx, src_indirect_requirements[idx],
                                gather_targets);
         }
@@ -6038,21 +6742,18 @@ namespace Legion {
             scatter_instances[0] = output.dst_indirect_instances[idx];
           else
             scatter_instances.clear();
+          std::vector<PhysicalManager*> scatter_sources;
           perform_conversion<SCATTER_REQ>(idx, dst_indirect_requirements[idx],
-                                          scatter_instances, scatter_targets);
+                                    scatter_instances,
+                                    output.dst_indirect_source_instances[idx],
+                                    scatter_sources, scatter_targets);
           // Now do the registration
           const size_t scatter_idx = src_requirements.size() + 
             dst_requirements.size() + src_indirect_requirements.size() + idx;
           const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
                                     == output.untracked_valid_ind_dsts.end());
           PhysicalTraceInfo scatter_info(trace_info, scatter_idx);
-          std::vector<PhysicalManager*> scatter_sources;
-          if (!output.dst_indirect_source_instances[idx].empty())
-            runtime->forest->physical_convert_sources(this,
-                dst_indirect_requirements[idx], 
-                output.dst_indirect_source_instances[idx], scatter_sources, 
-                !runtime->unsafe_mapper ? &acquired_instances : NULL);
-          ApEvent effects_done = 
+          scatter_ready =
             runtime->forest->physical_perform_updates_and_registration(
                                       dst_indirect_requirements[idx],
                                       scatter_versions[idx], this,
@@ -6067,9 +6768,8 @@ namespace Legion {
                                       get_logging_name(),
                                       unique_op_id,
 #endif
+                                      false/*check collective*/,
                                       record_valid);
-          if (effects_done.exists())
-            copy_complete_events.insert(effects_done);
           log_mapping_decision(scatter_idx, dst_indirect_requirements[idx],
                                scatter_targets);
         }
@@ -6104,9 +6804,10 @@ namespace Legion {
           }
           RtUserEvent deferred_applied = Runtime::create_rt_user_event();
           DeferredCopyAcross args(this, physical_trace_info, idx, 
-                                  init_precondition, local_precondition,
+                                  init_precondition, src_ready, dst_ready,
+                                  gather_ready,scatter_ready,local_precondition,
                                   local_postcondition, collective_precondition,
-                                  collective_postcondition, predication_guard,
+                                  collective_postcondition, true_guard,
                                   deferred_applied, deferred_src, deferred_dst,
                                   deferred_gather, deferred_scatter,
                                   output.compute_preimages);
@@ -6115,22 +6816,16 @@ namespace Legion {
           map_applied_conditions.insert(deferred_applied);
         }
         else
-          perform_copy_across(idx, init_precondition, local_precondition,
+          perform_copy_across(idx, init_precondition, src_ready, dst_ready,
+                              gather_ready, scatter_ready, local_precondition,
                               local_postcondition, collective_precondition,
                               collective_postcondition,
-                              predication_guard, src_targets, dst_targets, 
+                              true_guard, src_targets, dst_targets, 
                               gather_targets.empty() ? NULL : &gather_targets,
                               scatter_targets.empty() ? NULL : &scatter_targets,
                               physical_trace_info, map_applied_conditions,
                               output.compute_preimages);
       }
-      ApEvent copy_complete_event = 
-        Runtime::merge_events(&trace_info, copy_complete_events);
-#ifdef LEGION_SPY
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, copy_complete_event,
-                                        completion_event);
-#endif
       // Chain all the unlock and barrier arrivals off of the
       // copy complete event
       if (!arrive_barriers.empty())
@@ -6142,11 +6837,9 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);    
+                                        get_completion_event());    
         }
       }
-      if (is_recording())
-        trace_info.record_complete_replay(copy_complete_event);
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -6154,17 +6847,17 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
-      // Handle the case for marking when the copy completes
-      if (!request_early_complete(copy_complete_event))
-        complete_execution(Runtime::protect_event(copy_complete_event));
-      else
-        complete_execution();
+      complete_mapping(record_complete_replay(trace_info, mapping_applied));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
     void CopyOp::perform_copy_across(const unsigned index, 
                                      const ApEvent init_precondition,
+                                     const ApEvent src_ready,
+                                     const ApEvent dst_ready,
+                                     const ApEvent gather_ready,
+                                     const ApEvent scatter_ready,
                                      const ApUserEvent local_precondition,
                                      const ApUserEvent local_postcondition,
                                      const ApEvent collective_precondition,
@@ -6192,8 +6885,9 @@ namespace Legion {
               src_requirements[index], dst_requirements[index],
               src_versions[index], dst_versions[index],
               src_targets, dst_targets, across_sources, this, index,
-              trace_info.dst_index, init_precondition, predication_guard,
-              atomic_locks[index], trace_info, applied_conditions);
+              trace_info.dst_index, init_precondition, src_ready, dst_ready,
+              predication_guard, atomic_locks[index], 
+              trace_info, applied_conditions);
         }
         else
         {
@@ -6208,9 +6902,10 @@ namespace Legion {
               src_targets, (*gather_targets), dst_targets, this, index, 
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, gather_is_range[index],
-              init_precondition, predication_guard, collective_precondition,
-              collective_postcondition, local_precondition, 
-              atomic_locks[index], trace_info, applied_conditions, 
+              init_precondition, src_ready, dst_ready, gather_ready,
+              predication_guard, collective_precondition,
+              collective_postcondition, local_precondition,
+              atomic_locks[index], trace_info, applied_conditions,
               possible_src_indirect_out_of_range, compute_preimages);
         }
       }
@@ -6229,10 +6924,11 @@ namespace Legion {
               dst_targets, dst_indirect_records[index], this, index, 
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, scatter_is_range[index],
-              init_precondition, predication_guard, collective_precondition,
-              collective_postcondition, local_precondition, 
+              init_precondition, src_ready, dst_ready, scatter_ready,
+              predication_guard, collective_precondition,
+              collective_postcondition, local_precondition,
               atomic_locks[index], trace_info, applied_conditions, 
-              possible_dst_indirect_out_of_range, 
+              possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing, compute_preimages);
         }
         else
@@ -6255,7 +6951,8 @@ namespace Legion {
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() +
               src_indirect_requirements.size() + index, gather_is_range[index],
-              init_precondition, predication_guard, collective_precondition,
+              init_precondition, src_ready, dst_ready, gather_ready,
+              scatter_ready, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, atomic_locks[index],
               trace_info,applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
@@ -6286,6 +6983,8 @@ namespace Legion {
       const DeferredCopyAcross *dargs = (const DeferredCopyAcross*)args;
       std::set<RtEvent> applied_conditions;
       dargs->copy->perform_copy_across(dargs->index, dargs->init_precondition,
+                            dargs->src_ready, dargs->dst_ready,
+                            dargs->gather_ready, dargs->scatter_ready,
                             dargs->local_precondition, 
                             dargs->local_postcondition,
                             dargs->collective_precondition,
@@ -6391,13 +7090,13 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       collective_pre = local_pre;
       collective_post = local_post;
-      records.emplace_back(IndirectRecord(runtime->forest, req, insts, key));
+      records.emplace_back(IndirectRecord(runtime->forest, req, insts));
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -6421,15 +7120,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::select_sources(const unsigned index,
-                                const InstanceRef &target,
-                                const InstanceSet &sources,
-                                std::vector<unsigned> &ranking)
+    void CopyOp::select_sources(const unsigned index, PhysicalManager *target,
+                                const std::vector<InstanceView*> &sources,
+                                std::vector<unsigned> &ranking,
+                                std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances, 
+                          input.collective_views);
       prepare_for_mapping(target, input.target);
       input.is_src = false;
       input.is_dst = false;
@@ -6474,7 +7174,7 @@ namespace Legion {
       }
       mapper->invoke_select_copy_sources(this, &input, &output);
       // Fill in the ranking based on the output
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -6856,54 +7556,14 @@ namespace Legion {
     void CopyOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
-      complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CopyOp::compute_sync_precondition(const TraceInfo *info) const
-    //--------------------------------------------------------------------------
-    {
-      ApEvent result;
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        std::set<ApEvent> sync_preconditions;
-        if (!wait_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
-            sync_preconditions.insert(e);
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-          }
-        }
-        if (!grants.empty())
-        {
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            ApEvent e = it->impl->acquire_grant();
-            sync_preconditions.insert(e);
-          }
-        }
-        // For some reason we don't trace these, not sure why
-        result = Runtime::merge_events(NULL, sync_preconditions);
-      }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::complete_replay(ApEvent copy_complete_event)
+    void CopyOp::complete_replay(ApEvent pre, ApEvent copy_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -6917,14 +7577,13 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);    
+                                        copy_complete_event);
         }
       }
-
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(NULL, completion_event, copy_complete_event);
-      need_completion_trigger = false;
-      complete_execution(Runtime::protect_event(completion_event));
+      record_completion_effect(copy_complete_event);
+      complete_mapping();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -6985,14 +7644,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<CopyOp::ReqType REQ_TYPE>
-    int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
+    int CopyOp::perform_conversion(unsigned ridx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
+                                   std::vector<MappingInstance> &input,
+                                   std::vector<PhysicalManager*> &sources,
                                    InstanceSet &targets, bool is_reduce)
     //--------------------------------------------------------------------------
     {
       RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
+      if (!input.empty())
+        runtime->forest->physical_convert_sources(this, req, input, sources,
+            !runtime->unsafe_mapper ? &acquired_instances : NULL);
       int composite_idx = runtime->forest->physical_convert_mapping(this,
                               req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
@@ -7005,7 +7669,7 @@ namespace Legion {
                       "for explicit region-to_region copy in task %s (ID %lld) "
                       "but the logical region for this requirement is from "
                       "region tree %d.", mapper->get_mapper_name(), 
-                      bad_tree, get_req_type_name<REQ_TYPE>(), idx,
+                      bad_tree, get_req_type_name<REQ_TYPE>(), ridx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                       req.region.get_tree_id())
       if (!missing_fields.empty())
@@ -7028,7 +7692,7 @@ namespace Legion {
                       "of explicit region-to-region copy in task %s (ID %lld). "
                       "The missing fields are listed below.",
                       mapper->get_mapper_name(), missing_fields.size(), 
-                      get_req_type_name<REQ_TYPE>(), idx,
+                      get_req_type_name<REQ_TYPE>(), ridx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       }
       if (!unacquired.empty())
@@ -7047,7 +7711,7 @@ namespace Legion {
                           "have detected this. Please update the mapper to "
                           "abide by proper mapping conventions.",
                           mapper->get_mapper_name(), 
-                          get_req_type_name<REQ_TYPE>(), idx,
+                          get_req_type_name<REQ_TYPE>(), ridx,
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
         }
@@ -7058,7 +7722,7 @@ namespace Legion {
                         "region copy in task %s (ID %lld) in 'map_copy' call. "
                         "You may experience undefined behavior as a "
                         "consequence.", mapper->get_mapper_name(),
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
       }
@@ -7074,7 +7738,7 @@ namespace Legion {
                         "be virtual instances for explicit region-to-region "
                         "copy operations. Operation was issued in task %s "
                         "(ID %lld).", mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         if (is_reduce)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -7085,9 +7749,9 @@ namespace Legion {
                         "physical instances are permitted to be sources of "
                         "explicit region-to-region reductions. Operation was "
                         "issued in task %s (ID %lld).", mapper->get_mapper_name(),
-                        get_req_type_name<REQ_TYPE>(), idx, 
+                        get_req_type_name<REQ_TYPE>(), ridx, 
                         parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        if (idx < src_indirect_requirements.size())
+        if (ridx < src_indirect_requirements.size())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper requested the creation of a "
@@ -7097,9 +7761,9 @@ namespace Legion {
                         "be virtual instances for explicit region-to-region "
                         "copy operations. Operation was issued in task %s "
                         "(ID %lld).", mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        if (idx < dst_indirect_requirements.size())
+        if (ridx < dst_indirect_requirements.size())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'map_copy' "
                         "on mapper %s. Mapper requested the creation of a "
@@ -7109,7 +7773,7 @@ namespace Legion {
                         "be virtual instances for explicit region-to-region "
                         "copy operations. Operation was issued in task %s "
                         "(ID %lld).", mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       }
       if (runtime->unsafe_mapper)
@@ -7130,25 +7794,9 @@ namespace Legion {
                         "the logical region requirement. The copy operation "
                         "was issued in task %s (ID %lld).",
                         mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx, 
+                        get_req_type_name<REQ_TYPE>(), ridx, 
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (manager->is_collective_manager())
-        {
-          CollectiveManager *collective_manager = 
-            manager->as_collective_manager();
-          if (!collective_manager->point_space->contains_point(index_point))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from invocation of 'map_copy' "
-                        "on mapper %s. Mapper selected a collective instance "
-                        "for %s region requirement at index %d but point copy "
-                        "(ID %lld) launched in task %s (ID %lld) is not "
-                        "contained within the point space for the collective "
-                        "instace.", mapper->get_mapper_name(), 
-                        get_req_type_name<REQ_TYPE>(), idx,
-                        get_unique_op_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        }
       }
       // Make sure all the destinations are real instances, this has
       // to be true for all kinds of explicit copies including reductions
@@ -7163,7 +7811,7 @@ namespace Legion {
                         "specialized instance as the target for %s "
                         "region requirement %d of an explicit copy operation "
                         "in task %s (ID %lld).", mapper->get_mapper_name(),
-                        get_req_type_name<REQ_TYPE>(), idx,
+                        get_req_type_name<REQ_TYPE>(), ridx,
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
       }
@@ -7276,7 +7924,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(Runtime *rt)
-      : CollectiveInstanceCreator<CopyOp>(rt)
+      : CopyOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -7284,7 +7932,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-      : CollectiveInstanceCreator<CopyOp>(rhs)
+      : CopyOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7313,7 +7961,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_predication(ctx, true/*track*/, 
                              launcher.src_requirements.size() + 
                                launcher.dst_requirements.size(), 
                              launcher.static_dependences,
@@ -7459,7 +8107,7 @@ namespace Legion {
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
-        grants[idx].impl->register_operation(completion_event);
+        grants[idx].impl->register_operation(get_completion_event());
       wait_barriers = launcher.wait_barriers;
 #ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -7502,14 +8150,7 @@ namespace Legion {
     void IndexCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_copy();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::activate_index_copy(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_copy();
+      CopyOp::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -7518,19 +8159,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexCopyOp::deactivate(void)
+    void IndexCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_index_copy(); 
-      // Return this operation to the runtime
-      runtime->free_index_copy_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexCopyOp::deactivate_index_copy(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_copy();
+      CopyOp::deactivate(false/*free*/);
       // We can deactivate all of our point operations
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -7543,6 +8175,9 @@ namespace Legion {
       pending_intra_space_dependences.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      // Return this operation to the runtime
+      if (freeop)
+        runtime->free_index_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -7759,11 +8394,13 @@ namespace Legion {
       if (!src_indirect_requirements.empty())
       {
         gather_versions.resize(src_indirect_requirements.size());
+        const unsigned offset = 
+          src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           ProjectionInfo gather_info(runtime, src_indirect_requirements[idx], 
                                      launch_space);
-          runtime->forest->perform_dependence_analysis(this, idx, 
+          runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx],
@@ -7773,11 +8410,13 @@ namespace Legion {
       if (!dst_indirect_requirements.empty())
       {
         scatter_versions.resize(dst_indirect_requirements.size());
+        const unsigned offset = src_requirements.size() + 
+          dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           ProjectionInfo scatter_info(runtime, dst_indirect_requirements[idx],
                                       launch_space);
-          runtime->forest->perform_dependence_analysis(this, idx, 
+          runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx],
@@ -7796,27 +8435,16 @@ namespace Legion {
       if (runtime->check_privileges)
         check_point_requirements();
       // Launch the points
-      std::set<RtEvent> mapped_preconditions;
-      std::set<ApEvent> executed_preconditions;
-      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-            it != points.end(); it++)
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        mapped_preconditions.insert((*it)->get_mapped_event());
-        executed_preconditions.insert((*it)->get_completion_event());
-        (*it)->launch();
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->launch();
       }
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
-#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      if (!request_early_complete(done))
-        complete_execution(Runtime::protect_event(done));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -7853,20 +8481,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_index_copy_requirements();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       // Enumerate the points
       enumerate_points(true/*replaying*/);
       // Then call replay analysis on all of them
-      for (std::vector<PointCopyOp*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
-        (*it)->trigger_replay();
-      complete_mapping();
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->trigger_replay();
+      }
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
       complete_execution();
-      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexCopyOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_shard_points()->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -7875,8 +8510,9 @@ namespace Legion {
     {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
+      IndexSpaceNode *local_points = get_shard_points();
       Domain launch_domain;
-      launch_space->get_launch_space_domain(launch_domain);
+      local_points->get_launch_space_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -8005,18 +8641,18 @@ namespace Legion {
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       if (sources && !collective_src_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
                               collective_pre, collective_post, trace_info, 
-                              insts, req, key, records, sources);
+                              insts, req, records, sources);
       if (!sources && !collective_dst_indirect_points)
         return CopyOp::exchange_indirect_records(index, local_pre, local_post,
                               collective_pre, collective_post, trace_info,
-                              insts, req, key, records, sources);
+                              insts, req, records, sources);
 #ifdef DEBUG_LEGION
       assert(local_pre.exists());
       assert(local_post.exists());
@@ -8059,7 +8695,7 @@ namespace Legion {
         assert(src_indirect_records[index].size() < points.size());
 #endif
         src_indirect_records[index].emplace_back(
-            IndirectRecord(runtime->forest, req, insts, key));
+            IndirectRecord(runtime->forest, req, insts));
         exchange.src_records.push_back(&records);
         if (src_indirect_records[index].size() == points.size())
           return finalize_exchange(index, true/*sources*/);
@@ -8097,7 +8733,7 @@ namespace Legion {
         assert(dst_indirect_records[index].size() < points.size());
 #endif
         dst_indirect_records[index].emplace_back(
-            IndirectRecord(runtime->forest, req, insts, key));
+            IndirectRecord(runtime->forest, req, insts));
         exchange.dst_records.push_back(&records);
         if (dst_indirect_records[index].size() == points.size())
           return finalize_exchange(index, false/*sources*/);
@@ -8503,7 +9139,8 @@ namespace Legion {
       scatter_parent_indexes    = owner->scatter_parent_indexes;
       gather_is_range           = owner->gather_is_range;
       scatter_is_range          = owner->scatter_is_range;
-      predication_guard         = owner->predication_guard;
+      true_guard                = owner->true_guard;
+      false_guard               = owner->false_guard;
       src_versions              = owner->src_versions;
       dst_versions              = owner->dst_versions;
       gather_versions           = owner->gather_versions;
@@ -8522,17 +9159,18 @@ namespace Legion {
     void PointCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_copy();
+      CopyOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointCopyOp::deactivate(void)
+    void PointCopyOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_copy();
+      CopyOp::deactivate(false/*free*/);
       intra_space_mapping_dependences.clear();
-      runtime->free_point_copy_op(this);
+      if (freeop)
+        runtime->free_point_copy_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -8622,8 +9260,6 @@ namespace Legion {
           }
         }
       }
-      // We can also mark this as having resolved any predication
-      resolve_speculation();
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -8645,54 +9281,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t PointCopyOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointCopyOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent PointCopyOp::exchange_indirect_records(
         const unsigned index, const ApEvent local_pre, const ApEvent local_post,
         ApEvent &collective_pre, ApEvent &collective_post,
         const TraceInfo &trace_info, const InstanceSet &insts,
-        const RegionRequirement &req, const DomainPoint &key,
+        const RegionRequirement &req,
         std::vector<IndirectRecord> &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
       return owner->exchange_indirect_records(index, local_pre, local_post,
                                 collective_pre, collective_post, trace_info,
-                                insts, req, index_point, records, sources);
+                                insts, req, records, sources);
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointCopyOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
+    void PointCopyOp::record_completion_effect(ApEvent effect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_point.get_dim() > 0);
-#endif
-      collective_point = index_point;
-      return owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, kind, footprint, unsat_kind, unsat_index, 
-          collective_point);
+      owner->record_completion_effect(effect);
     }
 
     //--------------------------------------------------------------------------
-    bool PointCopyOp::finalize_collective_instance(MappingCallKind call_kind,
-                                                   unsigned index, bool success)
+    void PointCopyOp::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
-      return owner->finalize_collective_instance(call_kind, index, success);
+      owner->record_completion_effect(effect, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
-    void PointCopyOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    void PointCopyOp::record_completion_effects(
+                                               const std::set<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
-      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+      owner->record_completion_effects(effects);
     }
 
     //--------------------------------------------------------------------------
@@ -8806,14 +9443,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FenceOp::FenceOp(Runtime *rt)
-      : MemoizableOp<Operation>(rt)
+      : MemoizableOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FenceOp::FenceOp(const FenceOp &rhs)
-      : MemoizableOp<Operation>(NULL)
+      : MemoizableOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8841,7 +9478,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, track, 0/*regions*/, provenance);
-      initialize_memoizable();
       fence_kind = kind;
       if (need_future)
         result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
@@ -8857,33 +9493,19 @@ namespace Legion {
     void FenceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence(); 
+      MemoizableOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::activate_fence(void)
+    void FenceOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-      activate_memoizable();
-    }
-
-    //--------------------------------------------------------------------------
-    void FenceOp::deactivate_fence(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      MemoizableOp::deactivate(false/*free*/);
       map_applied_conditions.clear();
       execution_preconditions.clear();
       result = Future(); // clear out our future reference
-    }
-
-    //--------------------------------------------------------------------------
-    void FenceOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_fence();
-      runtime->free_fence_op(this);
+      if (freeop)
+        runtime->free_fence_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -8932,27 +9554,20 @@ namespace Legion {
             // If we're recording find all the prior event dependences
             if (is_recording())
               tpl->find_execution_fence_preconditions(execution_preconditions);
-            const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+            const PhysicalTraceInfo trace_info(this, 0/*index*/);
             // We can always trigger the completion event when these are done
-            ApEvent execution_precondition;
-            if (!execution_preconditions.empty())
-              execution_precondition = 
-                Runtime::merge_events(&trace_info, execution_preconditions);
-            if (is_recording())
-              trace_info.record_complete_replay(execution_precondition);
+            record_completion_effects(execution_preconditions);
             // Mark that we finished our mapping now
             if (!map_applied_conditions.empty())
-              complete_mapping(Runtime::merge_events(map_applied_conditions));
+              complete_mapping(
+                  record_complete_replay(trace_info,
+                    Runtime::merge_events(map_applied_conditions)));
             else
-              complete_mapping();
+              complete_mapping(record_complete_replay(trace_info));
             // Set the future result if it was needed
             if (result.impl != NULL)
-              result.impl->set_result(execution_precondition, NULL);
-            if (!request_early_complete(execution_precondition))
-              complete_execution(
-                  Runtime::protect_event(execution_precondition));
-            else
-              complete_execution();
+              result.impl->set_result(get_completion_event(), NULL);
+            complete_execution();
             break;
           }
         default:
@@ -9011,18 +9626,6 @@ namespace Legion {
       }
     }
 
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    void FenceOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-      complete_operation();
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void FenceOp::trigger_replay(void)
     //--------------------------------------------------------------------------
@@ -9035,18 +9638,16 @@ namespace Legion {
       else
         complete_execution();
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::complete_replay(ApEvent fence_complete_event)
+    void FenceOp::complete_replay(ApEvent pre, ApEvent fence_complete_event)
     //--------------------------------------------------------------------------
     {
       if (result.impl != NULL)
         result.impl->set_result(fence_complete_event, NULL);
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(NULL, completion_event, fence_complete_event);
-      need_completion_trigger = false;
+      record_completion_effect(fence_complete_event);
       complete_execution();
     }
 
@@ -9098,7 +9699,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FenceOp::initialize(ctx,EXECUTION_FENCE,false/*need future*/,provenance);
-      parent_ctx->issue_frame(this, completion_event); 
+      parent_ctx->issue_frame(this, get_completion_event()); 
     }
 
     //--------------------------------------------------------------------------
@@ -9112,16 +9713,17 @@ namespace Legion {
     void FrameOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      FenceOp::activate();
       previous_completion = ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::deactivate(void)
+    void FrameOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
-      runtime->free_frame_op(this);
+      FenceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_frame_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9154,7 +9756,7 @@ namespace Legion {
       // This frame has finished executing so it is no longer mapped
       parent_ctx->decrement_frame();
       // This frame is also finished so we can tell the context
-      parent_ctx->finish_frame(completion_event);
+      parent_ctx->finish_frame(get_completion_event());
       FenceOp::trigger_complete();
     }
 
@@ -9305,7 +9907,7 @@ namespace Legion {
     void CreationOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       index_space_node = NULL;
       field_space_node = NULL;
       mapping_precondition = RtEvent::NO_RT_EVENT;
@@ -9314,13 +9916,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CreationOp::deactivate(void)
+    void CreationOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       futures.clear();
       fields.clear();
-      runtime->free_creation_op(this);
+      if (freeop)
+        runtime->free_creation_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9501,18 +10104,6 @@ namespace Legion {
         complete_execution();
     }
 
-    //--------------------------------------------------------------------------
-    void CreationOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
-      complete_operation();
-    }
-
     /////////////////////////////////////////////////////////////
     // Deletion Operation 
     /////////////////////////////////////////////////////////////
@@ -9634,7 +10225,7 @@ namespace Legion {
       // will be deleted at a finite time in the future
       const std::vector<FieldID> field_vec(1,fid);
       runtime->forest->free_field_indexes(handle, field_vec,
-          Runtime::protect_event(completion_event), non_owner_shard);
+                                          mapped_event, non_owner_shard);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                               unique_op_id, context_index, unordered);
@@ -9670,7 +10261,7 @@ namespace Legion {
       // will be deleted at a finite time in the future
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
       runtime->forest->free_field_indexes(handle, field_vec,
-          Runtime::protect_event(completion_event), non_owner_shard);
+                                          mapped_event, non_owner_shard);
       // If we are unordered do this analysis here since we are not going
       // to go through the normal logical dependence analysis stage
       if (skip_dependence_analysis)
@@ -9714,31 +10305,16 @@ namespace Legion {
     void DeletionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_deletion();
-    }
-
-    //--------------------------------------------------------------------------
-    void DeletionOp::activate_deletion(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       allocator = NULL;
       has_preconditions = false;
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::deactivate(void)
+    void DeletionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_deletion(); 
-      // Return this to the available deletion ops on the queue
-      runtime->free_deletion_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void DeletionOp::deactivate_deletion(void)
-    //--------------------------------------------------------------------------
-    {
+      Operation::deactivate(false/*free*/);
       // We can remove the reference to the allocator once we are
       // done with all of our free operations
       if ((allocator != NULL) && allocator->remove_reference())
@@ -9746,7 +10322,6 @@ namespace Legion {
         allocator->free_from_runtime();
         delete allocator;
       }
-      deactivate_operation();
       sub_partitions.clear();
       free_fields.clear();
       local_fields.clear();
@@ -9760,6 +10335,9 @@ namespace Legion {
       map_applied_conditions.clear();
       to_release.clear();
       dependences.clear();
+      // Return this to the available deletion ops on the queue
+      if (freeop)
+        runtime->free_deletion_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -9946,7 +10524,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
           runtime->forest->invalidate_fields(this, idx, 
               deletion_requirements[idx], version_infos[idx],
-              PhysicalTraceInfo(trace_info, idx), map_applied_conditions);
+              PhysicalTraceInfo(trace_info, idx), map_applied_conditions,
+              NULL/*no collective map*/, false/*not collective*/);
         // make sure that we don't try to do the deletion calls until
         // after the allocator is ready
         if (allocator->ready_event.exists())
@@ -10058,11 +10637,6 @@ namespace Legion {
             delete (*it);
         to_release.clear();
       }
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
       if (!preconditions.empty())
         complete_operation(Runtime::merge_events(preconditions));
       else
@@ -10127,20 +10701,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InternalOp::activate_internal(void)
+    void InternalOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       creator_req_idx = -1;
       create_op = NULL;
       create_gen = 0;
     }
 
     //--------------------------------------------------------------------------
-    void InternalOp::deactivate_internal(void)
+    void InternalOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(freeop);
     }
 
     //--------------------------------------------------------------------------
@@ -10322,9 +10896,6 @@ namespace Legion {
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(completion_event.exists());
-#endif
       // Only initialize the operation here, this is not a trace-able op
       initialize_operation(ctx, track);
       // Never track this so don't get the close index
@@ -10339,9 +10910,6 @@ namespace Legion {
                                    const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(completion_event.exists());
-#endif
       initialize_internal(creator, idx);
       // We always track this so get the close index
       context_index = parent_ctx->register_new_close_operation(this);
@@ -10384,20 +10952,17 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CloseOp::activate_close(void)
+    void CloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_internal();
-#ifdef DEBUG_LEGION
-      assert(completion_event.exists());
-#endif
+      InternalOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::deactivate_close(void)
+    void CloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_internal();
+      InternalOp::deactivate(freeop);
       privilege_path.clear();
       version_info.clear();
       if (mapper_data != NULL)
@@ -10488,36 +11053,23 @@ namespace Legion {
     void MergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_merge();
-    }
-
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::activate_merge(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_close();
+      CloseOp::activate();
       refinement_overwrite = false;
     }
 
     //--------------------------------------------------------------------------
-    void MergeCloseOp::deactivate(void)
+    void MergeCloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_merge();
-      runtime->free_merge_close_op(this);
-    }
-    
-    //--------------------------------------------------------------------------
-    void MergeCloseOp::deactivate_merge(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_close();
+      CloseOp::deactivate(false/*free*/);
       close_mask.clear();
       version_info.clear();
       to_release.clear();
       refinement_mask.clear();
+      if (freeop)
+        runtime->free_merge_close_op(this);
     }
-
+    
     //--------------------------------------------------------------------------
     const char* MergeCloseOp::get_logging_name(void) const
     //--------------------------------------------------------------------------
@@ -10583,13 +11135,14 @@ namespace Legion {
         assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
         std::set<RtEvent> map_applied_conditions;
+        InnerContext *physical_context = find_physical_context(0/*idx*/);
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         // Make a new equivalence set and record it at this node
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
-            runtime->get_available_distributed_id(),
-            local_space, region_node, true/*register now*/);
+            runtime->get_available_distributed_id(), local_space, 
+            region_node, physical_context, true/*register now*/);
         // Merge the state from the old equivalence sets if not overwriting
         if (!refinement_overwrite)
         {
@@ -10630,11 +11183,6 @@ namespace Legion {
             delete (*it);
         to_release.clear();
       }
-#ifdef LEGION_SPY
-      // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
       complete_operation();
     }
 
@@ -10697,7 +11245,7 @@ namespace Legion {
     void PostCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_close();
+      CloseOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -10706,10 +11254,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::deactivate(void)
+    void PostCloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
+      CloseOp::deactivate(false/*free*/);
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
@@ -10721,7 +11269,8 @@ namespace Legion {
         profiling_info.clear();
       }
       target_instances.clear();
-      runtime->free_post_close_op(this);
+      if (freeop)
+        runtime->free_post_close_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -10742,9 +11291,6 @@ namespace Legion {
     void PostCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(completion_event.exists());
-#endif
       // This stage is only done for close operations issued
       // at the end of the task as dependence analysis for other
       // close operations is done inline in the region tree traversal
@@ -10777,13 +11323,10 @@ namespace Legion {
     void PostCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(completion_event.exists());
-#endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
-      ApUserEvent close_event = Runtime::create_ap_user_event(NULL);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
+      ApUserEvent close_event = Runtime::create_ap_user_event(&trace_info);
       std::vector<PhysicalManager*> dummy_sources;
-      ApEvent effects_done = 
+      ApEvent instances_ready =
         runtime->forest->physical_perform_updates_and_registration(
                                               requirement, version_info,
                                               this, 0/*idx*/,
@@ -10797,28 +11340,12 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
+                                              false/*check collective*/,
                                               true/*record valid*/,
                                               false/*check initialized*/);
-      std::set<ApEvent> close_preconditions;
-      if (effects_done.exists())
-        close_preconditions.insert(effects_done);
-      for (unsigned idx = 0; idx < target_instances.size(); idx++)
-      {
-        ApEvent pre = target_instances[idx].get_ready_event();
-        if (pre.exists())
-          close_preconditions.insert(pre);
-      }
-      if (!close_preconditions.empty())
-        Runtime::trigger_event(NULL, close_event, 
-            Runtime::merge_events(&trace_info, close_preconditions));
-      else
-        Runtime::trigger_event(NULL, close_event);
+      Runtime::trigger_event(&trace_info, close_event, instances_ready);
+      record_completion_effect(close_event);
       log_mapping_decision(0/*idx*/, requirement, target_instances);
-#ifdef LEGION_SPY
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, close_event, 
-                                        completion_event);
-#endif
       // No need to apply our mapping because we are done!
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -10827,10 +11354,7 @@ namespace Legion {
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
       complete_mapping(mapping_applied);
-      if (!request_early_complete(close_event))
-        complete_execution(Runtime::protect_event(close_event));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -10897,9 +11421,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PostCloseOp::select_sources(const unsigned index,
-                                     const InstanceRef &target,
-                                     const InstanceSet &sources,
-                                     std::vector<unsigned> &ranking)
+                                     PhysicalManager *target,
+                                     const std::vector<InstanceView*> &sources,
+                                     std::vector<unsigned> &ranking,
+                                     std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10908,14 +11433,15 @@ namespace Legion {
       Mapper::SelectCloseSrcInput input;
       Mapper::SelectCloseSrcOutput output;
       prepare_for_mapping(target, input.target);
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -11087,17 +11613,18 @@ namespace Legion {
     void VirtualCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_close();
+      CloseOp::activate();
       target_version_info = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void VirtualCloseOp::deactivate(void)
+    void VirtualCloseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_close();
+      CloseOp::deactivate(false/*free*/);
       source_version_info.clear();
-      runtime->free_virtual_close_op(this);
+      if (freeop)
+        runtime->free_virtual_close_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -11158,16 +11685,8 @@ namespace Legion {
           parent_ctx->owner_task, parent_idx, std::move(sources));
       analysis->add_reference();
       
-      std::set<RtEvent> deferral_events;
-      const FieldMaskSet<EquivalenceSet> &dst_equivalence_sets =
-        target_version_info->get_equivalence_sets();
-      for (FieldMaskSet<EquivalenceSet>::const_iterator it =  
-            dst_equivalence_sets.begin(); it != 
-            dst_equivalence_sets.end(); it++)
-        analysis->traverse(it->first, it->second, deferral_events,
-                           map_applied_conditions);
-      const RtEvent traversal_done = deferral_events.empty() ?
-        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      const RtEvent traversal_done = analysis->perform_traversal(
+          RtEvent::NO_RT_EVENT, *target_version_info, map_applied_conditions);
       if (traversal_done.exists() || analysis->has_remote_sets())
         analysis->perform_remote(traversal_done, map_applied_conditions);
       if (analysis->remove_reference())
@@ -11189,18 +11708,6 @@ namespace Legion {
 #endif
       return parent_idx;
     }
-
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    void VirtualCloseOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-      complete_operation();
-    }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Refinment Operation 
@@ -11241,30 +11748,15 @@ namespace Legion {
     void RefinementOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_refinement();
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::activate_refinement(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_internal();
+      InternalOp::activate();
       to_refine = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::deactivate(void)
+    void RefinementOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_refinement(); 
-      runtime->free_refinement_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void RefinementOp::deactivate_refinement(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_internal();
+      InternalOp::deactivate(false/*free*/);
       version_info.clear();
       make_from.clear();
       if (!projections.empty())
@@ -11282,6 +11774,8 @@ namespace Legion {
       }
       to_release.clear();
       uninitialized_fields.clear();
+      if (freeop)
+        runtime->free_refinement_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -11440,6 +11934,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       FieldMaskSet<PartitionNode> refinement_partitions;
       std::map<PartitionNode*,std::vector<RegionNode*> > refinement_regions;
+      InnerContext *context = find_physical_context(0/*idx*/);
       for (FieldMaskSet<RegionTreeNode>::const_iterator it =
             make_from.begin(); it != make_from.end(); it++)
       {
@@ -11458,26 +11953,26 @@ namespace Legion {
             sit->first->project_refinement(it->first, regions);
             for (std::vector<RegionNode*>::const_iterator rit =
                   regions.begin(); rit != regions.end(); rit++)
-              initialize_region(*rit, sit->second, refinement_regions,
+              initialize_region(*rit, sit->second, context, refinement_regions,
                                 refinement_partitions, version_info);
           }
           const FieldMask remaining = it->second - summaries.get_valid_mask();
           if (!!remaining)
           {
             if (it->first->is_region())
-              initialize_region(it->first->as_region_node(), remaining, 
+              initialize_region(it->first->as_region_node(), remaining, context,
                   refinement_regions, refinement_partitions, version_info);
             else
               initialize_partition(it->first->as_partition_node(), remaining, 
-               refinement_regions, refinement_partitions, version_info);
+               context, refinement_regions, refinement_partitions,version_info);
           }
         }
         else if (it->first->is_region())
-          initialize_region(it->first->as_region_node(), it->second,
+          initialize_region(it->first->as_region_node(), it->second, context,
               refinement_regions, refinement_partitions, version_info);
         else
           initialize_partition(it->first->as_partition_node(), it->second,
-             refinement_regions, refinement_partitions, version_info);
+             context, refinement_regions, refinement_partitions, version_info);
       }
       // Now we can invalidate the previous refinement
       const ContextID ctx = parent_ctx->get_context().get_id();
@@ -11511,7 +12006,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::initialize_region(RegionNode *node,const FieldMask &mask, 
+    void RefinementOp::initialize_region(RegionNode *node,
+         const FieldMask &mask, InnerContext *context, 
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
          FieldMaskSet<PartitionNode> &refinement_partitions,
          VersionInfo &info, bool record_all)
@@ -11520,7 +12016,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node->parent != NULL); // should always have a parent
 #endif
-      PendingEquivalenceSet *pending = new PendingEquivalenceSet(node);
+      PendingEquivalenceSet *pending = new PendingEquivalenceSet(node, context);
       initialize_pending(pending, mask, info, record_all);
       // Parent context takes ownership here
       parent_ctx->record_pending_disjoint_complete_set(pending, mask);
@@ -11545,7 +12041,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_partition(PartitionNode *node,
-         const FieldMask &mask, 
+         const FieldMask &mask, InnerContext *context,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
          FieldMaskSet<PartitionNode> &refinement_partitions,
          VersionInfo &info, bool record_all)
@@ -11566,7 +12062,8 @@ namespace Legion {
               color < index_part->total_children; color++)
         {
           RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+          PendingEquivalenceSet *pending = 
+            new PendingEquivalenceSet(child, context);
           initialize_pending(pending, mask, info, record_all);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
@@ -11593,7 +12090,8 @@ namespace Legion {
         {
           const LegionColor color = itr->yield_color();
           RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending = new PendingEquivalenceSet(child);
+          PendingEquivalenceSet *pending = 
+            new PendingEquivalenceSet(child, context);
           initialize_pending(pending, mask, info, record_all);
           // Parent context takes ownership here
           parent_ctx->record_pending_disjoint_complete_set(pending, mask);
@@ -11664,11 +12162,6 @@ namespace Legion {
             delete (*it);
         to_release.clear();
       }
-#ifdef LEGION_SPY
-      // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
       complete_operation();
     }
 
@@ -11732,16 +12225,16 @@ namespace Legion {
     void AdvisementOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       parent = LogicalRegion::NO_REGION;
       sharding_function = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void AdvisementOp::deactivate(void)
+    void AdvisementOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       regions.clear();
       partitions.clear();
       fields.clear();
@@ -11749,7 +12242,8 @@ namespace Legion {
       parent_indexes.clear();
       privilege_paths.clear();
       map_applied_conditions.clear();
-      runtime->free_advisement_op(this);
+      if (freeop)
+        runtime->free_advisement_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12050,18 +12544,6 @@ namespace Legion {
       complete_execution();
     }
 
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    void AdvisementOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-      complete_operation();
-    }
-#endif
-
     //--------------------------------------------------------------------------
     unsigned AdvisementOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
@@ -12150,14 +12632,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(Runtime *rt)
-      : ExternalAcquire(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalAcquire(), PredicatedOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(const AcquireOp &rhs)
-      : ExternalAcquire(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalAcquire(), PredicatedOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -12185,8 +12667,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_memoizable();
-      initialize_speculation(ctx, true/*track*/,
+      initialize_predication(ctx, true/*track*/,
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate, provenance);
@@ -12206,13 +12687,26 @@ namespace Legion {
       }
       requirement.privilege_fields = launcher.fields;
       logical_region = launcher.logical_region;
+      restricted_region = launcher.physical_region;
+      if (restricted_region.impl != NULL)
+      {
+        const RegionRequirement &region_req =
+          restricted_region.impl->get_requirement();
+        if (region_req.privilege_fields != launcher.fields)
+          REPORT_LEGION_ERROR(ERROR_BAD_FIELD_PRIVILEGES,
+              "The privilege fields for release operation %lld in "
+              "task %s (UID %lld) do not match the fields for the "
+              "PhysicalRegion object being used for establishing "
+              "restricted coherence. The field sets must match exactly.",
+              get_unique_op_id(), ctx->get_task_name(), ctx->get_unique_id())
+      }
       parent_region = launcher.parent_region;
       fields = launcher.fields; 
       // Mark the requirement restricted
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
-        grants[idx].impl->register_operation(completion_event);
+        grants[idx].impl->register_operation(get_completion_event());
       wait_barriers = launcher.wait_barriers;
 #ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -12246,8 +12740,7 @@ namespace Legion {
     void AcquireOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative(); 
-      activate_memoizable();
+      PredicatedOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -12257,10 +12750,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::deactivate(void)
+    void AcquireOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();  
+      PredicatedOp::deactivate(false/*free*/);
+      restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       fields.clear();
@@ -12284,7 +12778,8 @@ namespace Legion {
         mapper_data_size = 0;
       }
       // Return this operation to the runtime
-      runtime->free_acquire_op(this);
+      if (freeop)
+        runtime->free_acquire_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -12349,8 +12844,6 @@ namespace Legion {
     {  
       if (runtime->check_privileges)
         check_acquire_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
       LogicalAnalysis analysis(this, map_applied_conditions);
@@ -12361,7 +12854,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AcquireOp::query_speculate(bool &value, bool &mapping_only)
+    bool AcquireOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
@@ -12373,13 +12866,10 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_acquire_speculate(this, &output);
-      if (output.speculate)
-      {
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
+      if (output.speculate && output.speculate_mapping_only)
         return true;
-      }
-      return false;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -12399,10 +12889,10 @@ namespace Legion {
       // Otherwise do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
         complete_mapping();
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -12430,36 +12920,35 @@ namespace Legion {
     void AcquireOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       InstanceSet restricted_instances;
+      if (restricted_region.impl != NULL)
+        restricted_region.impl->get_references(restricted_instances);
+      const ApEvent init_precondition = compute_sync_precondition(trace_info);
+      ApUserEvent acquire_post = Runtime::create_ap_user_event(&trace_info);
       ApEvent acquire_complete = 
         runtime->forest->acquire_restrictions(requirement, version_info,
-                                              this, 0/*idx*/, completion_event,
-                                              restricted_instances,
-                                              trace_info, 
-                                              map_applied_conditions
+                                              this, 0/*idx*/, init_precondition,
+                                              acquire_post,restricted_instances,
+                                              trace_info, map_applied_conditions
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
 #endif
                                               );
+      Runtime::trigger_event(&trace_info, acquire_post, acquire_complete);
+      record_completion_effect(acquire_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
-      ApEvent init_precondition = compute_init_precondition(trace_info);
-      if (init_precondition.exists())
-        acquire_complete = Runtime::merge_events(&trace_info, 
-                                   acquire_complete, init_precondition);
       log_mapping_decision(0/*idx*/, requirement, restricted_instances);
-      if (runtime->legion_spy_enabled)
-      {
 #ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, acquire_complete,
-                                        completion_event);
+                                        acquire_post);
 #endif
-      }
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
       {
@@ -12470,15 +12959,13 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);
+                                        get_completion_event());
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      if (is_recording())
-        trace_info.record_complete_replay(acquire_complete); 
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -12486,11 +12973,9 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
-      if (!request_early_complete(acquire_complete))
-        complete_execution(Runtime::protect_event(acquire_complete));
-      else
-        complete_execution();
+      complete_mapping(finalize_complete_mapping(
+            record_complete_replay(trace_info, mapping_applied)));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -12622,54 +13107,15 @@ namespace Legion {
     void AcquireOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_acquire_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent AcquireOp::compute_sync_precondition(const TraceInfo *info) const
-    //--------------------------------------------------------------------------
-    {
-      ApEvent result;
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        std::set<ApEvent> sync_preconditions;
-        if (!wait_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it =
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
-            sync_preconditions.insert(e);
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-          }
-        }
-        if (!grants.empty())
-        {
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            ApEvent e = it->impl->acquire_grant();
-            sync_preconditions.insert(e);
-          }
-        }
-        // For some reason we don't trace these, not sure why
-        result = Runtime::merge_events(NULL, sync_preconditions);
-      }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::complete_replay(ApEvent acquire_complete_event)
+    void AcquireOp::complete_replay(ApEvent pre, ApEvent acquire_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -12683,13 +13129,11 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id,
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);
+                                        acquire_complete_event);
         }
       }
-
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(NULL, completion_event, acquire_complete_event);
-      need_completion_trigger = false;
+      record_completion_effect(acquire_complete_event);
       complete_execution();
     }
 
@@ -13049,14 +13493,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(Runtime *rt)
-      : ExternalRelease(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalRelease(), PredicatedOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(const ReleaseOp &rhs)
-      : ExternalRelease(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalRelease(), PredicatedOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -13084,8 +13528,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
-      initialize_memoizable();
-      initialize_speculation(ctx, true/*track*/, 
+      initialize_predication(ctx, true/*track*/, 
                              1/*num region requirements*/,
                              launcher.static_dependences,
                              launcher.predicate, provenance);
@@ -13123,7 +13566,7 @@ namespace Legion {
       grants = launcher.grants;
       // Register ourselves with all the grants
       for (unsigned idx = 0; idx < grants.size(); idx++)
-        grants[idx].impl->register_operation(completion_event);
+        grants[idx].impl->register_operation(get_completion_event());
       wait_barriers = launcher.wait_barriers;
 #ifdef LEGION_SPY
       for (std::vector<PhaseBarrier>::const_iterator it = 
@@ -13157,8 +13600,7 @@ namespace Legion {
     void ReleaseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative(); 
-      activate_memoizable();
+      PredicatedOp::activate();
       mapper = NULL;
       outstanding_profiling_requests.store(0);
       outstanding_profiling_reported.store(0);
@@ -13168,10 +13610,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::deactivate(void)
+    void ReleaseOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      PredicatedOp::deactivate(false/*free*/);
       restricted_region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
@@ -13196,7 +13638,8 @@ namespace Legion {
         mapper_data_size = 0;
       }
       // Return this operation to the runtime
-      runtime->free_release_op(this);
+      if (freeop)
+        runtime->free_release_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -13261,8 +13704,6 @@ namespace Legion {
     {  
       if (runtime->check_privileges)
         check_release_privilege();
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
@@ -13277,7 +13718,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReleaseOp::query_speculate(bool &value, bool &mapping_only)
+    bool ReleaseOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       if (mapper == NULL)
@@ -13289,13 +13730,10 @@ namespace Legion {
       output.speculate = false;
       output.speculate_mapping_only = true;
       mapper->invoke_release_speculate(this, &output);
-      if (output.speculate)
-      {
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
+      if (output.speculate && output.speculate_mapping_only)
         return true;
-      }
-      return false;
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -13315,10 +13753,10 @@ namespace Legion {
       // Do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
         complete_mapping();
-      resolve_speculation();
     } 
 
     //--------------------------------------------------------------------------
@@ -13346,19 +13784,19 @@ namespace Legion {
     void ReleaseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Invoke the mapper before doing anything else 
       std::vector<PhysicalManager*> source_instances;
       invoke_mapper(source_instances);
       InstanceSet restricted_instances;
       if (restricted_region.impl != NULL)
         restricted_region.impl->get_references(restricted_instances); 
-      ApEvent init_precondition = compute_init_precondition(trace_info); 
+      const ApEvent init_precondition = compute_sync_precondition(trace_info); 
+      ApUserEvent release_post = Runtime::create_ap_user_event(&trace_info);
       ApEvent release_complete = 
         runtime->forest->release_restrictions(requirement, version_info,
                                               this, 0/*idx*/, init_precondition,
-                                              completion_event,
-                                              restricted_instances, 
+                                              release_post,restricted_instances,
                                               source_instances, trace_info,
                                               map_applied_conditions
 #ifdef DEBUG_LEGION
@@ -13366,17 +13804,16 @@ namespace Legion {
                                               , unique_op_id
 #endif
                                               );
+      Runtime::trigger_event(&trace_info, release_post, release_complete);
+      record_completion_effect(release_post);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
-      if (init_precondition.exists())
-        release_complete = Runtime::merge_events(&trace_info,
-                            release_complete, init_precondition);
       log_mapping_decision(0/*idx*/, requirement, restricted_instances);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, release_complete,
-                                        completion_event);
+                                        release_post);
 #endif
       // Chain any arrival barriers
       if (!arrive_barriers.empty())
@@ -13388,15 +13825,13 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);
+                                        get_completion_event());
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((outstanding_profiling_requests.fetch_sub(1) == 1) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      if (is_recording())
-        trace_info.record_complete_replay(release_complete);
       // Mark that we completed mapping
       RtEvent mapping_applied;
       if (!map_applied_conditions.empty())
@@ -13404,11 +13839,9 @@ namespace Legion {
       if (!acquired_instances.empty())
         mapping_applied = release_nonempty_acquired_instances(mapping_applied, 
                                                           acquired_instances);
-      complete_mapping(mapping_applied);
-      if (!request_early_complete(release_complete))
-        complete_execution(Runtime::protect_event(release_complete));
-      else
-        complete_execution();
+      complete_mapping(finalize_complete_mapping(
+            record_complete_replay(trace_info, mapping_applied)));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -13474,10 +13907,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::select_sources(const unsigned index,
-                                   const InstanceRef &target,
-                                   const InstanceSet &sources,
-                                   std::vector<unsigned> &ranking)
+    void ReleaseOp::select_sources(const unsigned index,PhysicalManager *target,
+                                   const std::vector<InstanceView*> &sources,
+                                   std::vector<unsigned> &ranking,
+                                   std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13486,14 +13919,15 @@ namespace Legion {
       Mapper::SelectReleaseSrcInput input;
       Mapper::SelectReleaseSrcOutput output;
       prepare_for_mapping(target, input.target);
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -13563,54 +13997,15 @@ namespace Legion {
     void ReleaseOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_release_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
       complete_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
-    ApEvent ReleaseOp::compute_sync_precondition(const TraceInfo *info) const
-    //--------------------------------------------------------------------------
-    {
-      ApEvent result;
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        std::set<ApEvent> sync_preconditions;
-        if (!wait_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it =
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
-            sync_preconditions.insert(e);
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-          }
-        }
-        if (!grants.empty())
-        {
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            ApEvent e = it->impl->acquire_grant();
-            sync_preconditions.insert(e);
-          }
-        }
-        // For some reason we don't trace these, not sure why
-        result = Runtime::merge_events(NULL, sync_preconditions);
-      }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::complete_replay(ApEvent release_complete_event)
+    void ReleaseOp::complete_replay(ApEvent pre, ApEvent release_complete_event)
     //--------------------------------------------------------------------------
     {
       // Chain all the unlock and barrier arrivals off of the
@@ -13624,13 +14019,11 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id,
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);
+                                        release_complete_event);
         }
       }
-
       // Handle the case for marking when the copy completes
-      Runtime::trigger_event(NULL, completion_event, release_complete_event);
-      need_completion_trigger = false;
+      record_completion_effect(release_complete_event);
       complete_execution();
     }
 
@@ -13925,14 +14318,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(Runtime *rt)
-      : MemoizableOp<Operation>(rt)
+      : MemoizableOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DynamicCollectiveOp::DynamicCollectiveOp(const DynamicCollectiveOp &rhs)
-      : MemoizableOp<Operation>(NULL)
+      : MemoizableOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -13961,7 +14354,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      initialize_memoizable();
       future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
             runtime->get_available_distributed_id(),
             get_provenance(), this));
@@ -13985,25 +14377,24 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       trigger_mapping();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
     void DynamicCollectiveOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-      activate_memoizable();
+      MemoizableOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::deactivate(void)
+    void DynamicCollectiveOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
+      MemoizableOp::deactivate(false/*free*/);
       // Free the future
       future = Future();
-      deactivate_operation();
-      runtime->free_dynamic_collective_op(this);
+      if (freeop)
+        runtime->free_dynamic_collective_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14069,17 +14460,6 @@ namespace Legion {
       complete_execution();
     }
 
-    //--------------------------------------------------------------------------
-    void DynamicCollectiveOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id,
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-      complete_operation();
-    }
-
     /////////////////////////////////////////////////////////////
     // Future Predicate Operation
     /////////////////////////////////////////////////////////////
@@ -14119,16 +14499,17 @@ namespace Legion {
     void FuturePredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::deactivate(void)
+    void FuturePredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
+      PredicateOp::deactivate(false/*free*/);
       future = Future();
-      runtime->free_future_predicate_op(this);
+      if (freeop)
+        runtime->free_future_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14200,11 +14581,6 @@ namespace Legion {
     {
       // See if we have a value
       bool value = future.impl->get_boolean_value(parent_ctx);
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
       set_resolved_value(get_generation(), value);
     } 
 
@@ -14281,16 +14657,17 @@ namespace Legion {
     void NotPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
       pred_op = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::deactivate(void)
+    void NotPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
-      runtime->free_not_predicate_op(this);
+      PredicateOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_not_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14320,11 +14697,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
       if (pred_op != NULL)
       {
         bool prev_value;
@@ -14424,18 +14796,19 @@ namespace Legion {
     void AndPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
       true_count = 0;
       false_short = false;
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::deactivate(void)
+    void AndPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
+      PredicateOp::deactivate(false/*free*/);
       previous.clear();
-      runtime->free_and_predicate_op(this);
+      if (freeop)
+        runtime->free_and_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14497,11 +14870,6 @@ namespace Legion {
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
         (*it)->remove_predicate_reference();
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
       if (need_resolve)
         set_resolved_value(local_gen, !false_short);
     }
@@ -14605,18 +14973,19 @@ namespace Legion {
     void OrPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_predicate();
+      PredicateOp::activate();
       false_count = 0;
       true_short = false;
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::deactivate(void)
+    void OrPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_predicate();
+      PredicateOp::deactivate(false/*free*/);
       previous.clear();
-      runtime->free_or_predicate_op(this);
+      if (freeop)
+        runtime->free_or_predicate_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -14678,11 +15047,6 @@ namespace Legion {
       for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
             it != previous.end(); it++)
         (*it)->remove_predicate_reference();
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
       if (need_resolve)
         set_resolved_value(local_gen, true_short);
     }
@@ -14922,14 +15286,7 @@ namespace Legion {
     void MustEpochOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_must_epoch_op(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::activate_must_epoch_op(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       map_id = 0;
       tag = 0;
       parent_task = NULL;
@@ -14944,19 +15301,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::deactivate(void)
+    void MustEpochOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_must_epoch_op();      
-      // Return this operation to the free list
-      runtime->free_epoch_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void MustEpochOp::deactivate_must_epoch_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       // All the sub-operations we have will deactivate themselves
       indiv_tasks.clear();
       indiv_triggered.clear();
@@ -14986,6 +15334,9 @@ namespace Legion {
       completion_preconditions.clear();
       commit_preconditions.clear();
       completion_effects.clear();
+      // Return this operation to the free list
+      if (freeop)
+        runtime->free_epoch_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -15183,17 +15534,14 @@ namespace Legion {
       std::set<ApEvent> tasks_all_complete;
       // Map and distribute all our tasks
       map_and_distribute(tasks_all_mapped, tasks_all_complete);
+      record_completion_effects(tasks_all_complete);
       // Mark that we are done mapping and executing this operation
       RtEvent all_mapped = Runtime::merge_events(tasks_all_mapped);
       if (!acquired_instances.empty())
         all_mapped = 
           release_nonempty_acquired_instances(all_mapped, acquired_instances);
       complete_mapping(all_mapped);
-      ApEvent all_complete = Runtime::merge_events(NULL, tasks_all_complete);
-      if (!request_early_complete(all_complete))
-        complete_execution(Runtime::protect_event(all_complete));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -15201,9 +15549,6 @@ namespace Legion {
                                          std::set<ApEvent> &tasks_complete)
     //--------------------------------------------------------------------------
     {
-      // Perform the mapping
-      map_tasks();
-      mapping_dependences.clear();
       // Once all the tasks have been initialized we can defer
       // our all mapped event on all their all mapped events
       for (std::vector<IndividualTask*>::const_iterator it = 
@@ -15218,6 +15563,9 @@ namespace Legion {
         tasks_mapped.insert((*it)->get_mapped_event());
         tasks_complete.insert((*it)->get_completion_event());
       }
+      // Perform the mapping
+      map_tasks();
+      mapping_dependences.clear();
       // Then we can distribute the tasks
       distribute_tasks();
     }
@@ -15594,11 +15942,6 @@ namespace Legion {
       }
       if (need_complete)
       {
-#ifdef LEGION_SPY
-        // Still need this for Legion Spy
-        LegionSpy::log_operation_events(unique_op_id,
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
         if (!completion_preconditions.empty())
           complete_operation(Runtime::merge_events(completion_preconditions));
         else
@@ -15950,11 +16293,6 @@ namespace Legion {
       }
       if (need_complete)
       {
-#ifdef LEGION_SPY
-        // Still need this for Legion Spy
-        LegionSpy::log_operation_events(unique_op_id,
-            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
         if (!completion_preconditions.empty())
           complete_operation(Runtime::merge_events(completion_preconditions));
         else
@@ -16353,9 +16691,9 @@ namespace Legion {
       future_map = fm;
 #ifdef DEBUG_LEGION
       assert(sources.empty());
-      assert(future_map.impl != NULL);
 #endif
-      future_map.impl->get_all_futures(sources);
+      if (future_map.impl != NULL)
+        future_map.impl->get_all_futures(sources);
     }
 
     //--------------------------------------------------------------------------
@@ -16407,56 +16745,30 @@ namespace Legion {
     {
       // Perform the partitioning operation
       const ApEvent ready_event = thunk->perform(this, runtime->forest);
-      if (!request_early_complete(ready_event))
-        complete_execution(Runtime::protect_event(ready_event));
-      else
-        complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
-      complete_operation();
+      if (ready_event.exists())
+        record_completion_effect(ready_event);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_pending();
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::activate_pending(void)
+    void PendingPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_pending(); 
-      runtime->free_pending_partition_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::deactivate_pending(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       if (thunk != NULL)
         delete thunk;
       thunk = NULL;
       future_map = FutureMap(); // clear any references
       sources.clear();
+      if (freeop)
+        runtime->free_pending_partition_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -16612,7 +16924,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(Runtime *rt)
-      : ExternalPartition(), CollectiveInstanceCreator<Operation>(rt), 
+      : ExternalPartition(), Operation(rt), 
         thunk(NULL)
     //--------------------------------------------------------------------------
     {
@@ -16620,7 +16932,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(const DependentPartitionOp &rhs)
-      : ExternalPartition(), CollectiveInstanceCreator<Operation>(NULL)
+      : ExternalPartition(), Operation(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -17216,8 +17528,9 @@ namespace Legion {
 #endif
         // Need to get the launch domain in case it is different than
         // the original index domain due to control replication
+        IndexSpaceNode *local_points = get_shard_points();
         Domain launch_domain;
-        launch_space->get_launch_space_domain(launch_domain);
+        local_points->get_launch_space_domain(launch_domain);
         // Now enumerate the points and kick them off
         size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -17256,7 +17569,7 @@ namespace Legion {
         }
 #ifdef LEGION_SPY
         LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        completion_event);
+                                        ApEvent::NO_AP_EVENT);
 #endif
         // We are mapped when all our points are mapped
         finalize_mapping();
@@ -17287,7 +17600,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
       std::vector<PhysicalManager*> source_instances;
@@ -17298,34 +17611,34 @@ namespace Legion {
       assert(!mapped_instances.empty()); 
 #endif
       // Then we can register our mapped_instances
-      runtime->forest->physical_perform_updates_and_registration(
-                                              requirement, version_info,
-                                              this, 0/*idx*/,
-                                              ApEvent::NO_AP_EVENT,
-                                              completion_event,
-                                              mapped_instances,
-                                              source_instances,
-                                              trace_info,
-                                              map_applied_conditions,
+      ApUserEvent part_done = Runtime::create_ap_user_event(&trace_info);
+      ApEvent instances_ready =
+        runtime->forest->physical_perform_updates_and_registration(
+                                                requirement, version_info,
+                                                this, 0/*idx*/,
+                                                ApEvent::NO_AP_EVENT,
+                                                part_done,
+                                                mapped_instances,
+                                                source_instances,
+                                                trace_info,
+                                                map_applied_conditions,
 #ifdef DEBUG_LEGION
-                                              get_logging_name(),
-                                              unique_op_id,
+                                                get_logging_name(),
+                                                unique_op_id,
 #endif
-                                              record_valid);
+                                                false/*check collective*/,
+                                                record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
-                                     mapped_instances, trace_info, index_point);
+                               instances_ready, mapped_instances, trace_info);
+      Runtime::trigger_event(&trace_info, part_done, done_event);
+      record_completion_effect(part_done);
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, done_event, part_done);
+#endif
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       finalize_mapping(); 
-#ifdef LEGION_SPY
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, done_event,
-                                        completion_event);
-#endif
-      if (!request_early_complete(done_event))
-        complete_execution(Runtime::protect_event(done_event));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -17343,9 +17656,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::trigger_thunk(IndexSpace handle,
+                                                ApEvent instances_ready,
                                                 const InstanceSet &mapped_insts,
-                                                const PhysicalTraceInfo &info, 
-                                                const DomainPoint &key)
+                                                const PhysicalTraceInfo &info) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -17362,33 +17675,31 @@ namespace Legion {
           instances.resize(instances.size() + 1);
           FieldDataDescriptor &desc = instances.back();
           const InstanceRef &ref = mapped_insts[0];
-          InstanceManager *manager = ref.get_manager();
+          PhysicalManager *manager = ref.get_physical_manager();
           desc.index_space = handle;
-          desc.inst = manager->get_instance(key);
+          desc.inst = manager->get_instance();
           desc.field_offset = manager->layout->find_field_info(
                         *(requirement.privilege_fields.begin())).field_id;
-          index_preconditions.insert(ref.get_ready_event());
+          index_preconditions.insert(instances_ready);
 #ifdef DEBUG_LEGION
           assert(!points.empty());
 #endif
           ready = (instances.size() == points.size());
         }
+        ApEvent done_event;
         if (ready)
         {
-          ApEvent done_event = thunk->perform(this, runtime->forest,
+          done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(&info, index_preconditions), instances);
 #ifdef LEGION_SPY
           Runtime::trigger_event(NULL, intermediate_index_event, done_event);
 #endif
-          if (!request_early_complete(done_event))
-            complete_execution(Runtime::protect_event(done_event));
-          else
-            complete_execution();
+          complete_execution();
         }
 #ifdef LEGION_SPY
         return intermediate_index_event;
 #else
-        return completion_event;
+        return done_event;
 #endif
       }
       else
@@ -17399,14 +17710,13 @@ namespace Legion {
         instances.resize(1);
         FieldDataDescriptor &desc = instances[0];
         const InstanceRef &ref = mapped_insts[0];
-        InstanceManager *manager = ref.get_manager();
+        PhysicalManager *manager = ref.get_physical_manager();
         desc.index_space = handle;
-        desc.inst = manager->get_instance(key);
+        desc.inst = manager->get_instance();
         desc.field_offset = manager->layout->find_field_info(
                       *(requirement.privilege_fields.begin())).field_id;
-        ApEvent ready_event = ref.get_ready_event();
         return thunk->perform(this, runtime->forest, 
-                              ready_event, instances);
+                              instances_ready, instances);
       }
     }
 
@@ -17428,9 +17738,11 @@ namespace Legion {
       if (mapper->request_valid_instances)
       {
         InstanceSet valid_instances;
+        FieldMaskSet<ReplicatedView> collectives;
         runtime->forest->physical_premap_region(this, 0/*idx*/, requirement,
-                      version_info, valid_instances, map_applied_conditions);
-        prepare_for_mapping(valid_instances, input.valid_instances);
+            version_info, valid_instances, collectives, map_applied_conditions);
+        prepare_for_mapping(valid_instances, collectives,
+                            input.valid_instances, input.valid_collectives);
       }
       output.copy_fill_priority = 0;
       mapper->invoke_map_partition(this, &input, &output);
@@ -17555,22 +17867,6 @@ namespace Legion {
                         "partition operation in task %s (ID %lld).",
                         mapper->get_mapper_name(),parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-        if (manager->is_collective_manager())
-        {
-          CollectiveManager *collective_manager = 
-            manager->as_collective_manager();
-          if (!collective_manager->point_space->contains_point(index_point))
-            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from invocation of "
-                        "'map_partition' on mapper %s. Mapper selected a "
-                        "collective instance for region requirement %d but "
-                        "point partition (ID %lld) launched in task %s "
-                        "(ID %lld) is not contained within the point space "
-                        "for the collective instace.",
-                        mapper->get_mapper_name(), idx, 
-                        get_unique_op_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        }
         // This is a temporary check to guarantee that instances for 
         // dependent partitioning operations are in memories that 
         // Realm supports for now. In the future this should be fixed
@@ -17839,14 +18135,7 @@ namespace Legion {
     void DependentPartitionOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_dependent_op(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::activate_dependent_op(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       is_index_space = false;
       launch_space = NULL;
       index_domain = Domain::NO_DOMAIN;
@@ -17865,25 +18154,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::deactivate(void)
+    void DependentPartitionOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_dependent_op();  
-      runtime->free_dependent_partition_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::deactivate_dependent_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       if (thunk != NULL)
       {
         delete thunk;
         thunk = NULL;
       }
-      if (remove_launch_space_reference(launch_space))
-        delete launch_space;
       privilege_path = RegionTreePath();
       version_info.clear();
       map_applied_conditions.clear();
@@ -17910,6 +18189,10 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
+      if (freeop)
+        runtime->free_dependent_partition_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -17935,9 +18218,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DependentPartitionOp::select_sources(const unsigned index,
-                                              const InstanceRef &target,
-                                              const InstanceSet &sources,
-                                              std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -17945,7 +18229,8 @@ namespace Legion {
 #endif
       Mapper::SelectPartitionSrcInput input;
       Mapper::SelectPartitionSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views);
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
       {
@@ -17953,7 +18238,7 @@ namespace Legion {
         mapper = runtime->find_mapper(exec_proc, map_id);
       }
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -18065,52 +18350,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* DependentPartitionOp::find_or_create_collective_instance(
-                                  MappingCallKind call_kind, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index, 
-                                  DomainPoint &collective_point)
+    size_t DependentPartitionOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      if (points.empty())
-        return Operation::find_or_create_collective_instance(call_kind, index,
-                            constraints, regions, kind, footprint, unsat_kind, 
-                            unsat_index, collective_point);
-      else
-        return 
-          CollectiveInstanceCreator<Operation>::
-                find_or_create_collective_instance(
-                          call_kind, index, constraints, regions, kind,
-                          footprint, unsat_kind, unsat_index, collective_point);
-    }
-
-    //--------------------------------------------------------------------------
-    bool DependentPartitionOp::finalize_collective_instance(
-                        MappingCallKind call_kind, unsigned index, bool success)
-    //--------------------------------------------------------------------------
-    {
-      if (points.empty())
-        return Operation::finalize_collective_instance(call_kind,index,success);
-      else
-        return 
-          CollectiveInstanceCreator<Operation>::finalize_collective_instance(
-                                                    call_kind, index, success);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
-    //--------------------------------------------------------------------------
-    {
-      if (points.empty())
-        Operation::report_total_collective_instance_calls(mapper_call, 
-                                                          total_calls);
-      else
-        CollectiveInstanceCreator<Operation>::
-          report_total_collective_instance_calls(mapper_call, total_calls);
+      return get_shard_points()->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -18362,8 +18605,6 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
-      // We can also mark this as having resolved any predication
-      resolve_speculation();
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -18375,18 +18616,19 @@ namespace Legion {
     void PointDepPartOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_dependent_op();
+      DependentPartitionOp::activate();
       // Reset this to true after it was cleared by the base call
       is_index_space = true;
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointDepPartOp::deactivate(void)
+    void PointDepPartOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_dependent_op();
-      runtime->free_point_dep_part_op(this);
+      DependentPartitionOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_dep_part_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -18406,14 +18648,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PointDepPartOp::trigger_thunk(IndexSpace handle,
+    ApEvent PointDepPartOp::trigger_thunk(IndexSpace handle, ApEvent inst_ready,
                                           const InstanceSet &mapped_instances,
-                                          const PhysicalTraceInfo &trace_info,
-                                          const DomainPoint &key)
+                                          const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      return owner->trigger_thunk(handle, mapped_instances, 
-                                  trace_info, index_point);
+      return owner->trigger_thunk(handle, inst_ready,
+                        mapped_instances, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -18430,39 +18671,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointDepPartOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
+    void PointDepPartOp::record_completion_effect(ApEvent effect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_point.get_dim() > 0);
-#endif
-      collective_point = index_point;
-      return owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, kind, footprint, unsat_kind, unsat_index,
-          collective_point);
+      owner->record_completion_effect(effect);
     }
 
     //--------------------------------------------------------------------------
-    bool PointDepPartOp::finalize_collective_instance(MappingCallKind call_kind,
-                                                   unsigned index, bool success)
+    void PointDepPartOp::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
-      return owner->finalize_collective_instance(call_kind, index, success);
+      owner->record_completion_effect(effect, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
-    void PointDepPartOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    void PointDepPartOp::record_completion_effects(
+                                               const std::set<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
-      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointDepPartOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDepPartOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
     }
 
     //--------------------------------------------------------------------------
@@ -18574,7 +18816,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(Runtime *rt)
-      : MemoizableOp<SpeculativeOp>(rt), ExternalFill()
+      : PredicatedOp(rt), ExternalFill()
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -18582,7 +18824,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(const FillOp &rhs)
-      : MemoizableOp<SpeculativeOp>(NULL), ExternalFill()
+      : PredicatedOp(NULL), ExternalFill()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -18611,20 +18853,25 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 1, launcher.static_dependences,
+      initialize_predication(ctx, true/*track*/, 1, launcher.static_dependences,
                              launcher.predicate, provenance);
-      initialize_memoizable();
       requirement = RegionRequirement(launcher.handle, LEGION_WRITE_DISCARD,
                                       LEGION_EXCLUSIVE, launcher.parent);
       requirement.privilege_fields = launcher.fields;
-      value_size = launcher.argument.get_size();
-      if (value_size > 0)
+      if (launcher.future.impl != NULL)
+        future = launcher.future;
+      else if (launcher.argument.get_size() > 0)
       {
+        value_size = launcher.argument.get_size();
         value = malloc(value_size);
         memcpy(value, launcher.argument.get_ptr(), value_size);
       }
       else
-        future = launcher.future;
+        REPORT_LEGION_ERROR(ERROR_MISSING_FILL_VALUE,
+            "Fill operation %lld in task %s (UID %lld) was launched without "
+            "a fill value. All fill operations must be given a non-empty "
+            "argument or a future to use as a fill value.", get_unique_op_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
@@ -18646,7 +18893,7 @@ namespace Legion {
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id, context_index);
-        if ((value_size == 0) && (future.impl != NULL) &&
+        if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
@@ -18654,56 +18901,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::activate_fill(void)
+    void FillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_speculative();
-      activate_memoizable();
+      PredicatedOp::activate();
+      fill_view = NULL;
       value = NULL;
       value_size = 0;
-      fill_view = NULL;
-      true_guard = PredEvent::NO_PRED_EVENT;
-      false_guard = PredEvent::NO_PRED_EVENT;
+      set_view = false;
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::deactivate_fill(void)
+    void FillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_speculative();
+      PredicatedOp::deactivate(false/*free*/);
       privilege_path.clear();
       version_info.clear();
-      if (value != NULL) 
-      {
-        free(value);
-        value = NULL;
-      }
-      future = Future();
       map_applied_conditions.clear();
+      future = Future();
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
+      if (value != NULL)
+        free(value);
       if (mapper_data != NULL)
       {
         free(mapper_data);
         mapper_data = NULL;
         mapper_data_size = 0;
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_fill(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_fill(); 
-      runtime->free_fill_op(this);
+      if (freeop)
+        runtime->free_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -18802,6 +19031,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent FillOp::initialize_fill_view(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(fill_view == NULL);
+#endif
+      // Note that this returns a fill view with a reference added to it
+      // We remove the reference in trigger_complete
+      if (future.impl != NULL)
+        fill_view = parent_ctx->find_or_create_fill_view(this, future,set_view);
+      else
+        fill_view = parent_ctx->find_or_create_fill_view(this,value,value_size);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    FillView* FillOp::get_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(fill_view != NULL);
+#endif
+      return fill_view;
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::log_fill_requirement(void) const
     //--------------------------------------------------------------------------
     {
@@ -18816,6 +19071,30 @@ namespace Legion {
                                          requirement.parent.index_space.id);
       LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
                                         requirement.privilege_fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::register_fill_view_creation(FillView *view, bool set)
+    //--------------------------------------------------------------------------
+    {
+      // Remove the old reference if we already had it
+      if ((fill_view != NULL) && 
+          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete fill_view;
+      fill_view = view;
+      // No need to add a reference here since we got it from the caller
+      if (future.impl == NULL)
+      {
+        // Make sure to set the value before registering any eager fill views
+        if (set)
+          fill_view->set_value(value, value_size);
+        parent_ctx->record_fill_view_creation(fill_view);
+      }
+      else
+      {
+        set_view = set;
+        parent_ctx->record_fill_view_creation(future.impl->did, fill_view);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -18851,32 +19130,18 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       // If we are waiting on a future register a dependence
       if (future.impl != NULL)
         future.impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------
-    bool FillOp::query_speculate(bool &value, bool &mapping_only)
+    bool FillOp::query_speculate(void)
     //--------------------------------------------------------------------------
     {
       // Always speculate on fill ops, but mapping only since
       // we know that there is an easy way to defer them
-#if 1
-      value = true;
-      mapping_only = true;
-#ifdef DEBUG_LEGION
-      assert(!true_guard.exists());
-      assert(!false_guard.exists());
-#endif
-      // Make the copy across precondition guard 
-      predicate->get_predicate_guards(true_guard, false_guard);
       return true;
-#else
-      return false;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -18899,23 +19164,20 @@ namespace Legion {
       // Do it in this order to avoid calling 'execute_trigger'
       complete_execution();
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping();
-      resolve_speculation();
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
     } 
 
     //--------------------------------------------------------------------------
     void FillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      if (is_replaying())
-      {
-        enqueue_ready_operation();
-        return;
-      }
-
       std::set<RtEvent> preconditions;
+      const RtEvent view_ready = initialize_fill_view();
+      if (view_ready.exists())
+        preconditions.insert(view_ready);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
@@ -18930,131 +19192,34 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, true/*initialize*/);
-      // Tell the region tree forest to fill in this field
-      // Note that the forest takes ownership of the value buffer
-      if (future.impl == NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(value != NULL);
-        assert(fill_view == NULL);
-#endif
-        // This is NULL for now until we implement tracing for fills
-        ApEvent init_precondition = compute_init_precondition(trace_info);
-        // Ask the enclosing context to find or create the fill view
-#ifdef DEBUG_LEGION
-        InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
-        assert(context != NULL);
-#else
-        InnerContext *context = static_cast<InnerContext*>(parent_ctx);
-#endif
-        // This comes back with a reference to prevent collection
-        // that we need to free after we have been mapped
-        bool lost_ownership = true;
-        fill_view = context->find_or_create_fill_view(this, 
-            map_applied_conditions, value, value_size, lost_ownership);
-        // If we lost ownership of the buffer to the context then 
-        // we no longer need to free it
-        if (lost_ownership)
-        {
-          value = NULL;
-          value_size = 0;
-        }
-        ApEvent done_event = 
-          runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
-                                       fill_view, version_info, 
-                                       init_precondition, true_guard,
-                                       trace_info, map_applied_conditions);
-        if (runtime->legion_spy_enabled)
-        {
-#ifdef LEGION_SPY
-          LegionSpy::log_operation_events(unique_op_id, done_event, 
-                                          completion_event);
-#endif
-        }
-#ifdef DEBUG_LEGION
-        dump_physical_state(&requirement, 0);
-#endif
-        
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
-        else
-          complete_mapping();
-        // See if we have any arrivals to trigger
-        if (!arrive_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
-          {
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                   it->phase_barrier);
-            Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                          completion_event);
-          }
-        }
-        complete_execution(Runtime::protect_event(done_event));
-      }
-      else
-      {
-        // This will make sure we have a mapping locally
-        future.impl->request_internal_buffer(this, false/*eager*/);
-        // If we have a future value see if its event has triggered
-        const RtEvent future_ready_event = future.impl->subscribe(); 
-        if (!future_ready_event.has_triggered())
-          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
-        else
-          trigger_execution(); // can do the completion now
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_execution(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(fill_view == NULL);
-#endif
-      const PhysicalTraceInfo trace_info(this, 0/*index*/, false/*init*/);
-      // Make a copy of the future value since the region tree
-      // will want to take ownership of the buffer
-      size_t result_size = 0;
-      const void *buffer = 
-        future.impl->find_internal_buffer(parent_ctx, result_size);
-      void *result = malloc(result_size);
-      memcpy(result, buffer, result_size);
+      const PhysicalTraceInfo trace_info(this, 0/*index*/);
       // This is NULL for now until we implement tracing for fills
-      ApEvent init_precondition = compute_init_precondition(trace_info);
-      // Ask the enclosing context to find or create the fill view
-#ifdef DEBUG_LEGION
-      InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
-      assert(context != NULL);
-#else
-      InnerContext *context = static_cast<InnerContext*>(parent_ctx);
-#endif
-      // This comes back with a reference to prevent collection
-      // that we need to free after we have been mapped
-      bool lost_ownership = false;
-      fill_view = context->find_or_create_fill_view(this,
-          map_applied_conditions, result, result_size, lost_ownership);
-      if (!lost_ownership)
-        free(result);
-      ApEvent done_event = 
-          runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
-                                       fill_view, version_info,
-                                       init_precondition, true_guard,
-                                       trace_info, map_applied_conditions);
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, done_event,
-                                      completion_event);
-#endif
+      const ApEvent init_precondition = compute_sync_precondition(trace_info);
+      runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
+                                   get_fill_view(), version_info, 
+                                   init_precondition, true_guard, false_guard,
+                                   trace_info, map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
+      if (set_view)
+      {
+#ifdef DEBUG_LEGION
+        assert(future.impl != NULL);
+#endif
+        // This will make sure we have a mapping locally
+        const RtEvent buffer_ready = 
+          future.impl->request_internal_buffer(this, false/*eager*/);
+        if (buffer_ready.exists())
+          map_applied_conditions.insert(buffer_ready);
+      }
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              record_complete_replay(trace_info,
+                Runtime::merge_events(map_applied_conditions))));
       else
-        complete_mapping();
+        complete_mapping(finalize_complete_mapping(
+              record_complete_replay(trace_info)));
       // See if we have any arrivals to trigger
       if (!arrive_barriers.empty())
       {
@@ -19065,10 +19230,61 @@ namespace Legion {
             LegionSpy::log_phase_barrier_arrival(unique_op_id, 
                                                  it->phase_barrier);
           Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                        completion_event);
+                                        get_completion_event());
         }
       }
-      complete_execution(Runtime::protect_event(done_event));
+      if (set_view)
+      {
+        const RtEvent future_ready_event = future.impl->subscribe(); 
+        if (!future_ready_event.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, future_ready_event);
+        else
+          trigger_execution(); // can do the completion now
+      }
+      else
+        trigger_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+      if (set_view)
+      {
+#ifdef DEBUG_LEGION
+        assert(fill_view != NULL);
+#endif
+        size_t value_size = 0;
+        const void *value = 
+          future.impl->find_internal_buffer(parent_ctx, value_size);
+        if (fill_view->set_value(value, value_size))
+          delete fill_view;
+      }
+      // See if we have any arrivals to trigger
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        get_completion_event());
+        }
+      }
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now that we've mapped we can remove the reference on our fill_view
+      if ((fill_view != NULL) && 
+          fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+        delete fill_view;
+      complete_operation();
     }
     
     //--------------------------------------------------------------------------
@@ -19079,20 +19295,6 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // See if we have a fill view on which we can remove a reference
-      if (fill_view != NULL)
-      {
-        if (fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
-          delete fill_view;
-        fill_view = NULL;
-      }
-      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -19269,54 +19471,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FillOp::compute_sync_precondition(const TraceInfo *info) const
-    //--------------------------------------------------------------------------
-    {
-      ApEvent result;
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        std::set<ApEvent> sync_preconditions;
-        if (!wait_barriers.empty())
-        {
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
-            sync_preconditions.insert(e);
-            if (runtime->legion_spy_enabled)
-              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-          }
-        }
-        if (!grants.empty())
-        {
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            ApEvent e = it->impl->acquire_grant();
-            sync_preconditions.insert(e);
-          }
-        }
-        // For some reason we don't trace these, not sure why
-        result = Runtime::merge_events(NULL, sync_preconditions);
-      }
-      if ((info != NULL) && info->recording)
-        info->record_op_sync_event(result);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void FillOp::trigger_replay(void)
     //--------------------------------------------------------------------------
     {
-      if (runtime->legion_spy_enabled && !need_prepipeline_stage)
-        log_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       tpl->register_operation(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::complete_replay(ApEvent pre, ApEvent fill_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        fill_complete_event);
+        }
+      }
+      record_completion_effect(fill_complete_event);
       complete_mapping();
       complete_execution();
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -19334,7 +19518,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(Runtime *rt)
-      : CollectiveInstanceCreator<FillOp>(rt)
+      : FillOp(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = true;
@@ -19342,7 +19526,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexFillOp::IndexFillOp(const IndexFillOp &rhs)
-      : CollectiveInstanceCreator<FillOp>(rhs)
+      : FillOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -19372,7 +19556,7 @@ namespace Legion {
     {
       parent_ctx = ctx;
       parent_task = ctx->get_task();
-      initialize_speculation(ctx, true/*track*/, 1, launcher.static_dependences,
+      initialize_predication(ctx, true/*track*/, 1, launcher.static_dependences,
                              launcher.predicate, provenance);
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
@@ -19403,14 +19587,21 @@ namespace Legion {
                                         launcher.parent);
       }
       requirement.privilege_fields = launcher.fields;
-      value_size = launcher.argument.get_size();
-      if (value_size > 0)
+      // Note that this returns a fill view with a reference added to it
+      if (launcher.future.impl != NULL)
+        future = launcher.future;
+      else if (launcher.argument.get_size() > 0)
       {
+        value_size = launcher.argument.get_size();
         value = malloc(value_size);
         memcpy(value, launcher.argument.get_ptr(), value_size);
       }
       else
-        future = launcher.future;
+        REPORT_LEGION_ERROR(ERROR_MISSING_FILL_VALUE,
+            "Fill operation %lld in task %s (UID %lld) was launched without "
+            "a fill value. All fill operations must be given a non-empty "
+            "argument or a future to use as a fill value.", get_unique_op_id(),
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       grants = launcher.grants;
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
@@ -19429,7 +19620,7 @@ namespace Legion {
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
                                       unique_op_id, context_index);
-        if ((value_size == 0) && (future.impl != NULL) &&
+        if ((future.impl != NULL) &&
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
@@ -19441,14 +19632,7 @@ namespace Legion {
     void IndexFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_fill(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::activate_index_fill(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_fill();
+      FillOp::activate();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = NULL;
@@ -19457,19 +19641,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexFillOp::deactivate(void)
+    void IndexFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_index_fill(); 
-      // Return the operation to the runtime
-      runtime->free_index_fill_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::deactivate_index_fill(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_fill();
+      FillOp::deactivate(false/*free*/);
       // We can deactivate our point operations
       for (std::vector<PointFillOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
@@ -19477,6 +19652,9 @@ namespace Legion {
       points.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
+      // Return the operation to the runtime
+      if (freeop)
+        runtime->free_index_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -19538,42 +19716,55 @@ namespace Legion {
     void IndexFillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      const RtEvent view_ready = initialize_fill_view();
       // Enumerate the points
       enumerate_points(false/*replaying*/); 
       // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
         check_point_requirements(); 
       // Launch the points
-      std::set<RtEvent> mapped_preconditions;
-      std::set<ApEvent> executed_preconditions;
-      for (std::vector<PointFillOp*>::const_iterator it = points.begin();
-            it != points.end(); it++)
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        mapped_preconditions.insert((*it)->get_mapped_event());
-        executed_preconditions.insert((*it)->get_completion_event());
-        (*it)->launch();
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->launch(view_ready);
       }
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
+      // Include any map applied conditions as well
+      if (!map_applied_conditions.empty())
+        mapped_preconditions.insert(mapped_preconditions.end(),
+            map_applied_conditions.begin(), map_applied_conditions.end());
+      if (future.impl != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(future.impl != NULL);
 #endif
+        // This will make sure we have a mapping locally
+        const RtEvent buffer_ready = 
+          future.impl->request_internal_buffer(this, false/*eager*/);
+        if (buffer_ready.exists())
+          mapped_preconditions.push_back(buffer_ready);
+      }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      if (!request_early_complete(done))
-        complete_execution(Runtime::protect_event(done));
+      if (future.impl != NULL)
+      {
+        RtEvent future_ready = future.impl->subscribe(); 
+        // Make sure both the future and the view are ready
+        if (view_ready.exists() && !view_ready.has_triggered())
+        {
+          if (!future_ready.has_triggered())
+            future_ready = Runtime::merge_events(view_ready, future_ready);
+          else
+            future_ready = view_ready;
+        }
+        if (!future_ready.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, future_ready);
+        else
+          trigger_execution(); // can do the completion now
+      }
       else
-        complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexFillOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called as this operation doesn't
-      // go through the rest of the queue normally
-      assert(false);
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -19608,12 +19799,21 @@ namespace Legion {
       // Enumerate the points
       enumerate_points(true/*replaying*/);
       // Then call replay analysis on all of them
-      for (std::vector<PointFillOp*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
-        (*it)->trigger_replay();
-      complete_mapping();
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->trigger_replay();
+      }
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
       complete_execution();
-      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t IndexFillOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return get_shard_points()->get_volume();
     }
 
     //--------------------------------------------------------------------------
@@ -19623,8 +19823,9 @@ namespace Legion {
       // Enumerate the points
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
+      IndexSpaceNode *local_points = get_shard_points();
       Domain launch_domain;
-      launch_space->get_launch_space_domain(launch_domain);
+      local_points->get_launch_space_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -19907,7 +20108,6 @@ namespace Legion {
       requirement        = owner->get_requirement();
       grants             = owner->grants;
       wait_barriers      = owner->wait_barriers;
-      arrive_barriers    = owner->arrive_barriers;
       parent_task        = owner->parent_task;
       map_id             = owner->map_id;
       tag                = owner->tag;
@@ -19924,14 +20124,7 @@ namespace Legion {
       parent_req_index   = owner->parent_req_index;
       true_guard         = owner->true_guard;
       false_guard        = owner->false_guard;
-      future             = owner->future;
-      value_size         = owner->value_size;
       version_info       = owner->version_info;
-      if (value_size > 0)
-      {
-        value = malloc(value_size);
-        memcpy(value, owner->value, value_size);
-      }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
@@ -19940,16 +20133,17 @@ namespace Legion {
     void PointFillOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fill();
+      FillOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::deactivate(void)
+    void PointFillOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fill();
-      runtime->free_point_fill_op(this);
+      FillOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_fill_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -19977,15 +20171,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::launch(void)
+    void PointFillOp::launch(RtEvent view_ready)
     //--------------------------------------------------------------------------
     {
       // Perform the version info
       std::set<RtEvent> preconditions;
+      if (view_ready.exists())
+        preconditions.insert(view_ready);
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
-      // We can also mark this as having resolved any predication
-      resolve_speculation();
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -20004,39 +20198,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveManager* PointFillOp::find_or_create_collective_instance(
-                                  MappingCallKind mapper_call, unsigned index,
-                                  const LayoutConstraintSet &constraints,
-                                  const std::vector<LogicalRegion> &regions,
-                                  Memory::Kind kind, size_t *footprint,
-                                  LayoutConstraintKind *unsat_kind,
-                                  unsigned *unsat_index,
-                                  DomainPoint &collective_point)
+    void PointFillOp::record_completion_effect(ApEvent effect)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(index_point.get_dim() > 0);
-#endif
-      collective_point = index_point;
-      return owner->find_or_create_collective_instance(mapper_call, index,
-          constraints, regions, kind, footprint, unsat_kind, unsat_index,
-          collective_point);
+      owner->record_completion_effect(effect);
     }
 
     //--------------------------------------------------------------------------
-    bool PointFillOp::finalize_collective_instance(MappingCallKind call_kind,
-                                                   unsigned index, bool success)
+    void PointFillOp::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
-      return owner->finalize_collective_instance(call_kind, index, success);
+      owner->record_completion_effect(effect, map_applied_events);
     }
 
     //--------------------------------------------------------------------------
-    void PointFillOp::report_total_collective_instance_calls(
-                              MappingCallKind mapper_call, unsigned total_calls)
+    void PointFillOp::record_completion_effects(
+                                               const std::set<ApEvent> &effects)
     //--------------------------------------------------------------------------
     {
-      owner->report_total_collective_instance_calls(mapper_call, total_calls);
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    FillView* PointFillOp::get_fill_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_fill_view();
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointFillOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointFillOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
     }
 
     //--------------------------------------------------------------------------
@@ -20071,6 +20273,327 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TraceLocalID(trace_local_id, index_point);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Discard Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DiscardOp::DiscardOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DiscardOp::~DiscardOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      Operation::activate();
+      parent_req_index = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::deactivate(bool free)
+    //--------------------------------------------------------------------------
+    {
+      Operation::deactivate(false/*free*/);
+      requirement.privilege_fields.clear();
+      version_info.clear();
+      map_applied_conditions.clear();
+      if (free)
+        runtime->free_discard_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* DiscardOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DISCARD_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind DiscardOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DISCARD_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t DiscardOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 1;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned DiscardOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx == 0);
+#endif
+      return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::initialize(InnerContext *ctx,
+                        const DiscardLauncher &launcher, Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/, 1/*regions*/,
+                           provenance, launcher.static_dependences);
+      requirement.region = launcher.handle;
+      requirement.parent = launcher.parent;
+      requirement.privilege = LEGION_WRITE_DISCARD;
+      requirement.prop = LEGION_EXCLUSIVE;
+      requirement.handle_type = LEGION_SINGULAR_PROJECTION;
+      requirement.privilege_fields = launcher.fields;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_discard_operation(parent_ctx->get_unique_id(),
+                                         unique_op_id, context_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      compute_parent_index();
+      initialize_privilege_path(privilege_path, requirement);
+      if (runtime->legion_spy_enabled)
+        log_requirement();
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::log_requirement(void)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_logical_requirement(unique_op_id, 0/*index*/,
+                                         true/*region*/,
+                                         requirement.region.index_space.id,
+                                         requirement.region.field_space.id,
+                                         requirement.region.tree_id,
+                                         requirement.privilege,
+                                         requirement.prop,
+                                         requirement.redop,
+                                         requirement.parent.index_space.id);
+      LegionSpy::log_requirement_fields(unique_op_id, 0/*index*/,
+                                        requirement.privilege_fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->check_privileges)
+        check_privilege();
+      ProjectionInfo projection_info;
+      LogicalAnalysis analysis(this, map_applied_conditions);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
+                                                   requirement,
+                                                   projection_info,
+                                                   privilege_path, analysis);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;  
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/);
+      runtime->forest->discard_fields(this, 0/*idx*/, requirement,
+                version_info, trace_info, map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
+      else
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::check_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldID bad_field = LEGION_AUTO_GENERATE_ID;
+      int bad_index = -1;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == LEGION_NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
+      switch (et)
+      {
+        // Note there is no such things as bad privileges for
+        // acquires and releases because they are controlled by the runtime
+        case LEGION_NO_ERROR:
+        case ERROR_BAD_REGION_PRIVILEGES:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                             "Requirements for invalid region handle "
+                             "(%x,%d,%d) for discard operation "
+                             "(ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             unique_op_id)
+            break;
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = 
+              (requirement.handle_type == LEGION_SINGULAR_PROJECTION) ||
+              (requirement.handle_type == LEGION_REGION_PROJECTION) ? 
+                requirement.region.field_space :
+                requirement.partition.field_space;
+            REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID,
+                             "Field %d is not a valid field of field "
+                             "space %d for discard operation (ID %lld)",
+                             bad_field, sp.id, unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_PRIVILEGE,
+                             "Instance field %d is not one of the "
+                             "privilege fields for discard operation "
+                             "(ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_DUPLICATE,
+                             "Instance field %d is a duplicate for "
+                             "discard operation (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            if (bad_index > 0) 
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DISCARD,
+                               "Parent task %s (ID %lld) of discard operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "no 'parent' region had that name.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id)
+            else if (bad_field == LEGION_AUTO_GENERATE_ID) 
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DISCARD,
+                               "Parent task %s (ID %lld) of discard operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "parent requirement %d did not have "
+                               "sufficient privileges.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id, bad_index)
+            else 
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DISCARD,
+                               "Parent task %s (ID %lld) of discard operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "region requirement %d was missing field %d.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id,
+                               bad_index, bad_field)
+            break;
+          }
+        case ERROR_BAD_REGION_PATH:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_NOT_SUBREGION,
+                             "Region (%x,%x,%x) is not a "
+                             "sub-region of parent region "
+                             "(%x,%x,%x) for region requirement of discard "
+                             "operation (ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             requirement.parent.index_space.id,
+                             requirement.parent.field_space.id,
+                             requirement.parent.tree_id,
+                             unique_op_id)
+            break;
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_REQUIREMENT_DISCARD,
+                             "Region requirement of discard operation "
+                             "(ID %lld) cannot find privileges for field "
+                             "%d in parent task",
+                             unique_op_id, bad_field)
+            break;
+          }
+        // this should never happen with an discard operation
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
+        REPORT_LEGION_ERROR(ERROR_PARENT_TASK_DETACH,
+                               "Parent task %s (ID %lld) of discard "
+                               "operation (ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) as a parent",
+                               parent_ctx->get_task_name(), 
+                               parent_ctx->get_unique_id(),
+                               unique_op_id, 
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id, 
+                               requirement.region.tree_id)
+      else
+        parent_req_index = unsigned(parent_index);
+    }
+
+    //--------------------------------------------------------------------------
+    void DiscardOp::pack_remote_operation(Serializer &rez, 
+                        AddressSpaceID target, std::set<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -20119,8 +20642,6 @@ namespace Legion {
       resource = launcher.resource;
       footprint = launcher.footprint;
       restricted = launcher.restricted;
-      mapping = launcher.mapped;
-      local_files = launcher.local_files;
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -20258,19 +20779,10 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      if (mapping)
-      {
-        const ApUserEvent term_event = Runtime::create_ap_user_event(NULL);
-        region = PhysicalRegion(new PhysicalRegionImpl(requirement,mapped_event,
-              completion_event, term_event, true/*mapped*/, ctx, 0/*map id*/, 
-              0/*tag*/, false/*leaf*/, false/*virtual mapped*/, runtime));
-        termination_event = term_event;
-      }
-      else
-        region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-              mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
-              false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-              false/*virtual mapped*/, runtime)); 
+      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
+        mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT, 
+        false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
+        false/*virtual mapped*/, launcher.collective, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                             unique_op_id, context_index, restricted);
@@ -20278,23 +20790,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::activate_attach_op(void)
+    void AttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_operation();
+      Operation::activate();
       file_name = NULL;
       footprint = 0;
-      attached_event = ApUserEvent::NO_AP_USER_EVENT;
-      termination_event = ApEvent::NO_AP_EVENT;
       restricted = true;
-      local_files = false;
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::deactivate_attach_op(void)
+    void AttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       if (file_name != NULL)
       {
         free(const_cast<char*>(file_name));
@@ -20313,21 +20822,8 @@ namespace Legion {
       map_applied_conditions.clear();
       external_instances.clear();
       layout_constraint_set = LayoutConstraintSet();
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_attach_op(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void AttachOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_attach_op(); 
-      runtime->free_attach_op(this);
+      if (freeop)
+        runtime->free_attach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20364,7 +20860,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion AttachOp::create_external_instance(void)
+    void AttachOp::create_external_instance(void)
     //--------------------------------------------------------------------------
     {
       external_instances.resize(1);
@@ -20388,7 +20884,6 @@ namespace Legion {
         default:
           assert(false);
       }
-      return requirement.region;
     }
 
     //--------------------------------------------------------------------------
@@ -20441,10 +20936,6 @@ namespace Legion {
       const RtEvent attached = manager->attach_external_instance();
       if (attached.exists())
         preconditions.insert(attached);
-      // Perform an exchange looking for any coregions for point AttachOps
-      const RtEvent exchanged = check_for_coregions();
-      if (exchanged.exists())
-        preconditions.insert(exchanged);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -20452,60 +20943,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent AttachOp::check_for_coregions(void)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do here for individual attach ops
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     { 
-      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
-      // Check to see if we're going to be the ones performing the attach
-      // If someone else has already done the attach for us then the 
-      // attached event will be non-trivial
-      ApEvent attach_event = attached_event;
-      if (!attach_event.exists() || (external_instances.size() > 1))
-      {
-        InnerContext *context = find_physical_context(0/*index*/);
-        std::vector<InstanceView*> external_views;
-        context->convert_target_views(external_instances, external_views);
-        attach_event = runtime->forest->attach_external(this, 0/*idx*/,
-                                                        requirement,
-                                                        external_views,
-                                                        mapping ?
-                                                          termination_event :
-                                                          completion_event,
-                                                        version_info,
-                                                        trace_info,
-                                                        map_applied_conditions,
-                                                        restricted);
-        // Signal to any other point tasks that we performed the attach for them
-        if (attached_event.exists())
-          Runtime::trigger_event(&trace_info, attached_event, attach_event);
-      }
-      if (mapping)
-        external_instances[0].set_ready_event(attach_event);
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/);
+      ApUserEvent attach_post = Runtime::create_ap_user_event(&trace_info);
+      ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
+                                                         requirement,
+                                                         external_instances,
+                                                         version_info,
+                                                         attach_post,
+                                                         trace_info,
+                                                         map_applied_conditions,
+                                                         restricted);
       log_mapping_decision(0/*idx*/, requirement, external_instances);
-      // This operation is ready once the file is attached
+      Runtime::trigger_event(&trace_info, attach_post, attach_event);
+      record_completion_effect(attach_post);
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, attach_event,attach_post);
+#endif
+      // This operation is ready once the instance is attached
       region.impl->set_reference(external_instances[0]);
       // Once we have created the instance, then we are done
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping();
-#ifdef LEGION_SPY
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        completion_event);
-#endif
-      if (!request_early_complete(attach_event))
-        complete_execution(Runtime::protect_event(attach_event));
-      else
-        complete_execution();
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -20534,17 +21000,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
-                                         const std::vector<FieldID> &field_set,
-                                         const std::vector<size_t> &sizes,
-                                               LayoutConstraintSet &constraints,
-                                               ApEvent &ready_event,
-                                               LgEvent &unique_event,
-                                               size_t &instance_footprint)
+    PhysicalManager* AttachOp::create_manager(RegionNode *node,
+                                    const std::vector<FieldID> &field_set,
+                                    const std::vector<size_t> &sizes,
+                                    const std::vector<unsigned> &mask_index_map,
+                                    const std::vector<CustomSerdezID> &serdez,
+                                              const FieldMask &external_mask)
     //--------------------------------------------------------------------------
     {
+      ApEvent ready_event;
+      LayoutConstraintSet constraints;
       PhysicalInstance result = PhysicalInstance::NO_INST;
-      instance_footprint = footprint;
+      LgEvent unique_event;
       Realm::ProfilingRequestSet requests;
       if ((runtime->profiler != NULL) || runtime->legion_spy_enabled)
       {
@@ -20565,8 +21032,8 @@ namespace Legion {
             {
 	      field_ids[idx] = *it;
             }
-            result = node->create_file_instance(file_name, requests, field_ids,
-                                                sizes, file_mode, ready_event);
+            result = node->row_source->create_file_instance(file_name,
+                    requests, field_ids, sizes, file_mode, ready_event);
             constraints.specialized_constraint = 
               SpecializedConstraint(LEGION_GENERIC_FILE_SPECIALIZE);           
             constraints.field_constraint = 
@@ -20592,7 +21059,7 @@ namespace Legion {
               field_files[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->create_hdf5_instance(file_name, requests,
+            result = node->row_source->create_hdf5_instance(file_name, requests,
                                       field_ids, sizes, field_files,
                                       layout_constraint_set.ordering_constraint,
                                       (file_mode == LEGION_FILE_READ_ONLY),
@@ -20610,44 +21077,17 @@ namespace Legion {
           }
         case LEGION_EXTERNAL_INSTANCE:
           {
-            Realm::InstanceLayoutGeneric *ilg = node->create_layout(
-                layout_constraint_set, field_set, sizes, false/*compact*/);
             const PointerConstraint &pointer = 
                                       layout_constraint_set.pointer_constraint;
 #ifdef DEBUG_LEGION
             assert(pointer.is_valid);
 #endif
-            Realm::ExternalMemoryResource res(pointer.ptr, ilg->bytes_used,
-                                              false /*!read_only*/);
-
-            const Memory memory = res.suggested_memory();
-            if ((memory != pointer.memory) && pointer.memory.exists())
-            {
-              const char *mem_names[] = {
-#define MEM_NAMES(name, desc) desc,
-                REALM_MEMORY_KINDS(MEM_NAMES) 
-#undef MEM_NAMES
-              };
-              REPORT_LEGION_WARNING(LEGION_WARNING_IMPRECISE_ATTACH_MEMORY,
-                  "WARNING: %s memory " IDFMT " in pointer constraint for "
-                  "attach operation %lld in parent task %s (UID %lld) differs "
-                  "from the Realm-suggested %s memory " IDFMT " for the "
-                  "external instance. Legion is going to use the more precise "
-                  "Realm-specified memory. Please make sure that you do not "
-                  "have any code in your application or your mapper that "
-                  "relies on the instance being in the originally specified "
-                  "memory. To silence this warning you can pass in a NO_MEMORY "
-                  "to the pointer constraint.",
-                  mem_names[pointer.memory.kind()], pointer.memory.id,
-                  unique_op_id, parent_ctx->get_task_name(),
-                  parent_ctx->get_unique_id(), mem_names[memory.kind()],
-                  memory.id);
-            } 
-            ready_event = ApEvent(PhysicalInstance::create_external_instance(
-                                          result, memory, ilg, res, requests));
+            ready_event = create_realm_instance(node->row_source, pointer,
+                                      field_set, sizes, requests, result);
             constraints = layout_constraint_set;
             constraints.specialized_constraint =
               SpecializedConstraint(LEGION_AFFINE_SPECIALIZE);
+            const Memory memory = result.get_location();
             constraints.memory_constraint = MemoryConstraint(memory.kind());
             constraints.pointer_constraint = 
               PointerConstraint(memory, pointer.ptr);
@@ -20663,7 +21103,94 @@ namespace Legion {
         runtime->profiler->record_physical_instance_layout(unique_event,
             requirement.region.field_space, constraints);
       }
-      return result;
+      // Check to see if this instance is local or whether we need
+      // to send this request to a remote node to make it
+      // Only external instances can be non-local, file instances
+      // are always "local" to the node that they are on
+      if ((resource == LEGION_EXTERNAL_INSTANCE) && 
+          (result.address_space() != runtime->address_space))
+      {
+        Serializer rez;
+        std::atomic<DistributedID> remote_did(0);
+        const RtUserEvent wait_for = Runtime::create_rt_user_event();
+        {
+          RezCheck z(rez);
+          rez.serialize(node->column_source->handle);
+          rez.serialize(result);
+          rez.serialize(ready_event);
+          rez.serialize(unique_event);
+          rez.serialize(footprint);
+          constraints.serialize(rez);
+          rez.serialize(external_mask);
+          rez.serialize<size_t>(field_set.size());
+          for (unsigned idx = 0; idx < field_set.size(); idx++)
+          {
+            rez.serialize(field_set[idx]);
+            rez.serialize(sizes[idx]);
+            rez.serialize(mask_index_map[idx]);
+            rez.serialize(serdez[idx]);
+          }
+          rez.serialize(node->row_source->handle);
+          rez.serialize<size_t>(0); // no collective mapping
+          rez.serialize(&remote_did);
+          rez.serialize(wait_for);
+        }
+        runtime->send_external_create_request(result.address_space(), rez);
+        // Wait for the response to come back
+        wait_for.wait();
+        // Now we can request the physical manager
+        RtEvent wait_on;
+        PhysicalManager *result = 
+         runtime->find_or_request_instance_manager(remote_did.load(), wait_on);
+        if (wait_on.exists())
+          wait_on.wait();
+        return result;
+      }
+      else // Local so we can just do this call here
+        return node->column_source->create_external_manager(result, ready_event,
+            footprint, constraints, field_set, sizes, external_mask, 
+            mask_index_map, unique_event, node, serdez,
+            runtime->get_available_distributed_id());
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent AttachOp::create_realm_instance(IndexSpaceNode *node,
+                                    const PointerConstraint &pointer,
+                                    const std::vector<FieldID> &set,
+                                    const std::vector<size_t> &sizes,
+                                    const Realm::ProfilingRequestSet &requests,
+                                    PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      Realm::InstanceLayoutGeneric *ilg = node->create_layout(
+                      layout_constraint_set, set, sizes, false/*compact*/);
+      Realm::ExternalMemoryResource res(pointer.ptr, ilg->bytes_used,
+                                        false /*!read_only*/);
+      const Memory memory = res.suggested_memory();
+      if ((memory != pointer.memory) && pointer.memory.exists())
+      {
+        const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+          REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+        };
+        REPORT_LEGION_WARNING(LEGION_WARNING_IMPRECISE_ATTACH_MEMORY,
+            "WARNING: %s memory " IDFMT " in pointer constraint for "
+            "attach operation %lld in parent task %s (UID %lld) differs "
+            "from the Realm-suggested %s memory " IDFMT " for the "
+            "external instance. Legion is going to use the more precise "
+            "Realm-specified memory. Please make sure that you do not "
+            "have any code in your application or your mapper that "
+            "relies on the instance being in the originally specified "
+            "memory. To silence this warning you can pass in a NO_MEMORY "
+            "to the pointer constraint.",
+            mem_names[pointer.memory.kind()], pointer.memory.id,
+            unique_op_id, parent_ctx->get_task_name(),
+            parent_ctx->get_unique_id(), mem_names[memory.kind()],
+            memory.id);
+      }
+      return ApEvent(PhysicalInstance::create_external_instance(instance, 
+                                              memory, ilg, res, requests));
     }
 
     //--------------------------------------------------------------------------
@@ -20828,14 +21355,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexAttachOp::IndexAttachOp(Runtime *rt)
-      : Operation(rt)
+      : CollectiveViewCreator<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexAttachOp::IndexAttachOp(const IndexAttachOp &rhs)
-      : Operation(NULL)
+      : CollectiveViewCreator<Operation>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -20861,32 +21388,17 @@ namespace Legion {
     void IndexAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_attach();
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndexAttachOp::activate_index_attach(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      CollectiveViewCreator<Operation>::activate();
       launch_space = NULL;
       points_committed = 0;
       commit_request = false;
     }
-
+    
     //--------------------------------------------------------------------------
-    void IndexAttachOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_index_attach();
-      runtime->free_index_attach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexAttachOp::deactivate_index_attach(void)
+    void IndexAttachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_operation();
+      CollectiveViewCreator<Operation>::deactivate(false/*free*/);
       resources = ExternalResources();
       privilege_path.clear();
       // We can deactivate all of our point operations
@@ -20894,9 +21406,9 @@ namespace Legion {
             points.begin(); it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
-      coregions.clear();
-      coregions_attached.clear();
       map_applied_conditions.clear();
+      if (freeop)
+        runtime->free_index_attach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -20957,6 +21469,8 @@ namespace Legion {
                               "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                               "FORGET THEM?!?", parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id())
+            requirement.privilege_fields.insert(
+                launcher.file_fields.begin(), launcher.file_fields.end());
             break;
           }
         case LEGION_EXTERNAL_HDF5_FILE:
@@ -20974,6 +21488,10 @@ namespace Legion {
                             "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                             "FORGET THEM?!?", parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id())
+            for (std::map<FieldID,std::vector<const char*> >::const_iterator
+                  it = launcher.field_files.begin();
+                  it != launcher.field_files.end(); it++)
+              requirement.privilege_fields.insert(it->first);
             const OrderingConstraint &input_constraint = 
               launcher.constraints.ordering_constraint;
             const int dims = launcher.parent.index_space.get_dim();
@@ -21049,7 +21567,7 @@ namespace Legion {
       // Create the result and the point attach operations
       ExternalResourcesImpl *result = new ExternalResourcesImpl(ctx,
           indexes.size(), upper_bound, launch_bounds, launcher.parent,
-          launcher.privilege_fields);
+          requirement.privilege_fields);
       points.resize(indexes.size());
       for (unsigned idx = 0; idx < indexes.size(); idx++)
       {
@@ -21084,13 +21602,8 @@ namespace Legion {
       }
       initialize_privilege_path(privilege_path, requirement);
       // Have each of the point tasks create their external instances
-      // Keep track of which points share the same logical region
       for (unsigned idx = 0; idx < points.size(); idx++)
-      {
-        PointAttachOp *point = points[idx];
-        LogicalRegion region = point->create_external_instance();
-        coregions[region].push_back(point);
-      }
+        points[idx]->create_external_instance();
     }
 
     //--------------------------------------------------------------------------
@@ -21130,77 +21643,35 @@ namespace Legion {
     void IndexAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<ApEvent> executed_preconditions;
-      for (std::vector<PointAttachOp*>::const_iterator it =
-            points.begin(); it != points.end(); it++)
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        map_applied_conditions.insert((*it)->get_mapped_event());
-        executed_preconditions.insert((*it)->get_completion_event());
-        (*it)->trigger_ready();
+        map_applied_conditions.insert(points[idx]->get_mapped_event());
+        points[idx]->trigger_ready();
       }
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
-#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(map_applied_conditions));
-      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      if (!request_early_complete(done))
-        complete_execution(Runtime::protect_event(done));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexAttachOp::find_coregions(PointAttachOp *point,
-         LogicalRegion reg, InstanceSet &instances, ApUserEvent &attached_event)
+    void IndexAttachOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
-      // No need for the lock here since we know this is being done
-      // sequentially by IndexAttachOp::trigger_ready
-      std::map<LogicalRegion,std::vector<PointAttachOp*> >::iterator
-        finder = coregions.find(reg);
-#ifdef DEBUG_LEGION
-      assert(finder != coregions.end());
-      assert(!finder->second.empty());
-#endif
-      if (finder->second.size() == 1)
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
       {
-        // No co-regions in this case
-        coregions.erase(finder);
-        return RtEvent::NO_RT_EVENT;
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        ApEvent effects_done;
+        if (!effects.empty())
+          effects_done = Runtime::merge_events(NULL, effects);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        get_completion_event());
       }
-#ifdef DEBUG_LEGION
-      assert(!attached_event.exists());
 #endif
-      // See if we're the first one
-      if (finder->second.front() == point)
-      {
-        // We're the first one
-        // Get the instances from all the other points
-        const size_t offset = instances.size();
-        instances.resize(offset + finder->second.size());
-        for (unsigned idx = 0; idx < finder->second.size(); idx++)
-          instances[offset+idx] = finder->second[idx]->external_instances[0];
-        // Save our attached event for later
-        attached_event = Runtime::create_ap_user_event(NULL);
-        coregions_attached[reg] = attached_event;  
-      }
-      else
-      {
-        // Record the attached event to know that a different
-        // operation is going to be performing the attach for this point
-        std::map<LogicalRegion,ApUserEvent>::const_iterator event_finder =
-          coregions_attached.find(reg);
-#ifdef DEBUG_LEGION
-        assert(event_finder != coregions_attached.end());
-        assert(event_finder->second.exists());
-#endif
-        attached_event = event_finder->second;
-      }
-      // Will only have non-trival events here with control replication
-      return RtEvent::NO_RT_EVENT;
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -21497,6 +21968,13 @@ namespace Legion {
                                         requirement.privilege_fields);
     }
 
+    //--------------------------------------------------------------------------
+    size_t IndexAttachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return points.size();
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Attach Op 
     /////////////////////////////////////////////////////////////
@@ -21536,16 +22014,17 @@ namespace Legion {
     void PointAttachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_attach_op();
+      AttachOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointAttachOp::deactivate(void) 
+    void PointAttachOp::deactivate(bool freeop) 
     //--------------------------------------------------------------------------
     {
-      deactivate_attach_op();
-      runtime->free_point_attach_op(this);
+      AttachOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_attach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -21567,7 +22046,6 @@ namespace Legion {
       if (index < launcher.footprint.size())
         footprint = launcher.footprint[index];
       restricted = launcher.restricted;
-      mapping = false;
       switch (resource)
       {
         case LEGION_EXTERNAL_POSIX_FILE:
@@ -21646,9 +22124,9 @@ namespace Legion {
           assert(false); // should never get here
       }
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
-            mapped_event, completion_event, ApUserEvent::NO_AP_USER_EVENT, 
+            mapped_event, get_completion_event(), ApUserEvent::NO_AP_USER_EVENT,
             false/*mapped*/, ctx, 0/*map id*/, 0/*tag*/, false/*leaf*/, 
-            false/*virtual mapped*/, runtime)); 
+            false/*virtual mapped*/, false/*collective*/, runtime)); 
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_index_point(owner->get_unique_op_id(), 
@@ -21659,19 +22137,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PointAttachOp::check_for_coregions(void)
-    //--------------------------------------------------------------------------
-    {
-      return owner->find_coregions(this, requirement.region, 
-                          external_instances, attached_event); 
-    }
-
-    //--------------------------------------------------------------------------
     void PointAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
       // Resolve our speculation then do the base case
-      resolve_speculation();
       AttachOp::trigger_ready();
     }
 
@@ -21682,6 +22151,68 @@ namespace Legion {
       commit_operation(false/*deactivate*/);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effect(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effect(effect, map_applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointAttachOp::record_completion_effects(
+                                               const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointAttachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointAttachOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PointAttachOp::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_collective_rendezvous(unique_op_id, 
+                        requirement_index, analysis_index);
+      return owner->convert_collective_views(requirement_index, analysis_index,
+          region, targets, physical_ctx, analysis_mapping, first_local,
+          target_views, collective_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointAttachOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      return true;
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -21748,36 +22279,23 @@ namespace Legion {
     void DetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_detach_op();
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::activate_detach_op(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      Operation::activate();
       detach_event = ApEvent::NO_AP_EVENT;
       flush = true;
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::deactivate(void)
+    void DetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_detach_op();
-      runtime->free_detach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void DetachOp::deactivate_detach_op(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       region = PhysicalRegion();
       privilege_path.clear();
       version_info.clear();
       map_applied_conditions.clear();
       result = Future(); // clear any references on the future
+      if (freeop)
+        runtime->free_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -21888,69 +22406,58 @@ namespace Legion {
       assert(!manager->is_reduction_manager()); 
 #endif
       manager->add_base_valid_ref(MAPPING_ACQUIRE_REF);
-      const PhysicalTraceInfo trace_info(this, 0/*idx*/, true/*init*/);
+      const PhysicalTraceInfo trace_info(this, 0/*idx*/);
       // If we need to flush then register this operation to bring the
       // data that it has up to date, use READ-ONLY privileges since we're
       // not going to invalidate the existing data. Don't register ourselves
       // either since we'll get all the preconditions for detaching it
       // as part of the detach_external call
-      ApEvent effects_done;
+      ApUserEvent detach_post = Runtime::create_ap_user_event(&trace_info);
+      RtEvent filter_precondition;
       if (flush)
       {
         requirement.privilege = LEGION_READ_ONLY;
         std::vector<PhysicalManager*> dummy_sources;
-        effects_done = 
-          runtime->forest->physical_perform_updates_and_registration(
-                                                  requirement, version_info,
-                                                  this, 0/*idx*/, 
-                                                  ApEvent::NO_AP_EVENT, 
-                                                  ApEvent::NO_AP_EVENT,
-                                                  references, dummy_sources,
-                                                  trace_info,
-                                                  map_applied_conditions,
+        UpdateAnalysis *analysis = NULL;
+        filter_precondition = runtime->forest->physical_perform_updates(
+                                                requirement, version_info,
+                                                this, 0/*idx*/, 
+                                                ApEvent::NO_AP_EVENT, 
+                                                detach_post,
+                                                references, dummy_sources,
+                                                trace_info,
+                                                map_applied_conditions,
+                                                analysis,
 #ifdef DEBUG_LEGION
-                                                  get_logging_name(),
-                                                  unique_op_id,
+                                                get_logging_name(),
+                                                unique_op_id,
 #endif
-                                                  false/*record valid*/,
-                                                  false/*check initialized*/);
+                                                false/*check collective*/,
+                                                false/*record valid*/,
+                                                false/*check initialized*/);
+        if (analysis->remove_reference())
+          delete analysis;
         requirement.privilege = LEGION_READ_WRITE;
       }
-      InnerContext *context = find_physical_context(0/*index*/);
-      std::vector<InstanceView*> external_views;
-      context->convert_target_views(references, external_views);
-#ifdef DEBUG_LEGION
-      assert(external_views.size() == 1);
-#endif
-      InstanceView *ext_view = external_views[0];
+      
       detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
-                                         version_info, ext_view,
-                                         trace_info, map_applied_conditions);
-      if (detach_event.exists() && effects_done.exists())
-        detach_event = 
-          Runtime::merge_events(&trace_info, detach_event, effects_done);
-      else if (effects_done.exists())
-        detach_event = effects_done;
+                                         version_info, references, detach_post,
+                                         trace_info, map_applied_conditions,
+                                         filter_precondition, flush);
+      Runtime::trigger_event(&trace_info, detach_post, detach_event);
+      record_completion_effect(detach_post);
       log_mapping_decision(0/*idx*/, requirement, references);
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id, detach_event,
-                                        completion_event);
+        LegionSpy::log_operation_events(unique_op_id, detach_event,detach_post);
 #endif
-      // Also tell the runtime to detach the external instance from memory
-      // This has to be done before we can consider this mapped
-      RtEvent detached_event = manager->detach_external_instance();
-      if (detached_event.exists())
-        map_applied_conditions.insert(detached_event);
       if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
+        complete_mapping(finalize_complete_mapping(
+              Runtime::merge_events(map_applied_conditions)));
       else
-        complete_mapping(); 
-      if (!request_early_complete(detach_event))
-        complete_execution(Runtime::protect_event(detach_event));
-      else
-        complete_execution();
+        complete_mapping(finalize_complete_mapping(RtEvent::NO_RT_EVENT));
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -21961,6 +22468,16 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::detach_external_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // It's only safe to actually perform the detach after the mapping
+      // is performed to know that all the updates to the instance have
+      // been mapped
+      manager->detach_external_instance(detach_event);
     }
 
     //--------------------------------------------------------------------------
@@ -21977,6 +22494,7 @@ namespace Legion {
 #endif
       const InstanceRef &reference = references[0];
       PhysicalManager *manager = reference.get_physical_manager();
+      detach_external_instance(manager);
       // We can remove the acquire reference that we added after we're mapped
       if (manager->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
         delete manager;
@@ -21991,10 +22509,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::select_sources(const unsigned index,
-                                  const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking)
+    void DetachOp::select_sources(const unsigned index, PhysicalManager *target,
+                                  const std::vector<InstanceView*> &sources,
+                                  std::vector<unsigned> &ranking,
+                                  std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22046,14 +22564,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexDetachOp::IndexDetachOp(Runtime *rt)
-      : Operation(rt)
+      : CollectiveViewCreator<Operation>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexDetachOp::IndexDetachOp(const IndexDetachOp &rhs)
-      : Operation(NULL)
+      : CollectiveViewCreator<Operation>(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -22079,34 +22597,20 @@ namespace Legion {
     void IndexDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_index_detach();
-    }
-    
-    //--------------------------------------------------------------------------
-    void IndexDetachOp::activate_index_detach(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
+      CollectiveViewCreator<Operation>::activate();
       launch_space = NULL;
       points_completed = 0;
       points_committed = 0;
       complete_request = false;
       commit_request = false;
+      flush = false;
     }
-
+    
     //--------------------------------------------------------------------------
-    void IndexDetachOp::deactivate(void)
+    void IndexDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_index_detach();
-      runtime->free_index_detach_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexDetachOp::deactivate_index_detach(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      CollectiveViewCreator<Operation>::deactivate(false/*free*/);
       resources = ExternalResources();
       privilege_path.clear();
       // We can deactivate all of our point operations
@@ -22117,6 +22621,8 @@ namespace Legion {
       map_applied_conditions.clear();
       point_effects.clear();
       result = Future();
+      if (freeop)
+        runtime->free_index_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22148,7 +22654,7 @@ namespace Legion {
                                    ExternalResourcesImpl *external,
                                    const std::vector<FieldID> &privilege_fields,
                                    const std::vector<PhysicalRegion> &regions,
-                                   bool flush, bool unordered,
+                                   bool flsh, bool unordered,
                                    Provenance *provenance)
     //--------------------------------------------------------------------------
     {
@@ -22169,6 +22675,7 @@ namespace Legion {
       resources = ExternalResources(external);
       launch_space = launch_bounds;
       points.reserve(regions.size());
+      flush = flsh;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         PointDetachOp *point = runtime->get_available_point_detach_op();
@@ -22224,27 +22731,16 @@ namespace Legion {
     void IndexDetachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> mapped_preconditions;
-      std::set<ApEvent> executed_preconditions;
-      for (std::vector<PointDetachOp*>::const_iterator it =
-            points.begin(); it != points.end(); it++)
+      std::vector<RtEvent> mapped_preconditions(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        mapped_preconditions.insert((*it)->get_mapped_event());
-        executed_preconditions.insert((*it)->get_completion_event());
-        (*it)->trigger_ready();
+        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        points[idx]->trigger_ready();
       }
-#ifdef LEGION_SPY
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      completion_event);
-#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      ApEvent done = Runtime::merge_events(NULL, executed_preconditions);
-      if (!request_early_complete(done))
-        complete_execution(Runtime::protect_event(done));
-      else
-        complete_execution();
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -22294,7 +22790,19 @@ namespace Legion {
     void IndexDetachOp::complete_detach(void)
     //--------------------------------------------------------------------------
     {
-      result.impl->set_result(get_complete_effects(), NULL, 0, true/*own*/);
+      result.impl->set_result(get_completion_event(), NULL, 0, true/*own*/);
+#ifdef LEGION_SPY
+      if (runtime->legion_spy_enabled)
+      {
+        std::set<ApEvent> effects;
+        find_completion_effects(effects);
+        ApEvent effects_done;
+        if (!effects.empty())
+          effects_done = Runtime::merge_events(NULL, effects);
+        LegionSpy::log_operation_events(unique_op_id, effects_done,
+                                        get_completion_event());
+      }
+#endif
       complete_operation();
     }
 
@@ -22389,6 +22897,13 @@ namespace Legion {
                                         requirement.privilege_fields);
     }
 
+    //--------------------------------------------------------------------------
+    size_t IndexDetachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return points.size();
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Detach Op 
     /////////////////////////////////////////////////////////////
@@ -22428,16 +22943,17 @@ namespace Legion {
     void PointDetachOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_detach_op();
+      DetachOp::activate();
       owner = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void PointDetachOp::deactivate(void)
+    void PointDetachOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_detach_op();
-      runtime->free_point_detach_op(this);
+      DetachOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_point_detach_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22472,7 +22988,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Resolve our speculation then do the base case
-      resolve_speculation();
       DetachOp::trigger_ready();
     }
 
@@ -22491,6 +23006,68 @@ namespace Legion {
       commit_operation(false/*deactivate*/);
       // Tell our owner that we are done, they will do the deactivate
       owner->handle_point_commit(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effect(effect);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::record_completion_effect(ApEvent effect,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effect(effect, map_applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointDetachOp::record_completion_effects(
+                                               const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      owner->record_completion_effects(effects);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t PointDetachOp::get_collective_points(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_collective_points();
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDetachOp::find_shard_participants(std::vector<ShardID> &shards)
+    //--------------------------------------------------------------------------
+    {
+      return owner->find_shard_participants(shards);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PointDetachOp::convert_collective_views(unsigned requirement_index,
+                       unsigned analysis_index, LogicalRegion region,
+                       const InstanceSet &targets, InnerContext *physical_ctx,
+                       CollectiveMapping *&analysis_mapping, bool &first_local,
+                       LegionVector<FieldMaskSet<InstanceView> > &target_views,
+                       std::map<InstanceView*,size_t> &collective_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_collective_rendezvous(unique_op_id, 
+                        requirement_index, analysis_index);
+      return owner->convert_collective_views(requirement_index, analysis_index,
+          region, targets, physical_ctx, analysis_mapping, first_local,
+          target_views, collective_arrivals);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PointDetachOp::perform_collective_analysis(CollectiveMapping *&mapping,
+                                                    bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      return true;
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -22572,31 +23149,18 @@ namespace Legion {
     void TimingOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_timing();
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TimingOp::activate_timing(void)
+    void TimingOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      activate_operation(); 
-    }
-
-    //--------------------------------------------------------------------------
-    void TimingOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_timing(); 
-      runtime->free_timing_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void TimingOp::deactivate_timing(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
+      Operation::deactivate(false/*free*/);
       preconditions.clear();
       result = Future();
+      if (freeop)
+        runtime->free_timing_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22675,11 +23239,6 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
       // Complete the future
       complete_execution();
     }
@@ -22720,32 +23279,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TunableOp::activate_tunable(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation();
-      tunable_id = 0;
-      mapper_id = 0;
-      tag = 0;
-      arg = NULL;
-      argsize = 0;
-      tunable_index = 0;
-      return_type_size = 0;
-      instance = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void TunableOp::deactivate_tunable(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
-      if (arg != NULL)
-        free(arg);
-      result = Future();
-      futures.clear();
-    }
-
-    //--------------------------------------------------------------------------
     Future TunableOp::initialize(InnerContext *ctx, 
                         const TunableLauncher &launcher, Provenance *provenance)
     //--------------------------------------------------------------------------
@@ -22780,15 +23313,28 @@ namespace Legion {
     void TunableOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_tunable();
+      Operation::activate();
+      tunable_id = 0;
+      mapper_id = 0;
+      tag = 0;
+      arg = NULL;
+      argsize = 0;
+      tunable_index = 0;
+      return_type_size = 0;
+      instance = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void TunableOp::deactivate(void)
+    void TunableOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_tunable();
-      runtime->free_tunable_op(this);
+      Operation::deactivate(false/*free*/);
+      if (arg != NULL)
+        free(arg);
+      result = Future();
+      futures.clear();
+      if (freeop)
+        runtime->free_tunable_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22824,8 +23370,8 @@ namespace Legion {
       {
         MemoryManager *manager = 
           runtime->find_memory_manager(runtime->runtime_system_memory);
-        instance = manager->create_future_instance(this, 
-          unique_op_id, completion_event, return_type_size, false/*eager*/);
+        instance = manager->create_future_instance(this, unique_op_id,
+            get_completion_event(), return_type_size, false/*eager*/);
         complete_mapping();
       }
       std::set<ApEvent> pre_events;
@@ -22869,14 +23415,8 @@ namespace Legion {
                                           &input, &output);
       process_result(mapper, output.value, output.size);
       if (runtime->legion_spy_enabled)
-      {
         LegionSpy::log_tunable_value(parent_ctx->get_unique_id(), 
                         tunable_index, output.value, output.size);
-#ifdef LEGION_SPY
-        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                        completion_event); 
-#endif
-      }
       if (instance != NULL)
       {
         if (output.size > return_type_size)
@@ -22891,11 +23431,8 @@ namespace Legion {
         FutureInstance local(output.value, output.size, ApEvent::NO_AP_EVENT,
             runtime, false/*eager*/, true/*external*/, output.take_ownership);
         const ApEvent done = instance->copy_from(&local, this);
-        if (done.exists() && !request_early_complete(done))
-        {
-          complete_execution(Runtime::protect_event(done));
-          return;
-        }
+        if (done.exists())
+          record_completion_effect(done);
       }
       else
       {
@@ -22976,15 +23513,26 @@ namespace Legion {
     void AllReduceOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_all_reduce();
+      Operation::activate();
+      redop_id = 0;
+      future_result_size = 0;
+      serdez_redop_buffer = NULL;
+      serdez_upper_bound = SIZE_MAX;
     }
 
     //--------------------------------------------------------------------------
-    void AllReduceOp::deactivate(void)
+    void AllReduceOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_all_reduce(); 
-      runtime->free_all_reduce_op(this);
+      Operation::deactivate(false/*free*/);
+      future_map = FutureMap();
+      result = Future();
+      sources.clear();
+      targets.clear();
+      if (serdez_redop_buffer != NULL)
+        free(serdez_redop_buffer);
+      if (freeop)
+        runtime->free_all_reduce_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -22999,30 +23547,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ALL_REDUCE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::activate_all_reduce(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_operation(); 
-      redop_id = 0;
-      future_result_size = 0;
-      serdez_redop_buffer = NULL;
-      serdez_upper_bound = SIZE_MAX;
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::deactivate_all_reduce(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_operation();
-      future_map = FutureMap();
-      result = Future();
-      sources.clear();
-      targets.clear();
-      if (serdez_redop_buffer != NULL)
-        free(serdez_redop_buffer);
     }
 
     //--------------------------------------------------------------------------
@@ -23107,12 +23631,19 @@ namespace Legion {
       const Realm::ExternalMemoryResource resource(
           reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
           future_result_size, true/*read only*/);
-      const ApEvent src_ready(
+      ApEvent src_ready(
           PhysicalInstance::create_external_instance(
             source_instance, resource.suggested_memory(), ilg,
             resource, Realm::ProfilingRequestSet()));
+      if ((runtime->legion_spy_enabled || (runtime->profiler != NULL)) &&
+          !src_ready.exists())
+      {
+        ApUserEvent ready = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, ready);
+        src_ready = ready;
+      }
       FutureInstance source(serdez_redop_buffer, future_result_size, 
-          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, false/*external*/,
+          src_ready, runtime, false/*eager*/, false/*external*/,
           false/*own alloc*/, source_instance);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
@@ -23233,14 +23764,14 @@ namespace Legion {
               redop_id, future_result_size)
         }
         done = finalize_serdez_targets(executed);
-        if (request_early_complete(done))
-          executed = RtEvent::NO_RT_EVENT;
+        if (done.exists())
+          record_completion_effect(done);
       }
       else
       {
         done = finalize_serdez_targets(executed);
-        if (request_early_complete(done))
-          executed = RtEvent::NO_RT_EVENT;
+        if (done.exists())
+          record_completion_effect(done);
       }
       result.impl->set_results(done, targets);
       complete_execution(executed);
@@ -23310,7 +23841,8 @@ namespace Legion {
       {
         MemoryManager *manager = runtime->find_memory_manager(*it);
         FutureInstance *instance = manager->create_future_instance(this, 
-          unique_op_id, completion_event, future_result_size, false/*eager*/);
+          unique_op_id, get_completion_event(), future_result_size, 
+          false/*eager*/);
         targets.push_back(instance);
       }
     }
@@ -23365,26 +23897,8 @@ namespace Legion {
       }
       RtEvent completion_precondition;
       if (!postconditions.empty())
-      {
-        const ApEvent done = Runtime::merge_events(NULL, postconditions); 
-        if (!request_early_complete(done))
-          completion_precondition = Runtime::protect_event(done);
-      }
-      else
-        request_early_complete(ApEvent::NO_AP_EVENT);
-      return completion_precondition;
-    }
-
-    //--------------------------------------------------------------------------
-    void AllReduceOp::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      // Still have to do this call to let Legion Spy know we're done
-      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
-                                      ApEvent::NO_AP_EVENT);
-#endif
-      complete_operation();
+        record_completion_effects(postconditions);
+      return RtEvent::NO_RT_EVENT;
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -23463,7 +23977,7 @@ namespace Legion {
       rez.serialize(remote_ptr);
       rez.serialize(source);
       rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize(parent_ctx->did);
       Provenance *provenance = get_provenance();
       if (provenance != NULL)
         provenance->serialize(rez);
@@ -23478,10 +23992,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
-      UniqueID parent_uid;
-      derez.deserialize(parent_uid);
+      DistributedID did;
+      derez.deserialize(did);
       RtEvent ready;
-      parent_ctx = runtime->find_context(parent_uid, false, &ready);
+      parent_ctx = runtime->find_or_request_inner_context(did, ready);
       if (ready.exists())
         ready_events.insert(ready);
       set_provenance(Provenance::deserialize(derez));
@@ -23536,7 +24050,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::deactivate(void)
+    void RemoteOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -23607,6 +24121,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteOp::record_completion_effect(ApEvent effect)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called without map applied events
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::record_completion_effect(ApEvent effect,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (source != runtime->address_space)
+      {
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_ptr);
+          rez.serialize(effect);
+          rez.serialize(applied);
+        }
+        runtime->send_remote_op_completion_effect(source, rez);
+        applied_events.insert(applied);
+      }
+      else
+        remote_ptr->record_completion_effect(effect, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::record_completion_effects(const std::set<ApEvent> &effects)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called without map applied events
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void RemoteOp::handle_deferred_deletion(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -23667,6 +24219,11 @@ namespace Legion {
         case FILL_OP_KIND:
           {
             result = new RemoteFillOp(runtime, remote_ptr, source);
+            break;
+          }
+        case DISCARD_OP_KIND:
+          {
+            result = new RemoteDiscardOp(runtime, remote_ptr, source);
             break;
           }
         case ATTACH_OP_KIND:
@@ -23742,6 +24299,26 @@ namespace Legion {
 #endif
       op->handle_profiling_update(update_count);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteOp::handle_completion_effect(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *op;
+      derez.deserialize(op);
+      ApEvent effect;
+      derez.deserialize(effect);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      std::set<RtEvent> applied_events;
+      op->record_completion_effect(effect, applied_events);
+      if (!applied_events.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(done);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -23843,15 +24420,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteMapOp::select_sources(const unsigned index,
-                                     const InstanceRef &target,
-                                     const InstanceSet &sources,
-                                     std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -23859,12 +24437,13 @@ namespace Legion {
 #endif
       Mapper::SelectInlineSrcInput input;
       Mapper::SelectInlineSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_inline_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -23984,20 +24563,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteCopyOp::select_sources(const unsigned index,
-                                      const InstanceRef &target,
-                                      const InstanceSet &sources,
-                                      std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
       Mapper::SelectCopySrcInput input;
       Mapper::SelectCopySrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       input.is_src = false;
       input.is_dst = false;
@@ -24038,7 +24619,7 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_copy_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -24158,15 +24739,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteCloseOp::select_sources(const unsigned index,
-                                       const InstanceRef &target,
-                                       const InstanceSet &sources,
-                                       std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -24174,12 +24756,13 @@ namespace Legion {
 #endif
       Mapper::SelectCloseSrcInput input;
       Mapper::SelectCloseSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_close_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -24296,17 +24879,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ACQUIRE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteAcquireOp::select_sources(const unsigned index,
-                                         const InstanceRef &target,
-                                         const InstanceSet &sources,
-                                         std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -24427,15 +24999,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteReleaseOp::select_sources(const unsigned index,
-                                         const InstanceRef &target,
-                                         const InstanceSet &sources,
-                                         std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -24443,12 +25016,13 @@ namespace Legion {
 #endif
       Mapper::SelectReleaseSrcInput input;
       Mapper::SelectReleaseSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_release_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -24567,17 +25141,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteFillOp::select_sources(const unsigned index,
-                                      const InstanceRef &target,
-                                      const InstanceSet &sources,
-                                      std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteFillOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -24591,6 +25154,81 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       unpack_external_fill(derez, runtime);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Discard Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteDiscardOp::RemoteDiscardOp(Runtime *rt, 
+                                     Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDiscardOp::~RemoteDiscardOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteDiscardOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t RemoteDiscardOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDiscardOp::set_context_index(size_t index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteDiscardOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteDiscardOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DISCARD_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteDiscardOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DISCARD_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDiscardOp::pack_remote_operation(Serializer &rez,
+                 AddressSpaceID target, std::set<RtEvent> &applied_events) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDiscardOp::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -24702,15 +25340,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemotePartitionOp::select_sources(const unsigned index,
-                                           const InstanceRef &target,
-                                           const InstanceSet &sources,
-                                           std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->select_sources(index, target, sources, ranking);
+        remote_ptr->select_sources(index, target, sources, ranking, points);
         return;
       }
 #ifdef DEBUG_LEGION
@@ -24718,12 +25357,13 @@ namespace Legion {
 #endif
       Mapper::SelectPartitionSrcInput input;
       Mapper::SelectPartitionSrcOutput output;
-      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(sources, input.source_instances,
+                          input.collective_views); 
       prepare_for_mapping(target, input.target);
       if (mapper == NULL)
         mapper = runtime->find_mapper(map_id);
       mapper->invoke_select_partition_sources(this, &input, &output);
-      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking, points);
     }
 
     //--------------------------------------------------------------------------
@@ -24825,17 +25465,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteAttachOp::select_sources(const unsigned index,
-                                        const InstanceRef &target,
-                                        const InstanceSet &sources,
-                                        std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // Should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteAttachOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -24930,9 +25559,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::select_sources(const unsigned index,
-                                        const InstanceRef &target,
-                                        const InstanceSet &sources,
-                                        std::vector<unsigned> &ranking)
+                                    PhysicalManager *target,
+                                    const std::vector<InstanceView*> &sources,
+                                    std::vector<unsigned> &ranking,
+                                    std::map<unsigned,PhysicalManager*> &points)
     //--------------------------------------------------------------------------
     {
       // TODO: invoke the mapper
@@ -25032,17 +25662,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteDeletionOp::select_sources(const unsigned index, 
-                                          const InstanceRef &target,
-                                          const InstanceSet &sources,
-                                          std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteDeletionOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -25133,17 +25752,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return TRACE_REPLAY_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteReplayOp::select_sources(const unsigned index, 
-                                        const InstanceRef &target,
-                                        const InstanceSet &sources,
-                                        std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -25240,17 +25848,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteSummaryOp::select_sources(const unsigned index, 
-                                         const InstanceRef &target,
-                                         const InstanceSet &sources,
-                                         std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void RemoteSummaryOp::pack_remote_operation(Serializer &rez,
                  AddressSpaceID target, std::set<RtEvent> &applied_events) const
     //--------------------------------------------------------------------------
@@ -25269,4 +25866,3 @@ namespace Legion {
 }; // namespace Legion 
 
 // EOF
-

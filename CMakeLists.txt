@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2023 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 #------------------------------------------------------------------------------#
 # Version information
@@ -295,16 +295,14 @@ set(BINDINGS_DEFAULT_MODULE "" CACHE STRING "module to load by default in Python
 #------------------------------------------------------------------------------#
 option(Legion_USE_Kokkos "Enable support for the Kokkos runtime" OFF)
 if(Legion_USE_Kokkos)
-  # the kokkos interop stuff uses target_link_options, which doesn't show up
-  #  until cmake 3.13
-  cmake_minimum_required(VERSION 3.13)
-
   # cmake uses -DKokkos_DIR=.../lib/cmake to look in non-standard locations
   #
   # starting with Kokkos 3.3.0, including a cuda-enabled Kokkos will mess with
   #  the global compilation settings unless you ask it not to by requesting
   #  the 'separable_compilation' component
   find_package(Kokkos REQUIRED OPTIONAL_COMPONENTS separable_compilation)
+
+  message(STATUS "Kokkos version: ${Kokkos_VERSION}")
 
   # in order to build using Kokkos' exported compile options, we need to use
   #  the same compiler - newer versions of Kokkos will tell us, but for older
@@ -321,6 +319,85 @@ if(Legion_USE_Kokkos)
   endif()
 
   set(REALM_USE_KOKKOS ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# network interface configuration
+#------------------------------------------------------------------------------#
+set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
+separate_arguments(Legion_NETWORKS)
+
+# compatibility mode - Legion_USE_GASNet==ON -> Legion_NETWORKS=gasnet1
+option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
+if(Legion_USE_GASNet)
+  list(APPEND Legion_NETWORKS gasnet1)
+endif()
+
+#------------------------------------------------------------------------------#
+# GASNet configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
+  option(Legion_EMBED_GASNet "Embed a custom GASNet build in Realm library" OFF)
+  if(Legion_EMBED_GASNet)
+    if(NOT GASNet_CONDUIT)
+      message(FATAL_ERROR "GASNet_CONDUIT must be set when using an embedded GASNet build")
+    endif()
+    # an embedded GASNet uses the stanfordlegion/gasnet helper repository for
+    #  a build wrapper and curated-for-Legion GASNet configurations - it can
+    #  be fetched from github directly (the default) or use a local (and
+    #  perhaps modified) clone of the repository
+    set(Legion_EMBED_GASNet_GITREPO
+      "https://github.com/StanfordLegion/gasnet.git"
+      CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
+    set(Legion_EMBED_GASNet_GITREF
+      "master"
+      CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
+    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
+    set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
+    set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
+  else()
+    set(GASNet_THREADING par)
+    set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
+    find_package(GASNet REQUIRED)
+    if(NOT GASNet_THREADING STREQUAL "par")
+      message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
+    endif()
+  endif()
+
+  # define variable for realm_defines.h
+  if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
+    set(REALM_USE_GASNETEX ON)
+  else()
+    set(REALM_USE_GASNET1 ON)
+  endif()
+  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
+  set(GASNET_CONDUIT_${CONDUIT} ON)
+  # conduits other than udp support MPI interop
+  if(NOT ${GASNet_CONDUIT} STREQUAL "udp")
+    set(Legion_MPI_INTEROP ON)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# MPI configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*mpi.*)
+  find_package(MPI REQUIRED)
+  # define variable for realm_defines.h
+  set(REALM_USE_MPI ON)
+  set(Legion_MPI_INTEROP ON)
+endif()
+
+#------------------------------------------------------------------------------#
+# UCX configuration
+#------------------------------------------------------------------------------#
+if("${Legion_NETWORKS}" MATCHES .*ucx.*)
+  find_package(ucx 1.14.0 REQUIRED CONFIG)
+  message(STATUS "Found UCX: ${UCX_INCLUDE_DIRS} ${UCX_LIBRARIES})")
+  find_package(MPI REQUIRED) # for MPI bootstrap plugin
+  # define variable for realm_defines.h
+  set(REALM_USE_UCX ON)
+  set(Legion_MPI_INTEROP ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -360,8 +437,8 @@ if(Legion_USE_CUDA)
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
 
-  # default is to use hijack unless Kokkos interop is enabled
-  if(Legion_USE_Kokkos)
+  # default is to use hijack unless Kokkos interop is enabled or network is UCX
+  if(Legion_USE_Kokkos OR "${Legion_NETWORKS}" MATCHES .*ucx.*)
     option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
   else()
     option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
@@ -441,75 +518,6 @@ if(Legion_USE_HIP)
     set(REALM_USE_HIP_HIJACK ON)
   endif()
 
-endif()
-
-
-#------------------------------------------------------------------------------#
-# network interface configuration
-#------------------------------------------------------------------------------#
-set(Legion_NETWORKS "" CACHE STRING "Network backend(s) to use")
-separate_arguments(Legion_NETWORKS)
-
-# compatibility mode - Legion_USE_GASNet==ON -> Legion_NETWORKS=gasnet1
-option(Legion_USE_GASNet "Enable the distributed GASNet backend" OFF)
-if(Legion_USE_GASNet)
-  list(APPEND Legion_NETWORKS gasnet1)
-endif()
-
-#------------------------------------------------------------------------------#
-# GASNet configuration
-#------------------------------------------------------------------------------#
-if("${Legion_NETWORKS}" MATCHES ".*gasnet(1|ex).*")
-  option(Legion_EMBED_GASNet "Embed a custom GASNet build in Realm library" OFF)
-  if(Legion_EMBED_GASNet)
-    if(NOT GASNet_CONDUIT)
-      message(FATAL_ERROR "GASNet_CONDUIT must be set when using an embedded GASNet build")
-    endif()
-    # an embedded GASNet uses the stanfordlegion/gasnet helper repository for
-    #  a build wrapper and curated-for-Legion GASNet configurations - it can
-    #  be fetched from github directly (the default) or use a local (and
-    #  perhaps modified) clone of the repository
-    set(Legion_EMBED_GASNet_GITREPO
-      "https://github.com/StanfordLegion/gasnet.git"
-      CACHE STRING "URL for cloning StanfordLegion/gasnet repository")
-    set(Legion_EMBED_GASNet_GITREF
-      "master"
-      CACHE STRING "Branch/tag/commit to use from StanfordLegion/gasnet repository")
-    set(Legion_EMBED_GASNet_LOCALSRC "" CACHE STRING "Path to local clone of stanfordlegion/gasnet repository")
-    set(Legion_EMBED_GASNet_VERSION "" CACHE STRING "Override GASNet version to build")
-    set(Legion_EMBED_GASNet_CONFIGURE_ARGS "" CACHE STRING "Extra configuration arguments for GASNet")
-  else()
-    set(GASNet_THREADING par)
-    set(GASNet_PREFERRED_CONDUITS aries gemini ibv)
-    find_package(GASNet REQUIRED)
-    if(NOT GASNet_THREADING STREQUAL "par")
-      message(FATAL_ERROR "GASNet threading mode \"${GASNet_THREADING}\" is not currently supported by Legion")
-    endif()
-  endif()
-
-  # define variable for realm_defines.h
-  if("${Legion_NETWORKS}" MATCHES .*gasnetex.*)
-    set(REALM_USE_GASNETEX ON)
-  else()
-    set(REALM_USE_GASNET1 ON)
-  endif()
-  string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
-  set(GASNET_CONDUIT_${CONDUIT} ON)
-  # conduits other than udp support MPI interop
-  if(NOT ${GASNet_CONDUIT} STREQUAL "udp")
-    set(Legion_MPI_INTEROP ON)
-  endif()
-endif()
-
-#------------------------------------------------------------------------------#
-# MPI configuration
-#------------------------------------------------------------------------------#
-if("${Legion_NETWORKS}" MATCHES .*mpi.*)
-  cmake_minimum_required(VERSION 3.9)
-  find_package(MPI REQUIRED)
-  # define variable for realm_defines.h
-  set(REALM_USE_MPI ON)
-  set(Legion_MPI_INTEROP ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -841,6 +849,7 @@ option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
 option(Legion_BUILD_TESTS "Build Legion tests" OFF)
 option(Legion_BUILD_JUPYTER "Build Legion jupyter notebook support" OFF)
 option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
+option(Legion_BUILD_RUST_PROFILER "Build Rust version of Legion profiler" OFF)
 if(Legion_ENABLE_TESTING)
   enable_testing()
   # if Legion_TEST_LAUNCHER is set, split the string into a list
@@ -939,6 +948,40 @@ if(Legion_REDOP_COMPLEX AND Legion_USE_HIP)
   if(NOT HIP_THRUST_ROOT_DIR)
     message(FATAL_ERROR "When using HIP, complex support requires that the HIP version of Thrust be installed")
   endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# Build and install legion_prof_rs
+#------------------------------------------------------------------------------#
+
+if(Legion_BUILD_ALL OR Legion_BUILD_RUST_PROFILER)
+  find_package(Corrosion 0.3.2 QUIET)
+
+  if(NOT Corrosion_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+      Corrosion
+      GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+      GIT_TAG 020d11f092314a58942891f14b4cd20c0edff80a # v0.3.2
+    )
+    # Set any global configuration variables such as `Rust_TOOLCHAIN` before this line!
+    FetchContent_MakeAvailable(Corrosion)
+  endif()
+
+  corrosion_import_crate(
+    MANIFEST_PATH tools/legion_prof_rs/Cargo.toml
+    PROFILE release
+  )
+
+  install(
+    PROGRAMS
+      ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/legion_prof
+    TYPE
+      BIN
+    PERMISSIONS
+      OWNER_EXECUTE OWNER_WRITE OWNER_READ
+      GROUP_EXECUTE GROUP_WRITE GROUP_READ
+      WORLD_EXECUTE WORLD_READ)
 endif()
 
 #------------------------------------------------------------------------------#

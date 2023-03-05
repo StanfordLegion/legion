@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2023 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -1565,6 +1565,8 @@ function base.task:set_name(name)
   self.unique_task_identifier = make_unique_task_identifier(name)
   if base.config["separate"] then
     self.taskid:setname("__regent_task_" .. self.unique_task_identifier .. "_task_id")
+    self.mapper_id:setname("__regent_task_" .. self.unique_task_identifier .. "_mapper_id")
+    self.mapping_tag_id:setname("__regent_task_" .. self.unique_task_identifier .. "_mapping_tag_id")
   end
 end
 

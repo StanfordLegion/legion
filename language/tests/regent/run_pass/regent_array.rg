@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, Los Alamos National Laboratory
+-- Copyright 2023 Stanford University, Los Alamos National Laboratory
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -52,6 +52,19 @@ end
 local foo = make_task(fs1)
 local bar = make_task(fs2)
 
+task test_conversion(is : ispace(int1d), r : region(is, fs2))
+where reads writes(r) do
+  for p in is do
+    var tmp : fs2 = r[p]
+    for i = 0, 10 do
+      regentlib.assert(tmp.data[i] == 2 * (100 + [int](p)) + 3, "test failed")
+      tmp.data[i] += 10
+      r[p] = tmp
+      regentlib.assert(r[p].data[i] == 2 * (100 + [int](p)) + 13, "test failed")
+    end
+  end
+end
+
 task toplevel()
   var is = ispace(int1d, 10)
   var r = region(is, fs1)
@@ -73,6 +86,8 @@ task toplevel()
       regentlib.assert(s[p].data[i] == 2 * (100 + [int](p)) + 3, "test failed")
     end
   end
+
+  test_conversion(is, s)
 end
 
 regentlib.start(toplevel)

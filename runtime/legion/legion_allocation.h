@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,12 +53,13 @@ namespace Legion {
       REDUCTION_ALLOC,
       PREDICATE_ALLOC,
       FUTURE_RESULT_ALLOC,
-      INDIVIDUAL_INST_MANAGER_ALLOC,
-      COLLECTIVE_INST_MANAGER_ALLOC,
+      PHYSICAL_MANAGER_ALLOC,
       TREE_CLOSE_ALLOC,
       TREE_CLOSE_IMPL_ALLOC,
       MATERIALIZED_VIEW_ALLOC,
       REDUCTION_VIEW_ALLOC,
+      REPLICATED_VIEW_ALLOC,
+      ALLREDUCE_VIEW_ALLOC,
       FILL_VIEW_ALLOC,
       PHI_VIEW_ALLOC,
       INDIVIDUAL_TASK_ALLOC,
@@ -92,13 +93,13 @@ namespace Legion {
       PENDING_PARTITION_OP_ALLOC,
       DEPENDENT_PARTITION_OP_ALLOC,
       FILL_OP_ALLOC,
+      DISCARD_OP_ALLOC,
       ATTACH_OP_ALLOC,
       DETACH_OP_ALLOC,
       MESSAGE_BUFFER_ALLOC,
       EXECUTING_CHILD_ALLOC,
       EXECUTED_CHILD_ALLOC,
       COMPLETE_CHILD_ALLOC,
-      PHYSICAL_MANAGER_ALLOC,
       LOGICAL_VIEW_ALLOC,
       LOGICAL_FIELD_VERSIONS_ALLOC,
       LOGICAL_FIELD_STATE_ALLOC,

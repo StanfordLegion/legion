@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Stanford University
+# Copyright 2023 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionBindings_python)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -30,10 +30,29 @@ target_link_libraries(legion_python Legion::Legion)
 if(BINDINGS_DEFAULT_MODULE)
   target_compile_definitions(legion_python PRIVATE "BINDINGS_DEFAULT_MODULE=${BINDINGS_DEFAULT_MODULE}")
 endif()
+
+add_library(legion_canonical_python SHARED canonical_python.cc)
+target_link_libraries(legion_canonical_python Legion::Legion)
+set_target_properties(legion_canonical_python PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(legion_canonical_python PROPERTIES OUTPUT_NAME "legion_canonical_python${INSTALL_SUFFIX}")
+set_target_properties(legion_canonical_python PROPERTIES SOVERSION ${SOVERSION})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(legion_canonical_python PROPERTIES BUILD_RPATH "\$ORIGIN")
+  set_target_properties(legion_canonical_python PROPERTIES INSTALL_RPATH "\$ORIGIN")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set_target_properties(legion_canonical_python PROPERTIES BUILD_RPATH "@loader_path")
+  set_target_properties(legion_canonical_python PROPERTIES INSTALL_RPATH "@loader_path")
+endif ()
+
 install(TARGETS legion_python
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(TARGETS legion_canonical_python
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
 # Allow passing extra args to `setup.py` on install like

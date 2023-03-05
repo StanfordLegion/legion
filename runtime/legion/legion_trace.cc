@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ namespace Legion {
                                bool static_trace, Provenance *p,
                                const std::set<RegionTreeID> *trees)
       : context(c), tid(t), begin_provenance(p), end_provenance(NULL),
-        last_memoized(0), physical_op_count(0), blocking_call_observed(false), 
+        blocking_call_observed(false),
         has_intermediate_ops(false), fixed(false),
         recording(true), trace_fence(NULL),
         static_translator(static_trace ? new StaticTranslator(trees) : NULL)
@@ -133,23 +133,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalTrace::register_physical_only(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      std::pair<Operation*,GenerationID> key(op, op->get_generation());
-      const size_t index = operations.size();
-      op->set_trace_local_id(index);
-      op->add_mapping_reference(key.second);
-      operations.push_back(key);
-      current_uids[key] = op->get_unique_op_id();
-#else
-      op->set_trace_local_id(physical_op_count++);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalTrace::register_operation(Operation *op, GenerationID gen)
+    size_t LogicalTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -157,32 +141,7 @@ namespace Legion {
 #endif
       std::pair<Operation*,GenerationID> key(op,gen);
       const size_t index = operations.size();
-      if (!context->runtime->no_physical_tracing &&
-          op->is_memoizing() && !op->is_internal_op())
-      {
-        if (index != last_memoized)
-        {
-          for (unsigned i = 0; i < operations.size(); ++i)
-          {
-            Operation *op = operations[i].first;
-            if (!op->is_internal_op() && op->get_memoizable() == NULL)
-              REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
-                  "Invalid memoization request. Operation of type %s (UID %lld)"
-                  " at index %d in trace %d requested memoization, but physical"
-                  " tracing does not support this operation type yet.",
-                  Operation::get_string_rep(op->get_operation_kind()),
-                  op->get_unique_op_id(), i, tid);
-          }
-          REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
-              "Invalid memoization request. A trace cannot be partially "
-              "memoized. Please change the mapper to request memoization "
-              "for all the operations in the trace");
-        }
-        op->set_trace_local_id(index);
-        last_memoized = index + 1;
-      }
-      if (has_physical_trace() &&
-          !op->is_internal_op() && op->get_memoizable() == NULL)
+      if (has_physical_trace() && op->get_memoizable() == NULL)
         REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
             "Invalid memoization request. Operation of type %s (UID %lld) "
             "at index %zd in trace %d requested memoization, but physical "
@@ -272,6 +231,7 @@ namespace Legion {
         else // need to at least record a dependence on the fence event
           op->register_dependence(trace_fence, trace_fence_gen);
       }
+      return index;
     }
 
     //--------------------------------------------------------------------------
@@ -482,8 +442,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(operations.empty());
 #endif
-          // Reset the physical op count for the next replay
-          physical_op_count = 0;
 #endif
           return;
         }
@@ -525,10 +483,15 @@ namespace Legion {
           for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
                 it = operations.begin(); it != operations.end(); it++)
             it->first->remove_mapping_reference(it->second);
+          // Remove mapping fences on the frontiers which haven't been removed 
+          for (std::set<std::pair<Operation*,GenerationID> >::const_iterator 
+                it = frontiers.begin(); it != frontiers.end(); it++)
+            it->first->remove_mapping_reference(it->second);
         }
       }
       operations.clear();
-      last_memoized = 0;
+      if (physical_trace != NULL)
+        physical_trace->reset_last_memoized();
       frontiers.clear();
 #ifdef LEGION_SPY
       current_uids.clear();
@@ -765,23 +728,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void StaticTrace::register_operation(Operation *op, GenerationID gen)
+    size_t StaticTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const size_t index = operations.size();
-      if (!ctx->runtime->no_physical_tracing &&
-          op->is_memoizing() && !op->is_internal_op())
-      {
-        if (index != last_memoized)
-          REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
-              "Invalid memoization request. A trace cannot be partially "
-              "memoized. Please change the mapper to request memoization "
-              "for all the operations in the trace");
-        op->set_trace_local_id(index);
-        last_memoized = index + 1;
-      }
-
       if (!op->is_internal_op())
       {
         frontiers.insert(key);
@@ -901,6 +852,7 @@ namespace Legion {
           }
         }
       }
+      return index;
     }
 
     //--------------------------------------------------------------------------
@@ -938,7 +890,8 @@ namespace Legion {
         it->first->remove_mapping_reference(it->second);
       operations.clear();
       frontiers.clear();
-      last_memoized = 0;
+      if (physical_trace != NULL)
+        physical_trace->reset_last_memoized();
 #ifdef LEGION_SPY
       current_uids.clear();
       num_regions.clear();
@@ -1041,7 +994,8 @@ namespace Legion {
       // We don't record mapping dependences when tracing so we don't need
       // to remove them when we are here
       operations.clear();
-      last_memoized = 0;
+      if (physical_trace != NULL)
+        physical_trace->reset_last_memoized();
       op_map.clear();
       internal_dependences.clear();
       tracing = false;
@@ -1068,35 +1022,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DynamicTrace::register_operation(Operation *op, GenerationID gen)
+    size_t DynamicTrace::register_operation(Operation *op, GenerationID gen)
     //--------------------------------------------------------------------------
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const size_t index = operations.size();
-      if (!ctx->runtime->no_physical_tracing &&
-          op->is_memoizing() && !op->is_internal_op())
-      {
-        if (index != last_memoized)
-        {
-          for (unsigned i = 0; i < operations.size(); ++i)
-          {
-            Operation *op = operations[i].first;
-            if (!op->is_internal_op() && op->get_memoizable() == NULL)
-              REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
-                  "Invalid memoization request. Operation of type %s (UID %lld)"
-                  " at index %d in trace %d requested memoization, but physical"
-                  " tracing does not support this operation type yet.",
-                  Operation::get_string_rep(op->get_operation_kind()),
-                  op->get_unique_op_id(), i, tid);
-          }
-          REPORT_LEGION_ERROR(ERROR_INCOMPLETE_PHYSICAL_TRACING,
-              "Invalid memoization request. A trace cannot be partially "
-              "memoized. Please change the mapper to request memoization "
-              "for all the operations in the trace");
-        }
-        op->set_trace_local_id(index);
-        last_memoized = index + 1;
-      }
       if (has_physical_trace() &&
           !op->is_internal_op() && op->get_memoizable() == NULL)
         REPORT_LEGION_ERROR(ERROR_PHYSICAL_TRACING_UNSUPPORTED_OP,
@@ -1281,6 +1211,7 @@ namespace Legion {
           }
         }
       }
+      return index;
     }
 
 #if 0
@@ -1560,23 +1491,6 @@ namespace Legion {
       return *this;
     }
 
-    //--------------------------------------------------------------------------
-    void TraceOp::execute_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapping_tracker == NULL);
-#endif
-      // Make a dependence tracker
-      mapping_tracker = new MappingDependenceTracker();
-      // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_implicit_dependences(this);
-      parent_ctx->invalidate_trace_cache(local_trace, this);
-
-      trigger_dependence_analysis();
-      end_dependence_analysis();
-    }
-
     /////////////////////////////////////////////////////////////
     // TraceCaptureOp 
     /////////////////////////////////////////////////////////////
@@ -1621,9 +1535,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      local_trace = trace;
-      // Now mark our trace as NULL to avoid registering this operation
-      trace = NULL;
       tracing = false;
       current_template = NULL;
       has_blocking_call = has_block;
@@ -1635,15 +1546,16 @@ namespace Legion {
     void TraceCaptureOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::deactivate(void)
+    void TraceCaptureOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_capture_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_capture_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1664,18 +1576,14 @@ namespace Legion {
     void TraceCaptureOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(trace == NULL);
-      assert(local_trace != NULL);
-#endif
       // Indicate that we are done capturing this trace
-      local_trace->end_trace_execution(this);
+      trace->end_trace_execution(this);
       // Register this fence with all previous users in the parent's context
       FenceOp::trigger_dependence_analysis();
-      parent_ctx->record_previous_trace(local_trace);
-      if (local_trace->is_recording())
+      parent_ctx->record_previous_trace(trace);
+      if (trace->is_recording())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
@@ -1695,7 +1603,7 @@ namespace Legion {
       // Now finish capturing the physical trace
       if (is_recording)
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
         assert(current_template != NULL);
@@ -1720,10 +1628,10 @@ namespace Legion {
             execution_preconditions.insert(pending_deletion);
         }
         // Reset the local trace
-        local_trace->initialize_tracing_state();
+        trace->initialize_tracing_state();
       }
-      if (remove_trace_reference && local_trace->remove_reference())
-        delete local_trace;
+      if (remove_trace_reference && trace->remove_reference())
+        delete trace;
       FenceOp::trigger_mapping();
     }
 
@@ -1771,9 +1679,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
-      local_trace = trace;
-      // Now mark our trace as NULL to avoid registering this operation
-      trace = NULL;
       tracing = false;
       current_template = NULL;
       replayed = false;
@@ -1785,15 +1690,16 @@ namespace Legion {
     void TraceCompleteOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::deactivate(void)
+    void TraceCompleteOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_trace_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_trace_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -1814,34 +1720,30 @@ namespace Legion {
     void TraceCompleteOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(trace == NULL);
-      assert(local_trace != NULL);
-#endif
 #ifdef LEGION_SPY
-      if (local_trace->is_replaying())
+      if (trace->is_replaying())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
-        local_trace->perform_logging(
+        trace->perform_logging(
          physical_trace->get_current_template()->get_fence_uid(), unique_op_id);
       }
 #endif
-      local_trace->end_trace_execution(this);
-      parent_ctx->record_previous_trace(local_trace);
+      trace->end_trace_execution(this);
+      parent_ctx->record_previous_trace(trace);
 
-      if (local_trace->is_replaying())
+      if (trace->is_replaying())
       {
         if (has_blocking_call)
           REPORT_LEGION_ERROR(ERROR_INVALID_PHYSICAL_TRACING,
             "Physical tracing violation! Trace %d in task %s (UID %lld) "
             "encountered a blocking API call that was unseen when it was "
             "recorded. It is required that traces do not change their "
-            "behavior.", local_trace->get_trace_id(),
+            "behavior.", trace->get_trace_id(),
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif 
@@ -1854,18 +1756,20 @@ namespace Legion {
         // We need to do this because we're not registering this as
         // a fence with the context
         physical_trace->chain_replays(this);
-        physical_trace->record_previous_template_completion(completion_event);
-        local_trace->initialize_tracing_state();
+        physical_trace->record_previous_template_completion(
+                                      get_completion_event());
+        trace->initialize_tracing_state();
         replayed = true;
         return;
       }
-      else if (local_trace->is_recording())
+      else if (trace->is_recording())
       {
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
         assert(physical_trace != NULL);
 #endif
-        physical_trace->record_previous_template_completion(completion_event);
+        physical_trace->record_previous_template_completion(
+                                      get_completion_event());
         current_template = physical_trace->get_current_template();
         physical_trace->clear_cached_template();
         // Save this for later since we can't read it safely in mapping stage
@@ -1902,11 +1806,11 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(current_template != NULL);
-        assert(local_trace->get_physical_trace() != NULL);
+        assert(trace->get_physical_trace() != NULL);
         assert(current_template->is_recording());
 #endif
         current_template->finalize(parent_ctx, unique_op_id, has_blocking_call);
-        PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+        PhysicalTrace *physical_trace = trace->get_physical_trace();
         if (!current_template->is_replayable())
         {
           physical_trace->record_failed_capture(current_template);
@@ -1924,7 +1828,7 @@ namespace Legion {
           if (pending_deletion.exists())
             execution_preconditions.insert(pending_deletion);
         }
-        local_trace->initialize_tracing_state();
+        trace->initialize_tracing_state();
       }
       else if (replayed)
       {
@@ -1934,12 +1838,7 @@ namespace Legion {
         std::set<ApEvent> template_postconditions;
         current_template->finish_replay(template_postconditions);
         complete_mapping();
-        if (!template_postconditions.empty())
-          Runtime::trigger_event(NULL, completion_event, 
-              Runtime::merge_events(NULL, template_postconditions));
-        else
-          Runtime::trigger_event(NULL, completion_event);
-        need_completion_trigger = false;
+        record_completion_effects(template_postconditions);
         complete_execution();
         return;
       }
@@ -1983,29 +1882,27 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceReplayOp::initialize_replay(InnerContext *ctx, 
-                                    LogicalTrace *trace, Provenance *provenance)
+                                       LogicalTrace *tr, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      local_trace = trace;
+      trace = tr;
     }
 
     //--------------------------------------------------------------------------
     void TraceReplayOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::deactivate(void)
+    void TraceReplayOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_replay_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_replay_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2026,17 +1923,13 @@ namespace Legion {
     void TraceReplayOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(trace == NULL);
-      assert(local_trace != NULL);
-#endif
-      PhysicalTrace *physical_trace = local_trace->get_physical_trace();
+      PhysicalTrace *physical_trace = trace->get_physical_trace();
 #ifdef DEBUG_LEGION
       assert(physical_trace != NULL);
 #endif
       bool recurrent = true;
       bool fence_registered = false;
-      bool is_recording = local_trace->is_recording();
+      bool is_recording = trace->is_recording();
       if ((physical_trace->get_current_template() == NULL) || is_recording)
       {
         recurrent = false;
@@ -2048,7 +1941,7 @@ namespace Legion {
             mapped_event.wait();
         }
 #ifdef DEBUG_LEGION
-        assert(!(local_trace->is_recording() || local_trace->is_replaying()));
+        assert(!(trace->is_recording() || trace->is_replaying()));
 #endif
 
         if (physical_trace->get_current_template() == NULL)
@@ -2075,20 +1968,20 @@ namespace Legion {
         // If there were no intermediate dependences then we can just
         // record a dependence on the previous fence
         const ApEvent fence_completion = (recurrent &&
-          !local_trace->has_intermediate_operations()) ?
+          !trace->has_intermediate_operations()) ?
             physical_trace->get_previous_template_completion()
                     : get_completion_event();
-        if (recurrent && local_trace->has_intermediate_operations())
+        if (recurrent && trace->has_intermediate_operations())
         {
           parent_ctx->perform_fence_analysis(this, execution_preconditions,
                                        true/*mapping*/, true/*execution*/);
-          local_trace->reset_intermediate_operations();
+          trace->reset_intermediate_operations();
         }
         if (!fence_registered)
           execution_preconditions.insert(
               parent_ctx->get_current_execution_fence_event());
         physical_trace->initialize_template(fence_completion, recurrent);
-        local_trace->set_state_replay();
+        trace->set_state_replay();
 #ifdef LEGION_SPY
         physical_trace->get_current_template()->set_fence_uid(unique_op_id);
 #endif
@@ -2150,16 +2043,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::initialize_begin(InnerContext *ctx, LogicalTrace *trace,
+    void TraceBeginOp::initialize_begin(InnerContext *ctx, LogicalTrace *tr,
                                         Provenance *provenance)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MAPPING_FENCE, false/*need future*/, provenance);
-#ifdef DEBUG_LEGION
-      assert(trace != NULL);
-#endif
-      local_trace = trace;
-      trace = NULL;
+      trace = tr;
       tracing = false;
     }
 
@@ -2167,15 +2056,16 @@ namespace Legion {
     void TraceBeginOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::deactivate(void)
+    void TraceBeginOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_begin_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_begin_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2196,7 +2086,7 @@ namespace Legion {
     void TraceBeginOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      local_trace->begin_trace_execution(this);
+      trace->begin_trace_execution(this);
       TraceOp::trigger_dependence_analysis();
     }
 
@@ -2259,16 +2149,17 @@ namespace Legion {
     void TraceSummaryOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      activate_fence();
+      TraceOp::activate();
       current_template = NULL;
     }
 
     //--------------------------------------------------------------------------
-    void TraceSummaryOp::deactivate(void)
+    void TraceSummaryOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      deactivate_fence();
-      runtime->free_summary_op(this);
+      TraceOp::deactivate(false/*free*/);
+      if (freeop)
+        runtime->free_summary_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2328,7 +2219,7 @@ namespace Legion {
           !(runtime->no_trace_optimization || runtime->no_fence_elision)),
         repl_ctx(dynamic_cast<ReplicateContext*>(lt->context)),
         previous_replay(NULL), current_template(NULL), nonreplayable_count(0),
-        new_template_count(0),
+        new_template_count(0), last_memoized(0),
         previous_template_completion(ApEvent::NO_AP_EVENT),
         execution_fence_event(ApEvent::NO_AP_EVENT),
         intermediate_execution_fence(false)
@@ -2406,7 +2297,8 @@ namespace Legion {
     void PhysicalTrace::record_failed_capture(PhysicalTemplate *tpl)
     //--------------------------------------------------------------------------
     {
-      if (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING)
+      if ((last_memoized > 0) && 
+          (++nonreplayable_count > LEGION_NON_REPLAYABLE_WARNING))
       {
         const std::string &message = tpl->get_replayable_message();
         const char *message_buffer = message.c_str();
@@ -2423,6 +2315,29 @@ namespace Legion {
         nonreplayable_count = 0;
       }
       current_template = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalTrace::check_memoize_consensus(size_t index)
+    //--------------------------------------------------------------------------
+    {
+      if (index == last_memoized)
+      {
+        last_memoized = index + 1;
+        return true;
+      }
+      else
+      {
+        last_memoized = 0;
+        return false;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::reset_last_memoized(void)
+    //--------------------------------------------------------------------------
+    {
+      last_memoized = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -2581,18 +2496,24 @@ namespace Legion {
            << ", Index expr: " << expr->expr_id
            << ", Field Mask: " << m;
       }
+      else if (view->is_collective_view())
+      {
+        ss << "collective view: " << view
+           << ", Index expr: " << expr->expr_id
+           << ", Field Mask: " << m;
+      }
       else
       {
 #ifdef DEBUG_LEGION
-        assert(view->is_instance_view());
+        assert(view->is_individual_view());
 #endif
         const char *mem_names[] = {
 #define MEM_NAMES(name, desc) #name,
             REALM_MEMORY_KINDS(MEM_NAMES) 
 #undef MEM_NAMES
           };
-        IndividualManager *manager =
-          view->get_manager()->as_individual_manager();
+        PhysicalManager *manager =
+          view->as_individual_view()->get_manager();
         FieldSpaceNode *field_space = manager->field_space_node;
         Memory memory = manager->memory_manager->memory;
 
@@ -2622,51 +2543,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f, DistributedID own_did, 
+    TraceViewSet::TraceViewSet(InnerContext *ctx, DistributedID own_did, 
                                RegionNode *r)
-      : forest(f), region(r), owner_did(own_did)
+      : context(ctx), region(r), owner_did(
+          (own_did > 0) ? own_did : ctx->did), has_collective_views(false)
     //--------------------------------------------------------------------------
     {
       region->add_nested_resource_ref(owner_did);
-    }
-
-    //--------------------------------------------------------------------------
-    TraceViewSet::TraceViewSet(RegionTreeForest *f, TraceViewSet &source,
-                               DistributedID own_did, RegionNode *r)
-      : forest(f), region(r), owner_did(own_did)
-    //--------------------------------------------------------------------------
-    {
-      region->add_nested_resource_ref(owner_did);
-      conditions.swap(source.conditions);
-      if (owner_did > 0)
-      {
-        for (ViewExprs::const_iterator vit = 
-              conditions.begin(); vit != conditions.end(); ++vit)
-        {
-          vit->first->add_nested_valid_ref(owner_did);
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); ++it)
-            it->first->add_nested_expression_reference(owner_did);
-        }
-      }
+      if (owner_did == ctx->did)
+        context->add_base_resource_ref(TRACE_REF);
+      else
+        context->add_nested_resource_ref(owner_did);
     }
 
     //--------------------------------------------------------------------------
     TraceViewSet::~TraceViewSet(void)
     //--------------------------------------------------------------------------
     {
-      if (owner_did > 0)
+      for (ViewExprs::const_iterator vit = 
+            conditions.begin(); vit != conditions.end(); vit++)
       {
-        for (ViewExprs::const_iterator vit = 
-              conditions.begin(); vit != conditions.end(); vit++)
-        {
-          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                vit->second.begin(); it != vit->second.end(); it++)
-            if (it->first->remove_nested_expression_reference(owner_did))
-              delete it->first;
-          if (vit->first->remove_nested_valid_ref(owner_did))
-            delete vit->first;
-        }
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              vit->second.begin(); it != vit->second.end(); it++)
+          if (it->first->remove_nested_expression_reference(owner_did))
+            delete it->first;
+        if (vit->first->remove_nested_valid_ref(owner_did))
+          delete vit->first;
+      }
+      if (owner_did == context->did)
+      {
+        if (context->remove_base_resource_ref(TRACE_REF))
+          delete context;
+      }
+      else
+      {
+        if (context->remove_nested_resource_ref(owner_did))
+          delete context;
       }
       if (region->remove_nested_resource_ref(owner_did))
         delete region;
@@ -2675,7 +2587,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::insert(LogicalView *view, IndexSpaceExpression *expr, 
-                              const FieldMask &mask)
+                              const FieldMask &mask, bool antialiased)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
@@ -2703,11 +2615,12 @@ namespace Legion {
           {
             // Handle the difference fields first before we mutate set_overlap
             FieldMask diff = mask - set_overlap;
-            if (finder->second.insert(expr, mask) && (owner_did > 0))
+            if (finder->second.insert(expr, mask))
               expr->add_nested_expression_reference(owner_did);
           }
           FieldMaskSet<IndexSpaceExpression> to_add;
           std::vector<IndexSpaceExpression*> to_delete;
+          RegionTreeForest *forest = context->runtime->forest;
           for (FieldMaskSet<IndexSpaceExpression>::iterator it =
                 finder->second.begin(); it != finder->second.end(); it++)
           {
@@ -2744,8 +2657,7 @@ namespace Legion {
           }
           for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
                 to_add.begin(); it != to_add.end(); it++)
-            if (finder->second.insert(it->first, it->second) && 
-                (owner_did > 0))
+            if (finder->second.insert(it->first, it->second))
               it->first->add_nested_expression_reference(owner_did);
           for (std::vector<IndexSpaceExpression*>::const_iterator it =
                 to_delete.begin(); it != to_delete.end(); it++)
@@ -2753,37 +2665,72 @@ namespace Legion {
             if (to_add.find(*it) != to_add.end())
               continue;
             finder->second.erase(*it);
-            if ((owner_did > 0) &&
-                (*it)->remove_nested_expression_reference(owner_did))
+            if ((*it)->remove_nested_expression_reference(owner_did))
               delete (*it);
           }
         }
-        else if (finder->second.insert(expr, mask) && (owner_did > 0))
+        else if (finder->second.insert(expr, mask))
           expr->add_nested_expression_reference(owner_did);
       }
       else
       {
-        if (owner_did > 0)
+        if (!antialiased)
         {
-          view->add_nested_valid_ref(owner_did);
-          expr->add_nested_expression_reference(owner_did);
+          if (view->is_collective_view())
+          {
+            FieldMaskSet<InstanceView> antialiased_views;
+            antialias_collective_view(view->as_collective_view(), mask, 
+                                      antialiased_views);
+            // Now we can insert all the antialiased 
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                 antialiased_views.begin(); it != antialiased_views.end(); it++)
+              insert(it->first, expr, it->second, true/*antialiased*/);
+            return;
+          }
+          else if (has_collective_views && view->is_instance_view())
+            antialias_individual_view(view->as_individual_view(), mask);
         }
+        view->add_nested_valid_ref(owner_did);
+        expr->add_nested_expression_reference(owner_did);
         conditions[view].insert(expr, mask);
+        if (view->is_collective_view())
+          has_collective_views = true;
       }
     }
 
     //--------------------------------------------------------------------------
     void TraceViewSet::invalidate(
-           LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask,
-           std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
-           std::map<LogicalView*,unsigned> *view_refs_to_remove)
+       LogicalView *view, IndexSpaceExpression *expr, const FieldMask &mask,
+       std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+       std::map<LogicalView*,unsigned> *view_refs_to_remove, bool antialiased)
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
       if ((finder == conditions.end()) || 
           (finder->second.get_valid_mask() * mask))
+      {
+        if (!antialiased)
+        {
+          if (view->is_collective_view())
+          {
+            FieldMaskSet<InstanceView> antialiased_views;
+            antialias_collective_view(view->as_collective_view(), mask, 
+                                      antialiased_views);
+            // Now we can insert all the antialiased 
+            for (FieldMaskSet<InstanceView>::const_iterator it =
+                 antialiased_views.begin(); it != antialiased_views.end(); it++)
+              invalidate(it->first, expr, it->second, expr_refs_to_remove,
+                  view_refs_to_remove, true/*antialiased*/);
+          }
+          else if (has_collective_views && view->is_instance_view())
+          {
+            antialias_individual_view(view->as_individual_view(), mask);
+            invalidate(view, expr, mask, expr_refs_to_remove, 
+                view_refs_to_remove, true/*antialiased*/);
+          }
+        }
         return;
-      
+      }
       const size_t expr_volume = expr->get_volume();
       IndexSpaceExpression *const total_expr = region->row_source; 
 #ifdef DEBUG_LEGION
@@ -2797,35 +2744,32 @@ namespace Legion {
         if (!(finder->second.get_valid_mask() - mask))
         {
           // Dominate all fields so just filter everything
-          if (owner_did > 0)
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
           {
-            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-                  finder->second.begin(); it != finder->second.end(); it++)
+            if (expr_refs_to_remove != NULL)
             {
-              if (expr_refs_to_remove != NULL)
-              {
-                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
-                  expr_refs_to_remove->find(it->first);
-                if (finder == expr_refs_to_remove->end())
-                  (*expr_refs_to_remove)[it->first] = 1;
-                else
-                  finder->second += 1;
-              }
-              else if (it->first->remove_nested_expression_reference(owner_did))
-                delete it->first;
-            }
-            if (view_refs_to_remove != NULL)
-            {
-              std::map<LogicalView*,unsigned>::iterator finder = 
-                view_refs_to_remove->find(view);
-              if (finder == view_refs_to_remove->end())
-                (*view_refs_to_remove)[view] = 1;
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(it->first);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[it->first] = 1;
               else
                 finder->second += 1;
             }
-            else if (view->remove_nested_valid_ref(owner_did))
-              delete view;
+            else if (it->first->remove_nested_expression_reference(owner_did))
+              delete it->first;
           }
+          if (view_refs_to_remove != NULL)
+          {
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              view_refs_to_remove->find(view);
+            if (finder == view_refs_to_remove->end())
+              (*view_refs_to_remove)[view] = 1;
+            else
+              finder->second += 1;
+          }
+          else if (view->remove_nested_valid_ref(owner_did))
+            delete view;
           conditions.erase(finder);
         }
         else
@@ -2843,37 +2787,31 @@ namespace Legion {
                 to_delete.begin(); it != to_delete.end(); it++)
           {
             finder->second.erase(*it);
-            if (owner_did > 0)
+            if (expr_refs_to_remove != NULL)
             {
-              if (expr_refs_to_remove != NULL)
-              {
-                std::map<IndexSpaceExpression*,unsigned>::iterator finder =
-                  expr_refs_to_remove->find(*it);
-                if (finder == expr_refs_to_remove->end())
-                  (*expr_refs_to_remove)[*it] = 1;
-                else
-                  finder->second += 1;
-              }
-              else if ((*it)->remove_nested_expression_reference(owner_did))
-                delete (*it);
+              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+                expr_refs_to_remove->find(*it);
+              if (finder == expr_refs_to_remove->end())
+                (*expr_refs_to_remove)[*it] = 1;
+              else
+                finder->second += 1;
             }
+            else if ((*it)->remove_nested_expression_reference(owner_did))
+              delete (*it);
           }
           if (finder->second.empty())
           {
-            if (owner_did > 0)
+            if (view_refs_to_remove != NULL)
             {
-              if (view_refs_to_remove != NULL)
-              {
-                std::map<LogicalView*,unsigned>::iterator finder = 
-                  view_refs_to_remove->find(view);
-                if (finder == view_refs_to_remove->end())
-                  (*view_refs_to_remove)[view] = 1;
-                else
-                  finder->second += 1;
-              }
-              else if (view->remove_nested_valid_ref(owner_did))
-                delete view;
+              std::map<LogicalView*,unsigned>::iterator finder = 
+                view_refs_to_remove->find(view);
+              if (finder == view_refs_to_remove->end())
+                (*view_refs_to_remove)[view] = 1;
+              else
+                finder->second += 1;
             }
+            else if (view->remove_nested_valid_ref(owner_did))
+              delete view;
             conditions.erase(finder);
           }
           else
@@ -2885,6 +2823,7 @@ namespace Legion {
         // We need intersection tests as part of filtering
         FieldMaskSet<IndexSpaceExpression> to_add;
         std::vector<IndexSpaceExpression*> to_delete;
+        RegionTreeForest *forest = context->runtime->forest;
         for (FieldMaskSet<IndexSpaceExpression>::iterator it =
               finder->second.begin(); it != finder->second.end(); it++)
         {
@@ -2917,7 +2856,7 @@ namespace Legion {
         }
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               to_add.begin(); it != to_add.end(); it++)
-          if (finder->second.insert(it->first, it->second) && (owner_did > 0))
+          if (finder->second.insert(it->first, it->second))
             it->first->add_nested_expression_reference(owner_did);
         for (std::vector<IndexSpaceExpression*>::const_iterator it =
               to_delete.begin(); it != to_delete.end(); it++)
@@ -2925,37 +2864,31 @@ namespace Legion {
           if (to_add.find(*it) != to_add.end())
             continue;
           finder->second.erase(*it);
-          if (owner_did > 0)
+          if (expr_refs_to_remove != NULL)
           {
-            if (expr_refs_to_remove != NULL)
-            {
-              std::map<IndexSpaceExpression*,unsigned>::iterator finder =
-                expr_refs_to_remove->find(*it);
-              if (finder == expr_refs_to_remove->end())
-                (*expr_refs_to_remove)[*it] = 1;
-              else
-                finder->second += 1;
-            }
-            else if ((*it)->remove_nested_expression_reference(owner_did))
-              delete (*it);
+            std::map<IndexSpaceExpression*,unsigned>::iterator finder =
+              expr_refs_to_remove->find(*it);
+            if (finder == expr_refs_to_remove->end())
+              (*expr_refs_to_remove)[*it] = 1;
+            else
+              finder->second += 1;
           }
+          else if ((*it)->remove_nested_expression_reference(owner_did))
+            delete (*it);
         }
         if (finder->second.empty())
         {
-          if (owner_did > 0)
+          if (view_refs_to_remove != NULL)
           {
-            if (view_refs_to_remove != NULL)
-            {
-              std::map<LogicalView*,unsigned>::iterator finder = 
-                view_refs_to_remove->find(view);
-              if (finder == view_refs_to_remove->end())
-                (*view_refs_to_remove)[view] = 1;
-              else
-                finder->second += 1;
-            }
-            else if (view->remove_nested_valid_ref(owner_did))
-              delete view;
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              view_refs_to_remove->find(view);
+            if (finder == view_refs_to_remove->end())
+              (*view_refs_to_remove)[view] = 1;
+            else
+              finder->second += 1;
           }
+          else if (view->remove_nested_valid_ref(owner_did))
+            delete view;
           conditions.erase(finder);
         }
         else
@@ -2966,10 +2899,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TraceViewSet::invalidate_all_but(LogicalView *except,
                               IndexSpaceExpression *expr, const FieldMask &mask,
-                  std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
-                  std::map<LogicalView*,unsigned> *view_refs_to_remove)
+         std::map<IndexSpaceExpression*,unsigned> *expr_refs_to_remove,
+         std::map<LogicalView*,unsigned> *view_refs_to_remove, bool antialiased)
     //--------------------------------------------------------------------------
     {
+      if (!antialiased && (except != NULL))
+      {
+        if (except->is_collective_view())
+        {
+          FieldMaskSet<InstanceView> antialiased_views;
+          antialias_collective_view(except->as_collective_view(), mask, 
+                                    antialiased_views);
+          // Now we can insert all the antialiased 
+          for (FieldMaskSet<InstanceView>::const_iterator it =
+               antialiased_views.begin(); it != antialiased_views.end(); it++)
+            invalidate_all_but(it->first, expr, it->second, expr_refs_to_remove,
+                view_refs_to_remove, true/*antialiased*/);
+          return;
+        }
+        else if (has_collective_views && except->is_instance_view())
+          antialias_individual_view(except->as_individual_view(), mask);
+      }
       std::vector<LogicalView*> to_invalidate;
       for (ViewExprs::const_iterator it = 
             conditions.begin(); it != conditions.end(); it++)
@@ -2982,21 +2932,18 @@ namespace Legion {
       }
       for (std::vector<LogicalView*>::const_iterator it = 
             to_invalidate.begin(); it != to_invalidate.end(); it++)
-        invalidate(*it, expr, mask, expr_refs_to_remove, view_refs_to_remove);
+        invalidate(*it, expr, mask, expr_refs_to_remove, 
+                   view_refs_to_remove, true/*antialiased*/);
     }
 
     //--------------------------------------------------------------------------
-    bool TraceViewSet::dominates(LogicalView *view, IndexSpaceExpression *expr, 
-                                 FieldMask &non_dominated) const
+    bool TraceViewSet::dominates(LogicalView *view,
+                     IndexSpaceExpression *expr, FieldMask &non_dominated) const
     //--------------------------------------------------------------------------
     {
       // If this is for an empty equivalence set then it doesn't matter
       if (expr->is_empty())
         return true;
-      ViewExprs::const_iterator finder = conditions.find(view);
-      if (finder == conditions.end())
-        return false;
-
       const size_t expr_volume = expr->get_volume();
       IndexSpaceExpression *const total_expr = region->row_source;
 #ifdef DEBUG_LEGION
@@ -3004,41 +2951,115 @@ namespace Legion {
       // If we need to we can put in the full intersection test later
       assert(expr_volume <= total_expr->get_volume());
 #endif
-      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+      if (expr_volume == total_expr->get_volume())
+        expr = total_expr;
+      RegionTreeForest *forest = context->runtime->forest;
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder == conditions.end())
       {
-        // Expression is for the whole view, so will only be dominated
-        // by the expression for the full view
-        FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
-          finder->second.find(total_expr);
-        if (expr_finder != finder->second.end())
+        // If we couldn't find it directly then we need to deal with aliasing
+        if (view->is_collective_view())
         {
-          non_dominated -= expr_finder->second;
+          CollectiveAntiAlias alias_analysis(view->as_collective_view());
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
+          {
+            if (!vit->first->is_instance_view())
+              continue;
+            if (vit->second.get_valid_mask() * non_dominated)
+              continue;
+            InstanceView *inst_view = vit->first->as_instance_view();
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = it->second & non_dominated;
+              if (!overlap)
+                continue;
+              alias_analysis.traverse(inst_view, overlap, it->first);
+            }
+          }
+          FieldMask dominated = non_dominated;
+          FieldMaskSet<IndexSpaceExpression> empty_exprs;
+          alias_analysis.visit_leaves(non_dominated, dominated,
+                                      expr, forest, empty_exprs);
+          if (!!dominated)
+            non_dominated -= dominated;
+        }
+        else if (has_collective_views && view->is_instance_view())
+        {
+          IndividualView *individual_view = view->as_individual_view();
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
+          {
+            if (!vit->first->is_collective_view())
+              continue;
+            if (vit->second.get_valid_mask() * non_dominated)
+              continue;
+            if (!individual_view->aliases(vit->first->as_collective_view()))
+              continue;
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = non_dominated & it->second;
+              if (!overlap)
+                continue;
+              if ((it->first != total_expr) && (it->first != expr))
+              {
+                IndexSpaceExpression *intersection = 
+                  forest->intersect_index_spaces(it->first, expr);
+                const size_t volume = intersection->get_volume();
+                if (volume == 0)
+                  continue;
+                // Can only dominate if we have enough points
+                if (volume < expr->get_volume())
+                  continue;
+              }
+              // If we get here we were dominated
+              non_dominated -= overlap;
+              if (!non_dominated)
+                break;
+            }
+          }
+        }
+      } 
+      else
+      {
+        if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+        {
+          // Expression is for the whole view, so will only be dominated
+          // by the expression for the full view
+          FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+            finder->second.find(total_expr);
+          if (expr_finder != finder->second.end())
+          {
+            non_dominated -= expr_finder->second;
+            if (!non_dominated)
+              return true;
+          }
+        }
+        // There is at most one expression per field so just iterate and compare
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          const FieldMask overlap = non_dominated & it->second;
+          if (!overlap)
+            continue;
+          if ((it->first != total_expr) && (it->first != expr))
+          {
+            IndexSpaceExpression *intersection = 
+              forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // Can only dominate if we have enough points
+            if (volume < expr->get_volume())
+              continue;
+          }
+          // If we get here we were dominated
+          non_dominated -= overlap;
           if (!non_dominated)
-            return true;
+            break;
         }
-      }
-      // There is at most one expression per field so just iterate and compare
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-            finder->second.begin(); it != finder->second.end(); it++)
-      {
-        const FieldMask overlap = non_dominated & it->second;
-        if (!overlap)
-          continue;
-        if ((it->first != total_expr) && (it->first != expr))
-        {
-          IndexSpaceExpression *intersection = 
-            forest->intersect_index_spaces(it->first, expr);
-          const size_t volume = intersection->get_volume();
-          if (volume == 0)
-            continue;
-          // Can only dominate if we have enough points
-          if (volume < expr->get_volume())
-            continue;
-        }
-        // If we get here we were dominated
-        non_dominated -= overlap;
-        if (!non_dominated)
-          break;
       }
       // If there are no fields left then we dominated
       return !non_dominated;
@@ -3051,6 +3072,9 @@ namespace Legion {
                             FieldMaskSet<IndexSpaceExpression> *dominated) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(non_dominated.empty());
+#endif
       // If this is for an empty equivalence set then it doesn't matter
       if (expr->is_empty())
       {
@@ -3058,14 +3082,6 @@ namespace Legion {
           dominated->insert(expr, mask);
         return;
       }
-      ViewExprs::const_iterator finder = conditions.find(view);
-      if (finder == conditions.end() ||
-          (finder->second.get_valid_mask() * mask))
-      {
-        non_dominated.insert(expr, mask);
-        return;
-      }
-
       const size_t expr_volume = expr->get_volume();
       IndexSpaceExpression *const total_expr = region->row_source;
 #ifdef DEBUG_LEGION
@@ -3073,62 +3089,157 @@ namespace Legion {
       // If we need to we can put in the full intersection test later
       assert(expr_volume <= total_expr->get_volume());
 #endif
-      if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
+      if (expr_volume == total_expr->get_volume())
+        expr = total_expr;
+      RegionTreeForest *forest = context->runtime->forest;
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder == conditions.end())
       {
-        // Expression is for the whole view, so will only be dominated
-        // for the full view
-        FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
-          finder->second.find(total_expr);
-        if (expr_finder != finder->second.end())
+        if (view->is_collective_view())
         {
-          const FieldMask overlap = mask & expr_finder->second;
-          if (!!overlap)
+          CollectiveAntiAlias alias_analysis(view->as_collective_view());
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
           {
-            if (dominated != NULL)
-              dominated->insert(expr, overlap); 
-            mask -= overlap;
-            if (!mask)
-              return;
+            if (!vit->first->is_instance_view())
+              continue;
+            if (vit->second.get_valid_mask() * mask)
+              continue;
+            InstanceView *inst_view = vit->first->as_instance_view();
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = it->second & mask;
+              if (!overlap)
+                continue;
+              alias_analysis.traverse(inst_view, overlap, it->first);
+            }
+          } 
+          FieldMask dominated_mask = mask;
+          alias_analysis.visit_leaves(mask, dominated_mask,
+                                      non_dominated, expr, forest);
+          // Group the expressions across fields so there is exactly
+          // one non-dominated expression for each field
+          if (!non_dominated.empty())
+          {
+            LegionList<FieldSet<IndexSpaceExpression*> > field_sets;
+            non_dominated.compute_field_sets(FieldMask(), field_sets);
+            non_dominated.clear();
+            for (LegionList<FieldSet<IndexSpaceExpression*> >::const_iterator 
+                  it = field_sets.begin(); it != field_sets.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(!it->elements.empty());
+#endif
+              IndexSpaceExpression *non_dominated_expr =
+                (it->elements.size() == 1) ? *(it->elements.begin()) :
+                forest->union_index_spaces(it->elements);
+              non_dominated.insert(non_dominated_expr, it->set_mask);
+            }
+          }
+          if (!!dominated_mask && (dominated != NULL))
+            dominated->insert(expr, dominated_mask);
+        }
+        else if (has_collective_views && view->is_instance_view())
+        {
+          IndividualView *individual_view = view->as_individual_view();
+          for (ViewExprs::const_iterator vit =
+                conditions.begin(); vit != conditions.end(); vit++)
+          {
+            if (!vit->first->is_collective_view())
+              continue;
+            if (vit->second.get_valid_mask() * mask)
+              continue;
+            if (!individual_view->aliases(vit->first->as_collective_view()))
+              continue;
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = mask & it->second;
+              if (!overlap)
+                continue;
+              if ((it->first != total_expr) && (it->first != expr))
+              {
+                IndexSpaceExpression *difference = 
+                  forest->subtract_index_spaces(expr, it->first);
+                if (!difference->is_empty())
+                  non_dominated.insert(difference, overlap);
+                else if (dominated != NULL)
+                  dominated->insert(expr, overlap);
+              }
+              // If we get here we were dominated
+              else if (dominated != NULL)
+                dominated->insert(expr, overlap);
+            }
           }
         }
+        // If we get here then these fields are definitely not dominated
+#ifdef DEBUG_LEGION
+        assert(!!mask);
+#endif
+        non_dominated.insert(expr, mask);
       }
-      // There is at most one expression per field so just iterate and compare
-      for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
-            finder->second.begin(); it != finder->second.end(); it++)
+      else if (finder->second.get_valid_mask() * mask)
+        non_dominated.insert(expr, mask);
+      else
       {
-        const FieldMask overlap = mask & it->second;
-        if (!overlap)
-          continue;
-        if ((it->first != total_expr) && (it->first != expr))
+        if ((expr == total_expr) || (expr_volume == total_expr->get_volume()))
         {
-          IndexSpaceExpression *intersection = 
-            forest->intersect_index_spaces(it->first, expr);
-          const size_t volume = intersection->get_volume();
-          if (volume == 0)
-            continue;
-          // Can only dominate if we have enough points
-          if (volume < expr->get_volume())
+          // Expression is for the whole view, so will only be dominated
+          // for the full view
+          FieldMaskSet<IndexSpaceExpression>::const_iterator expr_finder =
+            finder->second.find(total_expr);
+          if (expr_finder != finder->second.end())
           {
-            if (dominated != NULL)
-              dominated->insert(intersection, overlap);
-            IndexSpaceExpression *diff = 
-              forest->subtract_index_spaces(expr, intersection);
-            non_dominated.insert(diff, overlap);
+            const FieldMask overlap = mask & expr_finder->second;
+            if (!!overlap)
+            {
+              if (dominated != NULL)
+                dominated->insert(expr, overlap); 
+              mask -= overlap;
+              if (!mask)
+                return;
+            }
           }
+        }
+        // There is at most one expression per field so just iterate and compare
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          const FieldMask overlap = mask & it->second;
+          if (!overlap)
+            continue;
+          if ((it->first != total_expr) && (it->first != expr))
+          {
+            IndexSpaceExpression *intersection = 
+              forest->intersect_index_spaces(it->first, expr);
+            const size_t volume = intersection->get_volume();
+            if (volume == 0)
+              continue;
+            // Can only dominate if we have enough points
+            if (volume < expr->get_volume())
+            {
+              if (dominated != NULL)
+                dominated->insert(intersection, overlap);
+              IndexSpaceExpression *diff = 
+                forest->subtract_index_spaces(expr, intersection);
+              non_dominated.insert(diff, overlap);
+            }
+            else if (dominated != NULL)
+              dominated->insert(expr, overlap);
+          } // total expr dominates everything
           else if (dominated != NULL)
             dominated->insert(expr, overlap);
-        } // total expr dominates everything
-        else if (dominated != NULL)
-          dominated->insert(expr, overlap);
-        mask -= overlap;
-        if (!mask)
-          return;
-      }
-      // If we get here then these fields are definitely not dominated
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+        // If we get here then these fields are definitely not dominated
 #ifdef DEBUG_LEGION
-      assert(!!mask);
+        assert(!!mask);
 #endif
-      non_dominated.insert(expr, mask);
+        non_dominated.insert(expr, mask);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3137,6 +3248,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FieldMask independent = mask;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit =
             conditions.begin(); vit != conditions.end(); vit++)
       {
@@ -3234,31 +3346,81 @@ namespace Legion {
       {
         ViewExprs::const_iterator finder = set.conditions.find(vit->first);
         if (finder == set.conditions.end())
+        {
+          if (vit->first->is_collective_view())
+          {
+            CollectiveView *collective = vit->first->as_collective_view();
+            for (ViewExprs::const_iterator sit = 
+                  set.conditions.begin(); sit != set.conditions.end(); sit++)
+            {
+              if (!sit->first->is_instance_view())
+                continue;
+              if (vit->second.get_valid_mask() * sit->second.get_valid_mask())
+                continue;
+              if (!collective->aliases(sit->first->as_instance_view()))
+                continue;
+              if (has_overlapping_expressions(collective, vit->second, 
+                                              sit->second, condition))
+                return false;
+            }
+          }
+          else if (set.has_collective_views && vit->first->is_instance_view())
+          {
+            IndividualView *view = vit->first->as_individual_view();
+            for (ViewExprs::const_iterator sit =
+                  set.conditions.begin(); sit != set.conditions.end(); sit++)
+            {
+              if (!sit->first->is_collective_view())
+                continue;
+              if (vit->second.get_valid_mask() * sit->second.get_valid_mask())
+                continue;
+              if (!view->aliases(sit->first->as_collective_view()))
+                continue;
+              if (has_overlapping_expressions(view, vit->second, 
+                                              sit->second, condition))
+                return false;
+            }
+          }
           continue;
+        }
         if (vit->second.get_valid_mask() * finder->second.get_valid_mask())
           continue;
-        LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                  FieldMask> overlaps;
-        unique_join_on_field_mask_sets(vit->second, finder->second, overlaps);
-        for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
-                       FieldMask>::const_iterator it = 
-              overlaps.begin(); it != overlaps.end(); it++)
-        {
-          IndexSpaceExpression *overlap = 
-            forest->intersect_index_spaces(it->first.first, it->first.second);
-          if (!overlap->is_empty())
-          {
-            if (condition != NULL)
-            {
-              condition->view = vit->first;
-              condition->expr = overlap;
-              condition->mask = it->second;
-            }
-            return false;
-          }
-        }
+        if (has_overlapping_expressions(vit->first, vit->second, 
+                                        finder->second, condition))
+          return false;
       }
       return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TraceViewSet::has_overlapping_expressions(LogicalView *view,
+        const FieldMaskSet<IndexSpaceExpression> &left_exprs,
+        const FieldMaskSet<IndexSpaceExpression> &right_exprs,
+        FailedPrecondition *condition) const
+    //--------------------------------------------------------------------------
+    {
+      LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+                FieldMask> overlaps;
+      unique_join_on_field_mask_sets(left_exprs, right_exprs, overlaps);
+      RegionTreeForest *forest = context->runtime->forest;
+      for (LegionMap<std::pair<IndexSpaceExpression*,IndexSpaceExpression*>,
+                     FieldMask>::const_iterator it = 
+            overlaps.begin(); it != overlaps.end(); it++)
+      {
+        IndexSpaceExpression *overlap = 
+          forest->intersect_index_spaces(it->first.first, it->first.second);
+        if (!overlap->is_empty())
+        {
+          if (condition != NULL)
+          {
+            condition->view = view;
+            condition->expr = overlap;
+            condition->mask = it->second;
+          }
+          return true;
+        }
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -3340,6 +3502,7 @@ namespace Legion {
             dst_views.swap(src_views);
           continue;
         }
+        RegionTreeForest *forest = context->runtime->forest;
         // Do pair-wise intersection tests for overlapping of the expressions
         std::vector<IndexSpaceExpression*> disjoint_expressions;
         std::vector<std::vector<IndexSpaceExpression*> > disjoint_components;
@@ -3448,9 +3611,6 @@ namespace Legion {
                                      const FieldMask &mask) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(target.owner_did == 0);
-#endif
       if (expr_covers)
       {
         for (ViewExprs::const_iterator vit = 
@@ -3479,6 +3639,7 @@ namespace Legion {
       }
       else
       {
+        RegionTreeForest *forest = context->runtime->forest;
         for (ViewExprs::const_iterator vit = 
               conditions.begin(); vit != conditions.end(); vit++)
         {
@@ -3556,15 +3717,13 @@ namespace Legion {
                          AddressSpaceID source, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(owner_did == 0); // should only be unpacking without refs
-#endif
+      RegionTreeForest *forest = context->runtime->forest;
       for (unsigned idx1 = 0; idx1 < num_views; idx1++)
       {
         DistributedID did;
         derez.deserialize(did);
         RtEvent ready;
-        LogicalView *view = 
+        LogicalView *view =
           forest->runtime->find_or_request_logical_view(did, ready);
         size_t num_exprs;
         derez.deserialize(num_exprs);
@@ -3575,10 +3734,13 @@ namespace Legion {
             IndexSpaceExpression::unpack_expression(derez, forest, source);
           FieldMask mask;
           derez.deserialize(mask);
-          exprs.insert(expr, mask);
+          if (exprs.insert(expr, mask))
+            expr->add_nested_expression_reference(owner_did);
         }
         if (ready.exists() && !ready.has_triggered())
           ready_events.insert(ready);
+        if (LogicalView::is_collective_did(did))
+          has_collective_views = true;
       }
     }
 
@@ -3588,7 +3750,10 @@ namespace Legion {
     {
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); vit++)
+      {
+        vit->first->add_nested_valid_ref(owner_did);
         vit->first->unpack_valid_ref();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3596,6 +3761,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const LogicalRegion lr = region->handle;
+      RegionTreeForest *forest = context->runtime->forest;
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
       {
@@ -3607,19 +3773,392 @@ namespace Legion {
           const void *name = NULL; size_t name_size = 0;
           forest->runtime->retrieve_semantic_information(lr, 
               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
-          PhysicalManager *manager = view->get_manager();
-          log_tracing.info() << "  "
-                    << (view->is_reduction_view() ? "Reduction" : 
-                       (view->is_fill_view() ? "Fill" : "Materialized"))
-                    << " view: " << view << ", Inst: " << std::hex
-                    << ((manager != NULL) ? 
-                        manager->get_instance(DomainPoint()).id : 0)
-                    << std::dec
-                    << ", Index expr: " << it->first->expr_id
-                    << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                    << ", Field Mask: " << mask;
+          if (view->is_fill_view())
+          {
+            log_tracing.info() << "  "
+                      << "Fill view: " << view
+                      << ", Index expr: " << it->first->expr_id
+                      << ", Name: " << (name_size > 0 ? (const char*)name : "")
+                      << ", Field Mask: " << mask;
+          }
+          else if (view->is_collective_view())
+          {
+            log_tracing.info() << "  Collective "
+                      << (view->is_reduction_kind() ? "Reduction " : "")
+                      << "view: " << view
+                      << ", Index expr: " << it->first->expr_id
+                      << ", Name: " << (name_size > 0 ? (const char*)name : "")
+                      << ", Field Mask: " << mask;
+          }
+          else
+          {
+            PhysicalManager *manager = 
+              view->as_individual_view()->get_manager();
+            log_tracing.info() << "  "
+                      << (view->is_reduction_view() ? 
+                          "Reduction" : "Materialized")
+                      << " view: " << view << ", Inst: "
+                      << std::hex << manager->get_instance().id << std::dec
+                      << ", Index expr: " << it->first->expr_id
+                      << ", Name: " << (name_size > 0 ? (const char*)name : "")
+                      << ", Field Mask: " << mask;
+          }
           free(mask);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::antialias_individual_view(IndividualView *view,
+                                                 FieldMask mask)
+    //--------------------------------------------------------------------------
+    {
+      if (!has_collective_views)
+        return;
+      // See if we can find it in which case we know that it doesn't alias
+      // with anything else so there is nothing to split
+      ViewExprs::const_iterator finder = conditions.find(view);
+      if (finder != conditions.end())
+      {
+        mask -= finder->second.get_valid_mask();
+        if (!mask)
+          return;
+      }
+      FieldMaskSet<CollectiveView> to_refine;
+      for (ViewExprs::const_iterator it = 
+            conditions.begin(); it != conditions.end(); it++)
+      {
+        if (!it->first->is_collective_view())
+          continue;
+        const FieldMask overlap = mask & it->second.get_valid_mask();
+        if (!overlap)
+          continue;
+        CollectiveView *collective = it->first->as_collective_view();
+        if (!collective->aliases(view))
+          continue;
+        to_refine.insert(collective, overlap);  
+        mask -= overlap;
+        if (!mask)
+          break;
+      }
+      Runtime *runtime = context->runtime;
+      // We've got the names of any collective views that need to be
+      // refined to not include this individual view, so go ahead and
+      // ask the context to make that collective view for us
+      std::vector<RtEvent> views_ready;
+      std::map<CollectiveView*,PhysicalManager*> individual_results;
+      std::map<CollectiveView*,InnerContext::CollectiveResult*> results;
+      for (FieldMaskSet<CollectiveView>::const_iterator it = 
+            to_refine.begin(); it != to_refine.end(); it++)
+      {
+        std::vector<DistributedID> dids = it->first->instances;
+        std::vector<DistributedID>::iterator finder = 
+          std::find(dids.begin(), dids.end(), view->manager->did);
+#ifdef DEBUG_LEGION
+        assert(finder != dids.end());
+#endif
+        dids.erase(finder);
+        RtEvent ready;
+        if (dids.size() > 1)
+        {
+          InnerContext::CollectiveResult *result =
+            context->find_or_create_collective_view(
+                region->handle.get_tree_id(), dids, ready);
+          results[it->first] = result;
+        }
+        else
+        {
+          // Just making a single view at this point
+          PhysicalManager *manager = 
+            runtime->find_or_request_instance_manager(dids.back(), ready);
+          individual_results[it->first] = manager;
+        }
+        if (ready.exists())
+          views_ready.push_back(ready);
+      }
+      if (!views_ready.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(views_ready);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      for (FieldMaskSet<CollectiveView>::const_iterator rit =
+            to_refine.begin(); rit != to_refine.end(); rit++)
+      {
+        RtEvent ready;
+        InstanceView *view = NULL;
+        std::map<CollectiveView*,PhysicalManager*>::const_iterator
+          individual_finder = individual_results.find(rit->first);
+        if (individual_finder == individual_results.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(results.find(rit->first) != results.end());
+#endif
+          // Common case
+          InnerContext::CollectiveResult *result = results[rit->first];
+          // Then wait for the collective view to be registered
+          if (result->ready_event.exists() && 
+              !result->ready_event.has_triggered())
+            result->ready_event.wait();
+          view = static_cast<InstanceView*>(
+              runtime->find_or_request_logical_view(
+                result->collective_did, ready));
+          if (result->remove_reference())
+            delete result;
+        }
+        else // Unusual case of an downgrading to an individual view
+          view = context->create_instance_top_view(individual_finder->second,
+                                                   runtime->address_space);
+        ViewExprs::iterator finder = conditions.find(rit->first);
+        if (finder->second.get_valid_mask() == rit->second)
+        {
+          // Can just swap expressions over in this particular case
+          conditions[view].swap(finder->second);
+          // Remove the reference if we have one
+          if (finder->first->remove_nested_valid_ref(owner_did))
+            delete finder->first;
+          conditions.erase(finder);
+        }
+        else
+        {
+          // Need to filter over specific expression in this case
+          FieldMaskSet<IndexSpaceExpression> &to_add = conditions[view];
+          std::vector<IndexSpaceExpression*> to_delete; 
+          for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                finder->second.begin(); it != finder->second.end(); it++)
+          {
+            const FieldMask overlap = rit->second & it->second;
+            if (!overlap)
+              continue;
+            to_add.insert(it->first, overlap);
+            it.filter(overlap);
+            if (!it->second) // reference flows back
+              to_delete.push_back(it->first);
+            else
+              it->first->add_nested_expression_reference(owner_did);
+          }
+          for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+            finder->second.erase(*it);
+          finder->second.tighten_valid_mask();
+        }
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        view->add_nested_valid_ref(owner_did);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceViewSet::antialias_collective_view(CollectiveView *collective,
+           const FieldMask &mask, FieldMaskSet<InstanceView> &alternative_views)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(conditions.find(collective) == conditions.end());
+#endif
+      ViewExprs to_add;
+      CollectiveAntiAlias alias_analysis(collective);
+      for (ViewExprs::iterator vit = conditions.begin(); 
+            vit != conditions.end(); /*nothing*/)
+      {
+        if (!vit->first->is_instance_view())
+        {
+          vit++;
+          continue;
+        }
+        const FieldMask view_overlap = mask & vit->second.get_valid_mask();
+        if (!view_overlap)
+        {
+          vit++;
+          continue;
+        }
+        if (vit->first->is_collective_view())
+        {
+          CollectiveView *current = vit->first->as_collective_view();
+          // See how the instances overlap
+          // First get the intersection
+          std::vector<DistributedID> intersection;
+          if (current->instances.size() < collective->instances.size())
+          {
+            for (std::vector<DistributedID>::const_iterator it =
+                  current->instances.begin(); it !=
+                  current->instances.end(); it++)
+              if (std::binary_search(collective->instances.begin(),
+                    collective->instances.end(), *it))
+                intersection.push_back(*it);
+          }
+          else
+          {
+            for (std::vector<DistributedID>::const_iterator it =
+                  collective->instances.begin(); it !=
+                  collective->instances.end(); it++)
+              if (std::binary_search(current->instances.begin(),
+                    current->instances.end(), *it))
+                intersection.push_back(*it);
+          }
+          // If they don't overlap at all then there's nothing to do
+          if (intersection.empty())
+          {
+            vit++;
+            continue;
+          }
+          // Don't care about expressions for this analysis
+          // but we're reusing an exisint alias so we have to
+          // conform to get the linker to work
+          IndexSpaceExpression *null_expr = NULL;
+          alias_analysis.traverse(current, view_overlap, null_expr);
+          if (intersection.size() == current->instances.size())
+          {
+#ifdef DEBUG_LEGION
+            assert(intersection.size() < collective->instances.size());
+#endif
+            vit++;
+          }
+          else
+          {
+            // Otherwise, if vit->first is not covered by the intersection
+            // then we need to do two things
+            // 1. Create a new instance for the difference and record
+            //    any overlapping expressions for that in to_add
+            std::vector<DistributedID> difference;
+            for (std::vector<DistributedID>::const_iterator it =
+                  current->instances.begin(); it != 
+                  current->instances.end(); it++)
+              if (!std::binary_search(collective->instances.begin(),
+                    collective->instances.end(), *it))
+                difference.push_back(*it);
+            InstanceView *diff_view = find_instance_view(difference);
+            if (to_add.find(diff_view) == to_add.end())
+              diff_view->add_nested_valid_ref(owner_did);
+            // 2. Make a new instance for the intersection, analyze it
+            //    and record any overlapping expressions in to_add
+            InstanceView *inter_view = 
+              (intersection.size() == collective->instances.size()) ?
+              collective : find_instance_view(intersection);
+            if (to_add.find(inter_view) == to_add.end())
+              inter_view->add_nested_valid_ref(owner_did);
+            std::vector<IndexSpaceExpression*> to_delete;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+            {
+              const FieldMask overlap = view_overlap & it->second;
+              if (!overlap)
+                continue;
+              if (to_add[diff_view].insert(it->first, overlap))
+                it->first->add_nested_expression_reference(owner_did);
+              to_add[inter_view].insert(it->first, overlap);
+              it.filter(overlap);
+              if (!it->second) // reference flows back
+                to_delete.push_back(it->first);
+              else
+                it->first->add_nested_expression_reference(owner_did);
+            }
+            if (to_delete.size() < vit->second.size())
+            {
+              for (std::vector<IndexSpaceExpression*>::const_iterator it =
+                    to_delete.begin(); it != to_delete.end(); it++)
+                vit->second.erase(*it);
+              vit->second.tighten_valid_mask();
+              vit++;
+            }
+            else
+            {
+              vit->second.clear();
+              if (vit->first->remove_nested_valid_ref(owner_did))
+                delete vit->first;
+              ViewExprs::iterator to_delete = vit++;
+              conditions.erase(to_delete);
+            }
+          }
+        }
+        else // just an individual view, so we can just traverse it
+        {
+          IndividualView *individual = vit->first->as_individual_view();
+          // Check to see if it they alias
+          if (std::binary_search(collective->instances.begin(),
+                collective->instances.end(), individual->manager->did))
+          {
+            // Don't care about expressions for this analysis
+            // but we're reusing an exisint alias so we have to
+            // conform to get the linker to work
+            IndexSpaceExpression *null_expr = NULL;
+            alias_analysis.traverse(individual, view_overlap, null_expr);
+          }
+          vit++;
+        }
+      }
+      // Now traverse the alias analysis and record the alternate views
+      // and their index space expressions in to_add
+      FieldMask allvalid_mask = mask;
+      alias_analysis.visit_leaves(mask, allvalid_mask, 
+                                  *this, alternative_views);
+      if (!!allvalid_mask)
+        alternative_views.insert(collective, allvalid_mask);
+      if (!to_add.empty())
+      {
+        for (ViewExprs::iterator vit = to_add.begin(); 
+              vit != to_add.end(); vit++)
+        {
+          ViewExprs::iterator finder = conditions.find(vit->first);
+          if (finder != conditions.end())
+          {
+            // Remove duplicate view reference
+            vit->first->remove_nested_valid_ref(owner_did);
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
+                  vit->second.begin(); it != vit->second.end(); it++)
+              // Remove duplicate references
+              if (!finder->second.insert(it->first, it->second))
+                it->first->remove_nested_expression_reference(owner_did);
+          }
+          else
+          {
+            // Already have a reference to the view so pass it here
+            // Also have references on the expression so the swap is enough
+            conditions[vit->first].swap(vit->second);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* TraceViewSet::find_instance_view(
+                                        const std::vector<DistributedID> &dids)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!dids.empty());
+#endif
+      if (dids.size() > 1)
+      {
+        RtEvent ready;
+        InnerContext::CollectiveResult *result =
+          context->find_or_create_collective_view(
+              region->handle.get_tree_id(), dids, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        // Then wait for the collective view to be registered
+        if (result->ready_event.exists() && 
+            !result->ready_event.has_triggered())
+          result->ready_event.wait();
+        InstanceView *view = static_cast<InstanceView*>(
+          context->runtime->find_or_request_logical_view(
+            result->collective_did, ready));
+        if (result->remove_reference())
+          delete result;
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        return view;
+      }
+      else
+      {
+        RtEvent ready;
+        PhysicalManager *manager =
+          context->runtime->find_or_request_instance_manager(
+              dids.back(), ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready.wait();
+        return context->create_instance_top_view(manager,
+                        context->runtime->address_space);
       }
     }
 
@@ -3943,7 +4482,7 @@ namespace Legion {
     void TraceConditionSet::dump_preconditions(void) const
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+      TraceViewSet dump_view_set(context, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
@@ -3957,7 +4496,7 @@ namespace Legion {
     void TraceConditionSet::dump_anticonditions(void) const
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+      TraceViewSet dump_view_set(context, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
@@ -3971,7 +4510,7 @@ namespace Legion {
     void TraceConditionSet::dump_postconditions(void) const
     //--------------------------------------------------------------------------
     {
-      TraceViewSet dump_view_set(forest, 0/*owner did*/,
+      TraceViewSet dump_view_set(context, 0/*owner did*/,
           forest->get_tree(region->handle.get_tree_id()));
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
@@ -4025,7 +4564,7 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+          analysis->analyze(it->first, overlap, deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -4052,7 +4591,7 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+          analysis->analyze(it->first, overlap, deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -4140,7 +4679,7 @@ namespace Legion {
       }
       // Perform an overwrite analysis for each of the postconditions
       unsigned index = 0;
-      const TraceInfo trace_info(op, false/*init*/);
+      const TraceInfo trace_info(op);
       const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++, index++)
@@ -4156,7 +4695,7 @@ namespace Legion {
           const FieldMask overlap = eit->second.get_valid_mask() & it->second;
           if (!overlap)
             continue;
-          analysis->traverse(it->first, overlap,deferral_events,applied_events);
+          analysis->analyze(it->first, overlap, deferral_events,applied_events);
         }
         const RtEvent traversal_done = deferral_events.empty() ?
           RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -4243,10 +4782,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *t, ApEvent fence_event,
                                        TaskTreeCoordinates &&coords)
-      : trace(t), coordinates(std::move(coords)),
+      : trace(t), coordinates(std::move(coords)), total_replays(1),
         replayable(false, "uninitialized"), fence_completion_id(0),
         replay_parallelism(t->runtime->max_replay_parallelism),
-        has_virtual_mapping(false), last_fence(NULL)
+        has_virtual_mapping(false), has_no_consensus(false), last_fence(NULL)
     //--------------------------------------------------------------------------
     {
       recording.store(true);
@@ -4307,9 +4846,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> all_events;
+      std::set<ApEvent> local_barriers;
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
+            managed_barriers.begin(); it != managed_barriers.end(); it++)
+        local_barriers.insert(it->second->get_current_barrier());
       for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
            it != event_map.end(); ++it)
-        all_events.insert(it->first);
+        // If this is one of our local barriers then don't use it
+        if (local_barriers.find(it->first) == local_barriers.end())
+          all_events.insert(it->first);
       return Runtime::merge_events(NULL, all_events);
     }
 
@@ -4318,19 +4863,16 @@ namespace Legion {
                                                std::set<ApEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      AutoLock tpl_lock(template_lock);
+      // No need for a lock here, the mapping fence protects us
 #ifdef DEBUG_LEGION
       assert(!events.empty());
       assert(events.size() == instructions.size());
 #endif
       // Scan backwards until we find the previous execution fence (if any)
-      for (unsigned idx = events.size() - 1; idx > 0; idx--)
+      // Skip the most recent one as that is going to be our term event
+      for (int idx = events.size() - 2; idx > 0; idx--)
       {
-        // Skip any barrier events from remote shards, they will be picked
-        // up by their own shards and mixed into the fences appropriately
-        const InstructionKind kind = instructions[idx]->get_kind(); 
-        if ((kind != BARRIER_ADVANCE) && (kind != BARRIER_ARRIVAL))
-          preconditions.insert(events[idx]);
+        preconditions.insert(events[idx]);
         if (instructions[idx] == last_fence)
           return;
       }
@@ -4414,6 +4956,9 @@ namespace Legion {
 
       if (has_virtual_mapping)
         return Replayable(false, "virtual mapping");
+
+      if (has_no_consensus)
+        return Replayable(false, "no recording consensus");
       
       // First let's get the equivalence sets with data for these regions
       // We'll use the result to get guide the creation of the trace condition
@@ -4527,20 +5072,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::register_operation(Operation *op)
+    void PhysicalTemplate::register_operation(MemoizableOp *memoizable)
     //--------------------------------------------------------------------------
     {
-      Memoizable *memoizable = op->get_memoizable();
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
       const TraceLocalID tid = memoizable->get_trace_local_id();
       // Should be able to call back() without the lock even when
       // operations are being removed from the front
-      std::map<TraceLocalID,Memoizable*> &ops = operations.back();
+      std::map<TraceLocalID,MemoizableOp*> &ops = operations.back();
 #ifdef DEBUG_LEGION
       assert(ops.find(tid) == ops.end());
-      assert(memo_entries.find(tid) != memo_entries.end());
 #endif
       ops[tid] = memoizable;
     }
@@ -4555,7 +5098,7 @@ namespace Legion {
 #endif
       // should be able to read front() even while new maps for operations 
       // are begin appended to the back of 'operations'
-      std::map<TraceLocalID,Memoizable*> &ops = operations.front();
+      std::map<TraceLocalID,MemoizableOp*> &ops = operations.front();
       std::vector<Instruction*> &instructions = slices[slice_idx];
       for (std::vector<Instruction*>::const_iterator it = instructions.begin();
            it != instructions.end(); ++it)
@@ -4672,7 +5215,7 @@ namespace Legion {
       dst_indirect_insts.clear();
       instance_last_users.clear();
       // We don't need the expression or view references anymore
-      for (std::map<DistributedID,InstanceView*>::const_iterator it =
+      for (std::map<DistributedID,IndividualView*>::const_iterator it =
             recorded_views.begin(); it != recorded_views.end(); it++)
         if (it->second->remove_base_valid_ref(TRACE_REF))
           delete it->second;
@@ -4728,11 +5271,17 @@ namespace Legion {
         {
           results.emplace_back(LastUserResult(*uit));
           LastUserResult &result = results.back();
-          std::map<DistributedID,InstanceView*>::const_iterator finder =
+          std::map<DistributedID,IndividualView*>::const_iterator finder =
             recorded_views.find(uit->instance.view_did);
+          RtEvent ready;
+          PhysicalManager *manager = 
+            trace->runtime->find_or_request_instance_manager(
+                                uit->instance.inst_did, ready);
 #ifdef DEBUG_LEGION
           assert(finder != recorded_views.end());
 #endif
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
           // Query the view for the events that it needs
           // Note that if we're not performing actual fence elision
           // we switch the usage to full read-write privileges so 
@@ -4740,14 +5289,12 @@ namespace Legion {
           if (!trace->perform_fence_elision)
           {
             const RegionUsage usage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0);
-            finder->second->find_last_users(result.events,
-                uit->instance.collective_point, usage,
+            finder->second->find_last_users(manager, result.events, usage,
                 uit->mask, uit->expr, frontier_events);
           }
           else
-            finder->second->find_last_users(result.events,
-                uit->instance.collective_point, uit->usage,
-                uit->mask, uit->expr, frontier_events);
+            finder->second->find_last_users(manager, result.events,
+                uit->usage, uit->mask, uit->expr, frontier_events);
         }
       }
     }
@@ -4872,11 +5419,12 @@ namespace Legion {
             }
           case COMPLETE_REPLAY:
             {
-              unsigned completion_event_idx =
-                (*it)->as_complete_replay()->rhs;
+              CompleteReplay *complete = (*it)->as_complete_replay();
               InstructionKind generator_kind =
-                instructions[completion_event_idx]->get_kind();
-              num_merges += generator_kind != MERGE_EVENT;
+                instructions[complete->pre]->get_kind();
+              num_merges += (generator_kind != MERGE_EVENT) ? 1 : 0;
+              generator_kind = instructions[complete->post]->get_kind(); 
+              num_merges += (generator_kind != MERGE_EVENT) ? 1 : 0;
               break;
             }
           default:
@@ -4911,7 +5459,9 @@ namespace Legion {
               if (finder == op_insts.end()) break;
               std::set<unsigned> users;
               find_all_last_users(finder->second, users);
-              rewrite_preconditions(replay->rhs, users, instructions, 
+              rewrite_preconditions(replay->pre, users, instructions, 
+                  new_instructions, gen, merge_starts);
+              rewrite_preconditions(replay->post, users, instructions, 
                   new_instructions, gen, merge_starts);
               break;
             }
@@ -5040,7 +5590,6 @@ namespace Legion {
     void PhysicalTemplate::propagate_merges(std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
     {
-      std::vector<Instruction*> new_instructions;
       std::vector<bool> used(instructions.size(), false);
 
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
@@ -5108,19 +5657,15 @@ namespace Legion {
               used[gen[fill->precondition_idx]] = true;
               break;
             }
-          case SET_EFFECTS:
-            {
-              SetEffects *effects = inst->as_set_effects();
-              used[gen[effects->rhs]] = true;
-              break;
-            }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
-              used[gen[complete->rhs]] = true;
+              used[gen[complete->pre]] = true;
+              used[gen[complete->post]] = true;
               break;
             }
           case GET_TERM_EVENT:
+          case REPLAY_MAPPING:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
@@ -5135,6 +5680,8 @@ namespace Legion {
             }
         }
       }
+      record_used_frontiers(used, gen); 
+
       std::vector<unsigned> inv_gen(instructions.size(), -1U);
       for (unsigned idx = 0; idx < gen.size(); ++idx)
       {
@@ -5148,6 +5695,7 @@ namespace Legion {
       std::vector<Instruction*> to_delete;
       std::vector<unsigned> new_gen(gen.size(), -1U);
       initialize_generators(new_gen);
+      std::vector<Instruction*> new_instructions;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (used[idx])
         {
@@ -5175,6 +5723,16 @@ namespace Legion {
       gen.swap(new_gen);
       for (unsigned idx = 0; idx < to_delete.size(); ++idx)
         delete to_delete[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_used_frontiers(std::vector<bool> &used,
+                                         const std::vector<unsigned> &gen) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<unsigned,unsigned>::const_iterator it =
+            frontiers.begin(); it != frontiers.end(); it++)
+        used[gen[it->first]] = true;
     }
 
     //--------------------------------------------------------------------------
@@ -5209,6 +5767,9 @@ namespace Legion {
         if (g != -1U && g < instructions.size())
           used[g] = true;
       }
+      // Don't eliminate the last fence instruction
+      if (last_fence != NULL)
+        used[gen[last_fence->lhs]] = true;
     }
 
     //--------------------------------------------------------------------------
@@ -5239,7 +5800,8 @@ namespace Legion {
       {
         unsigned slice_index = -1U;
         if (!round_robin_for_tasks && 
-            (it->second.second == Operation::TASK_OP_KIND))
+            (it->second.second == Operation::TASK_OP_KIND) &&
+            (it->first.index_point.get_dim() > 0))
         {
           CachedMappings::iterator finder = cached_mappings.find(it->first);
 #ifdef DEBUG_LEGION
@@ -5320,7 +5882,10 @@ namespace Legion {
                it != merge->rhs.end(); ++it)
           {
             unsigned rh = *it;
-            if (gen[rh] == 0)
+            // Don't need to worry about crossing events for the fence
+            // initialization as we know it's always set before any 
+            // slices executes (rh == 0)
+            if ((rh == 0) || (gen[rh] == 0))
               new_rhs.insert(rh);
             else
             {
@@ -5373,6 +5938,13 @@ namespace Legion {
                     crossing_counts, crossing_instructions);
                 break;
               }
+            case BARRIER_ARRIVAL:
+              {
+                parallelize_replay_event(inst->as_barrier_arrival()->rhs,
+                    slice_index, gen, slice_indices_by_inst,
+                    crossing_counts, crossing_instructions);
+                break;
+              }
             case ISSUE_COPY:
               {
                 parallelize_replay_event(
@@ -5409,23 +5981,12 @@ namespace Legion {
                       crossing_counts, crossing_instructions);
                 break;
               }
-            case SET_EFFECTS:
-              {
-                parallelize_replay_event(inst->as_set_effects()->rhs,
-                    slice_index, gen, slice_indices_by_inst,
-                    crossing_counts, crossing_instructions);
-                break;
-              }
             case COMPLETE_REPLAY:
               {
-                parallelize_replay_event(inst->as_complete_replay()->rhs,
+                parallelize_replay_event(inst->as_complete_replay()->pre,
                     slice_index, gen, slice_indices_by_inst,
                     crossing_counts, crossing_instructions);
-                break;
-              }
-            case BARRIER_ARRIVAL:
-              {
-                parallelize_replay_event(inst->as_barrier_arrival()->rhs,
+                parallelize_replay_event(inst->as_complete_replay()->post,
                     slice_index, gen, slice_indices_by_inst,
                     crossing_counts, crossing_instructions);
                 break;
@@ -5462,6 +6023,10 @@ namespace Legion {
               std::vector<Instruction*> &crossing_instructions)
     //--------------------------------------------------------------------------
     {
+      // If this is the zero event, then don't even bother, we know the 
+      // fence event is set before all the slices replay anyway
+      if (event_to_check == 0)
+        return;
       unsigned g = gen[event_to_check];
 #ifdef DEBUG_LEGION
       assert(g != -1U && g < instructions.size());
@@ -5524,6 +6089,7 @@ namespace Legion {
       initialize_transitive_reduction_frontiers(topo_order, inv_topo_order);
 
       std::map<TraceLocalID, GetTermEvent*> term_insts;
+      std::map<TraceLocalID, ReplayMapping*> replay_insts;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
         Instruction *inst = instructions[idx];
@@ -5532,10 +6098,14 @@ namespace Legion {
           // Pass these instructions as their events will be added later
           case GET_TERM_EVENT :
             {
-#ifdef DEBUG_LEGION
-              assert(inst->as_get_term_event() != NULL);
-#endif
-              term_insts[inst->owner] = inst->as_get_term_event();
+              GetTermEvent *term = inst->as_get_term_event();
+              term_insts[term->owner] = term; 
+              break;
+            }
+          case REPLAY_MAPPING:
+            {
+              ReplayMapping *replay = inst->as_replay_mapping();
+              replay_insts[inst->owner] = replay;
               break;
             }
           case CREATE_AP_USER_EVENT :
@@ -5623,10 +6193,6 @@ namespace Legion {
               topo_order.push_back(advance->lhs);
               break;
             }
-          case SET_EFFECTS :
-            {
-              break;
-            }
           case ASSIGN_FENCE_COMPLETION :
             {
               inv_topo_order[fence_completion_id] = topo_order.size();
@@ -5636,16 +6202,33 @@ namespace Legion {
           case COMPLETE_REPLAY :
             {
               CompleteReplay *replay = inst->as_complete_replay();
-#ifdef DEBUG_LEGION
-              assert(term_insts.find(replay->owner) != term_insts.end());
-#endif
-              GetTermEvent *term = term_insts[replay->owner];
-              unsigned lhs = term->lhs;
-#ifdef DEBUG_LEGION
-              assert(lhs != -1U);
-#endif
-              incoming[lhs].push_back(replay->rhs);
-              outgoing[replay->rhs].push_back(lhs);
+              // Check to see if we can find a replay instruction to match 
+              std::map<TraceLocalID,ReplayMapping*>::iterator replay_finder =
+                replay_insts.find(replay->owner);
+              if (replay_finder != replay_insts.end())
+              {
+                incoming[replay_finder->second->lhs].push_back(replay->pre);
+                outgoing[replay->pre].push_back(replay_finder->second->lhs);
+                replay_insts.erase(replay_finder);
+              }
+              // Lastly check to see if we can find a term inst to match
+              std::map<TraceLocalID,GetTermEvent*>::iterator term_finder =
+                term_insts.find(replay->owner);
+              if (term_finder != term_insts.end())
+              {
+                if (replay->post != 0)
+                {
+                  incoming[term_finder->second->lhs].push_back(replay->post);
+                  outgoing[replay->post].push_back(term_finder->second->lhs);
+                  term_insts.erase(term_finder);
+                }
+                else if (replay->pre != 0)
+                {
+                  incoming[term_finder->second->lhs].push_back(replay->pre);
+                  outgoing[replay->pre].push_back(term_finder->second->lhs);
+                  term_insts.erase(term_finder);
+                }
+              }
               break;
             }
           default:
@@ -5653,6 +6236,21 @@ namespace Legion {
               assert(false);
               break;
             }
+        }
+      }
+#ifdef DEBUG_LEGION
+      // should have seen a complete replay instruction for every replay mapping
+      assert(replay_insts.empty());
+#endif
+      if (!term_insts.empty())
+      {
+        // Any term instructions that don't match with a complete replay
+        // need to be recorded as sources for the BFS
+        for (std::map<TraceLocalID,GetTermEvent*>::const_iterator it =
+              term_insts.begin(); it != term_insts.end(); it++)
+        {
+          inv_topo_order[it->second->lhs] = topo_order.size();
+          topo_order.push_back(it->second->lhs);
         }
       }
 
@@ -5680,6 +6278,10 @@ namespace Legion {
         }
         ++idx;
       }
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < incoming.size(); idx++)
+        assert(remaining_edges[idx] == 0);
+#endif
 
       // Third, construct a chain decomposition
       unsigned num_chains = 0;
@@ -5761,10 +6363,8 @@ namespace Legion {
         std::vector<std::vector<unsigned> > *in_reduced_copy = 
           new std::vector<std::vector<unsigned> >();
         in_reduced_copy->swap(incoming_reduced);
-        // Write them to the members
+        // Write them to the members (in this order)
         pending_inv_topo_order.store(inv_topo_order_copy);
-        // Need memory fence so writes happen in this order
-        __sync_synchronize();
         pending_transitive_reduction.store(in_reduced_copy);
       }
       else
@@ -5865,7 +6465,7 @@ namespace Legion {
     void PhysicalTemplate::propagate_copies(std::vector<unsigned> *gen)
     //--------------------------------------------------------------------------
     {
-      std::vector<int> substs(events.size(), -1);
+      std::map<unsigned,unsigned> substitutions;
       std::vector<Instruction*> new_instructions;
       new_instructions.reserve(instructions.size());
       std::set<Instruction*> to_prune;
@@ -5880,9 +6480,9 @@ namespace Legion {
 #endif
           if (merge->rhs.size() == 1)
           {
-            substs[merge->lhs] = *merge->rhs.begin();
+            substitutions[merge->lhs] = *merge->rhs.begin();
 #ifdef DEBUG_LEGION
-            assert(merge->lhs != (unsigned)substs[merge->lhs]);
+            assert(merge->lhs != substitutions[merge->lhs]);
 #endif
             if (gen == NULL)
               to_prune.insert(inst);
@@ -5898,6 +6498,10 @@ namespace Legion {
 
       if (instructions.size() == new_instructions.size()) return;
 
+      // Rewrite the frontiers first
+      rewrite_frontiers(substitutions); 
+
+      // Then rewrite the instructions
       instructions.swap(new_instructions);
 
       std::vector<unsigned> new_gen((gen == NULL) ? 0 : gen->size(), -1U);
@@ -5916,6 +6520,12 @@ namespace Legion {
               lhs = term->lhs;
               break;
             }
+          case REPLAY_MAPPING:
+            {
+              ReplayMapping *replay = inst->as_replay_mapping();
+              lhs = replay->lhs;
+              break;
+            }
           case CREATE_AP_USER_EVENT:
             {
               CreateApUserEvent *create = inst->as_create_ap_user_event();
@@ -5925,15 +6535,19 @@ namespace Legion {
           case TRIGGER_EVENT:
             {
               TriggerEvent *trigger = inst->as_trigger_event();
-              int subst = substs[trigger->rhs];
-              if (subst >= 0) trigger->rhs = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(trigger->rhs);
+              if (finder != substitutions.end())
+                trigger->rhs = finder->second;
               break;
             }
           case BARRIER_ARRIVAL:
             {
               BarrierArrival *arrival = inst->as_barrier_arrival();
-              int subst = substs[arrival->rhs];
-              if (subst >= 0) arrival->rhs = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(arrival->rhs);
+              if (finder != substitutions.end())
+                arrival->rhs = finder->second;
               lhs = arrival->lhs;
               break;
             }
@@ -5944,9 +6558,12 @@ namespace Legion {
               for (std::set<unsigned>::iterator it = merge->rhs.begin();
                    it != merge->rhs.end(); ++it)
               {
-                int subst = substs[*it];
-                if (subst >= 0) new_rhs.insert((unsigned)subst);
-                else new_rhs.insert(*it);
+                std::map<unsigned,unsigned>::const_iterator finder =
+                  substitutions.find(*it);
+                if (finder != substitutions.end())
+                  new_rhs.insert(finder->second);
+                else
+                  new_rhs.insert(*it);
               }
               merge->rhs.swap(new_rhs);
               lhs = merge->lhs;
@@ -5955,50 +6572,49 @@ namespace Legion {
           case ISSUE_COPY:
             {
               IssueCopy *copy = inst->as_issue_copy();
-              int subst = substs[copy->precondition_idx];
-              if (subst >= 0) copy->precondition_idx = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(copy->precondition_idx);
+              if (finder != substitutions.end())
+                copy->precondition_idx = finder->second;
               lhs = copy->lhs;
               break;
             }
           case ISSUE_FILL:
             {
               IssueFill *fill = inst->as_issue_fill();
-              int subst = substs[fill->precondition_idx];
-              if (subst >= 0) fill->precondition_idx = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(fill->precondition_idx);
+              if (finder != substitutions.end())
+                fill->precondition_idx = finder->second;
               lhs = fill->lhs;
               break;
             }
           case ISSUE_ACROSS:
             {
               IssueAcross *across = inst->as_issue_across();
-              int subst = substs[across->copy_precondition];
-              if (subst >= 0) across->copy_precondition= (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(across->copy_precondition);
+              if (finder != substitutions.end())
+                across->copy_precondition = finder->second;
               if (across->collective_precondition != 0)
               {
-                int subst = substs[across->collective_precondition];
-                if (subst >= 0) 
-                  across->collective_precondition = (unsigned)subst;
+                finder = substitutions.find(across->collective_precondition);
+                if (finder != substitutions.end())
+                  across->collective_precondition = finder->second;
               }
               if (across->src_indirect_precondition != 0)
               {
-                int subst = substs[across->src_indirect_precondition];
-                if (subst >= 0) 
-                  across->src_indirect_precondition = (unsigned)subst;
+                finder = substitutions.find(across->src_indirect_precondition);
+                if (finder != substitutions.end())
+                  across->src_indirect_precondition = finder->second;
               }
               if (across->dst_indirect_precondition != 0)
               {
-                int subst = substs[across->dst_indirect_precondition];
-                if (subst >= 0) 
-                  across->dst_indirect_precondition = (unsigned)subst;
+                finder = substitutions.find(across->dst_indirect_precondition);
+                if (finder != substitutions.end())
+                  across->dst_indirect_precondition = finder->second;
               }
               lhs = across->lhs;
-              break;
-            }
-          case SET_EFFECTS:
-            {
-              SetEffects *effects = inst->as_set_effects();
-              int subst = substs[effects->rhs];
-              if (subst >= 0) effects->rhs = (unsigned)subst;
               break;
             }
           case SET_OP_SYNC_EVENT:
@@ -6021,8 +6637,13 @@ namespace Legion {
           case COMPLETE_REPLAY:
             {
               CompleteReplay *replay = inst->as_complete_replay();
-              int subst = substs[replay->rhs];
-              if (subst >= 0) replay->rhs = (unsigned)subst;
+              std::map<unsigned,unsigned>::const_iterator finder =
+                substitutions.find(replay->pre);
+              if (finder != substitutions.end())
+                replay->pre = finder->second;
+              finder = substitutions.find(replay->post);
+              if (finder != substitutions.end())
+                replay->post = finder->second;
               break;
             }
           default:
@@ -6070,6 +6691,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::rewrite_frontiers(
+                                     std::map<unsigned,unsigned> &substitutions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<unsigned,unsigned> > to_add;
+      for (std::map<unsigned,unsigned>::iterator it =
+            frontiers.begin(); it != frontiers.end(); /*nothing*/)
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          substitutions.find(it->first);
+        if (finder != substitutions.end())
+        {
+          to_add.emplace_back(std::make_pair(finder->second,it->second));
+          std::map<unsigned,unsigned>::iterator to_delete = it++;
+          frontiers.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      for (std::vector<std::pair<unsigned,unsigned> >::const_iterator it =
+            to_add.begin(); it != to_add.end(); it++)
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          frontiers.find(it->first);
+        if (finder != frontiers.end())
+        {
+          // Handle the case where we recorded two different frontiers
+          // but they are now being merged together from the same source
+          // and we can therefore substitute the first one for the second
+#ifdef DEBUG_LEGION
+          assert(substitutions.find(it->second) == substitutions.end());
+#endif
+          substitutions[it->second] = finder->second;
+        }
+        else
+          frontiers.insert(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::eliminate_dead_code(std::vector<unsigned> &gen)
     //--------------------------------------------------------------------------
     {
@@ -6078,9 +6739,9 @@ namespace Legion {
       {
         Instruction *inst = instructions[idx];
         InstructionKind kind = inst->get_kind();
-        // We only eliminate two kinds of instructions:
+        // We only eliminate two kinds of instructions currently:
         // GetTermEvent and SetOpSyncEvent
-        used[idx] = kind != SET_OP_SYNC_EVENT;
+        used[idx] = (kind != SET_OP_SYNC_EVENT) && (kind != GET_TERM_EVENT);
         switch (kind)
         {
           case MERGE_EVENT:
@@ -6153,22 +6814,15 @@ namespace Legion {
               }
               break;
             }
-          case SET_EFFECTS:
-            {
-              SetEffects *effects = inst->as_set_effects();
-#ifdef DEBUG_LEGION
-              assert(gen[effects->rhs] != -1U);
-#endif
-              used[gen[effects->rhs]] = true;
-              break;
-            }
           case COMPLETE_REPLAY:
             {
               CompleteReplay *complete = inst->as_complete_replay();
 #ifdef DEBUG_LEGION
-              assert(gen[complete->rhs] != -1U);
+              assert(gen[complete->pre] != -1U);
+              assert(gen[complete->post] != -1U);
 #endif
-              used[gen[complete->rhs]] = true;
+              used[gen[complete->pre]] = true;
+              used[gen[complete->post]] = true;
               break;
             }
           case BARRIER_ARRIVAL:
@@ -6181,6 +6835,7 @@ namespace Legion {
               break;
             }
           case GET_TERM_EVENT:
+          case REPLAY_MAPPING:
           case CREATE_AP_USER_EVENT:
           case SET_OP_SYNC_EVENT:
           case ASSIGN_FENCE_COMPLETION:
@@ -6314,7 +6969,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_premap_output(Memoizable *memo,
+    void PhysicalTemplate::record_premap_output(MemoizableOp *memo,
                                          const Mapper::PremapTaskOutput &output,
                                          std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -6453,7 +7108,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_get_term_event(ApEvent lhs,
+    void PhysicalTemplate::record_completion_event(ApEvent lhs,
                                      unsigned op_kind, const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
@@ -6465,6 +7120,21 @@ namespace Legion {
       unsigned lhs_ = convert_event(lhs);
       record_memo_entry(tlid, lhs_, op_kind);
       insert_instruction(new GetTermEvent(*this, lhs_, tlid, fence));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_replay_mapping(ApEvent lhs,
+                 unsigned op_kind, const TraceLocalID &tlid, bool register_memo)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(is_recording());
+#endif
+      unsigned lhs_ = convert_event(lhs);
+      if (register_memo)
+        record_memo_entry(tlid, lhs_, op_kind);
+      insert_instruction(new ReplayMapping(*this, lhs_, tlid));
     }
 
     //--------------------------------------------------------------------------
@@ -6511,7 +7181,22 @@ namespace Legion {
       // Do this first in case it gets pre-empted
       const unsigned rhs_ = 
         rhs.exists() ? find_event(rhs, tpl_lock) : fence_completion_id;
+#ifdef DEBUG_LEGION
+      // Make sure we're always recording user events on the same shard
+      // where the create user event is recorded
+      unsigned lhs_ = UINT_MAX;
+      for (std::map<unsigned,ApUserEvent>::const_iterator it =
+            user_events.begin(); it != user_events.end(); it++)
+      {
+        if (it->second != lhs)
+          continue;
+        lhs_ = it->first;
+        break;
+      }
+      assert(lhs_ != UINT_MAX);
+#else
       unsigned lhs_ = find_event(lhs, tpl_lock);
+#endif
       events.push_back(ApEvent());
       insert_instruction(new TriggerEvent(*this, lhs_, rhs_, tlid));
     }
@@ -6631,12 +7316,68 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(PredEvent &lhs, PredEvent e1,
+                                         PredEvent e2, const TraceLocalID &tlid)
+    //--------------------------------------------------------------------------
+    {
+      // need support for predicated execution with tracing
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_collective_barrier(ApBarrier bar, 
               ApEvent pre, const std::pair<size_t,size_t> &key, size_t arrivals)
     //--------------------------------------------------------------------------
     {
       // should only be called on sharded physical templates
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID PhysicalTemplate::record_managed_barrier(ApBarrier bar,
+                                                     size_t total_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+      assert(is_recording());
+      assert(event_map.find(bar) == event_map.end());
+      assert(managed_barriers.find(bar) == managed_barriers.end());
+      const unsigned lhs = convert_event(bar, false/*check*/);
+#else
+      const unsigned lhs = convert_event(bar);
+#endif
+      BarrierAdvance *advance =
+        new BarrierAdvance(*this, bar, lhs, total_arrivals, true/*owner*/);
+      insert_instruction(advance);
+      // Save this as one of the barriers that we're managing
+      managed_barriers[bar] = advance;
+      return 0; // No bothering with shards here
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_barrier_arrival(ApBarrier bar, ApEvent pre,
+        size_t arrivals, std::set<RtEvent> &applied_events, ShardID owner_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Should only be seeing things from ourself here
+      assert(owner_shard == 0);
+#endif
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+      assert(is_recording());
+#endif
+      const unsigned rhs = 
+        pre.exists() ? find_event(pre, tpl_lock) : fence_completion_id;
+      const unsigned lhs = events.size();
+      events.push_back(ApEvent());
+      BarrierArrival *arrival =
+          new BarrierArrival(*this, bar, lhs, rhs, arrivals, true/*managed*/);
+      insert_instruction(arrival);
+      managed_arrivals[bar].push_back(arrival);
     }
 
     //--------------------------------------------------------------------------
@@ -6796,7 +7537,7 @@ namespace Legion {
       if (recorded_views.find(instance.view_did) == recorded_views.end())
       {
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
+        IndividualView *view = static_cast<IndividualView*>(
             trace->runtime->find_or_request_logical_view(
                                 instance.view_did, ready));
         recorded_views[instance.view_did] = view;
@@ -6819,7 +7560,7 @@ namespace Legion {
           (recorded_views.find(inst.view_did) == recorded_views.end()))
       {
         RtEvent ready;
-        InstanceView *view = static_cast<InstanceView*>(
+        IndividualView *view = static_cast<IndividualView*>(
             trace->runtime->find_or_request_logical_view(inst.view_did, ready));
         recorded_views[inst.view_did] = view;
         if (ready.exists() && !ready.has_triggered())
@@ -6928,12 +7669,10 @@ namespace Legion {
                                                     const TraceLocalID &tlid)
     //--------------------------------------------------------------------------
     {
-      if (!lhs.exists())
-      {
-        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, rename);
-        lhs = rename;
-      }
+      // Always make a fresh event here for these
+      ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+      Runtime::trigger_event(NULL, rename, lhs);
+      lhs = rename;
       AutoLock tpl_lock(template_lock);
 #ifdef DEBUG_LEGION
       assert(is_recording());
@@ -6943,22 +7682,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::record_set_effects(const TraceLocalID &tlid, 
-                                              ApEvent &rhs)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-      assert(is_recording());
-#endif
-      const unsigned rhs_ = find_event(rhs, tpl_lock);
-      events.push_back(ApEvent());
-      insert_instruction(new SetEffects(*this, tlid, rhs_));
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTemplate::record_complete_replay(const TraceLocalID &tlid,
-                                                  ApEvent rhs)
+                   ApEvent pre, ApEvent post, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);
@@ -6966,9 +7691,10 @@ namespace Legion {
       assert(is_recording());
 #endif
       // Do this first in case it gets preempted
-      const unsigned rhs_ = find_event(rhs, tpl_lock);
+      const unsigned pre_ = pre.exists() ? find_event(pre, tpl_lock) : 0;
+      const unsigned post_ = post.exists() ? find_event(post, tpl_lock) : 0;
       events.push_back(ApEvent());
-      insert_instruction(new CompleteReplay(*this, tlid, rhs_));
+      insert_instruction(new CompleteReplay(*this, tlid, pre_, post_));
     }
 
     //--------------------------------------------------------------------------
@@ -7066,15 +7792,22 @@ namespace Legion {
         initialize_replay(completion, recurrent, false/*need lock*/);
         return;
       }
-      operations.emplace_back(std::map<TraceLocalID,Memoizable*>());
+      operations.emplace_back(std::map<TraceLocalID,MemoizableOp*>());
       pending_replays.emplace_back(std::make_pair(completion, recurrent));
     }
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::perform_replay(Runtime *runtime, 
-                std::set<RtEvent> &replayed_events, RtEvent replay_precondition)
+                                          std::set<RtEvent> &replayed_events)
     //--------------------------------------------------------------------------
     {
+      RtEvent replay_precondition;
+      if (total_replays++ == Realm::Barrier::MAX_PHASES)
+      {
+        replay_precondition = refresh_managed_barriers();
+        // Reset it back to one after updating our barriers
+        total_replays = 1;
+      }
       ApEvent completion;
       bool recurrent;
       {
@@ -7110,7 +7843,10 @@ namespace Legion {
 
       if (recurrent)
       {
-        fence_completion = ApEvent::NO_AP_EVENT;
+        if (last_fence == NULL)
+          fence_completion = ApEvent::NO_AP_EVENT;
+        else
+          fence_completion = completion;
         for (std::map<unsigned, unsigned>::iterator it = frontiers.begin();
             it != frontiers.end(); ++it)
           events[it->second] = events[it->first];
@@ -7145,6 +7881,40 @@ namespace Legion {
             replay_precondition, replay_targets[idx % replay_targets.size()]);
         replayed_events.insert(done);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PhysicalTemplate::refresh_managed_barriers(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ShardID,std::map<ApEvent,ApBarrier> > notifications;
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it =
+            managed_barriers.begin(); it != managed_barriers.end(); it++)
+        it->second->refresh_barrier(it->first, notifications);
+      if (!notifications.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(notifications.size() == 1);
+#endif
+        std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator local =
+          notifications.begin();
+#ifdef DEBUG_LEGION
+        assert(local->first == 0);
+        assert(local->second.size() == managed_arrivals.size());
+#endif
+        for (std::map<ApEvent,ApBarrier>::const_iterator it =
+              local->second.begin(); it != local->second.end(); it++)
+        {
+          std::map<ApEvent,std::vector<BarrierArrival*> >::iterator finder =
+            managed_arrivals.find(it->first);
+#ifdef DEBUG_LEGION
+          assert(finder != managed_arrivals.end());
+#endif
+          for (unsigned idx = 0; idx < finder->second.size(); idx++)
+            finder->second[idx]->set_managed_barrier(it->second);
+        }
+      }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -7217,18 +7987,6 @@ namespace Legion {
     {
       const DeleteTemplateArgs *pargs = (const DeleteTemplateArgs*)args;
       delete pargs->tpl;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned PhysicalTemplate::find_memo_entry(const TraceLocalID &op_key)
-    //--------------------------------------------------------------------------
-    {
-      std::map<TraceLocalID,std::pair<unsigned,unsigned> >::iterator 
-        entry_finder = memo_entries.find(op_key);
-#ifdef DEBUG_LEGION
-      assert(entry_finder != memo_entries.end());
-#endif
-      return entry_finder->second.first;
     }
 
     //--------------------------------------------------------------------------
@@ -7352,11 +8110,11 @@ namespace Legion {
         local_shard(repl_ctx->owner_shard->shard_id), 
         total_shards(repl_ctx->shard_manager->total_shards),
         template_index(repl_ctx->register_trace_template(this)),
-        total_replays(0), refreshed_barriers(0), next_deferral_precondition(0), 
+        refreshed_barriers(0), next_deferral_precondition(0), 
         recurrent_replays(0), updated_frontiers(0)
     //--------------------------------------------------------------------------
     {
-      repl_ctx->add_reference();
+      repl_ctx->add_base_resource_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -7368,7 +8126,7 @@ namespace Legion {
         it->second.destroy_barrier();
       // Unregister ourselves from the context and then remove our reference
       repl_ctx->unregister_trace_template(template_index);
-      if (repl_ctx->remove_reference())
+      if (repl_ctx->remove_base_resource_ref(TRACE_REF))
         delete repl_ctx;
     } 
 
@@ -7647,16 +8405,72 @@ namespace Legion {
 #else
       const unsigned bar_ = convert_event(bar);
 #endif
-      // Use a NO_BARRIER here since it is going to be filled in on each replay
-      // by an operation that will provide the name of the barrier to use
       BarrierArrival *arrival =
-        new BarrierArrival(*this, bar, bar_, pre_, arrivals, true/*collect*/);
+        new BarrierArrival(*this, bar, bar_, pre_, arrivals, false/*managed*/);
       insert_instruction(arrival);
 #ifdef DEBUG_LEGION
       assert(collective_barriers.find(key) == collective_barriers.end());
 #endif
       // Save this collective barrier
       collective_barriers[key] = arrival;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardedPhysicalTemplate::record_managed_barrier(ApBarrier bar,
+                                                          size_t total_arrivals)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::record_managed_barrier(bar, total_arrivals);
+      return local_shard;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_barrier_arrival(ApBarrier bar,
+        ApEvent pre, size_t arrival_count, std::set<RtEvent> &applied,
+        ShardID owner_shard)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+      assert(bar.exists());
+      assert(is_recording());
+#endif
+      // Find the pre event first
+      unsigned rhs = find_event(pre, tpl_lock);
+      events.push_back(ApEvent());
+      BarrierArrival *arrival = new BarrierArrival(*this, bar,
+          events.size() - 1, rhs, arrival_count, true/*managed*/);
+      insert_instruction(arrival);
+      if (owner_shard != local_shard)
+      {
+        // Check to see if we've already made a barrier arrival instruction
+        // for this barrier or not
+        std::map<ApEvent,std::vector<BarrierArrival*> >::iterator finder =
+          managed_arrivals.find(bar);
+        if (finder == managed_arrivals.end())
+        {
+          // Need to request a subscription to this barrier on the owner shard
+          // We need to tell the owner shard that we are going to 
+          // subscribe to its updates for this barrier
+          RtEvent subscribed = Runtime::create_rt_user_event();
+          ShardManager *manager = repl_ctx->shard_manager;
+          Serializer rez;
+          rez.serialize(manager->did);
+          rez.serialize(owner_shard);
+          rez.serialize(template_index);
+          rez.serialize(REMOTE_BARRIER_SUBSCRIBE);
+          rez.serialize(bar);
+          rez.serialize(local_shard);
+          rez.serialize(subscribed);
+          manager->send_trace_update(owner_shard, rez);
+          applied.insert(subscribed); 
+          managed_arrivals[bar].push_back(arrival);
+        }
+        else
+          finder->second.push_back(arrival);
+      }
+      else
+        managed_arrivals[bar].push_back(arrival);
     }
 
     //--------------------------------------------------------------------------
@@ -7759,26 +8573,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardedPhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, 
-                                                       const TraceLocalID &tlid)
-    //--------------------------------------------------------------------------
-    {
-      // Make sure the lhs event is local to our shard
-      if (lhs.exists())
-      {
-        const AddressSpaceID event_space = find_event_space(lhs);
-        if (event_space != repl_ctx->runtime->address_space)
-        {
-          ApUserEvent rename = Runtime::create_ap_user_event(NULL);
-          Runtime::trigger_event(NULL, rename, lhs);
-          lhs = rename;
-        }
-      }
-      // Then do the base call
-      PhysicalTemplate::record_set_op_sync_event(lhs, tlid);
-    } 
-
-    //--------------------------------------------------------------------------
     ApBarrier ShardedPhysicalTemplate::find_trace_shard_event(ApEvent event,
                                                            ShardID remote_shard)
     //--------------------------------------------------------------------------
@@ -7790,26 +8584,35 @@ namespace Legion {
       if (finder == event_map.end() || (finder->second == NO_INDEX))
         return ApBarrier::NO_AP_BARRIER;
       // If we did make it then see if we have a remote barrier for it yet
-      std::map<ApEvent,BarrierArrival*>::const_iterator barrier_finder = 
-        remote_arrivals.find(event);
-      if (barrier_finder == remote_arrivals.end())
+      std::map<ApEvent,BarrierAdvance*>::const_iterator barrier_finder = 
+        managed_barriers.find(event);
+      if (barrier_finder == managed_barriers.end())
       {
         // Make a new barrier and record it in the events
         ApBarrier barrier(Realm::Barrier::create_barrier(1/*arrival count*/));
+        // The first generation of each barrier should be triggered when
+        // it is recorded in a barrier arrival instruction
+        Runtime::phase_barrier_arrive(barrier, 1/*count*/);
         // Record this in the instruction stream
 #ifdef DEBUG_LEGION
-        const unsigned index = convert_event(barrier, false/*check*/);
+        const unsigned lhs = convert_event(barrier, false/*check*/);
 #else
-        const unsigned index = convert_event(barrier);
+        const unsigned lhs = convert_event(barrier);
 #endif
-        // Then add a new instruction to arrive on the barrier with the
-        // event as a precondition
-        BarrierArrival *arrival_instruction =
-          new BarrierArrival(*this, barrier, index, finder->second);
-        insert_instruction(arrival_instruction);
-        // Save this in the remote barriers
-        remote_arrivals[event] = arrival_instruction;
-        return arrival_instruction->record_subscribed_shard(remote_shard);
+        // First record the barrier advance for this new barrier
+        BarrierAdvance *advance = new BarrierAdvance(*this, barrier,
+                            lhs, 1/*arrival count*/, true/*owner*/);
+        insert_instruction(advance);
+        managed_barriers[event] = advance;
+        // Next make the arrival instruction for this barrier
+        events.push_back(ApEvent());
+        BarrierArrival *arrival = new BarrierArrival(*this, barrier,
+            events.size() - 1, finder->second, 1/*count*/, true/*managed*/);
+        insert_instruction(arrival);
+        managed_arrivals[event].push_back(arrival);
+        // Record our local shard too
+        advance->record_subscribed_shard(local_shard);
+        return advance->record_subscribed_shard(remote_shard);
       }
       else
         return barrier_finder->second->record_subscribed_shard(remote_shard);
@@ -7833,7 +8636,8 @@ namespace Legion {
 #else
         const unsigned index = convert_event(event);
 #endif
-        BarrierAdvance *advance = new BarrierAdvance(*this, barrier, index);
+        BarrierAdvance *advance =
+          new BarrierAdvance(*this, barrier, index, 1/*count*/, false/*owner*/);
         insert_instruction(advance); 
         local_advances[event] = advance;
         // Don't remove it, just set it to NO_EVENT so we can tell the names
@@ -7956,7 +8760,7 @@ namespace Legion {
             if (!PhysicalTemplate::are_read_only_users(inst_users))
             {
               Serializer rez;
-              rez.serialize(manager->repl_id);
+              rez.serialize(manager->did);
               rez.serialize(source_shard);
               rez.serialize(template_index);
               rez.serialize(READ_ONLY_USERS_RESPONSE);
@@ -7994,19 +8798,32 @@ namespace Legion {
                 derez.deserialize(bar);
                 std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
                   local_advances.find(key);
+                if (finder == local_advances.end())
+                {
+                  std::map<ApEvent,
+                    std::vector<BarrierArrival*> >::const_iterator finder2 =
+                    managed_arrivals.find(key);
 #ifdef DEBUG_LEGION
-                assert(finder != local_advances.end());
+                  assert(finder2 != managed_arrivals.end());
 #endif
-                finder->second->refresh_barrier(bar);
+                  for (std::vector<BarrierArrival*>::const_iterator it =
+                        finder2->second.begin(); it !=
+                        finder2->second.end(); it++)
+                    (*it)->set_managed_barrier(bar);
+                }
+                else
+                  finder->second->remote_refresh_barrier(bar);
               }
               refreshed_barriers += num_barriers;
+              const size_t expected = 
+                local_advances.size() + managed_arrivals.size();
 #ifdef DEBUG_LEGION
-              assert(refreshed_barriers <= local_advances.size());
+              assert(refreshed_barriers <= expected);
 #endif
               // See if the wait has already been done by the local shard
               // If so, trigger it, otherwise do nothing so it can come
               // along and see that everything is done
-              if (refreshed_barriers == local_advances.size())
+              if (refreshed_barriers == expected)
               {
                 done = update_advances_ready;
                 // We're done so reset everything for the next refresh
@@ -8088,6 +8905,23 @@ namespace Legion {
                 derez.deserialize(pending_refresh_frontiers[oldbar]);
               }
             }
+            break;
+          }
+        case REMOTE_BARRIER_SUBSCRIBE:
+          {
+            ApBarrier bar;
+            derez.deserialize(bar);
+            ShardID remote_shard;
+            derez.deserialize(remote_shard);
+            derez.deserialize(done);
+
+            AutoLock tpl_lock(template_lock);
+            std::map<ApEvent,BarrierAdvance*>::const_iterator finder =
+              managed_barriers.find(bar);
+#ifdef DEBUG_LEGION
+            assert(finder != managed_barriers.end());
+#endif
+            finder->second->record_subscribed_shard(remote_shard);
             break;
           }
         default:
@@ -8274,8 +9108,16 @@ namespace Legion {
                                                                   ApEvent event)
     //--------------------------------------------------------------------------
     {
+      if (!event.exists())
+        return 0;
       // TODO: Remove hack include at top of file when we fix this 
-      return Realm::ID(event.id).event_creator_node();
+      const Realm::ID id(event.id);
+      if (id.is_barrier())
+        return id.barrier_creator_node();
+#ifdef DEBUG_LEGION
+      assert(id.is_event());
+#endif
+      return id.event_creator_node();
     }
 
     //--------------------------------------------------------------------------
@@ -8327,12 +9169,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ShardedPhysicalTemplate::perform_replay(Runtime *runtime,
-                std::set<RtEvent> &replayed_events, RtEvent replay_precondition)
+                                             std::set<RtEvent> &replayed_events)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!replay_precondition.exists());
-#endif
       ApEvent completion; bool recurrent;
       std::map<std::pair<size_t,size_t>,ApBarrier> collective_updates;
       {
@@ -8380,7 +9219,7 @@ namespace Legion {
                 nit = notifications.begin(); nit != notifications.end(); nit++)
           {
             Serializer rez;
-            rez.serialize(manager->repl_id);
+            rez.serialize(manager->did);
             rez.serialize(nit->first);
             rez.serialize(template_index);
             rez.serialize(FRONTIER_BARRIER_REFRESH);
@@ -8473,73 +9312,6 @@ namespace Legion {
               remote_frontiers.begin(); it != remote_frontiers.end(); it++)
           events[it->second] = completion;
       }
-      // Regardless of whether this is recurrent or not check to see if
-      // we need to referesh the barriers for our instructions
-      if (total_replays++ == Realm::Barrier::MAX_PHASES)
-      {
-        std::map<ShardID,std::map<ApEvent,ApBarrier> > notifications;
-        // Need to update all our barriers since we're out of generations
-        for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
-              remote_arrivals.begin(); it != remote_arrivals.end(); it++)
-          it->second->refresh_barrier(it->first, notifications);
-        // Send out the notifications to all the shards
-        ShardManager *manager = repl_ctx->shard_manager;
-        for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
-              nit = notifications.begin(); nit != notifications.end(); nit++)
-        {
-#ifdef DEBUG_LEGION
-          assert(nit->first != repl_ctx->owner_shard->shard_id);
-#endif
-          Serializer rez;
-          rez.serialize(manager->repl_id);
-          rez.serialize(nit->first);
-          rez.serialize(template_index);
-          rez.serialize(TEMPLATE_BARRIER_REFRESH);
-          rez.serialize<size_t>(nit->second.size());
-          for (std::map<ApEvent,ApBarrier>::const_iterator it = 
-                nit->second.begin(); it != nit->second.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          manager->send_trace_update(nit->first, rez);
-        }
-        // Then wait for all our advances to be updated from other shards
-        {
-          AutoLock tpl_lock(template_lock);
-#ifdef DEBUG_LEGION
-          assert(!update_advances_ready.exists());
-#endif
-          if (!pending_refresh_barriers.empty())
-          {
-            for (std::map<ApEvent,ApBarrier>::const_iterator it = 
-                  pending_refresh_barriers.begin(); it != 
-                  pending_refresh_barriers.end(); it++)
-            {
-              std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
-                local_advances.find(it->first);
-#ifdef DEBUG_LEGION
-              assert(finder != local_advances.end());
-#endif
-              finder->second->refresh_barrier(it->second);
-            }
-            refreshed_barriers += pending_refresh_barriers.size();
-#ifdef DEBUG_LEGION
-            assert(refreshed_barriers <= local_advances.size());
-#endif
-            pending_refresh_barriers.clear();
-          }
-          if (refreshed_barriers < local_advances.size())
-          {
-            update_advances_ready = Runtime::create_rt_user_event();
-            replay_precondition = update_advances_ready;
-          }
-          else // Reset this back to zero for the next round
-            refreshed_barriers = 0;
-        }
-        // Reset it back to one after updating our barriers
-        total_replays = 1;
-      }
       if (!collective_updates.empty())
       {
         for (std::map<std::pair<size_t,size_t>,ApBarrier>::const_iterator it =
@@ -8552,12 +9324,108 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != collective_barriers.end());
 #endif
-          finder->second->set_collective_barrier(it->second);
+          finder->second->set_managed_barrier(it->second);
         }
       }
       // Now call the base version of this
-      PhysicalTemplate::perform_replay(runtime, replayed_events, 
-                                       replay_precondition);
+      PhysicalTemplate::perform_replay(runtime, replayed_events); 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardedPhysicalTemplate::refresh_managed_barriers(void)
+    //--------------------------------------------------------------------------
+    {
+      std::map<ShardID,std::map<ApEvent,ApBarrier> > notifications;
+      // Need to update all our barriers since we're out of generations
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
+            managed_barriers.begin(); it != managed_barriers.end(); it++)
+        it->second->refresh_barrier(it->first, notifications);
+      // Send out the notifications to all the shards
+      ShardManager *manager = repl_ctx->shard_manager;
+      size_t local_refreshed = 0;
+      for (std::map<ShardID,std::map<ApEvent,ApBarrier> >::const_iterator
+            nit = notifications.begin(); nit != notifications.end(); nit++)
+      {
+        if (nit->first != local_shard)
+        {
+          Serializer rez;
+          rez.serialize(manager->did);
+          rez.serialize(nit->first);
+          rez.serialize(template_index);
+          rez.serialize(TEMPLATE_BARRIER_REFRESH);
+          rez.serialize<size_t>(nit->second.size());
+          for (std::map<ApEvent,ApBarrier>::const_iterator it = 
+                nit->second.begin(); it != nit->second.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+          manager->send_trace_update(nit->first, rez);
+        }
+        else
+        {
+          local_refreshed = nit->second.size();
+          for (std::map<ApEvent,ApBarrier>::const_iterator it =
+                nit->second.begin(); it != nit->second.end(); it++)
+          {
+            std::map<ApEvent,std::vector<BarrierArrival*> >::iterator finder =
+              managed_arrivals.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(finder != managed_arrivals.end());
+#endif
+            for (unsigned idx = 0; idx < finder->second.size(); idx++)
+              finder->second[idx]->set_managed_barrier(it->second);
+          }
+        }
+      }
+      // Then wait for all our advances to be updated from other shards
+      RtEvent replay_precondition;
+      {
+        AutoLock tpl_lock(template_lock);
+#ifdef DEBUG_LEGION
+        assert(!update_advances_ready.exists());
+#endif
+        if (local_refreshed > 0)
+          refreshed_barriers += local_refreshed;
+        if (!pending_refresh_barriers.empty())
+        {
+          for (std::map<ApEvent,ApBarrier>::const_iterator it = 
+                pending_refresh_barriers.begin(); it != 
+                pending_refresh_barriers.end(); it++)
+          {
+            std::map<ApEvent,BarrierAdvance*>::const_iterator finder = 
+              local_advances.find(it->first);
+            if (finder == local_advances.end())
+            {
+              std::map<ApEvent,std::vector<BarrierArrival*> >::const_iterator 
+                finder2 = managed_arrivals.find(it->first);
+#ifdef DEBUG_LEGION
+              assert(finder2 != managed_arrivals.end());
+#endif
+              for (unsigned idx = 0; idx < finder2->second.size(); idx++)
+                finder2->second[idx]->set_managed_barrier(it->second);
+            }
+            else
+              finder->second->remote_refresh_barrier(it->second);
+          }
+          refreshed_barriers += pending_refresh_barriers.size();
+
+          pending_refresh_barriers.clear();
+        }
+        const size_t expected = 
+          local_advances.size() + managed_arrivals.size();
+#ifdef DEBUG_LEGION
+        assert(refreshed_barriers <= expected);
+#endif
+        if (refreshed_barriers < expected)
+        {
+          update_advances_ready = Runtime::create_rt_user_event();
+          replay_precondition = update_advances_ready;
+        }
+        else // Reset this back to zero for the next round
+          refreshed_barriers = 0;
+      }
+      return replay_precondition;
     }
 
     //--------------------------------------------------------------------------
@@ -8579,7 +9447,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!operations.empty());
 #endif
-      operations.pop_front();
+      operations.pop_front(); 
     }
 
     //--------------------------------------------------------------------------
@@ -8589,8 +9457,8 @@ namespace Legion {
       // Skip the any events that are from remote shards since we  
       std::set<ApEvent> all_events;
       std::set<ApEvent> local_barriers;
-      for (std::map<ApEvent,BarrierArrival*>::const_iterator it = 
-            remote_arrivals.begin(); it != remote_arrivals.end(); it++)
+      for (std::map<ApEvent,BarrierAdvance*>::const_iterator it = 
+            managed_barriers.begin(); it != managed_barriers.end(); it++)
         local_barriers.insert(it->second->get_current_barrier());
       for (std::map<ApEvent, unsigned>::const_iterator it = event_map.begin();
            it != event_map.end(); ++it)
@@ -8619,7 +9487,7 @@ namespace Legion {
         RtUserEvent done = Runtime::create_rt_user_event();
         ShardManager *manager = repl_ctx->shard_manager;
         Serializer rez;
-        rez.serialize(manager->repl_id);
+        rez.serialize(manager->did);
         rez.serialize(target_shard);
         rez.serialize(template_index);
         rez.serialize(UPDATE_MUTATED_INST);
@@ -8649,8 +9517,7 @@ namespace Legion {
       // that node. This algorithm guarantees that all the related instances
       // end up on the same shard for analysis to determine if the trace is
       // replayable or not.
-      const AddressSpaceID inst_owner =
-        inst.get_analysis_space(trace->runtime);
+      const AddressSpaceID inst_owner = inst.get_analysis_space();
       std::vector<ShardID> owner_shards;
       find_owner_shards(inst_owner, owner_shards);
 #ifdef DEBUG_LEGION
@@ -8884,7 +9751,7 @@ namespace Legion {
           const RtUserEvent done = Runtime::create_rt_user_event();
           const AddressSpaceID target = manager->get_shard_space(sit->first);
           Serializer rez;
-          rez.serialize(manager->repl_id);
+          rez.serialize(manager->did);
           rez.serialize(sit->first);
           rez.serialize(template_index);
           rez.serialize(READ_ONLY_USERS_REQUEST);
@@ -8994,7 +9861,7 @@ namespace Legion {
         unsigned g = gen[it->first];
         if (g != -1U && g < instructions.size())
           used[g] = true;
-      }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -9010,6 +9877,58 @@ namespace Legion {
         inv_topo_order[it->second] = topo_order.size();
         topo_order.push_back(it->second);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::record_used_frontiers(std::vector<bool> &used,
+                                         const std::vector<unsigned> &gen) const
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::record_used_frontiers(used, gen);  
+      for (std::map<unsigned,ApBarrier>::const_iterator it =
+            local_frontiers.begin(); it != local_frontiers.end(); it++)
+        used[gen[it->first]] = true;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedPhysicalTemplate::rewrite_frontiers(
+                                     std::map<unsigned,unsigned> &substitutions)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate::rewrite_frontiers(substitutions);
+      std::vector<std::pair<unsigned,ApBarrier> > to_add;
+      for (std::map<unsigned,ApBarrier>::iterator it =
+            local_frontiers.begin(); it != local_frontiers.end(); /*nothing*/)
+      {
+        std::map<unsigned,unsigned>::const_iterator finder =
+          substitutions.find(it->first);
+        if (finder != substitutions.end())
+        {
+          to_add.emplace_back(std::make_pair(finder->second,it->second));
+          // Also need to update the local subscriptions data structure
+          std::map<unsigned,std::set<ShardID> >::iterator subscription_finder =
+            local_subscriptions.find(it->first);
+#ifdef DEBUG_LEGION
+          assert(subscription_finder != local_subscriptions.end());
+#endif
+          std::map<unsigned,std::set<ShardID> >::iterator local_finder =
+            local_subscriptions.find(finder->second);
+          if (local_finder != local_subscriptions.end())
+            local_finder->second.insert(subscription_finder->second.begin(),
+                                        subscription_finder->second.end());
+          else
+            local_subscriptions[finder->second].swap(
+                                        subscription_finder->second);
+          local_subscriptions.erase(subscription_finder);
+          std::map<unsigned,ApBarrier>::iterator to_delete = it++;
+          local_frontiers.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      for (std::vector<std::pair<unsigned,ApBarrier> >::const_iterator it =
+            to_add.begin(); it != to_add.end(); it++)
+        local_frontiers.insert(*it);
     }
 
     /////////////////////////////////////////////////////////////
@@ -9043,7 +9962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void GetTermEvent::execute(std::vector<ApEvent> &events,
                                std::map<unsigned,ApUserEvent> &user_events,
-                               std::map<TraceLocalID,Memoizable*> &operations,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
                                const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
@@ -9051,8 +9970,7 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      operations[owner]->replay_mapping_output();
-      events[lhs] = operations[owner]->get_memo_completion();
+      events[lhs] = operations[owner]->get_completion_event();
     }
 
     //--------------------------------------------------------------------------
@@ -9066,6 +9984,51 @@ namespace Legion {
 #endif
       ss << "events[" << lhs << "] = operations[" << owner
          << "].get_completion_event()    (op kind: "
+         << Operation::op_names[finder->second.second]
+         << ")";
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ReplayMapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplayMapping::ReplayMapping(PhysicalTemplate& tpl, unsigned l,
+                                 const TraceLocalID& r)
+      : Instruction(tpl, r), lhs(l)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < tpl.events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplayMapping::execute(std::vector<ApEvent> &events,
+                              std::map<unsigned,ApUserEvent> &user_events,
+                              std::map<TraceLocalID,MemoizableOp*> &operations,
+                              const bool recurrent_replay)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(owner) != operations.end());
+      assert(operations.find(owner)->second != NULL);
+#endif
+      events[lhs] = operations[owner]->replay_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    std::string ReplayMapping::to_string(const MemoEntries &memo_entries)
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      MemoEntries::const_iterator finder = memo_entries.find(owner);
+#ifdef DEBUG_LEGION
+      assert(finder != memo_entries.end());
+#endif
+      ss << "events[" << lhs << "] = operations[" << owner
+         << "].replay_mapping()    (op kind: "
          << Operation::op_names[finder->second.second]
          << ")";
       return ss.str();
@@ -9089,9 +10052,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CreateApUserEvent::execute(std::vector<ApEvent> &events,
-                                 std::map<unsigned,ApUserEvent> &user_events,
-                                 std::map<TraceLocalID,Memoizable*> &operations,
-                                 const bool recurrent_replay)
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
+                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9131,7 +10094,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TriggerEvent::execute(std::vector<ApEvent> &events,
                                std::map<unsigned,ApUserEvent> &user_events,
-                               std::map<TraceLocalID,Memoizable*> &operations,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
                                const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
@@ -9175,7 +10138,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MergeEvent::execute(std::vector<ApEvent> &events,
                              std::map<unsigned,ApUserEvent> &user_events,
-                             std::map<TraceLocalID,Memoizable*> &operations,
+                             std::map<TraceLocalID,MemoizableOp*> &operations,
                              const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
@@ -9227,9 +10190,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void AssignFenceCompletion::execute(std::vector<ApEvent> &events,
-                                 std::map<unsigned,ApUserEvent> &user_events,
-                                 std::map<TraceLocalID,Memoizable*> &operations,
-                                 const bool recurrent_replay)
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
+                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
       events[lhs] = tpl.get_fence_completion();
@@ -9291,7 +10254,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IssueCopy::execute(std::vector<ApEvent> &events,
                             std::map<unsigned,ApUserEvent> &user_events,
-                            std::map<TraceLocalID,Memoizable*> &operations,
+                            std::map<TraceLocalID,MemoizableOp*> &operations,
                             const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
@@ -9299,10 +10262,9 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memo = operations[owner];
-      Operation *op = memo->get_operation();
+      MemoizableOp *op = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(op, -1U, false);
+      const PhysicalTraceInfo trace_info(op, -1U);
       events[lhs] = expr->issue_copy(op, trace_info, dst_fields, 
                                      src_fields, reservations,
 #ifdef LEGION_SPY
@@ -9377,7 +10339,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IssueAcross::execute(std::vector<ApEvent> &events,
                               std::map<unsigned,ApUserEvent> &user_events,
-                              std::map<TraceLocalID,Memoizable*> &operations,
+                              std::map<TraceLocalID,MemoizableOp*> &operations,
                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
@@ -9385,12 +10347,11 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memo = operations[owner];
-      Operation *op = memo->get_operation();
+      MemoizableOp *op = operations[owner];
       ApEvent copy_pre = events[copy_precondition];
       ApEvent src_indirect_pre = events[src_indirect_precondition];
       ApEvent dst_indirect_pre = events[dst_indirect_precondition];
-      const PhysicalTraceInfo trace_info(op, -1U, false);
+      const PhysicalTraceInfo trace_info(op, -1U);
       events[lhs] = executor->execute(op, PredEvent::NO_PRED_EVENT,
                                       copy_pre, src_indirect_pre,
                                       dst_indirect_pre, trace_info,
@@ -9455,7 +10416,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IssueFill::execute(std::vector<ApEvent> &events,
                             std::map<unsigned,ApUserEvent> &user_events,
-                            std::map<TraceLocalID,Memoizable*> &operations,
+                            std::map<TraceLocalID,MemoizableOp*> &operations,
                             const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
@@ -9463,10 +10424,9 @@ namespace Legion {
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memo = operations[owner];
-      Operation *op = memo->get_operation();
+      MemoizableOp *op = operations[owner];
       ApEvent precondition = events[precondition_idx];
-      const PhysicalTraceInfo trace_info(op, -1U, false);
+      const PhysicalTraceInfo trace_info(op, -1U);
       events[lhs] = expr->issue_fill(op, trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
@@ -9514,20 +10474,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SetOpSyncEvent::execute(std::vector<ApEvent> &events,
-                                 std::map<unsigned,ApUserEvent> &user_events,
-                                 std::map<TraceLocalID,Memoizable*> &operations,
-                                 const bool recurrent_replay)
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
+                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memoizable = operations[owner];
+      MemoizableOp *memoizable = operations[owner];
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      ApEvent sync_condition = memoizable->compute_sync_precondition(NULL);
+      TraceInfo info(memoizable);
+      ApEvent sync_condition = memoizable->compute_sync_precondition(info);
       events[lhs] = sync_condition;
     }
 
@@ -9548,85 +10509,37 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // SetEffects
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    SetEffects::SetEffects(PhysicalTemplate& tpl, const TraceLocalID& l,
-                           unsigned r)
-      : Instruction(tpl, l), rhs(r)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs < tpl.events.size());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void SetEffects::execute(std::vector<ApEvent> &events,
-                             std::map<unsigned,ApUserEvent> &user_events,
-                             std::map<TraceLocalID,Memoizable*> &operations,
-                             const bool recurrent_replay)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(operations.find(owner) != operations.end());
-      assert(operations.find(owner)->second != NULL);
-#endif
-      Memoizable *memoizable = operations[owner];
-#ifdef DEBUG_LEGION
-      assert(memoizable != NULL);
-#endif
-      memoizable->set_effects_postcondition(events[rhs]);
-    }
-
-    //--------------------------------------------------------------------------
-    std::string SetEffects::to_string(const MemoEntries &memo_entries)
-    //--------------------------------------------------------------------------
-    {
-      std::stringstream ss;
-      MemoEntries::const_iterator finder = memo_entries.find(owner);
-#ifdef DEBUG_LEGION
-      assert(finder != memo_entries.end());
-#endif
-      ss << "operations[" << owner << "].set_effects_postcondition(events["
-         << rhs << "])    (op kind: "
-         << Operation::op_names[finder->second.second]
-         << ")";
-      return ss.str();
-    }
-
-    /////////////////////////////////////////////////////////////
     // CompleteReplay
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompleteReplay::CompleteReplay(PhysicalTemplate& tpl,
-                                              const TraceLocalID& l, unsigned r)
-      : Instruction(tpl, l), rhs(r)
+    CompleteReplay::CompleteReplay(PhysicalTemplate& tpl, const TraceLocalID& l,
+                                   unsigned pr, unsigned po)
+      : Instruction(tpl, l), pre(pr), post(po)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs < tpl.events.size());
+      assert(pre < tpl.events.size());
+      assert(post < tpl.events.size());
 #endif
     }
 
     //--------------------------------------------------------------------------
     void CompleteReplay::execute(std::vector<ApEvent> &events,
-                                 std::map<unsigned,ApUserEvent> &user_events,
-                                 std::map<TraceLocalID,Memoizable*> &operations,
-                                 const bool recurrent_replay)
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
+                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(owner) != operations.end());
       assert(operations.find(owner)->second != NULL);
 #endif
-      Memoizable *memoizable = operations[owner];
+      MemoizableOp *memoizable = operations[owner];
 #ifdef DEBUG_LEGION
       assert(memoizable != NULL);
 #endif
-      memoizable->complete_replay(events[rhs]);
+      memoizable->complete_replay(events[pre], events[post]);
     }
 
     //--------------------------------------------------------------------------
@@ -9639,7 +10552,8 @@ namespace Legion {
       assert(finder != memo_entries.end());
 #endif
       ss << "operations[" << owner
-         << "].complete_replay(events[" << rhs << "])    (op kind: "
+         << "].complete_replay(events[" << pre
+         << "], events[ " << post << "])    (op kind: "
          << Operation::op_names[finder->second.second]
          << ")";
       return ss.str();
@@ -9651,41 +10565,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     BarrierArrival::BarrierArrival(PhysicalTemplate &tpl, ApBarrier bar,
-                                   unsigned _lhs, unsigned _rhs,
-                                   size_t arrivals, bool collect)
+                     unsigned _lhs, unsigned _rhs, size_t arrivals, bool manage)
       : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
-        lhs(_lhs), rhs(_rhs), arrival_count(arrivals), collective(collect)
+        lhs(_lhs), rhs(_rhs), total_arrivals(arrivals), managed(manage)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
-      assert(rhs < tpl.events.size());
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    BarrierArrival::~BarrierArrival(void)
-    //--------------------------------------------------------------------------
-    {
-      // Destroy our barrier if we're not a collective barrier
-      if (!collective)
-        barrier.destroy_barrier();
-    }
+      if (managed)
+        Runtime::advance_barrier(barrier);
+    } 
 
     //--------------------------------------------------------------------------
     void BarrierArrival::execute(std::vector<ApEvent> &events,
-                                 std::map<unsigned,ApUserEvent> &user_events,
-                                 std::map<TraceLocalID,Memoizable*> &operations,
-                                 const bool recurrent_replay)
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
+                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs < events.size());
       assert(lhs < events.size());
 #endif
-      Runtime::phase_barrier_arrive(barrier, arrival_count, events[rhs]);
+      Runtime::phase_barrier_arrive(barrier, total_arrivals, events[rhs]);
       events[lhs] = barrier;
-      if (!collective)
+      if (managed)
         Runtime::advance_barrier(barrier);
     }
 
@@ -9695,48 +10599,9 @@ namespace Legion {
     {
       std::stringstream ss; 
       ss << "events[" << lhs << "] = Runtime::phase_barrier_arrive("
-         << std::hex << barrier.id << std::dec << ", events[" << rhs << "], "
-         << "collective: " << (collective ? "yes" : "no") << ")";
+         << std::hex << barrier.id << std::dec << ", events["; 
+      ss << rhs << "], managed : " << (managed ? "yes" : "no") << ")";
       return ss.str();
-    }
-
-    //--------------------------------------------------------------------------
-    ApBarrier BarrierArrival::record_subscribed_shard(ShardID remote_shard)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!collective);
-#endif
-      subscribed_shards.push_back(remote_shard);
-      return barrier;
-    }
-
-    //--------------------------------------------------------------------------
-    void BarrierArrival::refresh_barrier(ApEvent key, 
-                  std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!collective);
-#endif
-      // Destroy the old barrier
-      barrier.destroy_barrier();
-      // Make the new barrier
-      barrier = ApBarrier(Realm::Barrier::create_barrier(1/*total arrivals*/));
-      for (std::vector<ShardID>::const_iterator it = 
-            subscribed_shards.begin(); it != subscribed_shards.end(); it++)
-        notifications[*it][key] = barrier;
-    }
-
-    //--------------------------------------------------------------------------
-    void BarrierArrival::remote_refresh_barrier(ApBarrier newbar)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!collective);
-      assert(subscribed_shards.empty()); 
-#endif
-      barrier = newbar;
     }
 
     //--------------------------------------------------------------------------
@@ -9744,7 +10609,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(collective);
+      assert(!managed);
+#endif
+      barrier = newbar;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierArrival::set_managed_barrier(ApBarrier newbar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(managed);
 #endif
       barrier = newbar;
     }
@@ -9754,21 +10629,33 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    BarrierAdvance::BarrierAdvance(PhysicalTemplate &tpl,
-                                   ApBarrier bar, unsigned _lhs) 
-      : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), lhs(_lhs)
+    BarrierAdvance::BarrierAdvance(PhysicalTemplate &tpl, ApBarrier bar, 
+                                  unsigned _lhs, size_t arrival_count, bool own) 
+      : Instruction(tpl, TraceLocalID(0,DomainPoint())), barrier(bar), 
+        lhs(_lhs), total_arrivals(arrival_count), owner(own)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < tpl.events.size());
 #endif
+      if (owner)
+        Runtime::advance_barrier(barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    BarrierAdvance::~BarrierAdvance(void)
+    //--------------------------------------------------------------------------
+    {
+      // Destroy our barrier if we're managing it
+      if (owner)
+        barrier.destroy_barrier();
     }
 
     //--------------------------------------------------------------------------
     void BarrierAdvance::execute(std::vector<ApEvent> &events,
-                                 std::map<unsigned,ApUserEvent> &user_events,
-                                 std::map<TraceLocalID,Memoizable*> &operations,
-                                 const bool recurrent_replay)
+                               std::map<unsigned,ApUserEvent> &user_events,
+                               std::map<TraceLocalID,MemoizableOp*> &operations,
+                               const bool recurrent_replay)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9786,6 +10673,45 @@ namespace Legion {
       ss << "events[" << lhs << "] = Runtime::barrier_advance("
          << std::hex << barrier.id << std::dec << ")";
       return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier BarrierAdvance::record_subscribed_shard(ShardID remote_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner);
+#endif
+      subscribed_shards.push_back(remote_shard);
+      return barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierAdvance::refresh_barrier(ApEvent key, 
+                  std::map<ShardID,std::map<ApEvent,ApBarrier> > &notifications)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner);
+#endif
+      // Destroy the old barrier
+      barrier.destroy_barrier();
+      // Make the new barrier
+      barrier = ApBarrier(Realm::Barrier::create_barrier(total_arrivals));
+      for (std::vector<ShardID>::const_iterator it = 
+            subscribed_shards.begin(); it != subscribed_shards.end(); it++)
+        notifications[*it][key] = barrier;
+    }
+
+    //--------------------------------------------------------------------------
+    void BarrierAdvance::remote_refresh_barrier(ApBarrier newbar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!owner);
+      assert(subscribed_shards.empty()); 
+#endif
+      barrier = newbar;
     }
 
   }; // namespace Internal 

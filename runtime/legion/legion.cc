@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ namespace Legion {
 
     // Note: GCC 4.9 breaks even with C++11, so for now peg this on
     // C++14 until we deprecate GCC 4.9 support.
-#if __cplusplus >= 201402L
+#if !defined(__GNUC__) || (__GNUC__ >= 5)
     static_assert(std::is_trivially_copyable<IndexSpace>::value,
                   "IndexSpace is not trivially copyable");
     static_assert(std::is_trivially_copyable<IndexPartition>::value,
@@ -1996,6 +1996,17 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // DiscardLauncher 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DiscardLauncher::DiscardLauncher(LogicalRegion h, LogicalRegion p)
+      : handle(h), parent(p)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    /////////////////////////////////////////////////////////////
     // AttachLauncher
     /////////////////////////////////////////////////////////////
 
@@ -2005,8 +2016,9 @@ namespace Legion {
                                    const bool restr/*= true*/,
                                    const bool map/*= true*/)
       : resource(r), handle(h), parent(p), restricted(restr), mapped(map),
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
-        static_dependences(NULL)
+        collective((r == LEGION_EXTERNAL_INSTANCE) ? true : false),
+        deduplicate_across_shards(false), file_name(NULL),
+        mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -2018,7 +2030,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexAttachLauncher::IndexAttachLauncher(ExternalResource r,
                                              LogicalRegion p, const bool restr)
-      : resource(r), parent(p), restricted(restr), 
+      : resource(r), parent(p), restricted(restr),
         deduplicate_across_shards(false), mode(LEGION_FILE_READ_ONLY),
         static_dependences(NULL)
     //--------------------------------------------------------------------------
@@ -6565,11 +6577,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::discard_fields(Context ctx, const DiscardLauncher &launcher)
+    //--------------------------------------------------------------------------
+    {
+      ctx->discard_fields(launcher);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalRegion Runtime::attach_external_resource(Context ctx, 
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      return ctx->attach_resource(launcher);
+      if (launcher.mapped)
+      {
+        PhysicalRegion region = ctx->attach_resource(launcher);
+        Internal::AutoProvenance provenance(launcher.provenance);
+        ctx->remap_region(region, provenance);
+        return region;
+      }
+      else
+        return ctx->attach_resource(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6621,7 +6648,10 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_HDF5_FILE, handle, parent);
       launcher.attach_hdf5(file_name, field_map, mode);
-      return ctx->attach_resource(launcher);
+      PhysicalRegion region = ctx->attach_resource(launcher);
+      if (launcher.mapped)
+        ctx->remap_region(region, NULL/*no provenance because deprecated*/);
+      return region;
     }
 
     //--------------------------------------------------------------------------
@@ -6642,7 +6672,10 @@ namespace Legion {
     {
       AttachLauncher launcher(LEGION_EXTERNAL_POSIX_FILE, handle, parent);
       launcher.attach_file(file_name, field_vec, mode);
-      return ctx->attach_resource(launcher);
+      PhysicalRegion region = ctx->attach_resource(launcher);
+      if (launcher.mapped)
+        ctx->remap_region(region, NULL/*no provenance because deprecated*/);
+      return region;
     }
 
     //--------------------------------------------------------------------------

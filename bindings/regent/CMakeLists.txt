@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Stanford University
+# Copyright 2023 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 project(LegionBindings_regent)
 
 # Only search if were building stand-alone and not as part of Legion
@@ -80,6 +80,13 @@ endif()
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(Regent PROPERTIES OUTPUT_NAME "regent${INSTALL_SUFFIX}")
 set_target_properties(Regent PROPERTIES SOVERSION ${SOVERSION})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set_target_properties(Regent PROPERTIES BUILD_RPATH "\$ORIGIN")
+  set_target_properties(Regent PROPERTIES INSTALL_RPATH "\$ORIGIN")
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  set_target_properties(Regent PROPERTIES BUILD_RPATH "@loader_path")
+  set_target_properties(Regent PROPERTIES INSTALL_RPATH "@loader_path")
+endif ()
 
 install(TARGETS Regent EXPORT LegionTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

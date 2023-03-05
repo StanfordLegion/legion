@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University, NVIDIA Corporation
+# Copyright 2023 Stanford University, NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-# from __future__ import annotations
+from __future__ import annotations
 
 from inspect import signature, Parameter, _empty
 from functools import wraps
@@ -29,8 +29,7 @@ import io
 import collections
 import os
 
-if sys.version_info >= (3,8):
-    from typing import get_origin, get_args
+from typing import get_origin, get_args
 
 type_check_env = os.getenv("USE_TYPE_CHECK")
 if type_check_env is None:
@@ -66,11 +65,6 @@ def typeassert(*ty_args, **ty_kwargs):
         return wrapper
     return decorate
 
-def typecheck36(func):
-    if type_check_enabled:
-        assert 0, "Please use at least Python 3.8 when enabling type checking"
-    return func
-
 def get_annotation_type(annotation_type):
     annotation_type_origin = get_origin(annotation_type)
     # print(annotation_type_origin)
@@ -91,7 +85,7 @@ def get_annotation_type(annotation_type):
     # print(annotation_type, get_args(annotation_type))
     return actual_annotation_type
 
-def typecheck38(func):
+def typecheck(func):
     # If in optimized mode, disable type checking
     global type_check_enabled
     if not type_check_enabled:
@@ -129,5 +123,3 @@ def typecheck38(func):
             )
         return return_value
     return wrapper
-
-typecheck = typecheck38 if sys.version_info >= (3,8) else typecheck36

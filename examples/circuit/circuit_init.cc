@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2023 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -588,16 +588,16 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   for (int n = 0; n < num_pieces; n++)
   {
     pieces[n].pvt_nodes = runtime->get_logical_subregion_by_color(ctx, result.pvt_nodes, n);
-    sprintf(buf, "private_nodes_of_piece_%d", n);
+    snprintf(buf, sizeof(buf), "private_nodes_of_piece_%d", n);
     runtime->attach_name(pieces[n].pvt_nodes, buf);
     pieces[n].shr_nodes = runtime->get_logical_subregion_by_color(ctx, result.shr_nodes, n);
-    sprintf(buf, "shared_nodes_of_piece_%d", n);
+    snprintf(buf, sizeof(buf), "shared_nodes_of_piece_%d", n);
     runtime->attach_name(pieces[n].shr_nodes, buf);
     pieces[n].ghost_nodes = runtime->get_logical_subregion_by_color(ctx, result.ghost_nodes, n);
-    sprintf(buf, "ghost_nodes_of_piece_%d", n);
+    snprintf(buf, sizeof(buf), "ghost_nodes_of_piece_%d", n);
     runtime->attach_name(pieces[n].ghost_nodes, buf);
     pieces[n].pvt_wires = runtime->get_logical_subregion_by_color(ctx, result.pvt_wires, n);
-    sprintf(buf, "private_wires_of_piece_%d", n);
+    snprintf(buf, sizeof(buf), "private_wires_of_piece_%d", n);
     runtime->attach_name(pieces[n].pvt_wires, buf);
     pieces[n].num_wires = wires_per_piece;
     pieces[n].first_wire = Point<1>(n * wires_per_piece);

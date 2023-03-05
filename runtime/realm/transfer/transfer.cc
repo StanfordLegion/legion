@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4177,13 +4177,6 @@ namespace Realm {
                                                                 combined_field_size,
                                                                 domain_size * combined_field_size) :
                              TransferGraph::XDTemplate::mk_edge(ib_idx - 1));
-	  // FIXME: handle multiple fields
-	  memcpy(static_cast<char *>(fill_data)+fill_ofs,
-		 ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
-		    srcs[i].fill_data.direct :
-		    srcs[i].fill_data.indirect),
-		 srcs[i].size);
-	  fill_ofs += srcs[i].size;
 
 	  xdn.outputs.resize(1);
           xdn.outputs[0] = ((j == (pathlen - 1)) ?
@@ -4196,6 +4189,14 @@ namespace Realm {
             ibe.size = ib_alloc_size;
           }
 	}
+
+        // FIXME: handle multiple fields
+        memcpy(static_cast<char *>(fill_data)+fill_ofs,
+               ((srcs[i].size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
+                  srcs[i].fill_data.direct :
+                  srcs[i].fill_data.indirect),
+               srcs[i].size);
+        fill_ofs += srcs[i].size;
 
         prof_usage.source = Memory::NO_MEMORY;
         prof_usage.target = dst_mem;

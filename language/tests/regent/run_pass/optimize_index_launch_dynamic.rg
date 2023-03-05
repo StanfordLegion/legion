@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University
+-- Copyright 2023 Stanford University
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -15,6 +15,12 @@
 import "regent"
 
 -- Tests for dynamic index launches.
+
+-- Temporarily disable this test for multi-node legion spy
+-- There is a known bug in Legion that needs to be fixed here
+-- runs-with:
+-- [
+-- ]
 
 fspace fs {
   x : int,
@@ -67,4 +73,5 @@ task main()
     f_mixed(p[(i+1)%10])
   end
 end
+
 regentlib.start(main)

@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2023 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -121,7 +121,7 @@ inline void BlasTaskImplementations<T>::preregister_tasks(void)
 #else
     tvr.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
 #endif
-    Runtime::preregister_task_variant<T, BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
+    Runtime::preregister_task_variant<T, &BlasTaskImplementations<T>::dot_task_cpu>(tvr, "dot (cpu)");
   }
 }
 

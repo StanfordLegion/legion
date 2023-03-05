@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University
+/* Copyright 2023 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4934,6 +4934,59 @@ legion_fill_get_requirement(legion_fill_t fill_)
   Fill *fill = CObjectWrapper::unwrap(fill_);
 
   return CObjectWrapper::wrap(&fill->requirement);
+}
+
+// -----------------------------------------------------------------------
+// Discard Operation
+// -----------------------------------------------------------------------
+
+legion_discard_launcher_t
+legion_discard_launcher_create(legion_logical_region_t handle_,
+                               legion_logical_region_t parent_)
+{
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  DiscardLauncher *launcher = new DiscardLauncher(handle, parent);
+  return CObjectWrapper::wrap(launcher);
+}
+
+void
+legion_discard_launcher_destroy(legion_discard_launcher_t launcher_)
+{
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  delete launcher;
+}
+
+void
+legion_discard_launcher_add_field(legion_discard_launcher_t launcher_,
+                                  legion_field_id_t fid)
+{
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->add_field(fid);
+}
+
+void
+legion_discard_launcher_execute(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                legion_discard_launcher_t launcher_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  runtime->discard_fields(ctx, *launcher);
+}
+
+void
+legion_discard_launcher_set_provenance(legion_discard_launcher_t launcher_,
+                                       const char *provenance)
+{
+  DiscardLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  launcher->provenance = provenance;
 }
 
 // -----------------------------------------------------------------------

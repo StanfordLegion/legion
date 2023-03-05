@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 #include "legion.h"
 #include "legion/region_tree.h"
+#include "legion/legion_views.h"
 #include "legion/legion_mapping.h"
 #include "legion/mapper_manager.h"
 #include "legion/legion_instances.h"
@@ -42,16 +43,7 @@ namespace Legion {
       // structure from being collected, it doesn't change if 
       // the actual instance itself can be collected or not
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance::PhysicalInstance(const PhysicalInstance &rhs)
-      : impl(rhs.impl)
-    //--------------------------------------------------------------------------
-    {
-      if (impl != NULL)
-        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
+        impl->add_base_resource_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -63,25 +55,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalInstance::PhysicalInstance(const PhysicalInstance &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_base_resource_ref(Internal::MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalInstance::~PhysicalInstance(void)
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
+          impl->remove_base_resource_ref(Internal::MAPPER_REF))
         delete (impl);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalInstance& PhysicalInstance::operator=(const PhysicalInstance &rhs)
-    //--------------------------------------------------------------------------
-    {
-      if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
-        delete (impl);
-      impl = rhs.impl;
-      if (impl != NULL)
-        impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -89,10 +77,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
+          impl->remove_base_resource_ref(Internal::MAPPER_REF))
         delete (impl);
       impl = rhs.impl;
       rhs.impl = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance& PhysicalInstance::operator=(const PhysicalInstance &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && 
+          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+        delete (impl);
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_base_resource_ref(Internal::MAPPER_REF);
       return *this;
     }
 
@@ -123,7 +124,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return Memory::NO_MEMORY;
-      return impl->as_physical_manager()->get_memory();
+      Internal::PhysicalManager *manager = impl->as_physical_manager();
+      return manager->get_memory();
     }
 
     //--------------------------------------------------------------------------
@@ -132,7 +134,8 @@ namespace Legion {
     {
       if ((impl == NULL) || !impl->is_physical_manager())
         return 0;
-      return impl->get_instance(DomainPoint()).id;
+      Internal::PhysicalManager *manager = impl->as_physical_manager();
+      return manager->get_instance().id;
     }
 
     //--------------------------------------------------------------------------
@@ -233,15 +236,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalInstance::is_collective_instance(void) const
-    //--------------------------------------------------------------------------
-    {
-      if ((impl == NULL) || !impl->is_physical_manager())
-        return false;
-      return impl->is_collective_manager();
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ PhysicalInstance PhysicalInstance::get_virtual_instance(void)
     //--------------------------------------------------------------------------
     {
@@ -295,7 +289,7 @@ namespace Legion {
     {
       if (impl == NULL)
         return false;
-      return impl->entails(constraint_set, DomainPoint(), failed_constraint);
+      return impl->entails(constraint_set, failed_constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -303,7 +297,143 @@ namespace Legion {
 					const PhysicalInstance& p)
     //--------------------------------------------------------------------------
     {
-      return os << p.impl->get_instance(DomainPoint());
+      if (!p.impl->is_physical_manager())
+        return os << Realm::RegionInstance::NO_INST;
+      else
+        return os << p.impl->as_physical_manager()->get_instance();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CollectiveView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(CollectiveViewImpl i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->add_base_gc_ref(Internal::MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(CollectiveView &&rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      rhs.impl = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::CollectiveView(const CollectiveView &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView::~CollectiveView(void)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) &&
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete impl;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView& CollectiveView::operator=(CollectiveView &&rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) &&
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete impl;
+      impl = rhs.impl;
+      rhs.impl = NULL;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    CollectiveView& CollectiveView::operator=(const CollectiveView &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) &&
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
+        delete impl;
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::operator<(const CollectiveView &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl < rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::operator==(const CollectiveView &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl == rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CollectiveView::operator!=(const CollectiveView &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return (impl != rhs.impl);
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_instances_in_memory(Memory memory,
+                                     std::vector<PhysicalInstance> &insts) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return;
+      std::vector<Internal::PhysicalManager*> managers;
+      impl->find_instances_in_memory(memory, managers);
+      insts.reserve(insts.size() + managers.size());
+      for (unsigned idx = 0; idx < managers.size(); idx++)
+        insts.emplace_back(PhysicalInstance(managers[idx]));
+    }
+
+    //--------------------------------------------------------------------------
+    void CollectiveView::find_instances_nearest_memory(Memory memory,
+                     std::vector<PhysicalInstance> &insts, bool bandwidth) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return;
+      std::vector<Internal::PhysicalManager*> managers;
+      impl->find_instances_nearest_memory(memory, managers, bandwidth);
+      insts.reserve(insts.size() + managers.size());
+      for (unsigned idx = 0; idx < managers.size(); idx++)
+        insts.emplace_back(PhysicalInstance(managers[idx]));
+    }
+
+    //--------------------------------------------------------------------------
+    /*friend*/ std::ostream& operator<<(std::ostream& os,
+					const CollectiveView &v)
+    //--------------------------------------------------------------------------
+    {
+      if (v.impl == NULL)
+        return os << "Empty Collective View";
+      else
+        return os << "Collective View " << std::hex << v.impl->did << std::dec;
     }
 
     /////////////////////////////////////////////////////////////
@@ -775,7 +905,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_physical_instance(ctx, target_memory, 
-                  constraints, regions, result, acquire, tight_bounds);
+                constraints, regions, result, acquire, tight_bounds);
     }
 
     //--------------------------------------------------------------------------

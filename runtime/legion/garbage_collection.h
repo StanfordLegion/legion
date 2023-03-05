@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,35 +29,39 @@ namespace Legion {
       INDEX_PART_NODE_DC = 0x3,
       MATERIALIZED_VIEW_DC = 0x4,
       REDUCTION_VIEW_DC = 0x5,
-      FILL_VIEW_DC = 0x6,
-      PHI_VIEW_DC = 0x7,
-      SHARDED_VIEW_DC = 0x8,
+      REPLICATED_VIEW_DC = 0x6,
+      ALLREDUCE_VIEW_DC = 0x7,
+      FILL_VIEW_DC = 0x8,
       FUTURE_DC = 0x9,
       FUTURE_MAP_DC = 0xA,
       INDEX_EXPR_NODE_DC = 0xB,
       FIELD_SPACE_DC = 0xC,
       REGION_TREE_NODE_DC = 0xD,
       EQUIVALENCE_SET_DC = 0xE,
-      CONSTRAINT_SET_DC = 0xF,
-      // be careful making this last one bigger than 0x10! see instance encoding
-      DIST_TYPE_LAST_DC = 0x10,  // must be last
+      PHI_VIEW_DC = 0xF,
+      LEAF_CONTEXT_DC = 0x10,
+      INNER_CONTEXT_DC = 0x11,
+      SHARD_MANAGER_DC = 0x12,
+      CONSTRAINT_SET_DC = 0x13,
+      // be careful making this last one bigger than 0x20! see instance encoding
+      DIST_TYPE_LAST_DC = 0x20,  // must be last
     };
 
     enum ReferenceSource {
       INTERNAL_VALID_REF = 0,
       DEFERRED_TASK_REF = 1,
       VERSION_MANAGER_REF = 2,
-      PHYSICAL_ANALYIS_REF = 3,
+      PHYSICAL_ANALYSIS_REF = 3,
       PENDING_UNBOUND_REF = 4,
       PHYSICAL_REGION_REF = 5,
-      //PENDING_GC_REF = 6,
+      SINGLE_TASK_REF = 6,
       REMOTE_DID_REF = 7,
       PENDING_COLLECTIVE_REF = 8,
       MEMORY_MANAGER_REF = 9,
       PENDING_REFINEMENT_REF = 10,
       FIELD_ALLOCATOR_REF = 11,
       REMOTE_CREATE_REF = 12,
-      INSTANCE_MAPPER_REF = 13,
+      MAPPER_REF = 13,
       APPLICATION_REF = 14,
       MAPPING_ACQUIRE_REF = 15,
       NEVER_GC_REF = 16,
@@ -77,7 +81,7 @@ namespace Legion {
       CANONICAL_REF = 30,
       DISJOINT_COMPLETE_REF = 31,
       REPLICATION_REF = 32,
-      PHYSICAL_ANALYSIS_REF = 33,
+      COLLECTIVE_REF = 33,
       LAST_SOURCE_REF = 34,
     };
 
@@ -95,14 +99,14 @@ namespace Legion {
       "Physical Analysis Reference",                \
       "Pending Unbound Reference",                  \
       "Physical Region Reference",                  \
-      "Pending GC Reference",                       \
+      "Single Task Reference",                      \
       "Remote Distributed ID Reference",            \
       "Pending Collective Reference",               \
       "Memory Manager Reference",                   \
       "Pending Refinement Reference",               \
       "Field Allocator Reference",                  \
       "Remote Creation Reference",                  \
-      "Instance Mapper Reference",                  \
+      "Mapper Reference",                           \
       "Application Reference",                      \
       "Mapping Acquire Reference",                  \
       "Never GC Reference",                         \
@@ -122,7 +126,7 @@ namespace Legion {
       "Canonical Index Space Expression Reference", \
       "Disjoint Complete Reference",                \
       "Replication Reference",                      \
-      "Physical Analysis Reference",                \
+      "Collective Reference",                       \
     }
 
     extern Realm::Logger log_garbage;
@@ -149,6 +153,7 @@ namespace Legion {
     public:
       inline void add_reference(unsigned cnt = 1);
       inline bool remove_reference(unsigned cnt = 1);
+      inline bool check_add_reference(unsigned cnt = 1);
     protected:
       std::atomic<unsigned int> references;
     };
@@ -301,7 +306,7 @@ namespace Legion {
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(AutoLock &gc, State to_check);
-      virtual void initialize_downgrade_state(AddressSpaceID owner);
+      virtual void accumulate_local_references(void);
       void check_for_downgrade(AddressSpaceID downgrade_owner); 
       void process_downgrade_request(AddressSpaceID owner, State to_check);
       bool process_downgrade_response(AddressSpaceID notready,
@@ -409,7 +414,7 @@ namespace Legion {
       virtual bool can_downgrade(void) const;
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(AutoLock &gc, State to_check);
-      virtual void initialize_downgrade_state(AddressSpaceID owner);
+      virtual void accumulate_local_references(void);
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;
@@ -485,6 +490,20 @@ namespace Legion {
       // If previous is equal to count, the value is now
       // zero so it is safe to reclaim this object
       return (prev == cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool Collectable::check_add_reference(unsigned cnt /*= 1*/)
+    //--------------------------------------------------------------------------
+    {
+      unsigned current = references.load();
+      while (current > 0)
+      {
+        unsigned next = current + cnt;
+        if (references.compare_exchange_weak(current, next))
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------

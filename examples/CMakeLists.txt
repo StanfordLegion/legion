@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2022 Kitware, Inc.
+# Copyright 2023 Kitware, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
@@ -22,7 +22,9 @@ endif()
 
 # enable build warnings for all tutorials/examples/tests/etc.
 add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -std=c++${CMAKE_CXX_STANDARD})
 
+add_subdirectory(allreduce)
 add_subdirectory(attach_file)
 add_subdirectory(circuit)
 add_subdirectory(dynamic_registration)
@@ -43,6 +45,7 @@ add_subdirectory(provenance)
 add_subdirectory(implicit_top_task)
 add_subdirectory(future_map_transforms)
 add_subdirectory(concurrent_tasks)
+add_subdirectory(tree_collectives)
 
 if(Legion_MPI_INTEROP)
   add_subdirectory(mpi_interop)

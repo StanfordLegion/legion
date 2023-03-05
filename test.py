@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stanford University
+# Copyright 2023 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -68,6 +68,8 @@ legion_cxx_tests = [
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
     ['examples/inline_tasks/inline_tasks', []],
+    ['examples/allreduce/allreduce', []],
+    ['examples/tree_collectives/tree_collectives', []],
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
     ['examples/future_map_transforms/future_map_transforms', []],
@@ -356,6 +358,11 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     jupyter_test_file = os.path.join(root_dir, 'jupyter_notebook', 'ci_test.py')
     jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'legion_kernel_nocr', jupyter_test_file]
     cmd(jupyter_test_cmd, env=env)
+    canonical_jupyter_test_file = os.path.join(root_dir, 'jupyter_notebook', 'test_canonical.py')
+    canonical_jupyter_test_cmd = ['jupyter', 'run', '--kernel', 'python3', canonical_jupyter_test_file]
+    cmd(canonical_jupyter_test_cmd, env=env)
+    canonical_python_test_cmd = [sys.executable, canonical_jupyter_test_file]
+    cmd(canonical_python_test_cmd, env=env)
     cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
 def run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
@@ -834,11 +841,12 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
 def build_legion_prof_rs(root_dir, tmp_dir, env):
     legion_prof_dir = os.path.join(root_dir, 'tools', 'legion_prof_rs')
     cmd(['cargo', 'install',
+         '--all-features',
          '--locked',
          '--path', legion_prof_dir,
          '--root', tmp_dir],
         env=env)
-    cmd(['cargo', 'test'], env=env, cwd=legion_prof_dir)
+    cmd(['cargo', 'test', '--all-features'], env=env, cwd=legion_prof_dir)
     cmd(['cargo', 'fmt', '--all', '--', '--check'], env=env, cwd=legion_prof_dir)
 
 def build_regent(root_dir, env):
@@ -958,6 +966,7 @@ def run_tests(test_modules=None,
               launcher=None,
               thread_count=None,
               root_dir=None,
+              tmp_dir=None,
               check_ownership=False,
               keep_tmp_dir=False,
               timelimit=None,
@@ -1066,7 +1075,13 @@ def run_tests(test_modules=None,
                 use_shared_objects,
                 use_gcov, use_cmake, use_rdir, use_nvtx, cxx_standard)
 
-    tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    if not tmp_dir:
+        tmp_dir = tempfile.mkdtemp(dir=root_dir)
+    else:
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        os.mkdir(tmp_dir)
+
     if verbose:
         print('Using build directory: %s' % tmp_dir)
         print()
@@ -1124,6 +1139,10 @@ def run_tests(test_modules=None,
             if use_prof:
                 run_test_legion_prof_mypy(root_dir)
             if use_cmake:
+                # We should always be using ctest if we're building with
+                # cmake, except for some unusual cases with Regent
+                # (ask @eslaught for details about Regent cases)
+                assert test_ctest or test_regent
                 bin_dir = build_cmake(
                     root_dir, tmp_dir, env, thread_count,
                     test_regent, test_legion_cxx, test_external1,
@@ -1275,6 +1294,10 @@ def driver():
     parser.add_argument(
         '-C', '--directory', dest='root_dir', metavar='DIR', action='store', required=False,
         help='Legion root directory.')
+
+    parser.add_argument(
+        '--tmp-dir', dest='tmp_dir', metavar='DIR', action='store', required=False,
+        help='Temporary directory path for out-of-source builds')
 
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,

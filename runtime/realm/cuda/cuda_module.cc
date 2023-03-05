@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,12 @@
 #include "realm/cuda/cudart_hijack.h"
 #endif
 
+#ifdef REALM_USE_DLFCN
+  #include <dlfcn.h>
+#endif
+
 #ifdef REALM_CUDA_DYNAMIC_LOAD
-  #ifdef REALM_USE_DLFCN
-    #include <dlfcn.h>
-  #else
+  #ifndef REALM_USE_DLFCN
     #error dynamic loading of CUDA driver/runtime requires use of dlfcn!
   #endif
   #ifdef REALM_USE_CUDART_HIJACK
@@ -51,6 +53,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sstream>
+#include <iomanip>
 
 #define IS_DEFAULT_STREAM(stream)   \
   (((stream) == 0) || ((stream) == CU_STREAM_LEGACY) || ((stream) == CU_STREAM_PER_THREAD))
@@ -64,6 +68,8 @@ namespace Realm {
     Logger log_cudaipc("cudaipc");
 
     Logger log_stream("gpustream");
+    bool nvml_api_fnptrs_loaded = false;
+    bool nvml_initialized = false;
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
     bool cuda_api_fnptrs_loaded = false;
@@ -81,9 +87,14 @@ namespace Realm {
   #undef DEFINE_FNPTR
 #endif
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class GPUStream
+#define DEFINE_FNPTR(name) decltype(&name) name##_fnptr = 0;
+
+    NVML_APIS(DEFINE_FNPTR);
+#undef DEFINE_FNPTR
+
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUStream
 
     GPUStream::GPUStream(GPU *_gpu, GPUWorker *_worker,
                          int rel_priority /*= 0*/)
@@ -1695,6 +1706,26 @@ namespace Realm {
       , ctxsync(_gpu, _gpu->context, crs, _gpu->module->cfg_max_ctxsync_threads)
     {
       Realm::CoreReservationParameters params;
+
+      if (_gpu->info->has_numa_preference) {
+        int numa_domain = 0;
+        // Pick the first numa domain in the retrieved numa mask
+        // TODO: pass the mask directly to params instead of picking the first one
+        for (size_t numa_idx = 0; numa_idx < _gpu->info->MAX_NUMA_NODE_LEN; numa_idx++) {
+          bool found_numa = false;
+          for (size_t numa_offset = 0; numa_offset < sizeof(_gpu->info->numa_node_affinity[0]); numa_offset++) {
+            if (_gpu->info->numa_node_affinity[numa_idx] & (1UL << numa_offset)) {
+              numa_domain = numa_offset + numa_idx * sizeof(_gpu->info->numa_node_affinity[0]);
+              found_numa = true;
+              break;
+            }
+          }
+          if (found_numa) {
+            break;
+          }
+        }
+        params.set_numa_domain(numa_domain);
+      }
       params.set_num_cores(1);
       params.set_alu_usage(params.CORE_USAGE_SHARED);
       params.set_fpu_usage(params.CORE_USAGE_SHARED);
@@ -3729,7 +3760,7 @@ namespace Realm {
 
     CudaModule *cuda_module_singleton = 0;
 
-    CudaModule::CudaModule(void)
+    CudaModule::CudaModule(RuntimeImpl *_runtime)
       : Module("cuda")
       , cfg_zc_mem_size(64 << 20)
       , cfg_zc_ib_size(256 << 20)
@@ -3757,6 +3788,7 @@ namespace Realm {
       , cfg_hostreg_limit(1 << 30)
       , cfg_d2d_stream_priority(-1)
       , cfg_use_cuda_ipc(true)
+      , runtime(_runtime)
       , shared_worker(0), zcmem_cpu_base(0)
       , zcib_cpu_base(0), zcmem(0)
       , uvm_base(0), uvmmem(0)
@@ -3767,6 +3799,7 @@ namespace Realm {
     {
       assert(!cuda_module_singleton);
       cuda_module_singleton = this;
+      rh_listener = new GPUReplHeapListener(this);
     }
       
     CudaModule::~CudaModule(void)
@@ -3774,6 +3807,24 @@ namespace Realm {
       delete_container_contents(gpu_info);
       assert(cuda_module_singleton == this);
       cuda_module_singleton = 0;
+      delete rh_listener;
+    }
+
+    static std::string convert_uuid(CUuuid& cu_uuid)
+    {
+      stringbuilder ss;
+      ss << "GPU-";
+      for (size_t i = 0; i < 16; i++) {
+        switch (i) {
+        case 4:
+        case 6:
+        case 8:
+        case 10:
+          ss << '-';
+        }
+        ss << std::hex << std::setfill('0') << std::setw(2) << (0xFF & (int)cu_uuid.bytes[i]);
+      }
+      return ss;
     }
 
 #ifdef REALM_CUDA_DYNAMIC_LOAD
@@ -3831,55 +3882,93 @@ namespace Realm {
       }
 #endif  // REALM_USE_DLFCN
 
+      cuda_api_fnptrs_loaded = true;
+
       return true;
     }
 #endif
 
-    /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
-						 std::vector<std::string>& cmdline)
+    static bool resolve_nvml_api_fnptrs()
     {
-      CudaModule *m = new CudaModule;
+#ifdef REALM_USE_DLFCN
+      void *libnvml = NULL;
+      if (nvml_api_fnptrs_loaded)
+        return true;
+      log_gpu.info() << "dynamically loading libnvidia-ml.so";
+      libnvml = dlopen("libnvidia-ml.so", RTLD_NOW);
+      if (libnvml == NULL) {
+        log_gpu.info() << "could not open libnvidia-ml.so" << strerror(errno);
+        return false;
+      }
+
+#define STRINGIFY(s) #s
+#define DRIVER_GET_FNPTR(name)                                                     \
+      do {                                                                         \
+        void *sym = dlsym(libnvml, STRINGIFY(name));                               \
+        if (!sym) {                                                                \
+          log_gpu.info() << "symbol '" STRINGIFY(                                  \
+              name) " missing from libnvidia-ml.so!";                              \
+          return false;                                                            \
+        }                                                                          \
+        name##_fnptr = reinterpret_cast<decltype(&name)>(sym);                     \
+      } while (0)
+
+      NVML_APIS(DRIVER_GET_FNPTR);
+#undef STRINGIFY
+#undef DRIVER_GET_FNPTR
+
+      nvml_api_fnptrs_loaded = true;
+      return true;
+#else
+      return false;
+#endif
+    }
+
+    /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
+                                                 std::vector<std::string> &cmdline)
+    {
+      CudaModule *m = new CudaModule(runtime);
 
       // first order of business - read command line parameters
       {
-	CommandLineParser cp;
+        CommandLineParser cp;
 
-	cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
-	  .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
-	  .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
-	  .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
-          .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
-          .add_option_int("-cuda:dynfb", m->cfg_use_dynamic_fb)
-          .add_option_int_units("-cuda:dynfb_max", m->cfg_dynfb_max_size, 'm')
-	  .add_option_int("-ll:gpu", m->cfg_num_gpus)
-          .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
-	  .add_option_int("-ll:streams", m->cfg_task_streams)
-          .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
-          .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
-	  .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
-	  .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
-	  .add_option_int("-ll:pin", m->cfg_pin_sysmem)
-	  .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
-	  .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
-	  .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
-	  .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
-	  .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
-          .add_option_int("-cuda:legacysync", m->cfg_task_legacy_sync)
-          .add_option_int("-cuda:contextsync", m->cfg_task_context_sync)
-	  .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
-          .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max)
-	  .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
-          .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm')
-          .add_option_int("-cuda:ipc", m->cfg_use_cuda_ipc);
+        cp.add_option_int_units("-ll:fsize", m->cfg_fb_mem_size, 'm')
+            .add_option_int_units("-ll:zsize", m->cfg_zc_mem_size, 'm')
+            .add_option_int_units("-ll:ib_fsize", m->cfg_fb_ib_size, 'm')
+            .add_option_int_units("-ll:ib_zsize", m->cfg_zc_ib_size, 'm')
+            .add_option_int_units("-ll:msize", m->cfg_uvm_mem_size, 'm')
+            .add_option_int("-cuda:dynfb", m->cfg_use_dynamic_fb)
+            .add_option_int_units("-cuda:dynfb_max", m->cfg_dynfb_max_size, 'm')
+            .add_option_int("-ll:gpu", m->cfg_num_gpus)
+            .add_option_string("-ll:gpu_ids", m->cfg_gpu_idxs)
+            .add_option_int("-ll:streams", m->cfg_task_streams)
+            .add_option_int("-ll:d2d_streams", m->cfg_d2d_streams)
+            .add_option_int("-ll:d2d_priority", m->cfg_d2d_stream_priority)
+            .add_option_int("-ll:gpuworkthread", m->cfg_use_worker_threads)
+            .add_option_int("-ll:gpuworker", m->cfg_use_shared_worker)
+            .add_option_int("-ll:pin", m->cfg_pin_sysmem)
+            .add_option_bool("-cuda:callbacks", m->cfg_fences_use_callbacks)
+            .add_option_bool("-cuda:nohijack", m->cfg_suppress_hijack_warning)
+            .add_option_int("-cuda:skipgpus", m->cfg_skip_gpu_count)
+            .add_option_bool("-cuda:skipbusy", m->cfg_skip_busy_gpus)
+            .add_option_int_units("-cuda:minavailmem", m->cfg_min_avail_mem, 'm')
+            .add_option_int("-cuda:legacysync", m->cfg_task_legacy_sync)
+            .add_option_int("-cuda:contextsync", m->cfg_task_context_sync)
+            .add_option_int("-cuda:maxctxsync", m->cfg_max_ctxsync_threads)
+            .add_option_int("-cuda:lmemresize", m->cfg_lmem_resize_to_max)
+            .add_option_int("-cuda:mtdma", m->cfg_multithread_dma)
+            .add_option_int_units("-cuda:hostreg", m->cfg_hostreg_limit, 'm')
+            .add_option_int("-cuda:ipc", m->cfg_use_cuda_ipc);
 #ifdef REALM_USE_CUDART_HIJACK
-	cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
+        cp.add_option_int("-cuda:nongpusync", cudart_hijack_nongpu_sync);
 #endif
 
-	bool ok = cp.parse_command_line(cmdline);
-	if(!ok) {
-	  log_gpu.error() << "error reading CUDA command line parameters";
-	  exit(1);
-	}
+        bool ok = cp.parse_command_line(cmdline);
+        if(!ok) {
+          log_gpu.error() << "error reading CUDA command line parameters";
+          exit(1);
+        }
       }
 
       // if we know gpus have been requested, correct loading of libraries
@@ -3893,10 +3982,20 @@ namespace Realm {
       }
 #endif
 
+      if(!nvml_initialized && resolve_nvml_api_fnptrs()) {
+        nvmlReturn_t res = NVML_FNPTR(nvmlInit)();
+        if(res == NVML_SUCCESS) {
+          nvml_initialized = true;
+        } else {
+          log_gpu.info() << "Unable to initialize nvml: Error(" << (unsigned long long)res
+                         << ')';
+        }
+      }
+
       std::vector<GPUInfo *> infos;
       {
-	int num_devices;
-	CUresult ret = CUDA_DRIVER_FNPTR(cuInit)(0);
+        int num_devices;
+        CUresult ret = CUDA_DRIVER_FNPTR(cuInit)(0);
         if(ret != CUDA_SUCCESS) {
           // failure to initialize the driver is a fatal error if we know gpus
           //  have been requested
@@ -3904,8 +4003,8 @@ namespace Realm {
             const char *err_name, *err_str;
             CUDA_DRIVER_FNPTR(cuGetErrorName)(ret, &err_name);
             CUDA_DRIVER_FNPTR(cuGetErrorString)(ret, &err_str);
-            log_gpu.fatal() << "gpus requested, but cuInit(0) returned "
-                            << ret << " (" << err_name << "): " << err_str;
+            log_gpu.fatal() << "gpus requested, but cuInit(0) returned " << ret << " ("
+                            << err_name << "): " << err_str;
             abort();
           } else if(ret == CUDA_ERROR_NO_DEVICE) {
             num_devices = 0;
@@ -3915,25 +4014,51 @@ namespace Realm {
             delete m;
             return 0;
           }
-	} else {
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetCount)(&num_devices) );
-	  for(int i = 0; i < num_devices; i++) {
-	    GPUInfo *info = new GPUInfo;
+        } else {
+          CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetCount)(&num_devices));
+          for(int i = 0; i < num_devices; i++) {
+            GPUInfo *info = new GPUInfo;
 
-	    info->index = i;
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGet)(&info->device, i) );
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name), info->device) );
-	    CHECK_CU( CUDA_DRIVER_FNPTR(cuDeviceTotalMem)
-                      (&info->totalGlobalMem, info->device) );
-	    log_gpu.info() << "GPU #" << i << ": " << info->name << " ("
-			   << info->major << '.' << info->minor
-			   << ") " << (info->totalGlobalMem >> 20) << " MB";
+            info->index = i;
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGet)(&info->device, i));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetName)(info->name, sizeof(info->name),
+                                                        info->device));
+            CHECK_CU(
+                CUDA_DRIVER_FNPTR(cuDeviceTotalMem)(&info->totalGlobalMem, info->device));
+            CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetUuid)(&info->uuid, info->device));
+            info->has_numa_preference = false;
+            memset(info->numa_node_affinity, 0xff, sizeof(info->numa_node_affinity));
+            if(nvml_initialized) {
+              // Convert uuid bytes to uuid string for nvml
+              std::string uuid = convert_uuid(info->uuid);
+              CHECK_NVML(
+                  NVML_FNPTR(nvmlDeviceGetHandleByUUID)(uuid.c_str(), &info->nvml_dev));
+#if !defined(_WIN32) && NVML_API_VERSION >= 11
+              memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
+              CHECK_NVML(NVML_FNPTR(nvmlDeviceGetMemoryAffinity)(
+                  info->nvml_dev,
+                  info->MAX_NUMA_NODE_LEN,
+                  info->numa_node_affinity, NVML_AFFINITY_SCOPE_NODE));
+#endif
+            }
 
-	    infos.push_back(info);
-	  }
-	}
+            // For fast lookups, check if we actually have a numa preference
+            for (size_t i = 0; i < info->MAX_NUMA_NODE_LEN; i++) {
+              if (info->numa_node_affinity[i] != (unsigned long)-1) {
+                info->has_numa_preference = true;
+                break;
+              }
+            }
 
-	// query peer-to-peer access (all pairs)
+            log_gpu.info() << "GPU #" << i << ": " << info->name << " (" << info->major
+                           << '.' << info->minor << ") " << (info->totalGlobalMem >> 20)
+                           << " MB";
+
+            infos.push_back(info);
+          }
+        }
+
+        // query peer-to-peer access (all pairs)
 	for(std::vector<GPUInfo *>::iterator it1 = infos.begin();
 	    it1 != infos.end();
 	    it1++)
@@ -4109,6 +4234,10 @@ namespace Realm {
 	log_gpu.fatal() << cfg_num_gpus << " GPUs requested, but only " << gpu_count << " available!";
 	assert(false);
       }
+
+      // make sure we hear about any changes to the size of the replicated
+      //  heap
+      runtime->repl_heap.add_listener(rh_listener);
     }
 
     // create any memories provided by this module (default == do nothing)
@@ -4512,6 +4641,9 @@ namespace Realm {
 	  CHECK_CU( CUDA_DRIVER_FNPTR(cuMemHostUnregister)(*it) );
 	registered_host_ptrs.clear();
       }
+
+      // and clean up anything that was needed for the replicated heap
+      runtime->repl_heap.remove_listener(rh_listener);
 
       for(std::vector<GPU *>::iterator it = gpus.begin();
 	  it != gpus.end();

@@ -1,4 +1,4 @@
--- Copyright 2022 Stanford University, NVIDIA Corporation
+-- Copyright 2023 Stanford University, NVIDIA Corporation
 --
 -- Licensed under the Apache License, Version 2.0 (the "License");
 -- you may not use this file except in compliance with the License.
@@ -2151,6 +2151,7 @@ local bounded_type = data.weak_memoize(function(index_type, ...)
   terra st:to_domain_point()
     return ([index_type](@self)):to_domain_point()
   end
+  st.methods.to_domain_point.replicable = true
 
   function st:force_cast(from, to, expr)
     assert(std.is_bounded_type(from) and std.is_bounded_type(to) and
@@ -2464,6 +2465,7 @@ function std.index_type(base_type, displayname)
   terra st:to_domain_point()
     return [make_domain_point(self)]
   end
+  st.methods.to_domain_point.replicable = true
 
   -- Generate `from_domain_point` function.
   local function make_from_domain_point(pt_expr)
@@ -4319,6 +4321,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local argc = terralib.newsymbol(int, "argc")
   local argv = terralib.newsymbol(&rawstring, "argv")
+  local main_args = terralib.newlist()
 
   local main_setup = quote end
   if main_task then
@@ -4327,9 +4330,11 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       c.legion_runtime_initialize(&[argc], &[argv], true)
       return c.legion_runtime_start([argc], [argv], false)
     end
+    main_args:insert(argc)
+    main_args:insert(argv)
   end
 
-  local terra main([argc], [argv])
+  local terra main([main_args])
     [reduction_registrations];
     [layout_registrations];
     [projection_functor_registrations];
@@ -4743,7 +4748,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   flags:insertall(objfiles)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
-  if use_cmake then
+  local legion_install_prefix = os.getenv("LEGION_INSTALL_PREFIX")
+  if legion_install_prefix then
+    lib_dir = legion_install_prefix .. "/lib"
+  elseif use_cmake then
     lib_dir = os.getenv("CMAKE_BUILD_DIR") .. "/lib"
   end
   if os.getenv('CRAYPE_VERSION') then
@@ -4774,7 +4782,7 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
     end
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
-  if use_cmake then
+  if legion_install_prefix or use_cmake then
     flags:insertall({"-llegion", "-lrealm"})
   end
   if gpuhelper.check_gpu_available() then
@@ -4827,7 +4835,7 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
       end
     end
     -- In separate compilation, need to make sure all globals get exported.
-    if base.config["separate"] then
+    if std.config["separate"] then
       task_impl[task:get_task_id().name] = task:get_task_id()
       task_impl[task:get_mapper_id().name] = task:get_mapper_id()
       task_impl[task:get_mapping_tag_id().name] = task:get_mapping_tag_id()
@@ -4837,7 +4845,7 @@ local function generate_task_interfaces(task_whitelist, need_launcher)
   return task_c_iface:concat("\n\n"), task_cxx_iface:concat("\n\n"), task_impl
 end
 
-local function generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface)
+local function generate_header(header_filename, registration_name, has_main_task, task_c_iface, task_cxx_iface)
   local header_basename = std.normalize_name(header_filename)
   return string.format(
 [[
@@ -4859,7 +4867,7 @@ local function generate_header(header_filename, registration_name, task_c_iface,
 extern "C" {
 #endif
 
-void %s(void);
+void %s(%s);
 
 %s
 
@@ -4880,12 +4888,13 @@ void %s(void);
   header_basename,
   header_basename,
   registration_name,
+  (has_main_task and "int argc, char **argv" or ""),
   task_c_iface,
   task_cxx_iface,
   header_basename)
 end
 
-local function write_header(header_filename, registration_name, task_whitelist, need_launcher)
+local function write_header(header_filename, registration_name, has_main_task, task_whitelist, need_launcher)
   if not registration_name then
     registration_name = std.normalize_name(header_filename) .. "_register"
   end
@@ -4895,20 +4904,20 @@ local function write_header(header_filename, registration_name, task_whitelist, 
 
   local header = io.open(header_filename, "w")
   assert(header)
-  header:write(generate_header(header_filename, registration_name, task_c_iface, task_cxx_iface))
+  header:write(generate_header(header_filename, registration_name, has_main_task, task_c_iface, task_cxx_iface))
   header:close()
 
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist, need_launcher)
+function std.save_tasks(header_filename, filename, filetype, link_flags, registration_name, task_whitelist, need_launcher, main_task)
   assert(header_filename and filename)
   if need_launcher == nil then
     need_launcher = true
   end
   local task_wrappers = make_task_wrappers()
-  local registration_name, task_impl = write_header(header_filename, registration_name, task_whitelist, need_launcher)
-  local _, names = std.setup(nil, nil, task_wrappers, registration_name)
+  local registration_name, task_impl = write_header(header_filename, registration_name, main_task or false, task_whitelist, need_launcher)
+  local _, names = std.setup(main_task, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then

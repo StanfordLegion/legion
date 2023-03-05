@@ -1,4 +1,4 @@
-/* Copyright 2022 Stanford University, NVIDIA Corporation
+/* Copyright 2023 Stanford University, NVIDIA Corporation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18029,9 +18029,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void DiscardLauncher::add_field(FieldID f)
+    //--------------------------------------------------------------------------
+    {
+      fields.insert(f);
+    }
+
+    //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_file(const char *name,
                                             const std::vector<FieldID> &fields,
-                                            LegionFileMode m, bool local_file)
+                                            LegionFileMode m)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18040,13 +18047,12 @@ namespace Legion {
       file_name = name;
       mode = m;
       file_fields = fields;
-      local_files = local_file;
     }
 
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_hdf5(const char *name,
                                 const std::map<FieldID,const char*> &field_map,
-                                LegionFileMode m, bool local)
+                                LegionFileMode m)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -18055,7 +18061,6 @@ namespace Legion {
       file_name = name;
       mode = m;
       field_files = field_map;
-      local_files = local;
     }
 
     //--------------------------------------------------------------------------
@@ -19665,6 +19670,51 @@ namespace Legion {
       return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
               IndexSpace(parent), domain_future_map, IndexSpace(color_space),
               perform_intersections, part_kind, color, provenance));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_rectangles(
+                                    Context ctx, IndexSpaceT<DIM,T> parent,
+                                    const std::map<Point<COLOR_DIM,COLOR_T>,
+                                      std::vector<Rect<DIM,T> > > &rectangles,
+                                    IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
+                                    bool perform_intersections,
+                                    PartitionKind part_kind, Color color,
+                                    const char *provenance, bool collective)
+    //--------------------------------------------------------------------------
+    {
+      if (collective)
+      {
+        std::map<DomainPoint,Future> futures;
+        for (typename std::map<Point<COLOR_DIM,COLOR_T>,
+              std::vector<Rect<DIM,T> > >::const_iterator it =
+                rectangles.begin(); it != rectangles.end(); it++)
+        {
+          const DomainT<DIM,T> domain(it->second);
+          futures[DomainPoint(it->first)] = Future::from_value(domain);
+        }
+        FutureMap fm = construct_future_map(ctx, IndexSpace(color_space),
+                              futures, true/*collective*/, 0/*shard id*/, 
+                              true/*implicit sharding*/, provenance);
+        return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), fm, IndexSpace(color_space),
+              perform_intersections, part_kind, color, provenance));
+      }
+      else
+      {
+        // Make realm index spaces for each of the points and then we can call
+        // the base domain version of this method which takes ownership of the
+        // sparsity maps that have been created
+        std::map<DomainPoint,Domain> domains;
+        for (typename std::map<Point<COLOR_DIM,COLOR_T>,
+              std::vector<Rect<DIM,T> > >::const_iterator it =
+                rectangles.begin(); it != rectangles.end(); it++)
+          domains[DomainPoint(it->first)] = DomainT<DIM,T>(it->second); 
+        return IndexPartitionT<DIM,T>(create_partition_by_domain(ctx,
+              IndexSpace(parent), domains, IndexSpace(color_space),
+              perform_intersections, part_kind, color, provenance));
+      }
     }
 
     //--------------------------------------------------------------------------
