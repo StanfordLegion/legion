@@ -7534,22 +7534,12 @@ legion_layout_constraint_set_add_ordering_constraint(
 void
 legion_layout_constraint_set_add_tiling_constraint(
   legion_layout_constraint_set_t handle_,
-  legion_dimension_kind_t dim)
-{
-  LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
-
-  constraints->add_constraint(TilingConstraint(dim));
-}
-
-void
-legion_layout_constraint_set_add_full_tiling_constraint(
-  legion_layout_constraint_set_t handle_,
   legion_dimension_kind_t dim,
-  size_t value)
+  size_t value, bool tiles)
 {
   LayoutConstraintSet *constraints = CObjectWrapper::unwrap(handle_);
 
-  constraints->add_constraint(TilingConstraint(dim, value));
+  constraints->add_constraint(TilingConstraint(dim, value, tiles));
 }
 
 void
