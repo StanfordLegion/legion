@@ -2647,6 +2647,7 @@ namespace Legion {
       // Make sure our instance is valid before we try to delete it
       if (instance.exists() && use_event.exists() && !use_event.has_triggered())
         use_event.wait();
+      bool free_resource = true;
       // Only need to free resources if we own the allocation
       if (own_allocation)
       {
@@ -2700,6 +2701,9 @@ namespace Legion {
                 runtime->issue_runtime_meta_task(args,
                     LG_THROUGHPUT_WORK_PRIORITY,
                     Runtime::protect_event(precondition));
+              // No longer safe to free the resource since that is going
+              // to be done by the free external args task
+              free_resource = false;
             }
             else
             {
@@ -2755,7 +2759,7 @@ namespace Legion {
         else
           Runtime::trigger_event(NULL, remote_reads_done);
       }
-      if (resource != NULL)
+      if ((resource != NULL) && free_resource)
         delete resource;
     }
 
@@ -3369,8 +3373,7 @@ namespace Legion {
       (*(fargs->freefunc))(*resource);
       if (fargs->instance.exists())
         fargs->instance.destroy();
-      if (fargs->resource == NULL)
-        delete resource;
+      delete resource;
     }
 
     //--------------------------------------------------------------------------

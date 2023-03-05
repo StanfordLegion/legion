@@ -2283,7 +2283,7 @@ namespace Legion {
         const Realm::ExternalMemoryResource resource(
             reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
         FutureInstance source(value, size, ApEvent::NO_AP_EVENT, runtime,
-                              false/*own allocation*/, &resource);
+          false/*eager*/, true/*external allocation*/, false/*own allocation*/);
         // issue the copy between them
         Runtime::trigger_event(NULL, ready, 
             instance->copy_from(&source, owner_task));
