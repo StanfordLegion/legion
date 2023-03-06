@@ -1067,9 +1067,10 @@ namespace Legion {
       }
 
       static inline void log_projection_function(ProjectionID pid,
-                                                 int depth, bool invertible)
+                                                 unsigned depth,
+                                                 bool invertible)
       {
-        log_spy.print("Projection Function %u %d %d", pid, depth, 
+        log_spy.print("Projection Function %u %u %d", pid, depth, 
                       invertible ? 1 : 0);
       }
 

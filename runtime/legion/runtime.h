@@ -1599,7 +1599,7 @@ namespace Legion {
       void check_containment(const Mappable *mappable, unsigned idx,
                              const std::vector<DomainPoint> &ordered_points);
     public:
-      const int depth; 
+      const unsigned depth; 
       const bool is_exclusive;
       const bool is_invertible;
       const ProjectionID projection_id;
