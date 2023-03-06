@@ -1641,7 +1641,7 @@ namespace Legion {
     public:
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
-      void enumerate_points(bool replaying);
+      void enumerate_points(void);
       void handle_point_commit(RtEvent point_committed);
       void check_point_requirements(void);
     protected:
@@ -3801,7 +3801,7 @@ namespace Legion {
       virtual size_t get_collective_points(void) const;
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return launch_space; }
-      void enumerate_points(bool replaying);
+      void enumerate_points(void);
       void handle_point_commit(void);
       void check_point_requirements(void);
     protected:
