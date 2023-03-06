@@ -19826,8 +19826,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-      if (runtime->legion_spy_enabled)
-        log_index_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif

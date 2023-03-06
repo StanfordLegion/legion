@@ -2941,9 +2941,6 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled)
-          log_index_fill_requirement();
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
