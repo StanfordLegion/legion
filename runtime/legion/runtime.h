@@ -2309,7 +2309,7 @@ namespace Legion {
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map,
                   ShardID owner_shard = 0); 
     public:
-      const int depth; 
+      const unsigned depth; 
       const bool is_exclusive;
       const bool is_functional;
       const bool is_invertible;
