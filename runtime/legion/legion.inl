@@ -19692,7 +19692,7 @@ namespace Legion {
                 rectangles.begin(); it != rectangles.end(); it++)
         {
           const DomainT<DIM,T> domain(it->second);
-          futures[DomainPoint(it->first)] = Future::from_value(domain);
+          futures[DomainPoint(it->first)] = Future::from_value(Domain(domain));
         }
         FutureMap fm = construct_future_map(ctx, IndexSpace(color_space),
                               futures, true/*collective*/, 0/*shard id*/, 
