@@ -6100,7 +6100,7 @@ class Operation(object):
 
     def compute_physical_reachable(self):
         # We can skip some of these
-        if not self.is_physical_operation() or self.kind is INDEX_TASK_KIND:
+        if not self.is_physical_operation() or self.points is not None:
             return
         # Once we reach something that is not an event
         # then we record it and return
