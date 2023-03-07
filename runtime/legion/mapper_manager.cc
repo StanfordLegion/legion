@@ -1503,6 +1503,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_handle_instance_collection(
+                               MappingInstance *instance, MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(HANDLE_INSTANCE_COLLECTION_CALL,
+                                 NULL, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation1<MappingInstance,
+                              &MapperManager::invoke_handle_instance_collection>
+                                continuation(this, instance, info);
+          continuation.defer(runtime, continuation_precondition);
+          return;
+        }
+      }
+      mapper->handle_instance_collection(info, *instance);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::notify_instance_deletion(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Get a reference in case we need to defer this
+      MappingInstance instance(manager); 
+      invoke_handle_instance_collection(&instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::add_subscriber_reference(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do currently
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::remove_subscriber_reference(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do, make sure we don't get deleted
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::update_mappable_tag(MappingCallInfo *ctx,
                                  const Mappable &mappable, MappingTagID new_tag)
     //--------------------------------------------------------------------------
@@ -2602,6 +2649,33 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->size(); idx++)
           release_acquired_instance(ctx, (*it)[idx].impl);
       }
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperManager::subscribe(MappingCallInfo *ctx,
+                                  const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager())
+        return false;
+      pause_mapper_call(ctx);
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+      const bool result = manager->register_deletion_subscriber(this);
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::unsubscribe(MappingCallInfo *ctx,
+                                    const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager())
+        return;
+      pause_mapper_call(ctx);
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+      manager->unregister_deletion_subscriber(this);
       resume_mapper_call(ctx);
     }
 

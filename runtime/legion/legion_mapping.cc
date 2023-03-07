@@ -1023,6 +1023,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::subscribe(MapperContext ctx, 
+                                  const PhysicalInstance &inst) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->subscribe(ctx, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::unsubscribe(MapperContext ctx, 
+                                    const PhysicalInstance &inst) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->unsubscribe(ctx, inst);
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperRuntime::acquire_future(MapperContext ctx,
                                        const Future &f, Memory memory) const
     //--------------------------------------------------------------------------

@@ -18,6 +18,7 @@
 
 #include "legion/legion_types.h"
 #include "legion/legion_mapping.h"
+#include "legion/legion_instances.h"
 
 namespace Legion {
   namespace Internal {
@@ -44,7 +45,7 @@ namespace Legion {
      * possibly preempt.  This later class of calls are the ones that
      * are made virtual so that the 
      */
-    class MapperManager {
+    class MapperManager : public InstanceDeletionSubscriber {
     public:
       struct AcquireStatus {
       public:
@@ -281,6 +282,13 @@ namespace Legion {
                                  MappingCallInfo *info = NULL);
       void invoke_handle_task_result(Mapper::MapperTaskResult *result,
                                      MappingCallInfo *info = NULL);
+      void invoke_handle_instance_collection(MappingInstance *instance,
+                                             MappingCallInfo *info = NULL);
+    public:
+      // Instance deletion subscriber methods
+      virtual void notify_instance_deletion(PhysicalManager *manager);
+      virtual void add_subscriber_reference(PhysicalManager *manager);
+      virtual bool remove_subscriber_reference(PhysicalManager *manager);
     public:
       virtual bool is_locked(MappingCallInfo *info) = 0;
       virtual void lock_mapper(MappingCallInfo *info, bool read_only) = 0;
@@ -443,6 +451,8 @@ namespace Legion {
                                     const std::vector<MappingInstance> &insts);
       void release_instances(       MappingCallInfo *ctx, const std::vector<
                                     std::vector<MappingInstance> > &instances);
+      bool subscribe(MappingCallInfo *ctx, const MappingInstance &instance);
+      void unsubscribe(MappingCallInfo *ctx, const MappingInstance &instance);
       bool acquire_future(MappingCallInfo *ctx, const Future &f, Memory memory);
     public:
       void record_acquired_instance(MappingCallInfo *info, 

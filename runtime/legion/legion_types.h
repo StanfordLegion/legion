@@ -594,6 +594,7 @@ namespace Legion {
       PERMIT_STEAL_REQUEST_CALL,
       HANDLE_MESSAGE_CALL,
       HANDLE_TASK_RESULT_CALL,
+      HANDLE_INSTANCE_COLLECTION_CALL,
       APPLICATION_MAPPER_CALL,
       LAST_MAPPER_CALL,
     };
@@ -651,6 +652,7 @@ namespace Legion {
       "permit_steal_request",                       \
       "handle_message",                             \
       "handle_task_result",                         \
+      "handle_instance_collection",                 \
       "application mapper call",                    \
     }
 

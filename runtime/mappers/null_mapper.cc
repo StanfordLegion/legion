@@ -632,6 +632,14 @@ namespace Legion {
       report_unimplemented(__func__, __LINE__);
     }
 
+    //--------------------------------------------------------------------------
+    void NullMapper::handle_instance_collection(const MapperContext     ctx,
+                                                const PhysicalInstance& inst)
+    //--------------------------------------------------------------------------
+    {
+      report_unimplemented(__func__, __LINE__);
+    }
+
   }; // namespace Mapping 
 }; // namespace Legion
 

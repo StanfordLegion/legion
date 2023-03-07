@@ -2025,6 +2025,19 @@ namespace Legion {
       virtual void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result) = 0;
       //------------------------------------------------------------------------
+      
+      /**
+       * ----------------------------------------------------------------------
+       *  Handle Instance Collection
+       * ----------------------------------------------------------------------
+       * If a mapper successfully subscribed to an instance then it will 
+       * receive this callback from the runtime when the instance has been
+       * collected by the garbage collector.
+       */
+      //------------------------------------------------------------------------
+      virtual void handle_instance_collection(const MapperContext   ctx,
+                                              const PhysicalInstance& inst) { }
+      //------------------------------------------------------------------------
     };
 
     /**
@@ -2301,6 +2314,13 @@ namespace Legion {
                           const std::vector<PhysicalInstance> &instances) const;
       void release_instances(MapperContext ctx,
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
+      // Subscribing to an instance will ensure that a mapper receives a 
+      // mapper invocation when that instance has been deleted. Note that this
+      // subscription will fail if the instance has already been deleted
+      // Duplicate subscriptions from the same mapper will be deduplicated
+      // and only a single callback will be performed
+      bool subscribe(MapperContext ctx, const PhysicalInstance &instance) const;
+      void unsubscribe(MapperContext ctx, const PhysicalInstance &inst) const;
     public:
       // Futures can also be acquired to ensure that they are available in
       // particular memories prior to running a task.

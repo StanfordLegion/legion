@@ -277,6 +277,8 @@ namespace Legion {
                                   const MapperMessage&          message);
       virtual void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result);
+      virtual void handle_instance_collection(const MapperContext ctx,
+                                              const PhysicalInstance& inst);
     protected:
       const Machine machine;
     };

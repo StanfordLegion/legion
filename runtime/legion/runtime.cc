@@ -27038,6 +27038,8 @@ namespace Legion {
       assert(!prepared_for_shutdown);
       assert(virtual_manager != NULL);
 #endif
+      // Search through all our distributed collectables and find any
+      // futures which are leaking and therefore need to be finalized
       std::vector<FutureImpl*> leaked_futures;
       {
         // Also have any leaking futures force delete their instances 
@@ -27065,13 +27067,13 @@ namespace Legion {
         if ((*it)->remove_base_resource_ref(RUNTIME_REF))
           delete (*it);
       }
-      // Search through all our distributed collectables and find any
-      // futures which are leaking and therefore need to be finalized
-      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
-            proc_managers.begin(); it != proc_managers.end(); it++)
-        it->second->prepare_for_shutdown();
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
+        it->second->prepare_for_shutdown();
+      // Do processor managers after memory managers in case we need to
+      // report any deleted instances back to the mappers
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
         it->second->prepare_for_shutdown();
       // Destroy any index slice spaces that we made during execution
       std::set<RtEvent> applied;
