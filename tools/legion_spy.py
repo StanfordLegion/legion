@@ -7542,7 +7542,7 @@ class Operation(object):
             #OPEN_OP_KIND : "royalblue",
             #ADVANCE_OP_KIND : "magenta",
             MAPPING_FENCE_OP_KIND : "darkorchid2",
-            EXECUTION_FENCE_OP_KIND : "dodgerblue",
+            EXECUTION_FENCE_OP_KIND : "darkorchid2",
             COPY_OP_KIND : "darkgoldenrod3",
             FILL_OP_KIND : "darkorange1",
             ACQUIRE_OP_KIND : "darkolivegreen",
@@ -11101,9 +11101,10 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         if int(m.group('execution')) == 1:
             op.set_op_kind(EXECUTION_FENCE_OP_KIND)
+            op.set_name("Execution Fence Op")
         else:
             op.set_op_kind(MAPPING_FENCE_OP_KIND)
-        op.set_name("Fence Op")
+            op.set_name("Mapping Fence Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context, int(m.group('index')))
         return True
