@@ -5093,7 +5093,8 @@ class DataflowTraverser(object):
             # occur on the second entry in the reduction stack back
             # because we will have already traversed through the 
             # next copy that is going to be writing to it
-            if len(self.reduction_stack[-1]) >= 2 and  \
+            if len(self.reduction_stack) > 0 and \
+                len(self.reduction_stack[-1]) >= 2 and  \
                     dst is self.reduction_stack[-1][-2]:
                 self.dataflow_traversal.append(True)
                 self.dataflow_fill.append(False)
