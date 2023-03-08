@@ -68,8 +68,9 @@ static int fsync(int fd)
 
 namespace Realm {
 
-  extern Logger log_inst;
-  
+    extern Logger log_inst;
+    Logger log_disk("disk");
+
     DiskMemory::DiskMemory(Memory _me, size_t _size, std::string _file)
       : LocalManagedMemory(_me, _size, MKIND_DISK, ALIGNMENT,
 			   Memory::DISK_MEM, 0)
@@ -179,17 +180,26 @@ namespace Realm {
           case LEGION_FILE_CREATE:
             {
               fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0777);
-              assert(fd != -1);
+              if(fd == -1) {
+                log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
+                abort();
+              }
               // resize the file to what we want
               int ret = ftruncate(fd, inst->metadata.layout->bytes_used);
-              assert(ret == 0);
+              if(ret == -1) {
+                log_disk.fatal() << "failed to truncate file '" << res->filename << "': " << strerror(errno);
+                abort();
+              }
               break;
             }
           default:
             assert(0);
           }
 
-          assert(fd != -1);
+          if(fd == -1) {
+            log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
+            abort();
+          }
 
           OpenFileInfo *info = new OpenFileInfo;
           info->fd = fd;
@@ -208,7 +218,10 @@ namespace Realm {
     {
       OpenFileInfo *info = inst->metadata.find_mem_specific<OpenFileInfo>();
       assert(info != 0);
-      close(info->fd);
+      int ret = close(info->fd);
+      if(ret == -1) {
+        log_disk.warning() << "file failed to close cleanly, disk contents may be corrupted";
+      }
     }
 
     MemoryImpl::AllocationResult FileMemory::allocate_storage_immediate(RegionInstanceImpl *inst,
