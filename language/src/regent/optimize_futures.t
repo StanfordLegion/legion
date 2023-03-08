@@ -500,50 +500,21 @@ local optimize_futures = {}
 
 -- Normalize all sub-expressions that could be lifted to tasks.
 -- This will help us track futures from those lifted tasks accurately.
-local function normalize_compound_expr(cx, expr)
-  if expr:is(ast.typed.expr.Cast) or
-     expr:is(ast.typed.expr.Unary) or
-     expr:is(ast.typed.expr.Binary) or
-     expr:is(ast.typed.expr.Call) or
-     expr:is(ast.typed.expr.Future) or
-     expr:is(ast.typed.expr.DynamicCollectiveGetResult)
-  then
-    local temp_var = std.newsymbol(expr.expr_type, "__normalized_in_future_opt")
+local function normalize_compound_expr(cx, node)
+  if not node:is(ast.typed.expr.ID) and std.is_future(std.as_read(node.expr_type)) then
+    local temp_var = std.newsymbol(node.expr_type, "__normalized_in_future_opt")
     cx:add_spill(ast.typed.stat.Var {
       symbol = temp_var,
-      type = expr.expr_type,
-      value = expr,
-      span = expr.span,
+      type = node.expr_type,
+      value = node,
+      span = node.span,
       annotations = ast.default_annotations(),
     })
     return ast.typed.expr.ID {
       value = temp_var,
-      expr_type = expr.expr_type,
-      span = expr.span,
+      expr_type = node.expr_type,
+      span = node.span,
       annotations = ast.default_annotations(),
-    }
-  else
-    return expr
-  end
-end
-
-local function normalize(cx, node)
-  if node:is(ast.typed.expr.Binary) then
-    local lhs = normalize_compound_expr(cx, normalize(cx, node.lhs))
-    local rhs = normalize_compound_expr(cx, normalize(cx, node.rhs))
-    return node {
-      lhs = lhs,
-      rhs = rhs,
-    }
-  elseif node:is(ast.typed.expr.Unary) then
-    local rhs = normalize_compound_expr(cx, normalize(cx, node.rhs))
-    return node {
-      rhs = rhs,
-    }
-  elseif node:is(ast.typed.expr.Cast) then
-    local arg = normalize_compound_expr(cx, normalize(cx, node.arg))
-    return node {
-      arg = arg,
     }
   else
     return node
@@ -554,7 +525,7 @@ local function concretize(cx, node)
   local expr_type = std.as_read(node.expr_type)
   if std.is_future(expr_type) then
     if not node:is(ast.typed.expr.ID) then
-      node = normalize_compound_expr(cx, normalize(cx, node))
+      node = normalize_compound_expr(cx, node)
     end
     return ast.typed.expr.FutureGetResult {
       value = node,
@@ -571,18 +542,17 @@ local function promote(cx, node, expected_type)
 
   local expr_type = std.as_read(node.expr_type)
   if not std.is_future(expr_type) then
-    return normalize_compound_expr(cx,
-      ast.typed.expr.Future {
-        value = node,
-        expr_type = expected_type,
-        annotations = node.annotations,
-        span = node.span,
-      })
+    return ast.typed.expr.Future {
+      value = node,
+      expr_type = expected_type,
+      annotations = node.annotations,
+      span = node.span,
+    }
   elseif not std.type_eq(expr_type, expected_type) then
     -- FIXME: This requires a cast. For now, just concretize and re-promote.
     return promote(cx, concretize(cx, node), expected_type)
   end
-  return normalize(cx, node)
+  return node
 end
 
 function optimize_futures.expr_region_root(cx, node)
@@ -703,6 +673,7 @@ function optimize_futures.expr_cast(cx, node)
 
   local expr_type = node.expr_type
   if std.is_future(arg_type) then
+    arg = normalize_compound_expr(cx, arg)
     expr_type = std.future(expr_type)
   end
 
@@ -1152,6 +1123,7 @@ function optimize_futures.expr_unary(cx, node)
 
   local expr_type = node.expr_type
   if std.is_future(rhs_type) then
+    rhs = normalize_compound_expr(cx, rhs)
     expr_type = std.future(expr_type)
   end
 
@@ -1202,6 +1174,8 @@ function optimize_futures.expr_binary(cx, node)
 
   local expr_type = node.expr_type
   if std.is_future(lhs_type) or std.is_future(rhs_type) then
+    lhs = normalize_compound_expr(cx, lhs)
+    rhs = normalize_compound_expr(cx, rhs)
     expr_type = std.future(expr_type)
   end
 
