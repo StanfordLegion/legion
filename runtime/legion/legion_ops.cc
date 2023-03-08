@@ -8341,6 +8341,10 @@ namespace Legion {
     void FenceOp::complete_replay(ApEvent fence_complete_event)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, 
+          fence_complete_event, completion_event);
+#endif
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(NULL, completion_event, fence_complete_event);
       need_completion_trigger = false;

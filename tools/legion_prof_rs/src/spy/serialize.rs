@@ -312,7 +312,7 @@ pub enum Record {
     #[serde(rename = "Internal Operation Creator")]
     InternalCreator { uid: UniqueID, cuid: UniqueID, index: u64 },
     #[serde(rename = "Fence Operation")]
-    FenceOperation { ctx: ContextID, uid: UniqueID, index: u64 },
+    FenceOperation { ctx: ContextID, uid: UniqueID, index: u64, execution: u64 },
     #[serde(rename = "Trace Operation")]
     TraceOperation { ctx: ContextID, uid: UniqueID },
     #[serde(rename = "Copy Operation")]
