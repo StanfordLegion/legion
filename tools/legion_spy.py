@@ -74,8 +74,8 @@ INTER_CLOSE_OP_KIND = 4
 #READ_ONLY_CLOSE_OP_KIND = 5
 POST_CLOSE_OP_KIND = 6
 #OPEN_OP_KIND = 7
-#ADVANCE_OP_KIND = 8
-FENCE_OP_KIND = 9
+MAPPING_FENCE_OP_KIND = 8
+EXECUTION_FENCE_OP_KIND = 9
 COPY_OP_KIND = 10 
 FILL_OP_KIND = 11
 ACQUIRE_OP_KIND = 12 
@@ -5673,6 +5673,9 @@ class Operation(object):
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
+    def is_fence(self):
+        return self.kind == MAPPING_FENCE_OP_KIND or self.kind == EXECUTION_FENCE_OP_KIND
+
     def is_internal(self):
         return self.is_close()
 
@@ -6664,7 +6667,7 @@ class Operation(object):
         if self.reqs is None:
             # If this is a fence, check or record dependences on everything from
             # either the begining or from the previous fence
-            if self.kind == FENCE_OP_KIND:
+            if self.is_fence():
                 # Record dependences on all the users in the region tree 
                 if not self.analyze_logical_fence(perform_checks):
                     return False
@@ -6740,7 +6743,7 @@ class Operation(object):
     def analyze_previous_interference(self, next_op, next_req, reachable):
         if not self.reqs:
             # Check to see if this is a fence operation
-            if self.kind == FENCE_OP_KIND:
+            if self.is_fence():
                 # If we've got a fence operation, it should have a transitive
                 # dependence on all operations that came before it
                 if not self in reachable:
@@ -7538,7 +7541,8 @@ class Operation(object):
             POST_CLOSE_OP_KIND : "darkslateblue",
             #OPEN_OP_KIND : "royalblue",
             #ADVANCE_OP_KIND : "magenta",
-            FENCE_OP_KIND : "darkorchid2",
+            MAPPING_FENCE_OP_KIND : "darkorchid2",
+            EXECUTION_FENCE_OP_KIND : "dodgerblue",
             COPY_OP_KIND : "darkgoldenrod3",
             FILL_OP_KIND : "darkorange1",
             ACQUIRE_OP_KIND : "darkolivegreen",
@@ -7697,7 +7701,7 @@ class Operation(object):
             return False
         if self.kind is FILL_OP_KIND:
             return False
-        if self.kind is FENCE_OP_KIND:
+        if self.kind is MAPPING_FENCE_OP_KIND:
             return False
         if self.kind is CREATION_OP_KIND:
             return False
@@ -8073,12 +8077,12 @@ class Task(object):
             # Find all the backwards reachable operations
             current_op = self.operations[idx]
             # No need to do anything if there are no region requirements
-            if not current_op.reqs and current_op.kind != FENCE_OP_KIND:
+            if not current_op.reqs and not current_op.is_fence():
                 continue
             reachable = set()
             current_op.get_logical_reachable(reachable, False) 
             # Do something special for fence operations
-            if current_op.kind == FENCE_OP_KIND: # special path for fences
+            if current_op.is_fence(): # special path for fences
                 for prev in xrange(idx):
                     if not prev in reachable:
                         print("ERROR: Failed logical sanity check. No mapping "+
@@ -10433,7 +10437,7 @@ close_pat                = re.compile(
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(
-    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
+    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<execution>[0-1])")
 trace_pat                = re.compile(
     prefix+"Trace Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(
@@ -11095,7 +11099,10 @@ def parse_legion_spy_line(line, state):
     m = fence_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(FENCE_OP_KIND)
+        if int(m.group('execution')) == 1:
+            op.set_op_kind(EXECUTION_FENCE_OP_KIND)
+        else:
+            op.set_op_kind(MAPPING_FENCE_OP_KIND)
         op.set_name("Fence Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context, int(m.group('index')))
