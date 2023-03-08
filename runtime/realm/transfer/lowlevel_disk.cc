@@ -78,7 +78,7 @@ namespace Realm {
     {
       printf("file = %s\n", _file.c_str());
       // do not overwrite an existing file
-      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00777);
+      fd = open(_file.c_str(), O_CREAT | O_EXCL | O_RDWR, 00666);
       assert(fd != -1);
       // resize the file to what we want
       int ret =	ftruncate(fd, _size);
@@ -179,7 +179,7 @@ namespace Realm {
             }
           case LEGION_FILE_CREATE:
             {
-              fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0777);
+              fd = open(res->filename.c_str(), O_CREAT | O_RDWR, 0666);
               if(fd == -1) {
                 log_disk.fatal() << "unable to open file '" << res->filename << "': " << strerror(errno);
                 abort();
