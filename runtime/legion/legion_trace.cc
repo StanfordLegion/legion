@@ -1510,11 +1510,14 @@ namespace Legion {
         std::set<ApEvent> template_postconditions;
         current_template->finish_replay(template_postconditions);
         complete_mapping();
+        ApEvent completed;
         if (!template_postconditions.empty())
-          Runtime::trigger_event(NULL, completion_event, 
-              Runtime::merge_events(NULL, template_postconditions));
-        else
-          Runtime::trigger_event(NULL, completion_event);
+          completed = Runtime::merge_events(NULL, template_postconditions);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, 
+                        completed, completion_event);
+#endif
+        Runtime::trigger_event(NULL, completion_event, completed); 
         need_completion_trigger = false;
         complete_execution();
         return;
