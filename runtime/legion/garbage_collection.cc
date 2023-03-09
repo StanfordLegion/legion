@@ -1070,13 +1070,8 @@ namespace Legion {
       // our current state then that is because the downgrade from our 
       // current state has already been done on the owner and we should
       // perform our local down grade to reflect that first
-      while (current_state != to_check)
-      {
-#ifdef DEBUG_LEGION
-        assert(to_check < current_state);
-#endif
+      while (to_check < current_state)
         perform_downgrade(gc);
-      }
 #ifdef DEBUG_LEGION
       assert(LOCAL_REF_STATE < current_state);
 #endif
@@ -1227,7 +1222,8 @@ namespace Legion {
       AutoLock gc(gc_lock);
       // Check to see if this state has already been downgraded already
       // because a check_for_downgrade got here first
-      if (to_downgrade == current_state)
+      if ((to_downgrade == current_state) || 
+          ((current_state+1) == to_downgrade))
         perform_downgrade(gc);
 #ifdef DEBUG_LEGION
       else

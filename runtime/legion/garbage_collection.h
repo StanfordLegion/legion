@@ -219,11 +219,10 @@ namespace Legion {
       enum State {
         DELETED_REF_STATE = 0,
         LOCAL_REF_STATE = 1,
-        GLOBAL_REF_STATE = 2,
-        VALID_REF_STATE = 3, // a second global ref state
-        // intermediate states to guard downgrades
-        PENDING_LOCAL_REF_STATE = 4,
-        PENDING_GLOBAL_REF_STATE = 5,
+        PENDING_LOCAL_REF_STATE = 2,
+        GLOBAL_REF_STATE = 3,
+        PENDING_GLOBAL_REF_STATE = 4,
+        VALID_REF_STATE = 5, // a second global ref state
       };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
