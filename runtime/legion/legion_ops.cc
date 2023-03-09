@@ -8125,7 +8125,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id, context_index);
+            unique_op_id, context_index, (kind == EXECUTION_FENCE));
       return result;
     }
 
@@ -8148,7 +8148,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id, context_index);
+            unique_op_id, context_index, (kind == EXECUTION_FENCE));
       return result;
     }
 
@@ -8242,6 +8242,10 @@ namespace Legion {
               complete_mapping(Runtime::merge_events(map_applied_conditions));
             else
               complete_mapping();
+#ifdef LEGION_SPY
+            LegionSpy::log_operation_events(unique_op_id, 
+                execution_precondition, completion_event);
+#endif
             if (!request_early_complete(execution_precondition))
               complete_execution(
                   Runtime::protect_event(execution_precondition));
@@ -8311,8 +8315,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Still need this to record that this operation is done for LegionSpy
-      LegionSpy::log_operation_events(unique_op_id, 
-          ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
+      if (fence_kind != EXECUTION_FENCE)
+        LegionSpy::log_operation_events(unique_op_id, 
+            ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
       complete_operation();
     }
 #endif
@@ -8336,6 +8341,10 @@ namespace Legion {
     void FenceOp::complete_replay(ApEvent fence_complete_event)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, 
+          fence_complete_event, completion_event);
+#endif
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(NULL, completion_event, fence_complete_event);
       need_completion_trigger = false;

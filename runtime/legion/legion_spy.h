@@ -599,10 +599,11 @@ namespace Legion {
 
       static inline void log_fence_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index)
+                                             size_t context_index,
+                                             bool execution)
       {
-        log_spy.print("Fence Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Fence Operation %llu %llu %zd %d",
+		      context, unique_id, context_index, execution ? 1 : 0);
       }
 
       static inline void log_copy_operation(UniqueID context,
