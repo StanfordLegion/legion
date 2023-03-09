@@ -9534,7 +9534,7 @@ namespace Legion {
               get_provenance(), track ? this : NULL));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id, context_index);
+            unique_op_id, context_index, (kind == EXECUTION_FENCE));
       return result;
     }
 
