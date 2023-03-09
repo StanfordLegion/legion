@@ -221,6 +221,9 @@ namespace Legion {
         LOCAL_REF_STATE = 1,
         GLOBAL_REF_STATE = 2,
         VALID_REF_STATE = 3, // a second global ref state
+        // intermediate states to guard downgrades
+        PENDING_LOCAL_REF_STATE = 4,
+        PENDING_GLOBAL_REF_STATE = 5,
       };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
@@ -307,6 +310,7 @@ namespace Legion {
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(AutoLock &gc, State to_check);
       virtual void accumulate_local_references(void);
+      virtual void record_pending_downgrade(void);
       void check_for_downgrade(AddressSpaceID downgrade_owner); 
       void process_downgrade_request(AddressSpaceID owner, State to_check);
       bool process_downgrade_response(AddressSpaceID notready,
@@ -415,6 +419,7 @@ namespace Legion {
       virtual bool perform_downgrade(AutoLock &gc);
       virtual void process_downgrade_update(AutoLock &gc, State to_check);
       virtual void accumulate_local_references(void);
+      virtual void record_pending_downgrade(void);
     public:
       // Notify that this is no longer globally valid
       virtual void notify_invalid(void) = 0;
