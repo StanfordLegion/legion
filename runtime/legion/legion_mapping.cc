@@ -39,11 +39,11 @@ namespace Legion {
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      // By holding resource references, we prevent the data
+      // By holding gc references, we prevent the data
       // structure from being collected, it doesn't change if 
       // the actual instance itself can be collected or not
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -60,7 +60,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -68,7 +68,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
     }
 
@@ -77,7 +77,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
       impl = rhs.impl;
       rhs.impl = NULL;
@@ -89,11 +89,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((impl != NULL) && 
-          impl->remove_base_resource_ref(Internal::MAPPER_REF))
+          impl->remove_base_gc_ref(Internal::MAPPER_REF))
         delete (impl);
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_base_resource_ref(Internal::MAPPER_REF);
+        impl->add_base_gc_ref(Internal::MAPPER_REF);
       return *this;
     }
 
@@ -1036,6 +1036,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ctx->manager->unsubscribe(ctx, inst);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MapperRuntime::collect_instance(MapperContext ctx,
+                                         const PhysicalInstance &instance) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->collect_instance(ctx, instance);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperRuntime::collect_instances(MapperContext ctx,
+                                 const std::vector<PhysicalInstance> &instances,
+                                 std::vector<bool> &collected) const
+    //--------------------------------------------------------------------------
+    {
+      ctx->manager->collect_instances(ctx, instances, collected);
     }
 
     //--------------------------------------------------------------------------

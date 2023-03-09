@@ -2680,6 +2680,72 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperManager::collect_instance(MappingCallInfo *ctx, 
+                                         const MappingInstance &instance)
+    //--------------------------------------------------------------------------
+    {
+      if ((instance.impl == NULL) || instance.impl->is_virtual_manager() ||
+          instance.impl->is_external_instance())
+        return false;
+      pause_mapper_call(ctx);
+      PhysicalManager *manager = instance.impl->as_physical_manager();
+      RtEvent collected;
+      const bool result = manager->collect(collected);
+      if (result)
+      {
+        // Tell the memory that the instance has been collected
+        std::vector<PhysicalManager*> collected_instance(1, manager);
+        manager->memory_manager->notify_collected_instances(collected_instance);
+        // Wait for the collection to be done 
+        collected.wait();
+      }
+      resume_mapper_call(ctx);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::collect_instances(MappingCallInfo *ctx,
+                                  const std::vector<MappingInstance> &instances,
+                                  std::vector<bool> &collected)
+    //--------------------------------------------------------------------------
+    {
+      collected.resize(instances.size(), false);
+      if (instances.empty())
+        return;
+      pause_mapper_call(ctx);
+      std::vector<RtEvent> wait_for;
+      std::map<MemoryManager*,std::vector<PhysicalManager*> > to_notify;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        collected[idx] = false;
+        InstanceManager *inst = instances[idx].impl;
+        if ((inst == NULL) || inst->is_virtual_manager() || 
+            inst->is_external_instance())
+          continue;
+        RtEvent instance_collected;
+        PhysicalManager *manager = inst->as_physical_manager();
+        if (manager->collect(instance_collected))
+        {
+          collected[idx] = true;
+          to_notify[manager->memory_manager].push_back(manager);
+          if (instance_collected.exists())
+            wait_for.push_back(instance_collected);
+        }
+      }
+      // Notify all the memory managers of the collection
+      for (std::map<MemoryManager*,
+                    std::vector<PhysicalManager*> >::const_iterator it =
+            to_notify.begin(); it != to_notify.end(); it++)
+        it->first->notify_collected_instances(it->second);
+      if (!wait_for.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        wait_on.wait();
+      }
+      resume_mapper_call(ctx);
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperManager::acquire_future(MappingCallInfo *ctx,
                                        const Future &future, Memory memory)
     //--------------------------------------------------------------------------

@@ -1531,6 +1531,10 @@ namespace Legion {
                                     GCPriority priority);
       void record_created_instance( PhysicalManager *manager, bool acquire,
                                     GCPriority priority);
+      void notify_collected_instances(
+                                const std::vector<PhysicalManager*> &instances);
+      static void handle_notify_collected_instances(Deserializer &derez,
+                                                    Runtime *runtime);
       FutureInstance* create_future_instance(Operation *op, UniqueID creator_id,
                                   ApEvent ready_event, size_t size, bool eager);
       void free_future_instance(PhysicalInstance inst, size_t size, 
@@ -3421,6 +3425,8 @@ namespace Legion {
       void send_remote_trace_update(AddressSpaceID target, Serializer &rez);
       void send_remote_trace_response(AddressSpaceID target, Serializer &rez);
       void send_free_external_allocation(AddressSpaceID target,Serializer &rez);
+      void send_notify_collected_instances(AddressSpaceID target,
+                                           Serializer &rez);
       void send_create_future_instance_request(AddressSpaceID target,
                                                Serializer &rez);
       void send_create_future_instance_response(AddressSpaceID target,
@@ -3788,6 +3794,7 @@ namespace Legion {
                                         AddressSpaceID source);
       void handle_remote_tracing_response(Deserializer &derez);
       void handle_free_external_allocation(Deserializer &derez);
+      void handle_notify_collected_instances(Deserializer &derez);
       void handle_create_future_instance_request(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_create_future_instance_response(Deserializer &derez);
@@ -6128,6 +6135,8 @@ namespace Legion {
         case SEND_REMOTE_TRACE_RESPONSE:
           break;
         case SEND_FREE_EXTERNAL_ALLOCATION:
+          break;
+        case SEND_NOTIFY_COLLECTED_INSTANCES:
           break;
         case SEND_CREATE_FUTURE_INSTANCE_REQUEST:
           break;

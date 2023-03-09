@@ -2321,6 +2321,18 @@ namespace Legion {
       // and only a single callback will be performed
       bool subscribe(MapperContext ctx, const PhysicalInstance &instance) const;
       void unsubscribe(MapperContext ctx, const PhysicalInstance &inst) const;
+      // This will try to eagerly collect the physical instance if it does not
+      // contain any valid data, the runtime returns if the collection was 
+      // successful or not. The only reason it will not succeed is if the
+      // instance contains valid data.
+      bool collect_instance(MapperContext ctx,
+                            const PhysicalInstance &inst) const;
+      // This method will try to collect several instances concurrently and
+      // will return which instances were successfully collected in a 
+      // vector of booleans.
+      void collect_instances(MapperContext ctx,
+                             const std::vector<PhysicalInstance> &instances,
+                             std::vector<bool> &collected) const;
     public:
       // Futures can also be acquired to ensure that they are available in
       // particular memories prior to running a task.

@@ -966,6 +966,7 @@ namespace Legion {
       SEND_REMOTE_TRACE_UPDATE,
       SEND_REMOTE_TRACE_RESPONSE,
       SEND_FREE_EXTERNAL_ALLOCATION,
+      SEND_NOTIFY_COLLECTED_INSTANCES,
       SEND_CREATE_FUTURE_INSTANCE_REQUEST,
       SEND_CREATE_FUTURE_INSTANCE_RESPONSE,
       SEND_FREE_FUTURE_INSTANCE,
@@ -1227,6 +1228,7 @@ namespace Legion {
         "Send Remote Trace Update",                                   \
         "Send Remote Trace Response",                                 \
         "Send Free External Allocation",                              \
+        "Send Notify Collected Instances",                            \
         "Send Create Future Instance Request",                        \
         "Send Create Future Instance Response",                       \
         "Send Free Future Instance",                                  \

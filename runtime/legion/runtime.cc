@@ -10173,6 +10173,82 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::notify_collected_instances(
+                                 const std::vector<PhysicalManager*> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner)
+      {
+        AutoLock m_lock(manager_lock);
+        for (std::vector<PhysicalManager*>::const_iterator it =
+              instances.begin(); it != instances.end(); it++)
+        {
+          std::map<RegionTreeID,TreeInstances>::iterator current_finder =
+            current_instances.find((*it)->tree_id);
+          if (current_finder == current_instances.end())
+            continue;
+          TreeInstances::iterator finder = current_finder->second.find(*it);
+          if (finder == current_finder->second.end())
+            continue;
+          current_finder->second.erase(finder);
+          if (current_finder->second.empty())
+            current_instances.erase(current_finder);
+          if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+            delete (*it);
+        }
+      }
+      else
+      {
+        // Send the managers to the owner node to nodify them of the deletion
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(memory);
+          rez.serialize<size_t>(instances.size());
+          for (std::vector<PhysicalManager*>::const_iterator it =
+                instances.begin(); it != instances.end(); it++)
+          {
+            rez.serialize((*it)->did);
+            (*it)->pack_global_ref();
+          }
+        }
+        runtime->send_notify_collected_instances(owner_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MemoryManager::handle_notify_collected_instances(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Memory memory;
+      derez.deserialize(memory);
+      size_t num_instances;
+      derez.deserialize(num_instances);
+      std::vector<PhysicalManager*> instances(num_instances);
+      std::vector<RtEvent> wait_for;
+      for (unsigned idx = 0; idx < num_instances; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        instances[idx] = runtime->find_or_request_instance_manager(did, ready);
+        if (ready.exists())
+          wait_for.push_back(ready);
+      }
+      MemoryManager *manager = runtime->find_memory_manager(memory);
+      if (!wait_for.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        wait_on.wait();
+      }
+      manager->notify_collected_instances(instances);
+      for (unsigned idx = 0; idx < num_instances; idx++)
+        instances[idx]->unpack_global_ref();
+    }
+
+    //--------------------------------------------------------------------------
     FutureInstance* MemoryManager::create_future_instance(Operation *op,
              UniqueID creator_uid, ApEvent ready_event, size_t size, bool eager)
     //--------------------------------------------------------------------------
@@ -13053,6 +13129,11 @@ namespace Legion {
               runtime->handle_free_external_allocation(derez);
               break;
             }
+          case SEND_NOTIFY_COLLECTED_INSTANCES:
+            {
+              runtime->handle_notify_collected_instances(derez);
+              break;
+            }
           case SEND_CREATE_FUTURE_INSTANCE_REQUEST:
             {
               runtime->handle_create_future_instance_request(derez,
@@ -13442,6 +13523,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureInstance::handle_free_external(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_notify_collected_instances(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      MemoryManager::handle_notify_collected_instances(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -23212,6 +23300,15 @@ namespace Legion {
     {
       find_messenger(target)->send_message<SEND_FREE_EXTERNAL_ALLOCATION>(
                                       rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_notify_collected_instances(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_NOTIFY_COLLECTED_INSTANCES>(
+                                                          rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------

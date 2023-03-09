@@ -453,6 +453,10 @@ namespace Legion {
                                     std::vector<MappingInstance> > &instances);
       bool subscribe(MappingCallInfo *ctx, const MappingInstance &instance);
       void unsubscribe(MappingCallInfo *ctx, const MappingInstance &instance);
+      bool collect_instance(MappingCallInfo *ctx, const MappingInstance &inst);
+      void collect_instances(MappingCallInfo *ctx,
+                             const std::vector<MappingInstance> &instances,
+                             std::vector<bool> &collected);
       bool acquire_future(MappingCallInfo *ctx, const Future &f, Memory memory);
     public:
       void record_acquired_instance(MappingCallInfo *info, 
