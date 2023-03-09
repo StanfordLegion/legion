@@ -60,7 +60,12 @@ local function analyze_valid_node(node)
     return {true, node}
   end
 
-  if node:is(ast.typed.stat.Var) or node:is(ast.typed.stat.Assignment) or node:is(ast.typed.stat.Expr) then
+  if node:is(ast.typed.stat.IndexLaunchNum) or
+    node:is(ast.typed.stat.IndexLaunchList) or
+    node:is(ast.typed.stat.Var) or
+    node:is(ast.typed.stat.Assignment) or
+    node:is(ast.typed.stat.Expr)
+  then
     -- Ok for variables and expression statements to capture futures.
     return {true, node}
   end

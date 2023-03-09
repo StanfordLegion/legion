@@ -37,14 +37,19 @@ function context:__newindex (field, value)
   error ("context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function context:new_stat_scope()
+function context:new_stat_scope(has_conds)
+  local conds = self.conds
+  if has_conds then
+    conds = terralib.newlist()
+    conds:insertall(self.conds)
+  end
   local cx = {
     task_is_leaf = self.task_is_leaf,
     local_symbols = self.local_symbols,
     var_flows = self.var_flows,
     var_futures = self.var_futures,
     var_symbols = self.var_symbols,
-    conds = self.conds,
+    conds = conds,
     spills = terralib.newlist(),
   }
   return setmetatable(cx, context)
@@ -299,7 +304,11 @@ end
 
 function analyze_var_flow.stat_if(cx, node)
   local cond = analyze_var_flow.expr(cx, node.cond)
-  local cx = cx:new_local_scope(cond)
+  -- In order to introduce oportunities for predication, we need to
+  -- lift all variables inside of conditions to futures
+  if std.config["predicate"] then
+    cx = cx:new_local_scope(cond)
+  end
   analyze_var_flow.block(cx, node.then_block)
   node.elseif_blocks:map(
     function(block) return analyze_var_flow.stat_elseif(cx, block) end)
@@ -312,7 +321,11 @@ end
 
 function analyze_var_flow.stat_while(cx, node)
   local cond = analyze_var_flow.expr(cx, node.cond)
-  local cx = cx:new_local_scope(cond)
+  -- In order to introduce oportunities for predication, we need to
+  -- lift all variables inside of conditions to futures
+  if std.config["predicate"] then
+    cx = cx:new_local_scope(cond)
+  end
   analyze_var_flow.block(cx, node.block)
 end
 
@@ -1459,8 +1472,13 @@ function optimize_futures.block(cx, node)
 end
 
 function optimize_futures.stat_if(cx, node)
-  local cx = cx:new_stat_scope()
-  local cond = concretize(cx, optimize_futures.expr(cx, node.cond))
+  local cx = cx:new_stat_scope(true)
+  local cond = optimize_futures.expr(cx, node.cond)
+  if std.config["predicate"] and std.is_future(std.as_read(cond.expr_type)) then
+    cx.conds:insert(cond)
+  end
+  -- Always concretize, if we predicate later we'll strip this off
+  cond = concretize(cx, cond)
   local then_block = optimize_futures.block(cx, node.then_block)
   local else_block = node.else_block
   for idx = #node.elseif_blocks, 1, -1 do
@@ -1499,9 +1517,17 @@ end
 function optimize_futures.stat_while(cx, node)
   -- This is guaranteed by the normalizer
   assert(node.cond:is(ast.typed.expr.ID))
+
+  local cx = cx:new_stat_scope(true)
+  local cond = optimize_futures.expr(cx, node.cond)
+  if std.config["predicate"] and std.is_future(std.as_read(cond.expr_type)) then
+    cx.conds:insert(cond)
+  end
+  -- Always concretize, if we predicate later we'll strip this off
+  cond = concretize(cx, cond)
   return terralib.newlist({
     node {
-      cond = concretize(cx, optimize_futures.expr(cx, node.cond)),
+      cond = cond,
       block = optimize_futures.block(cx, node.block),
     }
   })
@@ -1826,6 +1852,10 @@ function optimize_futures.stat_assignment(cx, node)
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
     normalized_rhs = promote(cx, rhs, lhs_type)
+    if #cx.conds > 0 then
+      -- This might get predicated, so normalize preemptively
+      normalized_rhs = normalize_compound_expr(cx, normalized_rhs)
+    end
   else
     normalized_rhs = concretize(cx, rhs)
   end
@@ -1852,7 +1882,7 @@ function optimize_futures.stat_reduce(cx, node)
   local normalized_rhs
   local lhs_type = std.as_read(lhs.expr_type)
   if std.is_future(lhs_type) then
-    normalized_rhs = promote(cx, rhs, lhs_type)
+    normalized_rhs = normalize_compound_expr(cx, promote(cx, rhs, lhs_type))
 
     return cx:add_spill(
       ast.typed.stat.Assignment {
