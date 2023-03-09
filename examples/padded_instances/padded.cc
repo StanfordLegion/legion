@@ -274,7 +274,6 @@ int main(int argc, char **argv)
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
       registrar.add_layout_constraint_set(0, CSI_const);
       registrar.add_layout_constraint_set(1, Aff_const);
-      registrar.add_layout_constraint_set(2, Aff_const);
       registrar.set_leaf(true);
       Runtime::preregister_task_variant<stencil_task>(registrar, "stencil_task");
    }
