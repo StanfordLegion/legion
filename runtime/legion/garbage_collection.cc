@@ -1265,13 +1265,10 @@ namespace Legion {
       // It's possible we get this notification before the update saying
       // that the downgrade from the previous state has been successful
       // so make sure to update accordingly
-      while (to_check != current_state)
-      {
-#ifdef DEBUG_LEGION
-        assert(to_check < current_state);
-#endif
+      while (to_check < current_state)
         perform_downgrade(gc);
-      }
+      if (current_state < to_check)
+        current_state = to_check;
       downgrade_owner = local_space;
       if (gc_references == 0)
         check_for_downgrade(downgrade_owner);
@@ -1795,16 +1792,13 @@ namespace Legion {
       // It's possible we get this notification before the update saying
       // that the downgrade from the previous state has been successful
       // so make sure to update accordingly
-      while (to_check != current_state)
-      {
-#ifdef DEBUG_LEGION
-        assert(to_check < current_state);
-#endif
+      while (to_check < current_state)
         perform_downgrade(gc);
-      }
-      if (current_state == VALID_REF_STATE)
+      if ((current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE))
       {
         downgrade_owner = local_space;
+        current_state = VALID_REF_STATE;
         if (valid_references == 0)
           check_for_downgrade(downgrade_owner);
       }
