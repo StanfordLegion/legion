@@ -19083,9 +19083,21 @@ namespace Legion {
         hasher.hash(launcher.deduplicate_across_shards,
                     "deduplicate_across_shards");
         // Everything else other than the privilege fields is sharded already
+        // Make sure we include privilege fields from the files too
+        // Effectively the direct privilege fields or privilege fields 
+        // mentioned by any of the other data structures need to be the same
+        std::set<FieldID> all_privilege_fields(launcher.privilege_fields);
+        for (std::vector<FieldID>::const_iterator it =
+              launcher.file_fields.begin(); it != 
+              launcher.file_fields.end(); it++)
+          all_privilege_fields.insert(*it);
+        for (std::map<FieldID,std::vector<const char*> >::const_iterator it =
+              launcher.field_files.begin(); it != 
+              launcher.field_files.end(); it++)
+          all_privilege_fields.insert(it->first);
         for (std::set<FieldID>::const_iterator it = 
-              launcher.privilege_fields.begin(); it !=
-              launcher.privilege_fields.end(); it++)
+              all_privilege_fields.begin(); it !=
+              all_privilege_fields.end(); it++)
           hasher.hash(*it, "privilege_fields");
         hash_static_dependences(hasher, launcher.static_dependences);
         if (hasher.verify(__func__))
