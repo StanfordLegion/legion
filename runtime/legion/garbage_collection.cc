@@ -1816,7 +1816,8 @@ namespace Legion {
     void ValidDistributedCollectable::accumulate_local_references(void)
     //--------------------------------------------------------------------------
     {
-      if (current_state == VALID_REF_STATE)
+      if ((current_state == VALID_REF_STATE) ||
+          (current_state == PENDING_GLOBAL_REF_STATE))
       {
         total_sent_references += sent_valid_references;
         total_received_references += received_valid_references;
