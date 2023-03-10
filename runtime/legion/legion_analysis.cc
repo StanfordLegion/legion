@@ -7295,6 +7295,10 @@ namespace Legion {
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
     { 
+      // If we didn't perform a registration and someone wanted to know that
+      // the registration was done then we need to trigger that
+      if (user_registered.exists())
+        Runtime::trigger_event(user_registered);
     }
 
     //--------------------------------------------------------------------------
@@ -7497,7 +7501,10 @@ namespace Legion {
                               usage, applied_events, init_precondition,
                               termination, instances_ready, symbolic);
       if (user_registered.exists())
+      {
         Runtime::trigger_event(user_registered, registered);
+        user_registered = RtUserEvent::NO_RT_USER_EVENT;
+      }
       return registered;
     }
 
