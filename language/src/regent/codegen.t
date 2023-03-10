@@ -993,12 +993,16 @@ function value:address(cx)
 end
 
 function value:read(cx)
-  local actions = self.expr.actions
-  local result = self.expr.value
-  for _, field_name in ipairs(self.field_path) do
-    result = `([result].[field_name])
+  if #self.field_path > 0 then
+    local actions = self.expr.actions
+    local result = self.expr.value
+    for _, field_name in ipairs(self.field_path) do
+      result = `([result].[field_name])
+    end
+    return expr.just(actions, result)
+  else
+    return self.expr
   end
-  return expr.just(actions, result)
 end
 
 function value:write(cx, value)
