@@ -7441,7 +7441,7 @@ namespace Legion {
       {
         const Point<2> p = point;
         // Control replication case, see if we're compacted or not
-        if (launch.dense())
+        if (launch.dense() && (launch.lo()[0] == 0))
         {
           // Dense means that all the shards had the same number of points
           // so we can compute where our offset is based on that
