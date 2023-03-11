@@ -624,6 +624,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(downgrade_owner == local_space);
+        assert((current_state == VALID_REF_STATE) || 
+            (current_state == GLOBAL_REF_STATE));
 #endif
         Serializer rez;
         rez.serialize(did);
@@ -908,7 +910,13 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(current_state);
+              // If we're in a pending state send the downgrade
+              // for the non-pending version of this state
+              if ((current_state == PENDING_LOCAL_REF_STATE) ||
+                  (current_state == PENDING_GLOBAL_REF_STATE))
+                rez.serialize(current_state+1);
+              else
+                rez.serialize(current_state);
               rez.serialize(owner);
             }
             for (std::vector<AddressSpaceID>::const_iterator it =
@@ -925,7 +933,13 @@ namespace Legion {
             {
               RezCheck z(rez);
               rez.serialize(did);
-              rez.serialize(current_state);
+              // If we're in a pending state send the downgrade
+              // for the non-pending version of this state
+              if ((current_state == PENDING_LOCAL_REF_STATE) ||
+                  (current_state == PENDING_GLOBAL_REF_STATE))
+                rez.serialize(current_state+1);
+              else
+                rez.serialize(current_state);
               rez.serialize(owner);
             }
             struct {
@@ -953,6 +967,11 @@ namespace Legion {
         else if ((owner == local_space) && ((collective_mapping == NULL) || 
                                 !collective_mapping->contains(local_space)))
         {
+#ifdef DEBUG_LEGION
+          // Should be in a non-pending state if we're the owner
+          assert((current_state == GLOBAL_REF_STATE) ||
+                  (current_state == VALID_REF_STATE));
+#endif
           // If we're the owner then we have to send it to the owner_space
           // to get all the remote instances
           Serializer rez;
@@ -1064,6 +1083,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(owner != local_space); // we should be remote here
+      assert((to_check == GLOBAL_REF_STATE) || (to_check == VALID_REF_STATE));
 #endif
       AutoLock gc(gc_lock);
       // If the owner is asking us to downgrade a state that is less than
@@ -1133,6 +1153,10 @@ namespace Legion {
         accumulate_local_references();
         if (downgrade_owner == local_space)
         {
+#ifdef DEBUG_LEGION
+          assert((current_state == VALID_REF_STATE) || 
+            (current_state == GLOBAL_REF_STATE));
+#endif
           // See if it safe to downgrade
           // Make sure to check ourselves again to handle any 
           // check_*_and_increment methods
@@ -1261,6 +1285,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(downgrade_owner != local_space);
+      assert(to_check == GLOBAL_REF_STATE);
 #endif
       // It's possible we get this notification before the update saying
       // that the downgrade from the previous state has been successful
@@ -1788,6 +1813,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(downgrade_owner != local_space);
+      assert((to_check == VALID_REF_STATE) || (to_check == GLOBAL_REF_STATE));
 #endif
       // It's possible we get this notification before the update saying
       // that the downgrade from the previous state has been successful
