@@ -963,7 +963,7 @@ namespace Legion {
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
-        received_valid_references(0)
+        received_valid_references(0), padded_reservations(NULL)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,
@@ -1007,6 +1007,18 @@ namespace Legion {
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner() && !is_external_instance())
         memory_manager->unregister_remote_instance(this);
+      if (padded_reservations != NULL)
+      {
+        // If this is the owner view, delete any atomic reservations
+        if (is_owner())
+        {
+          for (std::map<unsigned,Reservation>::iterator it = 
+                padded_reservations->begin(); it != 
+                padded_reservations->end(); it++)
+            it->second.destroy_reservation();
+        }
+        delete padded_reservations;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1095,11 +1107,11 @@ namespace Legion {
             constraints->ordering_constraint.ordering.begin(); it !=
             constraints->ordering_constraint.ordering.end(); it++)
         LegionSpy::log_instance_ordering_constraint_dimension(inst_event, *it);
-      for (std::vector<SplittingConstraint>::const_iterator it = 
-            constraints->splitting_constraints.begin(); it !=
-            constraints->splitting_constraints.end(); it++)
-        LegionSpy::log_instance_splitting_constraint(inst_event,
-                                it->kind, it->value, it->chunks);
+      for (std::vector<TilingConstraint>::const_iterator it = 
+            constraints->tiling_constraints.begin(); it !=
+            constraints->tiling_constraints.end(); it++)
+        LegionSpy::log_instance_tiling_constraint(inst_event,
+                                it->dim, it->value, it->tiles);
       for (std::vector<DimensionConstraint>::const_iterator it = 
             constraints->dimension_constraints.begin(); it !=
             constraints->dimension_constraints.end(); it++)
@@ -3409,6 +3421,187 @@ namespace Legion {
         delete manager;
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalManager::find_padded_reservations(const FieldMask &mask,
+                                                  Operation *op, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Reservation> reservations(mask.pop_count());
+      find_field_reservations(mask, reservations);
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
+        op->update_atomic_locks(index, reservations[idx], true/*exclusive*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::find_field_reservations(const FieldMask &mask,
+                                         std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mask.pop_count() == reservations.size());
+#endif
+      unsigned offset = 0;
+      if (is_owner())
+      {
+        AutoLock i_lock(inst_lock);
+        if (padded_reservations == NULL)
+          padded_reservations = new std::map<unsigned,Reservation>();
+        for (int idx = mask.find_first_set(); idx >= 0;
+              idx = mask.find_next_set(idx+1))
+        {
+          std::map<unsigned,Reservation>::const_iterator finder = 
+            padded_reservations->find(idx);
+          if (finder == padded_reservations->end())
+          {
+            // Make a new reservation and add it to the set
+            Reservation handle = Reservation::create_reservation();
+            padded_reservations->insert(std::make_pair(idx, handle));
+            reservations[offset++] = handle;
+          }
+          else
+            reservations[offset++] = finder->second;
+        }
+      }
+      else
+      {
+        // Figure out which fields we need requests for and send them
+        FieldMask needed_fields;
+        {
+          AutoLock i_lock(inst_lock, 1, false);
+          if (padded_reservations == NULL)
+          {
+            for (int idx = mask.find_first_set(); idx >= 0;
+                  idx = mask.find_next_set(idx+1))
+              needed_fields.set_bit(idx);
+          }
+          else
+          {
+            for (int idx = mask.find_first_set(); idx >= 0;
+                  idx = mask.find_next_set(idx+1))
+            {
+              std::map<unsigned,Reservation>::const_iterator finder = 
+                padded_reservations->find(idx);
+              if (finder == padded_reservations->end())
+                needed_fields.set_bit(idx);
+              else
+                reservations[offset++] = finder->second;
+            }
+          }
+        }
+        if (!!needed_fields)
+        {
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(needed_fields);
+            rez.serialize(wait_on);
+          }
+          runtime->send_padded_reservation_request(owner_space, rez);
+          wait_on.wait();
+          // Now retake the lock and get the remaining reservations
+          AutoLock i_lock(inst_lock, 1, false);
+#ifdef DEBUG_LEGION
+          assert(padded_reservations != NULL);
+#endif
+          for (int idx = needed_fields.find_first_set(); idx >= 0;
+                idx = needed_fields.find_next_set(idx+1))
+          {
+            std::map<unsigned,Reservation>::const_iterator finder =
+              padded_reservations->find(idx);
+#ifdef DEBUG_LEGION
+            assert(finder != padded_reservations->end());
+#endif
+            reservations[offset++] = finder->second;
+          }
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(offset == reservations.size());
+#endif
+      // Sort them before returning
+      if (reservations.size() > 1)
+        std::sort(reservations.begin(), reservations.end());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_padded_reservation_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask needed_fields;
+      derez.deserialize(needed_fields);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      PhysicalManager *target = dynamic_cast<PhysicalManager*>(dc);
+      assert(target != NULL);
+#else
+      PhysicalManager *target = static_cast<PhysicalManager*>(dc);
+#endif
+      std::vector<Reservation> reservations(needed_fields.pop_count());
+      target->find_field_reservations(needed_fields, reservations);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(did);
+        rez.serialize(needed_fields);
+        for (unsigned idx = 0; idx < reservations.size(); idx++)
+          rez.serialize(reservations[idx]);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_padded_reservation_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::update_field_reservations(const FieldMask &mask,
+                                   const std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(mask.pop_count() == reservations.size());
+#endif
+      unsigned offset = 0;
+      AutoLock i_lock(inst_lock);
+      if (padded_reservations == NULL)
+        padded_reservations = new std::map<unsigned,Reservation>();
+      for (int idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
+        padded_reservations->insert(std::make_pair(idx,reservations[offset++]));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_padded_reservation_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask mask;
+      derez.deserialize(mask);
+      std::vector<Reservation> reservations(mask.pop_count());
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
+        derez.deserialize(reservations[idx]);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      PhysicalManager *target = dynamic_cast<PhysicalManager*>(dc);
+      assert(target != NULL);
+#else
+      PhysicalManager *target = static_cast<PhysicalManager*>(dc);
+#endif
+      target->update_field_reservations(mask, reservations);
+      Runtime::trigger_event(to_trigger);
+    }
+
     /////////////////////////////////////////////////////////////
     // Virtual Manager 
     /////////////////////////////////////////////////////////////
@@ -3830,10 +4023,6 @@ namespace Legion {
     {
       // First look at the OrderingConstraint to Figure out what kind
       // of instance we are building here, SOA, AOS, or hybrid
-      // Make sure to check for splitting constraints if see sub-dimensions
-      if (!constraints.splitting_constraints.empty())
-        REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-            "Splitting layout constraints are not currently supported")
       const size_t num_dims = instance_domain->get_num_dims();
       OrderingConstraint &ord = constraints.ordering_constraint;
       if (!ord.ordering.empty())
@@ -3853,9 +4042,6 @@ namespace Legion {
             else
               field_idx = idx;
           }
-          else if (ord.ordering[idx] > LEGION_DIM_F)
-            REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
-              "Splitting layout constraints are not currently supported")
           else
           {
             // Should never be duplicated
@@ -3952,6 +4138,38 @@ namespace Legion {
       assert(ord.contiguous);
       assert(ord.ordering.size() == (num_dims + 1));
 #endif
+      // Check the tiling constraints
+      if (!constraints.tiling_constraints.empty())
+      {
+        // Check to make sure we're not asking for a compact-sparse instance
+        switch (constraints.specialized_constraint.get_kind())
+        {
+          case LEGION_COMPACT_SPECIALIZE:
+          case LEGION_COMPACT_REDUCTION_SPECIALIZE:
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_LAYOUT_CONSTRAINT,
+                "Illegal tiling constraints specified for compact-sparse "
+                "instance creation. Tiling constraints can only be specified "
+                "on affine instances currently. If you have a compelling use "
+                "case for tiling the pieces of an compact-sparse instance "
+                "please report it to the Legion developer's mailing list.")
+          default:
+            break;
+        }
+        // Make sure that each of the dimensions are valid and aren't duplicated
+        std::vector<bool> observed(num_dims, false);
+        for (std::vector<TilingConstraint>::iterator it =
+              constraints.tiling_constraints.begin(); it !=
+              constraints.tiling_constraints.end(); /*nothing*/)
+        {
+          if ((it->dim < num_dims) && !observed[it->dim])
+          {
+            observed[it->dim] = true;
+            it++;
+          }
+          else
+            it = constraints.tiling_constraints.erase(it);
+        }
+      }
       // From this we should be able to compute the field groups 
       // Use the FieldConstraint to put any fields in the proper order
       const std::vector<FieldID> &field_set = 

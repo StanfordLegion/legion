@@ -202,13 +202,6 @@ local analyze_leaf_node = ast.make_single_dispatch(
   {ast.typed.expr, ast.typed.stat},
   always_true)
 
-local function analyze_leaf(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_leaf_node(),
-    all_with_provenance,
-    node, {true})
-end
-
 local node_is_inner = {
   -- Expressions:
   [ast.typed.expr.Deref] = function(node)
@@ -339,13 +332,6 @@ local analyze_inner_node = ast.make_single_dispatch(
   {ast.typed.expr, ast.typed.stat},
   always_true)
 
-local function analyze_inner(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_inner_node(),
-    all_with_provenance,
-    node, {true})
-end
-
 local node_is_idempotent = {
   -- Expressions:
 
@@ -475,13 +461,6 @@ local analyze_idempotent_node = ast.make_single_dispatch(
   node_is_idempotent,
   {ast.typed.expr, ast.typed.stat},
   always_true)
-
-local function analyze_idempotent(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_idempotent_node(),
-    all_with_provenance,
-    node, {true})
-end
 
 local node_is_replicable = {
   -- Expressions:
@@ -632,13 +611,6 @@ local analyze_replicable_node = ast.make_single_dispatch(
   node_is_replicable,
   {ast.typed.expr, ast.typed.stat},
   always_true)
-
-local function analyze_replicable(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_replicable_node(),
-    all_with_provenance,
-    node, {true})
-end
 
 local function analyze_all_node(cx)
   local analyze_leaf_node = analyze_leaf_node()

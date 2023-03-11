@@ -2716,9 +2716,6 @@ namespace Legion {
       // If it's empty we're done, otherwise we do the replay
       if (!local_space.exists())
       {
-        // Still have to do this for legion spy
-        if (runtime->legion_spy_enabled)
-          log_index_fill_requirement();
 #ifdef LEGION_SPY
         LegionSpy::log_replay_operation(unique_op_id);
         LegionSpy::log_operation_events(unique_op_id, 
@@ -7618,7 +7615,10 @@ namespace Legion {
       if (points.empty())
       {
         // Still need to wait for our collectives to be done
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
@@ -7814,7 +7814,10 @@ namespace Legion {
       if (points.empty())
       {
         // Still need to make sure our collective is done
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;

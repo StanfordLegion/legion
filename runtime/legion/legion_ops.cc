@@ -5265,6 +5265,48 @@ namespace Legion {
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id())
         }
+        // See if there is a padding constraint to get reservations for
+        if (constraints->padding_constraint.delta.get_dim() > 0)
+        {
+          FieldMask padding_mask;
+          FieldSpaceNode *fs = 
+            runtime->forest->get_node(requirement.region.get_field_space());
+          if (!constraints->field_constraint.field_set.empty())
+          {
+            std::set<FieldID> field_set;
+            for (std::vector<FieldID>::const_iterator it =
+                  constraints->field_constraint.field_set.begin(); it !=
+                  constraints->field_constraint.field_set.end(); it++)
+            {
+              field_set.insert(*it);
+              region.impl->add_padded_field(*it);
+            }
+            padding_mask = fs->get_field_mask(field_set);
+          }
+          else
+          {
+            padding_mask = fs->get_field_mask(requirement.privilege_fields);
+            for (std::set<FieldID>::const_iterator it =
+                  requirement.privilege_fields.begin(); it !=
+                  requirement.privilege_fields.end(); it++)
+              region.impl->add_padded_field(*it);
+          }
+          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+          {
+            const InstanceRef &ref = chosen_instances[idx];
+            const FieldMask overlap = padding_mask & ref.get_valid_fields();
+            if (!overlap)
+              continue;
+            PhysicalManager *manager = ref.get_physical_manager();
+            manager->find_padded_reservations(overlap, this, 0/*index*/);
+            padding_mask -= overlap;
+            if (!padding_mask)
+              break;
+          }
+#ifdef DEBUG_LEGION
+          assert(!padding_mask);
+#endif
+        }
       }
       return output.track_valid_region;
     }
@@ -8430,7 +8472,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
-      enumerate_points(false/*replaying*/); 
+      enumerate_points(); 
       // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
         check_point_requirements();
@@ -8485,7 +8527,7 @@ namespace Legion {
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       // Enumerate the points
-      enumerate_points(true/*replaying*/);
+      enumerate_points();
       // Then call replay analysis on all of them
       std::vector<RtEvent> mapped_preconditions(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
@@ -8505,7 +8547,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexCopyOp::enumerate_points(bool replaying)
+    void IndexCopyOp::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
       // Need to get the launch domain in case it is different than
@@ -8582,7 +8624,7 @@ namespace Legion {
                                    index_domain, projection_points);
         }
       }
-      if (runtime->legion_spy_enabled && !replaying)
+      if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
               it != points.end(); it++) 
@@ -9485,7 +9527,7 @@ namespace Legion {
               get_provenance(), track ? this : NULL));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id, context_index);
+            unique_op_id, context_index, (kind == EXECUTION_FENCE));
       return result;
     }
 
@@ -19718,7 +19760,7 @@ namespace Legion {
     {
       const RtEvent view_ready = initialize_fill_view();
       // Enumerate the points
-      enumerate_points(false/*replaying*/); 
+      enumerate_points();
       // Check for interfering point requirements in debug mode
       if (runtime->check_privileges)
         check_point_requirements(); 
@@ -19791,13 +19833,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_replaying());
 #endif
-      if (runtime->legion_spy_enabled)
-        log_index_fill_requirement();
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
       // Enumerate the points
-      enumerate_points(true/*replaying*/);
+      enumerate_points();
       // Then call replay analysis on all of them
       std::vector<RtEvent> mapped_preconditions(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
@@ -19817,7 +19857,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexFillOp::enumerate_points(bool replaying)
+    void IndexFillOp::enumerate_points(void)
     //--------------------------------------------------------------------------
     {
       // Enumerate the points
@@ -19847,7 +19887,7 @@ namespace Legion {
                                                       points.end());
       function->project_points(this, 0/*idx*/, requirement,
                                runtime, index_domain, projection_points);
-      if (runtime->legion_spy_enabled && !replaying)
+      if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointFillOp*>::const_iterator it = points.begin();
               it != points.end(); it++)

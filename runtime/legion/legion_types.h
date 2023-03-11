@@ -159,6 +159,8 @@ namespace Legion {
     class FieldAccessor;
   template<typename, bool, int, typename, typename, bool>
     class ReductionAccessor;
+  template<typename, int, typename, typename, bool>
+    class PaddingAccessor;
 #ifdef LEGION_MULTI_REGION_ACCESSOR
   template<typename, int,typename,typename,bool,bool,int>
     class MultiRegionAccessor;
@@ -240,8 +242,9 @@ namespace Legion {
   class SpecializedConstraint;
   class MemoryConstraint;
   class FieldConstraint;
+  class PaddingConstraint;
   class OrderingConstraint;
-  class SplittingConstraint;
+  class TilingConstraint;
   class DimensionConstraint;
   class AlignmentConstraint;
   class OffsetConstraint;
@@ -790,6 +793,8 @@ namespace Legion {
       DISTRIBUTED_VALID_ACQUIRE_RESPONSE,
       SEND_ATOMIC_RESERVATION_REQUEST,
       SEND_ATOMIC_RESERVATION_RESPONSE,
+      SEND_PADDED_RESERVATION_REQUEST,
+      SEND_PADDED_RESERVATION_RESPONSE,
       SEND_CREATED_REGION_CONTEXTS,
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
@@ -1051,6 +1056,8 @@ namespace Legion {
         "Distributed Valid Acquire Response",                         \
         "Send Atomic Reservation Request",                            \
         "Send Atomic Reservation Response",                           \
+        "Send Padded Reservation Request",                            \
+        "Send Padded Reservation Response",                           \
         "Send Created Region Contexts",                               \
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
@@ -2058,6 +2065,7 @@ namespace Legion {
     friend class Internal::PhysicalRegionImpl;              \
     friend class Internal::ExternalResourcesImpl;           \
     friend class Internal::TaskImpl;                        \
+    friend class Internal::VariantImpl;                     \
     friend class Internal::ProcessorManager;                \
     friend class Internal::MemoryManager;                   \
     friend class Internal::Operation;                       \

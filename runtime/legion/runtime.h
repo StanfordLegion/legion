@@ -52,7 +52,7 @@ code, __FILE__, __LINE__, message);                       \
 }
 
 namespace Legion {
-  namespace Internal { 
+  namespace Internal {  
 
     // Special helper for when we need a dummy context
 #define DUMMY_CONTEXT       0
@@ -801,6 +801,7 @@ namespace Legion {
       void unmap_region(void);
       ApEvent remap_region(ApEvent new_ready_event);
       const RegionRequirement& get_requirement(void) const;
+      void add_padded_field(FieldID fid);
       void set_reference(const InstanceRef &references, bool safe = false);
       void set_references(const InstanceSet &instances, bool safe = false);
       bool has_references(void) const;
@@ -829,6 +830,12 @@ namespace Legion {
                                          bool generic_accessor,
                                          bool check_field_size,
                                          ReductionOpID redop);
+      PhysicalInstance get_padding_info(FieldID fid, size_t field_size,
+                                        Domain *inner, Domain &outer,
+                                        const char *warning_string,
+                                        bool silence_warnings,
+                                        bool generic_accessor,
+                                        bool check_field_size);
       void report_incompatible_accessor(const char *accessor_kind,
                              PhysicalInstance instance, FieldID fid);
       void report_incompatible_multi_accessor(unsigned index, FieldID fid,
@@ -847,6 +854,7 @@ namespace Legion {
                                     PrivilegeMode mode);
       static void fail_privilege_check(Domain d, FieldID fid, 
                                     PrivilegeMode mode);
+      static void fail_padding_check(DomainPoint d, FieldID fid);
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -876,6 +884,9 @@ namespace Legion {
       // written by the "mapping stage" code of whatever operation made this
       // can be accessed in "application" side code after 'mapped' triggers
       InstanceSet references;
+      // Any fields which we have privileges on the padded space (sorted)
+      // This enables us to access the padded space for this field
+      std::vector<FieldID> padded_fields;
       // "appliciation side" state
       // whether it is currently mapped
       bool mapped; 
@@ -2081,22 +2092,30 @@ namespace Legion {
     public:
       void broadcast_variant(RtUserEvent done, AddressSpaceID origin,
                              AddressSpaceID local);
+      void find_padded_locks(SingleTask *task, 
+                    const std::vector<RegionRequirement> &regions,
+                    const std::deque<InstanceSet> &physical_instances) const;
+      void record_padded_fields(const std::vector<RegionRequirement> &regions,
+                    const std::vector<PhysicalRegion> &physical_regions) const;
     public:
       static void handle_variant_broadcast(Runtime *runtime, 
                                            Deserializer &derez);
+      static bool check_padding(Runtime *runtime,
+                                const TaskLayoutConstraintSet &constraints);
     public:
       const VariantID vid;
       TaskImpl *const owner;
       Runtime *const runtime;
       const bool global; // globally valid variant
+      const bool needs_padding;
       const bool has_return_type_size;
       const size_t return_type_size;
     public:
       const CodeDescriptorID descriptor_id;
       CodeDescriptor realm_descriptor;
-    private:
-      ExecutionConstraintSet execution_constraints;
-      TaskLayoutConstraintSet   layout_constraints;
+    public:
+      const ExecutionConstraintSet execution_constraints;
+      const TaskLayoutConstraintSet   layout_constraints;
     private:
       void *user_data;
       size_t user_data_size;
@@ -2309,7 +2328,7 @@ namespace Legion {
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map,
                   ShardID owner_shard = 0); 
     public:
-      const int depth; 
+      const unsigned depth; 
       const bool is_exclusive;
       const bool is_functional;
       const bool is_invertible;
@@ -3152,6 +3171,10 @@ namespace Legion {
                                            Serializer &rez);
       void send_atomic_reservation_response(AddressSpaceID target, 
                                             Serializer &rez);
+      void send_padded_reservation_request(AddressSpaceID target, 
+                                           Serializer &rez);
+      void send_padded_reservation_response(AddressSpaceID target, 
+                                            Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view_value(AddressSpaceID target, Serializer &rez);
@@ -3539,6 +3562,9 @@ namespace Legion {
                                           AddressSpaceID source);
       void handle_send_atomic_reservation_request(Deserializer &derez);
       void handle_send_atomic_reservation_response(Deserializer &derez);
+      void handle_send_padded_reservation_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_send_padded_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez); 
       void handle_send_fill_view(Deserializer &derez);
       void handle_send_fill_view_value(Deserializer &derez);
@@ -4826,6 +4852,40 @@ namespace Legion {
                                    LgEvent precondition = LgEvent::NO_LG_EVENT);
     };
 
+    // This is a small helper class for converting realm index spaces when
+    // the types don't naturally align with the underlying index space type
+    template<int DIM, typename TYPELIST>
+    struct RealmSpaceConverter {
+      static inline void convert_to(const Domain &domain, void *realm_is, 
+                                    const TypeTag type_tag, const char *context)
+      {
+        // Compute the type tag for this particular type with the same DIM
+        const TypeTag tag =
+          NT_TemplateHelper::encode_tag<DIM,typename TYPELIST::HEAD>();
+        if (tag == type_tag)
+        {
+          Realm::IndexSpace<DIM,typename TYPELIST::HEAD> *target =
+            static_cast<Realm::IndexSpace<DIM,typename TYPELIST::HEAD>*>(
+                                                                realm_is);
+          *target = domain;
+        }
+        else
+          RealmSpaceConverter<DIM,typename TYPELIST::TAIL>::convert_to(domain,
+                                                  realm_is, type_tag, context);
+      }
+    };
+
+    // Specialization for end-of-list cases
+    template<int DIM>
+    struct RealmSpaceConverter<DIM,Realm::DynamicTemplates::TypeListTerm> {
+      static inline void convert_to(const Domain &domain, void *realm_is, 
+                                    const TypeTag type_tag, const char *context)
+      {
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+          "Dynamic type mismatch in '%s'", context)
+      }
+    };
+
     //--------------------------------------------------------------------------
     template<typename T>
     inline T* Runtime::get_available(LocalLock &local_lock, 
@@ -5774,6 +5834,10 @@ namespace Legion {
         case SEND_ATOMIC_RESERVATION_REQUEST:
           break;
         case SEND_ATOMIC_RESERVATION_RESPONSE:
+          break;
+        case SEND_PADDED_RESERVATION_REQUEST:
+          break;
+        case SEND_PADDED_RESERVATION_RESPONSE:
           break;
         case SEND_CREATED_REGION_CONTEXTS:
           break;

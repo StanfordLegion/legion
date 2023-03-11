@@ -619,10 +619,11 @@ namespace Legion {
 
       static inline void log_fence_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             size_t context_index)
+                                             size_t context_index,
+                                             bool execution)
       {
-        log_spy.print("Fence Operation %llu %llu %zd",
-		      context, unique_id, context_index);
+        log_spy.print("Fence Operation %llu %llu %zd %d",
+		      context, unique_id, context_index, execution ? 1 : 0);
       }
 
       static inline void log_copy_operation(UniqueID context,
@@ -1105,9 +1106,10 @@ namespace Legion {
       }
 
       static inline void log_projection_function(ProjectionID pid,
-                                                 int depth, bool invertible)
+                                                 unsigned depth,
+                                                 bool invertible)
       {
-        log_spy.print("Projection Function %u %d %d", pid, depth, 
+        log_spy.print("Projection Function %u %u %d", pid, depth, 
                       invertible ? 1 : 0);
       }
 
@@ -1399,11 +1401,11 @@ namespace Legion {
                       inst_event.id, dim);
       }
 
-      static inline void log_instance_splitting_constraint(LgEvent inst_event,
-                              DimensionKind dim, size_t value, bool chunks)
+      static inline void log_instance_tiling_constraint(LgEvent inst_event,
+                              DimensionKind dim, size_t value, bool tiles)
       {
         log_spy.print("Instance Splitting Constraint " IDFMT " %d %zd %d",
-                      inst_event.id, dim, value, (chunks ? 1 : 0));
+                      inst_event.id, dim, value, (tiles ? 1 : 0));
       }
 
       static inline void log_instance_dimension_constraint(LgEvent inst_event,

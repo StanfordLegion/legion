@@ -1632,6 +1632,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::record_padded_fields(VariantImpl *variant)
+    //--------------------------------------------------------------------------
+    {
+      variant->record_padded_fields(regions, physical_regions); 
+    }
+
+    //--------------------------------------------------------------------------
     int TaskContext::find_parent_region_req(const RegionRequirement &req,
                                             bool check_privilege /*= true*/)
     //--------------------------------------------------------------------------
@@ -2283,7 +2290,7 @@ namespace Legion {
         const Realm::ExternalMemoryResource resource(
             reinterpret_cast<uintptr_t>(value), size, true/*read only*/);
         FutureInstance source(value, size, ApEvent::NO_AP_EVENT, runtime,
-                              false/*own allocation*/, &resource);
+          false/*eager*/, true/*external allocation*/, false/*own allocation*/);
         // issue the copy between them
         Runtime::trigger_event(NULL, ready, 
             instance->copy_from(&source, owner_task));
@@ -6360,7 +6367,7 @@ namespace Legion {
           mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
           mid, tag, false/*leaf region*/, virtual_mapped, 
           false/*never collective*/, runtime);
-      physical_regions.push_back(PhysicalRegion(impl));
+      physical_regions.emplace_back(PhysicalRegion(impl));
       if (!virtual_mapped)
       {
 #ifdef DEBUG_LEGION
@@ -7432,7 +7439,7 @@ namespace Legion {
       {
         const Point<2> p = point;
         // Control replication case, see if we're compacted or not
-        if (launch.dense())
+        if (launch.dense() && (launch.lo()[0] == 0))
         {
           // Dense means that all the shards had the same number of points
           // so we can compute where our offset is based on that
@@ -13175,13 +13182,13 @@ namespace Legion {
         hasher.hash(*it, "Ordering Constraint ordering");
       hasher.hash(constraints.ordering_constraint.contiguous,
           "Ordering Constraint contiguous");
-      for (std::vector<SplittingConstraint>::const_iterator it =
-            constraints.splitting_constraints.begin(); it !=
-            constraints.splitting_constraints.end(); it++)
+      for (std::vector<TilingConstraint>::const_iterator it =
+            constraints.tiling_constraints.begin(); it !=
+            constraints.tiling_constraints.end(); it++)
       {
-        hasher.hash(it->kind, "Splitting Constraint kind");
-        hasher.hash(it->value, "Splitting Constraint value");
-        hasher.hash(it->chunks, "Splitting Constraint chunks");
+        hasher.hash(it->dim, "Tiling Constraint dim");
+        hasher.hash(it->value, "Tiling Constraint value");
+        hasher.hash(it->tiles, "Tiling Constraint tiles");
       }
       for (std::vector<DimensionConstraint>::const_iterator it =
             constraints.dimension_constraints.begin(); it !=
@@ -19072,9 +19079,21 @@ namespace Legion {
         hasher.hash(launcher.deduplicate_across_shards,
                     "deduplicate_across_shards");
         // Everything else other than the privilege fields is sharded already
+        // Make sure we include privilege fields from the files too
+        // Effectively the direct privilege fields or privilege fields 
+        // mentioned by any of the other data structures need to be the same
+        std::set<FieldID> all_privilege_fields(launcher.privilege_fields);
+        for (std::vector<FieldID>::const_iterator it =
+              launcher.file_fields.begin(); it != 
+              launcher.file_fields.end(); it++)
+          all_privilege_fields.insert(*it);
+        for (std::map<FieldID,std::vector<const char*> >::const_iterator it =
+              launcher.field_files.begin(); it != 
+              launcher.field_files.end(); it++)
+          all_privilege_fields.insert(it->first);
         for (std::set<FieldID>::const_iterator it = 
-              launcher.privilege_fields.begin(); it !=
-              launcher.privilege_fields.end(); it++)
+              all_privilege_fields.begin(); it !=
+              all_privilege_fields.end(); it++)
           hasher.hash(*it, "privilege_fields");
         hash_static_dependences(hasher, launcher.static_dependences);
         if (hasher.verify(__func__))
@@ -23577,7 +23596,7 @@ namespace Legion {
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
           ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
           true/*leaf region*/, virtual_mapped, false/*collective*/, runtime);
-      physical_regions.push_back(PhysicalRegion(impl));
+      physical_regions.emplace_back(PhysicalRegion(impl));
       if (mapped)
         impl->set_references(physical_instances, true/*safe*/);
     }

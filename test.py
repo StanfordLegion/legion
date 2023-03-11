@@ -67,11 +67,13 @@ legion_cxx_tests = [
     ['examples/attach_index_space/index_space_attach', []],
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
+    ['examples/padded_instances/padded_instances', []],
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/allreduce/allreduce', []],
     ['examples/tree_collectives/tree_collectives', []],
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
+    ['examples/tiling/tiling', []],
     ['examples/future_map_transforms/future_map_transforms', []],
     ['examples/concurrent_tasks/concurrent', ['-ll:cpu', '4']],
     # Comment this test out until it works everywhere

@@ -5240,6 +5240,19 @@ namespace Legion {
                           idx/*redop index*/, manage_dst_events,
                           restricted_output, dst_events);
       }
+      // Make sure we do this before we trigger the effects_applied
+      // event as it could result in the deletion of this object
+      ApEvent summary;
+      if (track_events)
+      {
+        summary = Runtime::merge_events(&trace_info, events);
+        if (summary_event.exists())
+        {
+          Runtime::trigger_event(&trace_info, summary_event, summary);
+          // Pull this onto the stack in case the object is deleted
+          summary = summary_event;
+        }
+      }
 #ifndef NON_AGGRESSIVE_AGGREGATORS
       if (!recorded_events.empty())
         Runtime::trigger_event(guard_postcondition,
@@ -5263,19 +5276,7 @@ namespace Legion {
       else
         Runtime::trigger_event(effects_applied);
 #endif
-      if (track_events)
-      {
-        const ApEvent summary = Runtime::merge_events(&trace_info, events);
-        if (summary_event.exists())
-        {
-          Runtime::trigger_event(&trace_info, summary_event, summary);
-          return summary_event;
-        }
-        else
-          return summary;
-      }
-      else
-        return ApEvent::NO_AP_EVENT;
+      return summary;
     } 
 
     //--------------------------------------------------------------------------
@@ -7449,6 +7450,10 @@ namespace Legion {
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
     { 
+      // If we didn't perform a registration and someone wanted to know that
+      // the registration was done then we need to trigger that
+      if (user_registered.exists())
+        Runtime::trigger_event(user_registered);
     }
 
     //--------------------------------------------------------------------------
@@ -7651,7 +7656,10 @@ namespace Legion {
                               usage, applied_events, init_precondition,
                               termination, instances_ready, symbolic);
       if (user_registered.exists())
+      {
         Runtime::trigger_event(user_registered, registered);
+        user_registered = RtUserEvent::NO_RT_USER_EVENT;
+      }
       return registered;
     }
 

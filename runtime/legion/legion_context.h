@@ -683,6 +683,7 @@ namespace Legion {
                      const void *realm_point, TypeTag type_tag);
       bool is_region_mapped(unsigned idx);
       void clone_requirement(unsigned idx, RegionRequirement &target);
+      void record_padded_fields(VariantImpl *variant); 
       int find_parent_region_req(const RegionRequirement &req, 
                                  bool check_privilege = true);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
