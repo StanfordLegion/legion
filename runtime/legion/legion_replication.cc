@@ -7840,7 +7840,10 @@ namespace Legion {
       if (points.empty())
       {
         // Still need to wait for our collectives to be done
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
@@ -8036,7 +8039,10 @@ namespace Legion {
       if (points.empty())
       {
         // Still need to make sure our collective is done
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
