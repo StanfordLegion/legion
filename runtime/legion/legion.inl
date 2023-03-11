@@ -8648,6 +8648,694 @@ namespace Legion {
 #undef PHYSICAL_REGION_CONSTRUCTORS_WITH_BOUNDS
 
     ////////////////////////////////////////////////////////////
+    // Padding Accessor with Generic Accessors 
+    ////////////////////////////////////////////////////////////
+
+    // Padding Accessor, generic, N, no bounds checks
+    template<typename FT, int N, typename T, bool CB>
+    class PaddingAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,CB> { 
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0)
+        {
+          Domain outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                NULL/*inner*/, outer_bounds, warning_string,
+                silence_warnings, true/*generic*/, check_field_size);
+          const Rect<N,T> bounds = outer_bounds;
+          if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                             bounds)) 
+            region.report_incompatible_accessor("GenericAccessor",instance,fid);
+          accessor =
+            Realm::GenericAccessor<FT,N,T>(instance, fid, bounds, offset);
+        }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
+          operator[](const Point<N,T>& p) const
+        { 
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
+        }
+      inline ArraySyntax::GenericSyntaxHelper<
+          PaddingAccessor<FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<
+            PaddingAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Padding Accessor, generic, N, bounds checks
+    template<typename FT, int N, typename T>
+    class PaddingAccessor<FT,N,T,Realm::GenericAccessor<FT,N,T>,true> { 
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0) : field(fid)
+        {
+          Domain inner_bounds, outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                &inner_bounds, outer_bounds, warning_string,
+                silence_warnings, true/*generic*/, check_field_size);
+          inner = inner_bounds;
+          outer = outer_bounds;
+          if (!Realm::GenericAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                               outer)) 
+            region.report_incompatible_accessor("GenericAccessor",instance,fid);
+          accessor =
+            Realm::GenericAccessor<FT,N,T>(instance, fid, outer, offset);
+        }
+    public:
+      inline FT read(const Point<N,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor.read(p); 
+        }
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          accessor.write(p, val); 
+        }
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
+          operator[](const Point<N,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
+        }
+      inline ArraySyntax::GenericSyntaxHelper<
+          PaddingAccessor<FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<
+            PaddingAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      Rect<N,T> inner, outer;
+      FieldID field;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Padding Accessor, generic, 1, no bounds checks
+    template<typename FT, typename T, bool CB>
+    class PaddingAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,CB> { 
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0)
+        {
+          Domain outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                NULL/*inner*/, outer_bounds, warning_string,
+                silence_warnings, true/*generic*/, check_field_size);
+          const Rect<1,T> bounds = outer_bounds;
+          if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                             bounds)) 
+            region.report_incompatible_accessor("GenericAccessor",instance,fid);
+          accessor =
+            Realm::GenericAccessor<FT,1,T>(instance, fid, bounds, offset);
+        }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
+          operator[](const Point<1,T>& p) const
+        { 
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Padding Accessor, generic, 1, bounds checks
+    template<typename FT, typename T>
+    class PaddingAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T>,true> { 
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0) : field(fid)
+        {
+          Domain inner_bounds, outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                &inner_bounds, outer_bounds, warning_string,
+                silence_warnings, true/*generic*/, check_field_size);
+          inner = inner_bounds;
+          outer = outer_bounds;
+          if (!Realm::GenericAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                             outer)) 
+            region.report_incompatible_accessor("GenericAccessor",instance,fid);
+          accessor =
+            Realm::GenericAccessor<FT,1,T>(instance, fid, outer, offset);
+        }
+    public:
+      inline FT read(const Point<1,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor.read(p); 
+        }
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          accessor.write(p, val); 
+        }
+      inline ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE> 
+          operator[](const Point<1,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return ArraySyntax::AccessorRefHelper<FT,LEGION_READ_WRITE>(
+                                                          accessor[p]);
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      Rect<1,T> inner, outer;
+      FieldID field;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    ////////////////////////////////////////////////////////////
+    // Padding Accessor with Affine Accessors 
+    ////////////////////////////////////////////////////////////
+
+    // Padding Accessor, affine, N, no bounds checks
+    template<typename FT, int N, typename T, bool CB>
+    class PaddingAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,CB> { 
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0)
+        {
+          Domain outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                NULL/*inner*/, outer_bounds, warning_string,
+                silence_warnings, false/*generic*/, check_field_size);
+          const Rect<N,T> bounds = outer_bounds;
+          if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                            bounds)) 
+            region.report_incompatible_accessor("AffineAccessor",instance,fid);
+          accessor =
+            Realm::AffineAccessor<FT,N,T>(instance, fid, bounds, offset);
+        }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+          PaddingAccessor<FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+            PaddingAccessor<FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,LEGION_READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Padding Accessor, affine, N, bounds checks
+    template<typename FT, int N, typename T>
+    class PaddingAccessor<FT,N,T,Realm::AffineAccessor<FT,N,T>,true> { 
+    private:
+      static_assert(N > 0, "DIM must be positive");
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0) : field(fid)
+        {
+          Domain inner_bounds, outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                &inner_bounds, outer_bounds, warning_string,
+                silence_warnings, false/*generic*/, check_field_size);
+          inner = inner_bounds;
+          outer = outer_bounds;
+          if (!Realm::AffineAccessor<FT,N,T>::is_compatible(instance, fid, 
+                                                            outer)) 
+            region.report_incompatible_accessor("AffineAccessor",instance,fid);
+          accessor =
+            Realm::AffineAccessor<FT,N,T>(instance, fid, outer, offset);
+        }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<N,T>& p, FT val) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          const Rect<N,T> contained = outer.intersection(r);
+          if (contained.volume() < r.volume())
+          {
+            if (outer.contains(r.lo))
+              PhysicalRegion::fail_padding_check(DomainPoint(r.lo), field);
+            else
+              PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
+          }
+          const Rect<N,T> overlap = inner.overlaps(r);
+          if (!overlap.empty())
+            PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T>& r, size_t strides[N],
+                     size_t field_size = sizeof(FT)) const
+        {
+          const Rect<N,T> contained = outer.intersection(r);
+          if (contained.volume() < r.volume())
+          {
+            if (outer.contains(r.lo))
+              PhysicalRegion::fail_padding_check(DomainPoint(r.lo), field);
+            else
+              PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
+          }
+          const Rect<N,T> overlap = inner.overlaps(r);
+          if (!overlap.empty())
+            PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+          for (int i = 0; i < N; i++)
+            strides[i] = accessor.strides[i] / field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<N,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline ArraySyntax::AffineSyntaxHelper<
+          PaddingAccessor<FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>
+          operator[](T index) const
+      {
+        return ArraySyntax::AffineSyntaxHelper<
+            PaddingAccessor<FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,LEGION_READ_WRITE>(
+              *this, Point<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,N,T> accessor;
+      Rect<N,T> inner, outer;
+      FieldID field;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = N;
+    };
+
+    // Padding Accessor, affine, 1, no bounds checks
+    template<typename FT, typename T, bool CB>
+    class PaddingAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,CB> { 
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0)
+        {
+          Domain outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                NULL/*inner*/, outer_bounds, warning_string,
+                silence_warnings, false/*generic*/, check_field_size);
+          const Rect<1,T> bounds = outer_bounds;
+          if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                            bounds)) 
+            region.report_incompatible_accessor("AffineAccessor",instance,fid);
+          accessor =
+            Realm::AffineAccessor<FT,1,T>(instance, fid, bounds, offset);
+        }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+          strides[0] = accessor.strides[0] / field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    // Padding Accessor, affine, 1, bounds checks
+    template<typename FT, typename T>
+    class PaddingAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T>,true> { 
+    private:
+      static_assert(std::is_integral<T>::value, "must be integral type");
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t offset = 0) : field(fid)
+        {
+          Domain inner_bounds, outer_bounds;
+          const Realm::RegionInstance instance =
+            region.get_padding_info(fid, actual_field_size,
+                &inner_bounds, outer_bounds, warning_string,
+                silence_warnings, true/*generic*/, check_field_size);
+          inner = inner_bounds;
+          outer = outer_bounds;
+          if (!Realm::AffineAccessor<FT,1,T>::is_compatible(instance, fid, 
+                                                            outer)) 
+            region.report_incompatible_accessor("AffineAccessor",instance,fid);
+          accessor =
+            Realm::AffineAccessor<FT,1,T>(instance, fid, outer, offset);
+        }
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<1,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Point<1,T>& p, FT val) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Point<1,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
+        {
+          const Rect<1,T> contained = outer.intersection(r);
+          if (contained.volume() < r.volume())
+          {
+            if (outer.contains(r.lo))
+              PhysicalRegion::fail_padding_check(DomainPoint(r.lo), field);
+            else
+              PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
+          }
+          const Rect<1,T> overlap = inner.overlaps(r);
+          if (!overlap.empty())
+            PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Rect<1,T>& r, size_t strides[1],
+                     size_t field_size = sizeof(FT)) const
+        {
+          const Rect<1,T> contained = outer.intersection(r);
+          if (contained.volume() < r.volume())
+          {
+            if (outer.contains(r.lo))
+              PhysicalRegion::fail_padding_check(DomainPoint(r.lo), field);
+            else
+              PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
+          }
+          const Rect<1,T> overlap = inner.overlaps(r);
+          if (!overlap.empty())
+            PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+          strides[0] = accessor.strides[0] / field_size;
+          return accessor.ptr(r.lo);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Point<1,T>& p) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Point<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          if (!outer.contains(p) || inner.contains(p))
+            PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    public:
+      Realm::AffineAccessor<FT,1,T> accessor;
+      Rect<1,T> inner, outer;
+      FieldID field;
+    public:
+      typedef FT value_type;
+      typedef FT& reference;
+      typedef const FT& const_reference;
+      static const int dim = 1;
+    };
+
+    ////////////////////////////////////////////////////////////
     // Multi Region Accessor with Generic Accessors
     ////////////////////////////////////////////////////////////
 #ifdef LEGION_MULTI_REGION_ACCESSOR
@@ -18036,6 +18724,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
                              add_constraint(const PointerConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      layout_constraints.add_constraint(constraint);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    inline LayoutConstraintRegistrar& LayoutConstraintRegistrar::
+                             add_constraint(const PaddingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
       layout_constraints.add_constraint(constraint);

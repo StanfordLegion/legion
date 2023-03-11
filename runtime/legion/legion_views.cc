@@ -99,7 +99,7 @@ namespace Legion {
         // If this is the owner view, delete any atomic reservations
         if (is_owner())
         {
-          for (std::map<FieldID,Reservation>::iterator it = 
+          for (std::map<unsigned,Reservation>::iterator it = 
                 atomic_reservations.begin(); it != 
                 atomic_reservations.end(); it++)
           {

@@ -67,6 +67,7 @@ legion_cxx_tests = [
     ['examples/attach_index_space/index_space_attach', []],
     ['examples/predication/predication', []],
     ['examples/layout_constraints/transpose', []],
+    ['examples/padded_instances/padded_instances', []],
     ['examples/inline_tasks/inline_tasks', []],
     ['examples/local_function_tasks/local_function_tasks', []],
     ['examples/provenance/provenance', []],
