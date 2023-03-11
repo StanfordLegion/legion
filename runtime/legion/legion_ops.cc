@@ -5314,6 +5314,48 @@ namespace Legion {
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id())
         }
+        // See if there is a padding constraint to get reservations for
+        if (constraints->padding_constraint.delta.get_dim() > 0)
+        {
+          FieldMask padding_mask;
+          FieldSpaceNode *fs = 
+            runtime->forest->get_node(requirement.region.get_field_space());
+          if (!constraints->field_constraint.field_set.empty())
+          {
+            std::set<FieldID> field_set;
+            for (std::vector<FieldID>::const_iterator it =
+                  constraints->field_constraint.field_set.begin(); it !=
+                  constraints->field_constraint.field_set.end(); it++)
+            {
+              field_set.insert(*it);
+              region.impl->add_padded_field(*it);
+            }
+            padding_mask = fs->get_field_mask(field_set);
+          }
+          else
+          {
+            padding_mask = fs->get_field_mask(requirement.privilege_fields);
+            for (std::set<FieldID>::const_iterator it =
+                  requirement.privilege_fields.begin(); it !=
+                  requirement.privilege_fields.end(); it++)
+              region.impl->add_padded_field(*it);
+          }
+          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+          {
+            const InstanceRef &ref = chosen_instances[idx];
+            const FieldMask overlap = padding_mask & ref.get_valid_fields();
+            if (!overlap)
+              continue;
+            PhysicalManager *manager = ref.get_physical_manager();
+            manager->find_padded_reservations(overlap, this, 0/*index*/);
+            padding_mask -= overlap;
+            if (!padding_mask)
+              break;
+          }
+#ifdef DEBUG_LEGION
+          assert(!padding_mask);
+#endif
+        }
       }
       return output.track_valid_region;
     }

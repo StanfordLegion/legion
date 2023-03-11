@@ -352,6 +352,7 @@ namespace Legion {
       layout->alignment_reqd = 32;
       layout->space = space;
       std::vector<Rect<DIM,T> > piece_bounds;
+      const SpecializedConstraint &spec = constraints.specialized_constraint;
       if (space.dense() || !compact)
       {
         if (!space.bounds.empty())
@@ -432,7 +433,6 @@ namespace Legion {
         assert(num_pieces != NULL);
         assert((*num_pieces) == 0);
 #endif
-        const SpecializedConstraint &spec = constraints.specialized_constraint;
         if (spec.max_overhead > 0)
         {
           std::vector<Realm::Rect<DIM,T> > covering;
@@ -479,12 +479,41 @@ namespace Legion {
       }
       else if (piece_bounds.size() > 1)
       {
+        // Realm doesn't currently support padding on multiple pieces because
+        // then we might have valid points in multiple pieces and its 
+        // undefined which pieces Realm might copy to
+        if (constraints.padding_constraint.delta.get_dim() > 0)
+          REPORT_LEGION_FATAL(LEGION_FATAL_COMPACT_SPARSE_PADDING,
+              "Legion does not currently support additional padding "
+              "on compact sparse instances. Please open a github "
+              "issue to request support.")
         *num_pieces = piece_bounds.size();
         *piece_list_size = piece_bounds.size() * sizeof(Rect<DIM,T>);
         *piece_list = malloc(*piece_list_size);
         Rect<DIM,T> *pieces = static_cast<Rect<DIM,T>*>(*piece_list);
         for (unsigned idx = 0; idx < piece_bounds.size(); idx++)
           pieces[idx] = piece_bounds[idx];
+      }
+      else if (constraints.padding_constraint.delta.get_dim() > 0)
+      {
+        // If the user requested any scratch padding on the instance apply it
+        const Domain &delta = constraints.padding_constraint.delta;
+        const Point<DIM> lo = delta.lo();
+        const Point<DIM> hi = delta.hi();
+#ifdef DEBUG_LEGION
+        assert(!piece_bounds.empty());
+        for (int i = 0; i < DIM; i++)
+        {
+          assert(lo[i] >= 0);
+          assert(hi[i] >= 0);
+        }
+#endif
+        for (typename std::vector<Rect<DIM,T> >::iterator it = 
+              piece_bounds.begin(); it != piece_bounds.end(); it++)
+        {
+          it->lo -= lo;
+          it->hi += hi;
+        }
       }
       const OrderingConstraint &order = constraints.ordering_constraint;  
 #ifdef DEBUG_LEGION
@@ -2739,40 +2768,6 @@ namespace Legion {
       rhs_space.destroy(result);
       return result;
     } 
-
-    // This is a small helper class for converting realm index spaces when
-    // the types don't naturally align with the underlying index space type
-    template<int DIM, typename TYPELIST>
-    struct RealmSpaceConverter {
-      static inline void convert_to(const Domain &domain, void *realm_is, 
-                                    const TypeTag type_tag, const char *context)
-      {
-        // Compute the type tag for this particular type with the same DIM
-        const TypeTag tag =
-          NT_TemplateHelper::encode_tag<DIM,typename TYPELIST::HEAD>();
-        if (tag == type_tag)
-        {
-          Realm::IndexSpace<DIM,typename TYPELIST::HEAD> *target =
-            static_cast<Realm::IndexSpace<DIM,typename TYPELIST::HEAD>*>(
-                                                                realm_is);
-          *target = domain;
-        }
-        else
-          RealmSpaceConverter<DIM,typename TYPELIST::TAIL>::convert_to(domain,
-                                                  realm_is, type_tag, context);
-      }
-    };
-
-    // Specialization for end-of-list cases
-    template<int DIM>
-    struct RealmSpaceConverter<DIM,Realm::DynamicTemplates::TypeListTerm> {
-      static inline void convert_to(const Domain &domain, void *realm_is, 
-                                    const TypeTag type_tag, const char *context)
-      {
-        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-          "Dynamic type mismatch in '%s'", context)
-      }
-    };
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

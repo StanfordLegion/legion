@@ -102,7 +102,7 @@ namespace Legion {
       RegionTreeForest *const forest;
     protected:
       IndexSpaceOperation *result;
-    };
+    }; 
     
     /**
      * \class RegionTreeForest

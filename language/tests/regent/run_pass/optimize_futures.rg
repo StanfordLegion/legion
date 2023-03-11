@@ -12,6 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [
+--   ["-fpredicate", "1"],
+--   ["-fpredicate", "0"]
+-- ]
+
 import "regent"
 
 task f() : int

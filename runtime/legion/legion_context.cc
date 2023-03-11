@@ -1632,6 +1632,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::record_padded_fields(VariantImpl *variant)
+    //--------------------------------------------------------------------------
+    {
+      variant->record_padded_fields(regions, physical_regions); 
+    }
+
+    //--------------------------------------------------------------------------
     int TaskContext::find_parent_region_req(const RegionRequirement &req,
                                             bool check_privilege /*= true*/)
     //--------------------------------------------------------------------------
@@ -6369,7 +6376,7 @@ namespace Legion {
           mapped ? unmap_event : ApUserEvent::NO_AP_USER_EVENT, mapped, this,
           mid, tag, false/*leaf region*/, virtual_mapped, 
           false/*never collective*/, runtime);
-      physical_regions.push_back(PhysicalRegion(impl));
+      physical_regions.emplace_back(PhysicalRegion(impl));
       if (!virtual_mapped)
       {
 #ifdef DEBUG_LEGION
@@ -23621,7 +23628,7 @@ namespace Legion {
           RtEvent::NO_RT_EVENT, ApEvent::NO_AP_EVENT, 
           ApUserEvent::NO_AP_USER_EVENT, mapped, this, mid, tag, 
           true/*leaf region*/, virtual_mapped, false/*collective*/, runtime);
-      physical_regions.push_back(PhysicalRegion(impl));
+      physical_regions.emplace_back(PhysicalRegion(impl));
       if (mapped)
         impl->set_references(physical_instances, true/*safe*/);
     }

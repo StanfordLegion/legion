@@ -4859,6 +4859,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::add_padded_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      padded_fields.push_back(fid);
+      // Resort to keep things in order
+      if (padded_fields.size() > 1)
+        std::sort(padded_fields.begin(), padded_fields.end());
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegionImpl::set_reference(const InstanceRef &ref, bool safe)
     //--------------------------------------------------------------------------
     {
@@ -5169,8 +5179,16 @@ namespace Legion {
                               context->get_unique_id(),
                               (warning_string == NULL) ? "" : warning_string)
       // Get the index space to use for the accessor
-      runtime->get_index_space_domain(req.region.get_index_space(),
-                                      realm_is, type_tag);
+      IndexSpaceNode *bounds = 
+        runtime->forest->get_node(req.region.get_index_space());
+      // Check to see if this is a padded field, if it is then we need to 
+      // merge the padding into the resulting domain that is allowed
+      // to be accessed by the accessor for bounds checks
+      bool need_padded_bounds = false;
+      if (!std::binary_search(padded_fields.begin(), padded_fields.end(), fid))
+        bounds->get_index_space_domain(realm_is, type_tag);
+      else
+        need_padded_bounds = true;
       // Wait until we are valid before returning the accessor
       wait_until_valid(silence_warnings, warning_string,
                        runtime->runtime_warnings, "Accessor Construction");
@@ -5195,6 +5213,36 @@ namespace Legion {
                             fid, field_size, actual_size, 
                             context->get_task_name(), context->get_unique_id()) 
           }
+          if (need_padded_bounds)
+          {
+            Domain domain;
+            bounds->get_launch_space_domain(domain);
+#ifdef DEBUG_LEGION
+            assert(domain.dense());
+#endif
+            // Now we can compute the bounds on this instance
+            const Domain &delta= 
+              manager->layout->constraints->padding_constraint.delta;
+#ifdef DEBUG_LEGION
+            assert(domain.get_dim() == delta.get_dim());
+#endif
+            const Domain padded_bounds =
+              Domain(domain.lo() - delta.lo(), domain.hi() + delta.hi());
+            switch (domain.get_dim())
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to( \
+                      padded_bounds, realm_is, type_tag, "get_instance_info"); \
+                  break; \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+            }
+          }
           return manager->get_instance();
         }
       }
@@ -5202,7 +5250,100 @@ namespace Legion {
       // error raised earlier in this function
       assert(false);
       return PhysicalInstance::NO_INST;
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalRegionImpl::get_padding_info(FieldID fid,
+                              size_t field_size, Domain *inner, Domain &outer,
+                              const char *warning_string, bool silence_warnings,
+                              bool generic_accessor, bool check_field_size)
+    //--------------------------------------------------------------------------
+    {
+      if (!std::binary_search(padded_fields.begin(), padded_fields.end(), fid))
+        REPORT_LEGION_ERROR(ERROR_INVALID_PADDED_ACCESSOR,
+            "Illegal request to create a padded accessor for field %d in "
+            "parent task %s (UID %lld) which does not have padded privileges. "
+            "You must record a layout constraint with an explicit for padding "
+            "constraint when registering this task variant in order to be able "
+            "to access the padded space on this instance.",
+            fid, context->get_task_name(), context->get_unique_id())
+      if (context != NULL)
+      {
+        if (context->is_inner_context())
+          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
+            "Illegal padding accessor construction inside "
+            "task %s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id())
+        else if (runtime->runtime_warnings && !silence_warnings &&
+                  !context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
+              "Padding ccessor construction in non-leaf "
+              "task %s (UID %lld) is a blocking operation in violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation. Warning string: %s",
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
+      }
+      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
+        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
+                       "Padding accessor construction for field %d in task %s "
+                       "without privileges!", fid, context->get_task_name())
+      if (generic_accessor && runtime->runtime_warnings && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_GENERIC_ACCESSOR,
+                              "Using a generic accessor for accessing a "
+                              "physical instance of task %s (UID %lld). "
+                              "Generic accessors are very slow and are "
+                              "strongly discouraged for use in high "
+                              "performance code. Warning string: %s", 
+                              context->get_task_name(),
+                              context->get_unique_id(),
+                              (warning_string == NULL) ? "" : warning_string)
+      const InstanceSet &instances = references;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const InstanceRef &ref = instances[idx];
+        if (ref.is_field_set(fid))
+        {
+          PhysicalManager *manager = ref.get_physical_manager();
+          if (check_field_size)
+          {
+            const size_t actual_size = 
+              manager->field_space_node->get_field_size(fid);
+            if (actual_size != field_size)
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
+                            "Error creating accessor for field %d with a "
+                            "type of size %zd bytes when the field was "
+                            "originally allocated with a size of %zd bytes "
+                            "in task %s (UID %lld)",
+                            fid, field_size, actual_size, 
+                            context->get_task_name(), context->get_unique_id()) 
+          }
+          // If this is a padded instance, then we know that this is an affine
+          // instance so we can get it's index space expression and it should
+          // be dense so then we can just add the offsets
+          ApEvent dom_ready;
+          Domain bounds = 
+            manager->instance_domain->get_domain(dom_ready,true/*tight*/);
+#ifdef DEBUG_LEGION
+          assert(bounds.dense());
+#endif
+          if (inner != NULL)
+            *inner = bounds;
+          // Now we can compute the bounds on this instance
+          const Domain &delta= 
+            manager->layout->constraints->padding_constraint.delta;
+#ifdef DEBUG_LEGION
+          assert(bounds.get_dim() == delta.get_dim());
+#endif
+          outer = Domain(bounds.lo() - delta.lo(), bounds.hi() + delta.hi());
+          return manager->get_instance();
+        }
+      }
+      // should never get here at worst there should have been an
+      // error raised earlier in this function
+      assert(false);
+      return PhysicalInstance::NO_INST;
+    }
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::report_incompatible_accessor(
@@ -5471,6 +5612,29 @@ namespace Legion {
         default:
           assert(false);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::fail_padding_check(DomainPoint p,
+                                                           FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      char point_string[128];
+      sprintf(point_string," (");
+      for (int d = 0; d < p.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", p[0]);
+        else
+          sprintf(buffer,",%lld", p[d]);
+        strcat(point_string, buffer);
+      }
+      strcat(point_string,")");
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
+                          "Bounds check failure accessing padded point %s from "
+                          "field %d in task %s\n", point_string, fid,
+                          implicit_context->get_task_name())
     }
 
     /////////////////////////////////////////////////////////////
@@ -12134,6 +12298,17 @@ namespace Legion {
               runtime->handle_send_atomic_reservation_response(derez);
               break;
             }
+          case SEND_PADDED_RESERVATION_REQUEST:
+            {
+              runtime->handle_send_padded_reservation_request(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_PADDED_RESERVATION_RESPONSE:
+            {
+              runtime->handle_send_padded_reservation_response(derez);
+              break;
+            }
           case SEND_CREATED_REGION_CONTEXTS:
             {
               runtime->handle_created_region_contexts(derez,
@@ -14215,6 +14390,7 @@ namespace Legion {
                              const CodeDescriptor &realm,
                              const void *udata/*=NULL*/,size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
+        needs_padding(check_padding(rt, registrar.layout_constraints)),
         has_return_type_size(has_return_size), return_type_size(return_size),
         descriptor_id(runtime->get_unique_code_descriptor_id()),
         realm_descriptor(realm),
@@ -14499,6 +14675,133 @@ namespace Legion {
       }
       else
         Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::find_padded_locks(SingleTask *task,
+                        const std::vector<RegionRequirement> &regions,
+                        const std::deque<InstanceSet> &physical_instances) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(needs_padding);
+#endif
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.begin(); it != 
+            layout_constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->padding_constraint.delta.get_dim() == 0)
+          continue;
+#ifdef DEBUG_LEGION
+        assert(it->first < regions.size());
+        assert(it->first < physical_instances.size());
+#endif
+        const RegionRequirement &req = regions[it->first];
+        const InstanceSet &instances = physical_instances[it->first];
+        // Check to see if we have any explicit fields
+        std::set<FieldID> padded_fields;
+        if (!layout->field_constraint.field_set.empty())
+        {
+          for (std::vector<FieldID>::const_iterator fit =
+                layout->field_constraint.field_set.begin(); fit !=
+                layout->field_constraint.field_set.end(); fit++)
+          {
+#ifdef DEBUG_LEGION
+            assert(req.privilege_fields.find(*fit) != 
+                    req.privilege_fields.end());
+#endif
+            padded_fields.insert(*fit);
+          }
+        }
+        else // Add all the fields for this region requirement
+          padded_fields.insert(req.privilege_fields.begin(),
+                               req.privilege_fields.end());
+        FieldSpaceNode *fs = 
+          runtime->forest->get_node(req.region.get_field_space());
+        FieldMask padded_mask = fs->get_field_mask(padded_fields);
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          const InstanceRef &ref = instances[idx];
+          const FieldMask &overlap = padded_mask & ref.get_valid_fields();
+          if (!overlap)
+            continue;
+          PhysicalManager *manager = ref.get_physical_manager();
+          manager->find_padded_reservations(overlap, task, it->first);
+          padded_mask -= overlap;
+          if (!padded_mask)
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(!padded_mask);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::record_padded_fields(
+                      const std::vector<RegionRequirement> &regions,
+                      const std::vector<PhysicalRegion> &physical_regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(needs_padding);
+#endif
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.begin(); it != 
+            layout_constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->padding_constraint.delta.get_dim() == 0)
+          continue;
+#ifdef DEBUG_LEGION
+        assert(it->first < regions.size());
+        assert(it->first < physical_regions.size());
+#endif
+        const RegionRequirement &req = regions[it->first];
+        const PhysicalRegion &region = physical_regions[it->first];
+        // Check to see if we have any explicit fields
+        if (layout->field_constraint.field_set.empty())
+        {
+          // Add all the fields for this region requirement
+          for (std::set<FieldID>::const_iterator fit =
+                req.privilege_fields.begin(); fit !=
+                req.privilege_fields.end(); fit++)
+            region.impl->add_padded_field(*fit);
+        }
+        else
+        {
+          // Only add the fields specified by the constraint
+          for (std::vector<FieldID>::const_iterator fit =
+                layout->field_constraint.field_set.begin(); fit !=
+                layout->field_constraint.field_set.end(); fit++)
+          {
+#ifdef DEBUG_LEGION
+            assert(req.privilege_fields.find(*fit) != 
+                    req.privilege_fields.end());
+#endif
+            region.impl->add_padded_field(*fit);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool VariantImpl::check_padding(Runtime *runtime,
+                                     const TaskLayoutConstraintSet &constraints)
+    //--------------------------------------------------------------------------
+    {
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            constraints.layouts.begin(); it != constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->padding_constraint.delta.get_dim() > 0)
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -17327,8 +17630,8 @@ namespace Legion {
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
       // Pull in any static registrations that were done
-      register_static_variants();
       register_static_constraints();
+      register_static_variants();
       register_static_projections();
       register_static_sharding_functors();
       // Initialize our virtual manager and our mappers
@@ -21744,6 +22047,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_padded_reservation_request(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_PADDED_RESERVATION_REQUEST>(rez,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_padded_reservation_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_PADDED_RESERVATION_RESPONSE>(
+                                        rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_materialized_view(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24022,6 +24343,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualView::handle_atomic_reservation_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_padded_reservation_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_padded_reservation_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_padded_reservation_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_padded_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------

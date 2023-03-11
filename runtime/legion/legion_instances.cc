@@ -963,7 +963,7 @@ namespace Legion {
         gc_state(COLLECTABLE_GC_STATE), pending_changes(0),
         failed_collection_count(0), min_gc_priority(0), added_gc_events(0),
         valid_references(0), sent_valid_references(0),
-        received_valid_references(0)
+        received_valid_references(0), padded_reservations(NULL)
     //--------------------------------------------------------------------------
     {
       // If the manager was initialized with a valid Realm instance,
@@ -1007,6 +1007,18 @@ namespace Legion {
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner() && !is_external_instance())
         memory_manager->unregister_remote_instance(this);
+      if (padded_reservations != NULL)
+      {
+        // If this is the owner view, delete any atomic reservations
+        if (is_owner())
+        {
+          for (std::map<unsigned,Reservation>::iterator it = 
+                padded_reservations->begin(); it != 
+                padded_reservations->end(); it++)
+            it->second.destroy_reservation();
+        }
+        delete padded_reservations;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3407,6 +3419,187 @@ namespace Legion {
 
       if (manager->update_physical_instance(instance, kind, footprint))
         delete manager;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::find_padded_reservations(const FieldMask &mask,
+                                                  Operation *op, unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Reservation> reservations(mask.pop_count());
+      find_field_reservations(mask, reservations);
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
+        op->update_atomic_locks(index, reservations[idx], true/*exclusive*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::find_field_reservations(const FieldMask &mask,
+                                         std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mask.pop_count() == reservations.size());
+#endif
+      unsigned offset = 0;
+      if (is_owner())
+      {
+        AutoLock i_lock(inst_lock);
+        if (padded_reservations == NULL)
+          padded_reservations = new std::map<unsigned,Reservation>();
+        for (int idx = mask.find_first_set(); idx >= 0;
+              idx = mask.find_next_set(idx+1))
+        {
+          std::map<unsigned,Reservation>::const_iterator finder = 
+            padded_reservations->find(idx);
+          if (finder == padded_reservations->end())
+          {
+            // Make a new reservation and add it to the set
+            Reservation handle = Reservation::create_reservation();
+            padded_reservations->insert(std::make_pair(idx, handle));
+            reservations[offset++] = handle;
+          }
+          else
+            reservations[offset++] = finder->second;
+        }
+      }
+      else
+      {
+        // Figure out which fields we need requests for and send them
+        FieldMask needed_fields;
+        {
+          AutoLock i_lock(inst_lock, 1, false);
+          if (padded_reservations == NULL)
+          {
+            for (int idx = mask.find_first_set(); idx >= 0;
+                  idx = mask.find_next_set(idx+1))
+              needed_fields.set_bit(idx);
+          }
+          else
+          {
+            for (int idx = mask.find_first_set(); idx >= 0;
+                  idx = mask.find_next_set(idx+1))
+            {
+              std::map<unsigned,Reservation>::const_iterator finder = 
+                padded_reservations->find(idx);
+              if (finder == padded_reservations->end())
+                needed_fields.set_bit(idx);
+              else
+                reservations[offset++] = finder->second;
+            }
+          }
+        }
+        if (!!needed_fields)
+        {
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(needed_fields);
+            rez.serialize(wait_on);
+          }
+          runtime->send_padded_reservation_request(owner_space, rez);
+          wait_on.wait();
+          // Now retake the lock and get the remaining reservations
+          AutoLock i_lock(inst_lock, 1, false);
+#ifdef DEBUG_LEGION
+          assert(padded_reservations != NULL);
+#endif
+          for (int idx = needed_fields.find_first_set(); idx >= 0;
+                idx = needed_fields.find_next_set(idx+1))
+          {
+            std::map<unsigned,Reservation>::const_iterator finder =
+              padded_reservations->find(idx);
+#ifdef DEBUG_LEGION
+            assert(finder != padded_reservations->end());
+#endif
+            reservations[offset++] = finder->second;
+          }
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(offset == reservations.size());
+#endif
+      // Sort them before returning
+      if (reservations.size() > 1)
+        std::sort(reservations.begin(), reservations.end());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_padded_reservation_request(
+                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask needed_fields;
+      derez.deserialize(needed_fields);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      PhysicalManager *target = dynamic_cast<PhysicalManager*>(dc);
+      assert(target != NULL);
+#else
+      PhysicalManager *target = static_cast<PhysicalManager*>(dc);
+#endif
+      std::vector<Reservation> reservations(needed_fields.pop_count());
+      target->find_field_reservations(needed_fields, reservations);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(did);
+        rez.serialize(needed_fields);
+        for (unsigned idx = 0; idx < reservations.size(); idx++)
+          rez.serialize(reservations[idx]);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_padded_reservation_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::update_field_reservations(const FieldMask &mask,
+                                   const std::vector<Reservation> &reservations)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(mask.pop_count() == reservations.size());
+#endif
+      unsigned offset = 0;
+      AutoLock i_lock(inst_lock);
+      if (padded_reservations == NULL)
+        padded_reservations = new std::map<unsigned,Reservation>();
+      for (int idx = mask.find_first_set(); idx >= 0;
+            idx = mask.find_next_set(idx+1))
+        padded_reservations->insert(std::make_pair(idx,reservations[offset++]));
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalManager::handle_padded_reservation_response(
+                                          Runtime *runtime, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      FieldMask mask;
+      derez.deserialize(mask);
+      std::vector<Reservation> reservations(mask.pop_count());
+      for (unsigned idx = 0; idx < reservations.size(); idx++)
+        derez.deserialize(reservations[idx]);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      PhysicalManager *target = dynamic_cast<PhysicalManager*>(dc);
+      assert(target != NULL);
+#else
+      PhysicalManager *target = static_cast<PhysicalManager*>(dc);
+#endif
+      target->update_field_reservations(mask, reservations);
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

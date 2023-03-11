@@ -3278,7 +3278,9 @@ namespace Legion {
                                physical_instances[output_offset + idx]);
         }
       }
-
+      // If the variant has padded fields we need to get the atomic locks
+      if (variant_impl->needs_padding)
+        variant_impl->find_padded_locks(this, regions, physical_instances);
       // Now that we have our physical instances we can validate the variant
       if (!runtime->unsafe_mapper)
       {
@@ -4585,6 +4587,9 @@ namespace Legion {
         std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
                                 version_infos, unmap_events, execution_events);
+        // Update the physical regions with any padding they might have
+        if (variant->needs_padding)
+          execution_context->record_padded_fields(variant);
         // Execution events come from copying over virtual mapping state
         // which needs to be done before the child task starts
         if (!execution_events.empty())
