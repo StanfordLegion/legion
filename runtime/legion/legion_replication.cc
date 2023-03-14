@@ -12728,6 +12728,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void FutureAllReduceCollective::elide_collective(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(finished.exists());
+#endif
+      // Clean up the finished event we aren't going to trigger
+      Runtime::trigger_event(NULL, finished);
+      // elide the collective for the base class
+      AllGatherCollective<false>::elide_collective(); 
+    }
+
+    //--------------------------------------------------------------------------
     void FutureAllReduceCollective::set_shadow_instance(FutureInstance *shadow)
     //--------------------------------------------------------------------------
     {
