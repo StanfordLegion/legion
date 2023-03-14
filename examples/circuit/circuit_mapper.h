@@ -58,8 +58,31 @@ protected:
   std::map<Processor, Memory>& proc_zcmems;
 protected:
   // For memoizing mapping instances
-  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> local_instances;
-  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance> reduction_instances;
+  struct MemoizationKey {
+  public:
+    MemoizationKey(LogicalRegion o, LogicalRegion t, Memory m)
+      : one(o), two(t), memory(m) { }
+  public:
+    inline bool operator==(const MemoizationKey &rhs) const
+    {
+      if (one != rhs.one) return false;
+      if (two != rhs.two) return false;
+      return (memory == rhs.memory);
+    }
+    inline bool operator<(const MemoizationKey &rhs) const
+    {
+      if (one < rhs.one) return true;
+      if (one != rhs.one) return false; // same as >
+      if (two < rhs.two) return true;
+      if (two != rhs.two) return false; // same as >
+      return (memory < rhs.memory);
+    }
+  public:
+    LogicalRegion one, two;
+    Memory memory;
+  };
+  std::map<MemoizationKey,PhysicalInstance> local_instances;
+  std::map<MemoizationKey,PhysicalInstance> reduction_instances;
 };
 
 void update_mappers(Machine machine, Runtime *rt,
