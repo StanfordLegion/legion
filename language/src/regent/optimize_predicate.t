@@ -186,12 +186,6 @@ local node_is_side_effect_free = {
   [ast.typed.expr.Internal]                   = unreachable,
 
   -- Statements:
-  [ast.typed.stat.IndexLaunchList] = function(cx, node)
-    return {not node.reduce_op, node}
-  end,
-  [ast.typed.stat.IndexLaunchNum] = function(cx, node)
-    return {not node.reduce_op, node}
-  end,
 
   -- Currently we can only support unpredicated conditionals inside of
   -- a predicated statement.
@@ -206,7 +200,6 @@ local node_is_side_effect_free = {
   [ast.typed.stat.MustEpoch]                  = always_false,
   [ast.typed.stat.Return]                     = always_false,
   [ast.typed.stat.Break]                      = always_false,
-  [ast.typed.stat.Reduce]                     = always_false,
   [ast.typed.stat.RawDelete]                  = always_false,
   [ast.typed.stat.Fence]                      = always_false,
   [ast.typed.stat.ParallelizeWith]            = always_false,
@@ -218,9 +211,12 @@ local node_is_side_effect_free = {
   [ast.typed.stat.ForList]                    = always_true,
   [ast.typed.stat.Repeat]                     = always_true,
   [ast.typed.stat.Block]                      = always_true,
+  [ast.typed.stat.IndexLaunchList]            = always_true,
+  [ast.typed.stat.IndexLaunchNum]             = always_true,
   [ast.typed.stat.Var]                        = always_true,
   [ast.typed.stat.VarUnpack]                  = always_true,
   [ast.typed.stat.Assignment]                 = always_true,
+  [ast.typed.stat.Reduce]                     = always_true,
   [ast.typed.stat.Expr]                       = always_true,
 
   -- TODO: unimplemented
