@@ -100,13 +100,9 @@ class OutReqTestMapper : public DefaultMapper
   }
 
  public:
-  using DefaultMapper::speculate;
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
                                          TaskOptions&     output);
-  virtual void speculate(const MapperContext      ctx,
-                         const Task&              task,
-                               SpeculativeOutput& output);
   virtual void slice_task(const MapperContext ctx,
                           const Task& task,
                           const SliceTaskInput& input,
@@ -117,7 +113,6 @@ class OutReqTestMapper : public DefaultMapper
                         MapTaskOutput& output);
  private:
   Memory local_sysmem;
-  bool request_speculate;
   std::map<TaskIDs, Processor> producer_mappings;
 };
 
@@ -125,8 +120,7 @@ OutReqTestMapper::OutReqTestMapper(MapperRuntime *rt,
                                          Machine machine,
                                          Processor local,
                                          const char *mapper_name)
-  : DefaultMapper(rt, machine, local, mapper_name),
-    request_speculate(false)
+  : DefaultMapper(rt, machine, local, mapper_name)
 {
   Machine::MemoryQuery visible_memories(machine);
   visible_memories.has_affinity_to(local);
@@ -136,10 +130,6 @@ OutReqTestMapper::OutReqTestMapper(MapperRuntime *rt,
   const InputArgs &command_args = Runtime::get_input_args();
   char **argv = command_args.argv;
   int argc = command_args.argc;
-
-  for (int i = 0; i < argc; ++i)
-    if (strcmp(argv[i], "-speculate") == 0)
-      request_speculate = true;
 }
 
 void OutReqTestMapper::select_task_options(const MapperContext    ctx,
@@ -159,16 +149,6 @@ void OutReqTestMapper::select_task_options(const MapperContext    ctx,
       output.initial_proc = producer_mappings[TID_PRODUCER_LOCAL];
     }
   }
-}
-
-void OutReqTestMapper::speculate(const MapperContext      ctx,
-                                 const Task&              task,
-                                       SpeculativeOutput& output)
-{
-  if (task.task_id == TID_PRODUCER_GLOBAL || task.task_id == TID_PRODUCER_LOCAL)
-    output.speculate = request_speculate;
-  else
-    output.speculate = false;
 }
 
 void OutReqTestMapper::slice_task(const MapperContext ctx,
