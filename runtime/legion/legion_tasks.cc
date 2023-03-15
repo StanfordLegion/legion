@@ -11510,7 +11510,17 @@ namespace Legion {
       assert(!elide_future_return);
 #endif
       FutureInstance *result = NULL;
-      if (predicate_false_future.impl != NULL)
+      if (reduction_op != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_op->identity != NULL);
+        assert(predicate_false_future.impl == NULL);
+        assert(predicate_false_size == 0);
+#endif
+        result = FutureInstance::create_local(reduction_op->identity,
+            reduction_op->sizeof_rhs, false/*own*/, runtime);
+      }
+      else if (predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical =
           predicate_false_future.impl->get_canonical_instance();
