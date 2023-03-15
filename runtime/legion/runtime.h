@@ -185,6 +185,38 @@ namespace Legion {
     };
 
     /**
+     * \class PredicateImpl
+     * This class provides the base support for a predicate and
+     * any state needed to manage the mapping of things that 
+     * depend on a predicate value
+     */
+    class PredicateImpl : public Collectable {
+    public:
+      PredicateImpl(Operation *creator);
+      PredicateImpl(const PredicateImpl &rhs) = delete;
+      ~PredicateImpl(void);
+    public:
+      PredicateImpl& operator=(const PredicateImpl &rhs) = delete;
+    public:
+      // This returns the predicate value if it is set or returns the
+      // names of the guards to use if has not been set
+      bool get_predicate(PredEvent &true_guard, PredEvent &false_guard);
+      bool get_predicate(RtEvent &ready);
+      void set_predicate(bool value);
+    public:
+      InnerContext *const context;
+      Operation *const creator;
+      const GenerationID creator_gen;
+      const UniqueID creator_uid;
+      const size_t creator_ctx_index;
+    protected:
+      mutable LocalLock predicate_lock;
+      PredUserEvent true_guard, false_guard;
+      RtUserEvent ready_event;
+      int value; // <0 is unset, 0 is false, >0 is true
+    };
+
+    /**
      * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to

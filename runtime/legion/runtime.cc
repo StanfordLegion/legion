@@ -623,6 +623,88 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Predicate Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PredicateImpl::PredicateImpl(Operation *op)
+      : context(op->get_context()), creator(op),
+        creator_gen(op->get_generation()), creator_uid(op->get_unique_op_id()),
+        creator_ctx_index(op->get_ctx_index()), value(-1)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PredicateImpl::~PredicateImpl(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(0 <= value);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    bool PredicateImpl::get_predicate(PredEvent &true_g, PredEvent &false_g)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+      if (0 <= value)
+        return (0 < value);
+      // Not ready yet, make guards if they don't exist yet
+      if (!true_guard.exists())
+      {
+        true_guard = Runtime::create_pred_event();
+        false_guard = Runtime::create_pred_event(); 
+      }
+      true_g = true_guard;
+      false_g = false_guard;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PredicateImpl::get_predicate(RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+      if (0 <= value)
+        return (0 < value);
+      if (!ready_event.exists())
+        ready_event = Runtime::create_rt_user_event();
+      ready = ready_event;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PredicateImpl::set_predicate(bool result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+#ifdef DEBUG_LEGION
+      assert(value < 0);
+#endif
+      if (result)
+        value = 1;
+      else
+        value = 0;
+      if (ready_event.exists())
+        Runtime::trigger_event(ready_event);
+      if (true_guard.exists())
+      {
+        if (result)
+        {
+          Runtime::trigger_event(true_guard);
+          Runtime::poison_event(false_guard);
+        }
+        else
+        {
+          Runtime::poison_event(true_guard);
+          Runtime::trigger_event(false_guard);
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Impl 
     /////////////////////////////////////////////////////////////
 

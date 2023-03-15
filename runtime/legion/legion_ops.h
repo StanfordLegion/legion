@@ -30,9 +30,6 @@
 namespace Legion {
   namespace Internal {
 
-    // Special typedef for predicates
-    typedef PredicateImpl PredicateOp;  
-
     /**
      * \class Provenance
      */
@@ -1022,60 +1019,6 @@ namespace Legion {
     };
 
     /**
-     * \class PredicateWaiter
-     * An interface class for speculative operations
-     * and compound predicates that allows them to
-     * be notified when their constituent predicates
-     * have been resolved.
-     */
-    class PredicateWaiter {
-    public:
-      virtual void notify_predicate_value(GenerationID gen, bool value) = 0;
-    };
-
-    /**
-     * \class Predicate 
-     * A predicate operation is an abstract class that
-     * contains a method that allows other operations to
-     * sample their values and see if they are resolved
-     * or whether they are speculated values.
-     */
-    class PredicateImpl : public Operation {
-    public:
-      PredicateImpl(Runtime *rt);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(bool free);
-    public:
-      void add_predicate_reference(void);
-      void remove_predicate_reference(void);
-      virtual void trigger_complete(void);
-      virtual void trigger_commit(void);
-      virtual bool invalidates_physical_trace_template(bool &exec_fence) const
-        { return false; }
-    public:
-      bool register_waiter(PredicateWaiter *waiter, 
-                           GenerationID gen, bool &value);
-      PredEvent get_true_guard(void);
-      PredEvent get_false_guard(void);
-      void get_predicate_guards(PredEvent &true_guard, PredEvent &false_guard);
-      Future get_future_result(void);
-    protected:
-      void set_resolved_value(GenerationID pred_gen, bool value);
-    protected:
-      bool predicate_resolved;
-      bool predicate_value;
-      std::map<PredicateWaiter*,GenerationID> waiters;
-    protected:
-      RtUserEvent collect_predicate;
-      unsigned predicate_references;
-      PredUserEvent true_guard, false_guard;
-    protected:
-      Future result_future;
-      bool can_result_future_complete;
-    };
-
-    /**
      * \class MemoizableOp
      * A memoizable operation is an abstract class
      * that serves as the basis for operation whose
@@ -1171,12 +1114,10 @@ namespace Legion {
      * will be executed with a predicate value. 
      * Note that all speculative operations are also memoizable operations.
      */
-    class PredicatedOp : public MemoizableOp, public PredicateWaiter {
+    class PredicatedOp : public MemoizableOp {
     public:
       enum PredState {
-        PENDING_ANALYSIS_STATE,
-        WAITING_MAPPING_STATE,
-        SPECULATIVE_MAPPING_STATE,
+        PENDING_PREDICATE_STATE,
         RESOLVE_TRUE_STATE,
         RESOLVE_FALSE_STATE,
       };
@@ -1195,29 +1136,20 @@ namespace Legion {
       // needs to wait for the value
       bool get_predicate_value(void);
     public:
-      // Call this method for inheriting classes 
-      // to determine whether they should speculate 
-      virtual bool query_speculate(void) = 0;
-    public:
       // Every speculative operation will always get exactly one
       // call back to one of these methods after the predicate has
       // resolved. The 'speculated' parameter indicates whether the
       // operation was speculated by the mapper. The 'launch' parameter
       // indicates whether the operation has been issued into the 
       // pipeline for execution yet
-      virtual void resolve_true(bool speculated, bool launched) = 0;
-      virtual void resolve_false(bool speculated, bool launched) = 0;
-    public:
-      virtual void notify_predicate_value(GenerationID gen, bool value);
+      virtual void predicate_false(void) = 0;
     protected:
-      PredState    predication_state;
-      PredicateOp *predicate;
+      PredState     predication_state;
+      PredicateImpl *predicate;
     public:
       // For managing predication
       PredEvent true_guard;
       PredEvent false_guard;
-    protected:
-      RtUserEvent predicate_waiter; // used only when needed
     };
 
     /**
@@ -1231,7 +1163,6 @@ namespace Legion {
       Predicated(Runtime *rt) : Memoizable<OP>(rt) {}
       virtual ~Predicated(void) { }
     public:
-      virtual void trigger_prepipeline_stage(void) override;
       virtual void trigger_dependence_analysis(void) override;
       virtual void trigger_ready(void) override;
     };
@@ -1473,9 +1404,7 @@ namespace Legion {
           const InstanceSet &instances, const RegionRequirement &req,
           std::vector<IndirectRecord> &records, const bool sources);
     public:
-      virtual bool query_speculate(void);
-      virtual void resolve_true(bool speculated, bool launched);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void select_sources(const unsigned index, PhysicalManager *target,
@@ -2372,9 +2301,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     public:
-      virtual bool query_speculate(void);
-      virtual void resolve_true(bool speculated, bool launched);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -2487,9 +2414,7 @@ namespace Legion {
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
     public:
-      virtual bool query_speculate(void);
-      virtual void resolve_true(bool speculated, bool launched);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
     public:
       virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
@@ -2602,9 +2527,9 @@ namespace Legion {
 
     /**
      * \class FuturePredOp
-     * A class for making predicates out of futures.
+     * A class for making predicates out of futures or vice versa.
      */
-    class FuturePredOp : public PredicateOp {
+    class FuturePredOp : public Operation {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
@@ -2614,7 +2539,10 @@ namespace Legion {
     public:
       FuturePredOp& operator=(const FuturePredOp &rhs);
     public:
-      void initialize(InnerContext *ctx, Future f, Provenance *provenance);
+      Predicate initialize(InnerContext *ctx, 
+                           const Future &f, Provenance *provenance);
+      Future initialize(InnerContext *ctx,
+                        const Predicate &p, Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2626,13 +2554,15 @@ namespace Legion {
       virtual void trigger_execution(void);
     protected:
       Future future;
+      Predicate predicate;
+      bool to_predicate;
     };
 
     /**
      * \class NotPredOp
      * A class for negating other predicates
      */
-    class NotPredOp : public PredicateOp, PredicateWaiter {
+    class NotPredOp : public Operation {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
@@ -2642,8 +2572,8 @@ namespace Legion {
     public:
       NotPredOp& operator=(const NotPredOp &rhs);
     public:
-      void initialize(InnerContext *task, const Predicate &p,
-                      Provenance *provenance);
+      Predicate initialize(InnerContext *task, const Predicate &p,
+                           Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2652,16 +2582,16 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void notify_predicate_value(GenerationID gen, bool value);
+      virtual void trigger_execution(void);
     protected:
-      PredicateOp *pred_op;
+      Predicate previous, to_set;
     };
 
     /**
      * \class AndPredOp
      * A class for and-ing other predicates
      */
-    class AndPredOp : public PredicateOp, PredicateWaiter {
+    class AndPredOp : public Operation {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
@@ -2671,9 +2601,9 @@ namespace Legion {
     public:
       AndPredOp& operator=(const AndPredOp &rhs);
     public:
-      void initialize(InnerContext *task, 
-                      const std::vector<Predicate> &predicates,
-                      Provenance *provenance);
+      Predicate initialize(InnerContext *task, 
+                           std::vector<Predicate> &predicates,
+                           Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2682,18 +2612,17 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void notify_predicate_value(GenerationID pred_gen, bool value);
+      virtual void trigger_execution(void);
     protected:
-      std::vector<PredicateOp*> previous;
-      unsigned                  true_count;
-      bool                      false_short;
+      std::vector<Predicate> previous;
+      Predicate              to_set;
     };
 
     /**
      * \class OrPredOp
      * A class for or-ing other predicates
      */
-    class OrPredOp : public PredicateOp, PredicateWaiter {
+    class OrPredOp : public Operation {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
@@ -2703,9 +2632,9 @@ namespace Legion {
     public:
       OrPredOp& operator=(const OrPredOp &rhs);
     public:
-      void initialize(InnerContext *task, 
-                      const std::vector<Predicate> &predicates,
-                      Provenance *provenance);
+      Predicate initialize(InnerContext *task, 
+                           std::vector<Predicate> &predicates,
+                           Provenance *provenance);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2714,11 +2643,10 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void notify_predicate_value(GenerationID pred_gen, bool value);
+      virtual void trigger_execution(void);
     protected:
-      std::vector<PredicateOp*> previous;
-      unsigned                  false_count;
-      bool                      true_short;
+      std::vector<Predicate> previous;
+      Predicate              to_set;
     };
 
     /**
@@ -3728,9 +3656,7 @@ namespace Legion {
       // This is a helper method for ReplFillOp
       virtual RtEvent finalize_complete_mapping(RtEvent event) { return event; }
     public:
-      virtual bool query_speculate(void);
-      virtual void resolve_true(bool speculated, bool launched);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);

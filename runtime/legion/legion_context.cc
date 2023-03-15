@@ -7676,8 +7676,7 @@ namespace Legion {
                       get_task_name(), get_unique_id())
       FuturePredOp *pred_op = runtime->get_available_future_pred_op();
       // Hold a reference before initialization
-      Predicate result(pred_op);
-      pred_op->initialize(this, f, provenance);
+      Predicate result = pred_op->initialize(this, f, provenance);
       add_to_dependence_queue(pred_op);
       return result;
     }
@@ -7688,10 +7687,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (p == Predicate::TRUE_PRED)
+        return Predicate::FALSE_PRED;
+      if (p == Predicate::FALSE_PRED)
+        return Predicate::TRUE_PRED;
       NotPredOp *pred_op = runtime->get_available_not_pred_op();
       // Hold a reference before initialization
-      Predicate result(pred_op);
-      pred_op->initialize(this, p, provenance);
+      Predicate result = pred_op->initialize(this, p, provenance);
       add_to_dependence_queue(pred_op);
       return result;
     }
@@ -7729,8 +7731,8 @@ namespace Legion {
           return actual_predicates[0];
         AndPredOp *pred_op = runtime->get_available_and_pred_op();
         // Hold a reference before initialization
-        Predicate result(pred_op);
-        pred_op->initialize(this, actual_predicates, provenance);
+        Predicate result = 
+          pred_op->initialize(this, actual_predicates, provenance);
         add_to_dependence_queue(pred_op);
         return result;
       }
@@ -7754,8 +7756,8 @@ namespace Legion {
           return actual_predicates[0];
         OrPredOp *pred_op = runtime->get_available_or_pred_op();
         // Hold a reference before initialization
-        Predicate result(pred_op);
-        pred_op->initialize(this, actual_predicates, provenance);
+        Predicate result =
+          pred_op->initialize(this, actual_predicates, provenance);
         add_to_dependence_queue(pred_op);
         return result;
       }
@@ -7788,7 +7790,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(p.impl != NULL);
 #endif
-        return p.impl->get_future_result(); 
+        FuturePredOp *pred_op = runtime->get_available_future_pred_op();
+        // Hold a reference before initialization
+        Future result = pred_op->initialize(this, p, provenance);
+        add_to_dependence_queue(pred_op);
+        return result;
       }
     }
 
@@ -13008,7 +13014,7 @@ namespace Legion {
       else if (pred == Predicate::FALSE_PRED)
         hasher.hash(SIZE_MAX, description);
       else
-        hasher.hash(pred.impl->get_ctx_index(), description);
+        hasher.hash(pred.impl->creator_ctx_index, description);
     }
 
     //--------------------------------------------------------------------------

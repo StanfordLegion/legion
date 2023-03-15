@@ -897,40 +897,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool TaskOp::query_speculate(void)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)  
-        mapper = runtime->find_mapper(current_proc, map_id);
-      Mapper::SpeculativeOutput output;
-      output.speculate = false;
-      output.speculate_mapping_only = true;
-      mapper->invoke_task_speculate(this, &output);
-      if (output.speculate && output.speculate_mapping_only)
-      {
-        // Switch any write-discard privileges back to read-write
-        // so we can make sure we get the right data if we end up
-        // predicating false
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          RegionRequirement &req = regions[idx];
-          if (HAS_WRITE_DISCARD(req))
-            req.privilege &= ~LEGION_DISCARD_MASK;
-        }
-        return true;
-      }
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::resolve_true(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::select_sources(const unsigned index, PhysicalManager *target,
                                 const std::vector<InstanceView*> &sources,
                                 std::vector<unsigned> &ranking,
@@ -6077,12 +6043,10 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void IndividualTask::resolve_false(bool speculated, bool launched)
+    void IndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      // If we already launched, then return, otherwise continue
-      // through and do the work to clean up the task 
-      if (launched || elide_future_return)
+      if (elide_future_return)
         return;
       // Set the future to the false result
       if (predicate_false_future.impl != NULL)
@@ -7105,7 +7069,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::resolve_false(bool speculated, bool launched)
+    void PointTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7760,7 +7724,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::resolve_false(bool speculated, bool launched)
+    void ShardTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9339,13 +9303,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::resolve_false(bool speculated, bool launched)
+    void IndexTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      // If we already launched, then we can just return
-      // otherwise continue through to do the cleanup work
-      if (launched)
-        return;
       RtEvent execution_condition;
       // Fill in the index task map with the default future value
       if (redop == 0)
@@ -10893,7 +10853,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::resolve_false(bool speculated, bool launched)
+    void SliceTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
