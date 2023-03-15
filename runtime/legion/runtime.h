@@ -2311,6 +2311,14 @@ namespace Legion {
     public:
       bool is_complete(RegionTreeNode *node, Operation *op, 
                        unsigned index, IndexSpaceNode *projection_space) const;
+      ProjectionNode* construct_projection_tree(Operation *op, unsigned index,
+                        const RegionRequirement &req, ShardID local_shard,
+                        RegionTreeNode *root, const ProjectionInfo &proj_info);
+      static void add_to_projection_tree(LogicalRegion region,
+                  RegionTreeNode *root, RegionTreeForest *context, 
+                  std::map<RegionTreeNode*,ProjectionNode*> &node_map,
+                  ShardID owner_shard);
+#if 0
     public: 
       // From scratch
       ProjectionTree* construct_projection_tree(Operation *op, unsigned index,
@@ -2327,6 +2335,7 @@ namespace Legion {
                   IndexTreeNode *root, RegionTreeForest *context, 
                   std::map<IndexTreeNode*,ProjectionTree*> &node_map,
                   ShardID owner_shard = 0); 
+#endif
     public:
       const unsigned depth; 
       const bool is_exclusive;

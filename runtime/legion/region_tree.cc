@@ -1804,7 +1804,21 @@ namespace Legion {
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
-      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req), proj_info);
+      ProjectionNode *shard_proj = NULL;
+      if (proj_info.is_sharding() && proj_info.is_projecting())
+      {
+        // If we're doing a projection in a control replicated context then
+        // we need to compute the shard projection up front since it might
+        // involve a collective if we don't hit in the cache and we want
+        // that to appear nice and deterministic
+        RegionTreeNode *destination = 
+          (req.handle_type == LEGION_PARTITION_PROJECTION) ?
+          static_cast<RegionTreeNode*>(get_node(req.partition)) :
+          static_cast<RegionTreeNode*>(get_node(req.region));
+        shard_proj = destination->compute_projection_summary(op, idx, req,
+                                              logical_analysis, proj_info);
+      }
+      LogicalUser *user = new LogicalUser(op, idx, RegionUsage(req),shard_proj);
       user->add_reference();
 #ifdef DEBUG_LEGION
       TreeStateLogger::capture_state(runtime, &req, idx, op->get_logging_name(),
@@ -15853,6 +15867,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProjectionNode* RegionTreeNode::compute_projection_summary(
+                   Operation *op, unsigned index, const RegionRequirement &req,
+                   LogicalAnalysis &analysis, const ProjectionInfo &proj_info)
+    //--------------------------------------------------------------------------
+    {
+      const ContextID ctx = analysis.context->get_context_id();
+      LogicalState &state = get_logical_state(ctx);
+      return state.find_or_create_projection_summary(op, index, req,
+                                                     analysis, proj_info);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_user(LogicalRegion privilege_root,
                                        LogicalUser &user,
                                        const RegionTreePath &path,
@@ -19945,7 +19971,6 @@ namespace Legion {
       const bool tracing = user.op->is_tracing();
       const bool validates_local = arrived && (!proj_info.is_projecting() || 
                                 proj_info.is_complete_projection(this, user));
-      FieldMaskSet<LogicalUser> shard_users;
       if (!(check_mask * prev_users.get_valid_mask()))
       {
         std::vector<LogicalUser*> to_delete;
@@ -19988,7 +20013,6 @@ namespace Legion {
                 }
               case LEGION_TRUE_DEPENDENCE:
                 {
-                  bool record_shard_user = false;
                   if (prev.shard_proj != NULL)
                   {
                     // If this is a sharding projection operation then check 
@@ -20009,33 +20033,28 @@ namespace Legion {
                     //    we are tracing
                     if (arrived && proj_info.is_projecting())
                     {
+                      // If we arrived and are projecting then we can test
+                      // these two projection trees for intereference with
+                      // each other and see if we can prove that they are
+                      // disjoint in which case we don't need a close
 #ifdef DEBUG_LEGION
                       assert(proj_info.is_sharding());
+                      assert(user.shard_proj != NULL);
 #endif
-                      if (proj_info.can_elide_close_operation_symbolic(this, 
-                                                    state, prev.shard_proj))
+                      if (!state.test_interfering_shard_projections(
+                                    prev.shard_proj, user.shard_proj))
                         continue;
-                      // If we can't prove that it is safe to elide the
-                      // fence symbolically then we have two options:
-                      // 1. put in a fence to be safe
-                      // 2. evaluate the projection tree across all shards
-                      //    and check for interferences
-                      // The second option is expensive so we only do it when
-                      // we are tracing whereas the first one only occurs some
-                      // additional dynamic cost for the fence
-                      record_shard_user = tracing;
                     }
-                    if (!record_shard_user)
-                    {
-                      // Not able to do the symbolic elision so we need a fence
-                      // across the shards to be safe
-                      logical_analysis.record_close_dependence(root,
-                                                this, &user, overlap);
-                      it.filter(overlap);
-                      if (!it->second)
-                        to_delete.push_back(it->first);
-                      continue;
-                    }
+                    // We weren't able to provie that the projections were
+                    // non-interfering with each other so we need a close
+                    // Not able to do the symbolic elision so we need a fence
+                    // across the shards to be safe
+                    logical_analysis.record_close_dependence(root,
+                                              this, &user, overlap);
+                    it.filter(overlap);
+                    if (!it->second)
+                      to_delete.push_back(it->first);
+                    continue;
                   }
 #ifdef LEGION_SPY
                   LegionSpy::log_mapping_dependence(
@@ -20051,12 +20070,8 @@ namespace Legion {
                                                           prev.gen, prev.idx,
                                                           dtype, validate,
                                                           overlap))
-                  {
                     // hasn't commited, reset timeout and continue
                     prev.timeout = LogicalUser::TIMEOUT;
-                    if (record_shard_user)
-                      shard_users.insert(it->first, overlap);
-                  }
 #ifndef LEGION_SPY
                   // We cannot prune shard projection users out 
                   // non-deterministically because we need the shards to
@@ -20115,47 +20130,6 @@ namespace Legion {
           }
           prev_users.tighten_valid_mask();
         }
-      }
-      // Perform the check for interference between shard users
-      if (!shard_users.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(arrived && tracing);
-        assert(proj_info.is_projecting() && proj_info.is_sharding());
-#endif
-        // Perform the expensive elision test across the shards to
-        // see if we need to do the close for these operations or not
-        FieldMask close_mask;
-        if (!proj_info.expensive_elide_test(this, user, shard_users,close_mask))
-        {
-          // Cannot elide the fence across the shards so record
-          // close dependences on all the users and prune them
-          // out since the fence is going to dominate them
-          for (FieldMaskSet<LogicalUser>::const_iterator it =
-                shard_users.begin(); it != shard_users.end(); it++)
-          {
-            const FieldMask overlap = close_mask & it->second;
-            if (!overlap)
-              continue;
-            logical_analysis.record_close_dependence(root, this,
-                                            it->first, overlap);
-            FieldMaskSet<LogicalUser>::iterator finder =
-              prev_users.find(it->first);
-#ifdef DEBUG_LEGION
-            assert(finder != prev_users.end());
-#endif
-            finder.filter(overlap);
-            if (!finder->second)
-            {
-              prev_users.erase(finder);
-              if (it->first->remove_reference())
-                delete it->first;
-            }
-          }
-          prev_users.tighten_valid_mask();
-        }
-        // else we already recorded direct dependences on all those
-        // users so there is nothing else for us to do
       }
       // The result of this computation is the dominator mask.
       // It's only sound to say that we dominate fields that

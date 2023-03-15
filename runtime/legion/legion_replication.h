@@ -1302,6 +1302,7 @@ namespace Legion {
       std::map<DomainPoint,Processor> concurrent_processors;
     };
 
+#if 0
     /**
      * \class ElideCloseExchange
      * This class supports an exchange of symbolic projection trees to
@@ -1322,6 +1323,7 @@ namespace Legion {
     public:
       ProjectionTree *const tree;
     };
+#endif
 
     /**
      * \class MaskExchange

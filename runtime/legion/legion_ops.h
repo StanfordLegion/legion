@@ -2214,8 +2214,10 @@ namespace Legion {
       void initialize(Operation *creator, unsigned idx, 
                       RegionNode *to_refine, const FieldMask &mask,
                       LogicalRegion privilege_root);
+#if 0
       void record_refinement(RegionTreeNode *node, const FieldMask &mask,
                              RefProjectionSummary *summary = NULL);
+#endif
       void record_refinements(FieldMaskSet<RegionTreeNode> &nodes);
       void record_uninitialized(const FieldMask &mask);
 #ifdef DEBUG_LEGION
@@ -2252,9 +2254,11 @@ namespace Legion {
       VersionInfo version_info;
       // Region tree nodes from which to make refinements
       FieldMaskSet<RegionTreeNode> make_from;
+#if 0
       // Projection summaries for non-trivial projections from nodes
       LegionMap<RegionTreeNode*,
                 FieldMaskSet<RefProjectionSummary> > projections;
+#endif
       // Equivalence sets that need to be released at completion
       std::vector<EquivalenceSet*> to_release;
       // Fields which do not have initialized equivalence sets

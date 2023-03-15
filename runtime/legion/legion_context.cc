@@ -10603,6 +10603,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProjectionNode* InnerContext::construct_projection_tree(
+                    Operation *op, unsigned index, const RegionRequirement &req,
+                    RegionTreeNode *root, const ProjectionInfo &proj_info)
+    //--------------------------------------------------------------------------
+    {
+      return proj_info.projection->construct_projection_tree(op, index, req,
+                                          0/*local shard*/, root, proj_info);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::report_leaks_and_duplicates(std::set<RtEvent> &preconds)
     //--------------------------------------------------------------------------
     {

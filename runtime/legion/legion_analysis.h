@@ -71,7 +71,7 @@ namespace Legion {
     struct LogicalUser : public Collectable {
     public:
       LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                  const ProjectionInfo &proj_info);
+                  ProjectionNode *node);
       LogicalUser(Operation *o, GenerationID gen, unsigned id,
                   const RegionUsage &u);
       LogicalUser(const LogicalUser &rhs) = delete;
@@ -83,7 +83,7 @@ namespace Legion {
       Operation *const op;
       const unsigned idx;
       const GenerationID gen;
-      ProjectionSummary *const shard_proj;
+      ProjectionNode *const shard_proj;
       // This field addresses a problem regarding when
       // to prune tasks out of logical region tree data
       // structures.  If no later task ever performs a
@@ -789,11 +789,6 @@ namespace Legion {
       inline bool is_sharding(void) const { return (sharding_function != NULL); }
       bool is_complete_projection(RegionTreeNode *node,
                                   const LogicalUser &user) const;
-      bool can_elide_close_operation_symbolic(RegionTreeNode *node,
-            LogicalState &state, const ProjectionSummary *previous) const;
-      bool expensive_elide_test(RegionTreeNode *node, LogicalUser &user, 
-                                const FieldMaskSet<LogicalUser> &prev_users,
-                                FieldMask &close_mask) const;
     public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
@@ -831,6 +826,7 @@ namespace Legion {
       const bool covers; // whether the expr covers the ExprView its in
     };  
 
+#if 0
     /**
      * \struct ProjectionSummary
      * A small helper class that tracks the triple that 
@@ -885,6 +881,7 @@ namespace Legion {
                               std::vector<RegionNode*> &regions,
                               Provenance *provenance) const;
     };
+#endif
 
     /**
      * \struct FieldState
@@ -928,14 +925,58 @@ namespace Legion {
     };
 
     /**
-     * \class ProjectionTree
-     * This class helps to construct a symbolic tree of all the 
-     * index space nodes used by a projection index space task
-     * launch along with the shards that access them. This then
-     * facilitates an analysis to determine if a close operation
-     * is needed to act as a fence between the shards.
+     * \class ProjectionNode
+     * A projection node represents a summary of the regions and partitions
+     * accessed by a projection function from a particular node in the 
+     * region tree. In the case of control replication, it specifically
+     * stores the accesses performed by the local shard, and stores at
+     * least one NULL child for any aliasing children from different
+     * shards to facilitate testing for any close operations that might
+     * be required between shards. We can also test a projection node 
+     * to see if it can be converted to a refinement node (e.g. that
+     * is has all disjoint-complete partitions).
      */
-    class ProjectionTree {
+    class ProjectionNode : public Collectable {
+    public:
+      virtual ~ProjectionNode(void) = 0;
+      virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
+    };
+
+    class ProjectionRegion : public ProjectionNode {
+    public:
+      ProjectionRegion(RegionNode *node);
+      ProjectionRegion(const ProjectionRegion &rhs) = delete;
+      virtual ~ProjectionRegion(void);
+    public:
+      ProjectionRegion& operator=(const ProjectionRegion &rhs) = delete;
+    public:
+      virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      bool has_interference(ProjectionRegion *other, ShardID local) const;
+      void add_user(ShardID shard);
+      void add_child(ProjectionPartition *child);
+    public:
+      RegionNode *const region;
+      std::map<LegionColor,ProjectionPartition*> children;
+      std::vector<ShardID> users;
+    };
+
+    class ProjectionPartition : public ProjectionNode {
+    public:
+      ProjectionPartition(PartitionNode *node);
+      ProjectionPartition(const ProjectionPartition &rhs) = delete;
+      virtual ~ProjectionPartition(void);
+    public:
+      ProjectionPartition& operator=(const ProjectionPartition &rhs) = delete;
+    public:
+      virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      bool has_interference(ProjectionPartition *other, ShardID local) const;
+      void add_child(ProjectionRegion *child);
+    public:
+      PartitionNode *const partition;
+      std::map<LegionColor,ProjectionRegion*> children;
+    };
+
+#if 0
     public:
       ProjectionTree(bool all_children_disjoint);
       ProjectionTree(const ProjectionTree &rhs) = delete;
@@ -952,6 +993,7 @@ namespace Legion {
       std::set<ShardID> users;
       const bool all_children_disjoint;
     };
+#endif
 
     /**
      * \class RefinementNode
@@ -1011,11 +1053,20 @@ namespace Legion {
       void clear_deleted_state(const FieldMask &deleted_mask);
       void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
       void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
+      bool test_interfering_shard_projections(ProjectionNode *one,
+                                              ProjectionNode *two);
+      ProjectionNode* find_or_create_projection_summary(
+                                          Operation *op, unsigned index,
+                                          const RegionRequirement &req,
+                                          LogicalAnalysis &analysis,
+                                          const ProjectionInfo &proj_info);
+#if 0
     public:
       bool find_symbolic_elide_close_result(const ProjectionSummary &prev, 
                             const ProjectionSummary &next, bool &result) const;
       void record_symbolic_elide_close_result(const ProjectionSummary &prev,
                             const ProjectionSummary &next, bool result);
+#endif
     public:
       RegionTreeNode *const owner;
     public:
@@ -1035,6 +1086,31 @@ namespace Legion {
       // Keep track of the candidate refinement trees that we could make.
       // Alternative sub-trees to consider for refinement from the current
       FieldMaskSet<RefinementNode> candidate_refinement_trees;
+    public:
+      static constexpr size_t PROJECTION_CACHE_SIZE = 32;
+      struct ProjectionSummary {
+      public:
+        ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
+                          const RegionRequirement &req);
+        ProjectionSummary(const ProjectionSummary &rhs) = delete;
+        ProjectionSummary(ProjectionSummary &&rhs);
+        ~ProjectionSummary(void);
+      public:
+        ProjectionSummary& operator=(const ProjectionSummary &rhs) = delete;
+        ProjectionSummary& operator=(ProjectionSummary &&rhs);
+      public:
+        bool matches(const ProjectionInfo &rhs,
+                     const RegionRequirement &req) const;
+      public:
+        IndexSpaceNode *domain;
+        ProjectionFunction *projection;
+        ShardingFunction *sharding;
+        IndexSpaceNode *sharding_domain;
+        ProjectionNode *result;
+        void *args;
+        size_t arglen;
+      };
+      std::list<ProjectionSummary> projection_summary_cache;
 #if 0
       // Track whether this node is part of the disjoint-complete tree
       FieldMask disjoint_complete_tree;
@@ -1068,7 +1144,6 @@ namespace Legion {
       // these at the bottom of the disjoint complete access trees to say
       // how to project from a given node in the region tree
       FieldMaskSet<RefProjectionSummary> disjoint_complete_projections;
-#endif
     public:
       struct SymbolicCacheEntry {
       public:
@@ -1090,6 +1165,7 @@ namespace Legion {
       // This helps to memoize expensive close operation elisions tests 
       // within this context in a determinstic way for control replication
       std::list<SymbolicCacheEntry> *symbolic_elide_close_results;
+#endif
     };
 
     typedef DynamicTableAllocator<LogicalState,10,8> LogicalStateAllocator;

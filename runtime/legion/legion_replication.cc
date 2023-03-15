@@ -2030,6 +2030,7 @@ namespace Legion {
       refinement_barrier = refinement_bar;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplRefinementOp::trigger_ready(void)
     //--------------------------------------------------------------------------
@@ -2227,6 +2228,7 @@ namespace Legion {
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
       enqueue_ready_operation(refinement_barrier);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplRefinementOp::trigger_mapping(void)

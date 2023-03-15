@@ -3842,6 +3842,10 @@ namespace Legion {
                               RegionTreeNode *path_node,
                               LogicalAnalysis &analysis,
                               FieldMask &still_open);
+      ProjectionNode* compute_projection_summary(Operation *op, unsigned index,
+                                                 const RegionRequirement &req,
+                                                 LogicalAnalysis &analysis,
+                                                 const ProjectionInfo &info);
 #if 0
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,

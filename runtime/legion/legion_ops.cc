@@ -11801,6 +11801,7 @@ namespace Legion {
       InternalOp::deactivate(false/*free*/);
       version_info.clear();
       make_from.clear();
+#if 0
       if (!projections.empty())
       {
         for (LegionMap<RegionTreeNode*,FieldMaskSet<RefProjectionSummary> >::
@@ -11814,6 +11815,7 @@ namespace Legion {
         }
         projections.clear();
       }
+#endif
       to_release.clear();
       uninitialized_fields.clear();
       if (freeop)
@@ -11881,6 +11883,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RefinementOp::record_refinement(RegionTreeNode *node, 
                            const FieldMask &mask, RefProjectionSummary *summary)
@@ -11901,6 +11904,7 @@ namespace Legion {
           summary->add_reference();
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::record_refinements(FieldMaskSet<RegionTreeNode> &nodes)
@@ -11967,6 +11971,7 @@ namespace Legion {
         enqueue_ready_operation();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
@@ -12046,6 +12051,7 @@ namespace Legion {
         complete_mapping();
       complete_execution();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_region(RegionNode *node,

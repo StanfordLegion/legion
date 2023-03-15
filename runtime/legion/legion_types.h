@@ -1879,15 +1879,17 @@ namespace Legion {
     class PathTraverser;
     class NodeTraverser;
 
-    class ProjectionEpoch;
     class LogicalState;
+    class LogicalAnalysis;
     class PhysicalAnalysis;
     class EquivalenceSet;
     class PendingEquivalenceSet;
     class EqSetTracker;
     class VersionManager;
     class VersionInfo;
-    class RayTracer;
+    class ProjectionNode;
+    class ProjectionRegion;
+    class ProjectionPartition;
 
     class Collectable;
     class Notifiable;

@@ -16260,6 +16260,126 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    ProjectionNode* ProjectionFunction::construct_projection_tree(
+          Operation *op, unsigned index, const RegionRequirement &req,
+          ShardID local_shard, RegionTreeNode *root, const ProjectionInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeForest *forest = root->context;
+      ProjectionNode *result = NULL;
+      if (root->is_region())
+        result = new ProjectionRegion(root->as_region_node());
+      else
+        result = new ProjectionPartition(root->as_partition_node());
+      IndexSpaceNode *launch_space = info.projection_space;
+      IndexSpace local_space = info.sharding_function->find_shard_space(
+                  local_shard, launch_space, info.sharding_space->handle,
+                  op->get_provenance());
+      if (!local_space.exists())
+        return result;
+      Domain local_domain, launch_domain;
+      forest->find_launch_space_domain(local_space, local_domain);
+      launch_space->get_launch_space_domain(launch_domain);
+      std::map<RegionTreeNode*,ProjectionNode*> node_map;
+      node_map[root] = result;
+      if (root->is_region())
+      {
+        RegionNode *region = root->as_region_node();
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+        {
+          LogicalRegion result;
+          if (!is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            result = functor->project(region->handle, itr.p, launch_domain);
+          }
+          else
+            result = functor->project(region->handle, itr.p, launch_domain);
+          check_projection_region_result(region->handle, op, index,
+                                         result, op->runtime);
+          if (!result.exists())
+            continue;
+          add_to_projection_tree(result, root, forest, node_map, local_shard);
+        }
+      }
+      else
+      {
+        PartitionNode *partition = root->as_partition_node();
+        for (Domain::DomainPointIterator itr(local_domain); itr; itr++)
+        {
+          LogicalRegion result;
+          if (!is_exclusive)
+          {
+            AutoLock p_lock(projection_reservation);
+            result = functor->project(partition->handle, itr.p,launch_domain);
+          }
+          else
+            result = functor->project(partition->handle, itr.p,launch_domain);
+          check_projection_partition_result(partition->handle, op, index,
+                                            result, op->runtime);
+          if (!result.exists())
+            continue;
+          add_to_projection_tree(result, root, forest, node_map, local_shard);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ProjectionFunction::add_to_projection_tree(LogicalRegion r,
+                            RegionTreeNode *root, RegionTreeForest *context,
+                            std::map<RegionTreeNode*,ProjectionNode*> &node_map,
+                            ShardID owner_shard)
+    //--------------------------------------------------------------------------
+    {
+      RegionNode *child = context->get_node(r);
+      std::map<RegionTreeNode*,ProjectionNode*>::const_iterator finder = 
+        node_map.find(child);
+      ProjectionRegion *current = NULL;
+      if (finder == node_map.end())
+      {
+        current = new ProjectionRegion(child);
+        node_map[child] = current;
+      }
+      else
+        current = static_cast<ProjectionRegion*>(finder->second);
+      current->add_user(owner_shard);
+      while (true)
+      {
+        // Do the next partition
+        finder = node_map.find(child->parent);
+        ProjectionPartition *parent = NULL;
+        if (finder == node_map.end())
+        {
+          parent = new ProjectionPartition(child->parent);
+          node_map[child->parent] = parent;
+        }
+        else
+          parent = static_cast<ProjectionPartition*>(finder->second);
+        parent->add_child(current);
+        if (child->parent == root)
+          break;
+        // Do the next region
+        finder = node_map.find(child->parent->parent);
+        ProjectionRegion *next = NULL;
+        if (finder == node_map.end())
+        {
+          next = new ProjectionRegion(child->parent->parent);
+          node_map[child->parent->parent] = next;
+        }
+        else
+          next = static_cast<ProjectionRegion*>(finder->second);
+        next->add_child(parent); 
+        if (child->parent->parent == root)
+          break;
+        // Now we can walk up the tree
+        child = child->parent->parent;
+        current = next;
+      }
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
     ProjectionTree* ProjectionFunction::construct_projection_tree(Operation *op,
                             unsigned index, ShardID local_shard, 
                             RegionTreeNode *root, IndexSpaceNode *launch_space,
@@ -16439,6 +16559,7 @@ namespace Legion {
         current = next;
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Cyclic Sharding Functor
