@@ -126,10 +126,6 @@ OutReqTestMapper::OutReqTestMapper(MapperRuntime *rt,
   visible_memories.has_affinity_to(local);
   visible_memories.only_kind(Memory::SYSTEM_MEM);
   local_sysmem = visible_memories.first();
-
-  const InputArgs &command_args = Runtime::get_input_args();
-  char **argv = command_args.argv;
-  int argc = command_args.argc;
 }
 
 void OutReqTestMapper::select_task_options(const MapperContext    ctx,
