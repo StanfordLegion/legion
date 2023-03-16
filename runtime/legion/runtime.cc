@@ -10306,8 +10306,8 @@ namespace Legion {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
         std::map<std::pair<LayoutConstraintID,unsigned>,
                   const LayoutConstraint*>::const_iterator finder = 
-            no_pointer_entailment_cache.find(key);
-        if (finder != no_pointer_entailment_cache.end())
+            entailment_cache.find(key);
+        if (finder != entailment_cache.end())
         {
           if (finder->second != NULL)
           {
@@ -10324,8 +10324,8 @@ namespace Legion {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
         std::map<std::pair<LayoutConstraintID,unsigned>,
                   const LayoutConstraint*>::const_iterator finder = 
-            entailment_cache.find(key);
-        if (finder != entailment_cache.end())
+            no_pointer_entailment_cache.find(key);
+        if (finder != no_pointer_entailment_cache.end())
         {
           if (finder->second != NULL)
           {
@@ -10349,9 +10349,9 @@ namespace Legion {
       // Save the result in the cache
       AutoLock lay(layout_lock);
       if (test_pointer)
-        no_pointer_entailment_cache[key] = result;
-      else
         entailment_cache[key] = result;
+      else
+        no_pointer_entailment_cache[key] = result;
       return entailment;
     }
 
