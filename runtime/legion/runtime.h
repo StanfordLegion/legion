@@ -1499,17 +1499,15 @@ namespace Legion {
       void update_constraints(Deserializer &derez);
     public:
       bool entails(LayoutConstraints *other_constraints, unsigned total_dims,
-                   const LayoutConstraint **failed_constraint);
+                   const LayoutConstraint **failed_constraint, 
+                   bool test_pointer = true);
       bool entails(const LayoutConstraintSet &other, unsigned total_dims,
-                   const LayoutConstraint **failed_constraint) const;
+                   const LayoutConstraint **failed_constraint, 
+                   bool test_pointer = true) const;
       bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims,
                      const LayoutConstraint **conflict_constraint);
       bool conflicts(const LayoutConstraintSet &other, unsigned total_dims,
                      const LayoutConstraint **conflict_constraint) const;
-      bool entails_without_pointer(LayoutConstraints *other,unsigned total_dims,
-                                   const LayoutConstraint **failed_constraint);
-      bool entails_without_pointer(const LayoutConstraintSet &other,
-         unsigned total_dims, const LayoutConstraint **failed_constraint) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);

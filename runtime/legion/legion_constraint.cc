@@ -1759,9 +1759,9 @@ namespace Legion {
           return true;
         for (int idx = 0; idx < delta.get_dim(); idx++)
         {
-          if (delta.lo()[idx] != other.delta.lo()[idx])
+          if (delta.lo()[idx] < other.delta.lo()[idx])
             return true;
-          if (delta.hi()[idx] != other.delta.hi()[idx])
+          if (delta.hi()[idx] < other.delta.hi()[idx])
             return true;
         }
       }
@@ -1901,7 +1901,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool LayoutConstraintSet::entails(const LayoutConstraintSet &other,
                                       unsigned total_dims,
-                                      const LayoutConstraint **failed) const
+                                      const LayoutConstraint **failed,
+                                      bool test_pointer) const
     //--------------------------------------------------------------------------
     {
       if (!specialized_constraint.entails(other.specialized_constraint))
@@ -1922,7 +1923,7 @@ namespace Legion {
           *failed = &other.memory_constraint;
         return false;
       }
-      if (!pointer_constraint.entails(other.pointer_constraint))
+      if (test_pointer && !pointer_constraint.entails(other.pointer_constraint))
       {
         if (failed != NULL)
           *failed = &other.pointer_constraint;
