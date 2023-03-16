@@ -43,7 +43,8 @@ import statistics
 from functools import reduce
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Union, Dict, List, Tuple, Type, Set, Optional, NoReturn, ItemsView, KeysView, ValuesView, Any
+from typing import Union, Dict, List, Tuple, Type, Set, Optional, NoReturn, ItemsView, KeysView, ValuesView, Any, Callable
+from operator import eq
 
 from legion_util import typeassert, typecheck
 import legion_serializer as serializer
@@ -219,6 +220,11 @@ prof_uid_ctr = 0
 #  will init it with Operation(-1) later
 EMPTY_OP = None
 
+# configs
+all_logs = True
+assert_verbose = False
+filter_input = False
+
 def get_prof_uid() -> int:
     global prof_uid_ctr
     prof_uid_ctr += 1
@@ -226,6 +232,20 @@ def get_prof_uid() -> int:
 
 def by_prof_uid(element: Tuple) ->int:
   return element[1]
+
+def conditional_check(lhs: Any, rhs: Any, # type: ignore
+                      op: Callable,
+                      msg: str,
+                      cond: bool
+    ) -> None:
+    if op(lhs, rhs) == False:
+        if cond:
+            assert 0, msg
+        else:
+            global assert_verbose
+            if assert_verbose:
+                print(msg)
+
 
 @typecheck
 def data_tsv_str(level: int, level_ready: Optional[int], 
@@ -1368,8 +1388,7 @@ class OperationInstInfo(object):
                 self.instance = instance
                 flag = True
                 break
-        if flag == False:
-            print("Warning: Operation can not find inst:" + str(hex(self.inst_uid)))
+        conditional_check(flag, True, eq, "Warning: Operation can not find inst:" + str(hex(self.inst_uid)), all_logs)
 
     # TODO: they are not used now
     @typecheck
@@ -1455,8 +1474,8 @@ class Operation(ProcOperation):
         instances = ""
         instances_set = set()
         for node in self.operation_inst_infos:
-            assert node.instance is not None
-            instances_set.add((hex(node.instance.inst_id), node.instance.prof_uid))
+            if node.instance is not None:
+                instances_set.add((hex(node.instance.inst_id), node.instance.prof_uid))
         instances_list = sorted(instances_set, key=by_prof_uid)
         instances = dump_json(instances_list)
         return instances
@@ -2057,10 +2076,8 @@ class CopyInstInfo(object):
                 dst_flag = True   
             if src_flag and dst_flag:
                 break
-        if src_flag == False:
-            print("Warning: Copy can not find src_inst:" + str(hex(self.src_inst_uid)))
-        if dst_flag == False:
-            print("Warning: Copy can not find dst_inst:" + str(hex(self.dst_inst_uid)))
+        conditional_check(src_flag, True, eq, "Warning: Copy can not find src_inst:" + str(hex(self.src_inst_uid)), all_logs)
+        conditional_check(dst_flag, True, eq, "Warning: Copy can not find dst_inst:" + str(hex(self.dst_inst_uid)), all_logs)
 
     @typecheck
     def get_short_text(self) -> str:
@@ -2274,8 +2291,7 @@ class FillInstInfo(object):
                 self.dst_instance = instance
                 dst_flag = True
                 break
-        if dst_flag == False:
-           print("Warning: Fill can not find dst_inst:" + str(hex(self.dst_inst_uid)))
+        conditional_check(dst_flag, True, eq, "Warning: Fill can not find dst_inst:" + str(hex(self.dst_inst_uid)), all_logs)
 
     @typecheck
     def get_short_text(self) -> str:
@@ -2350,8 +2366,8 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
         instances = ""
         instances_set = set()
         for node in self.fill_inst_infos:
-            assert node.dst_instance is not None
-            instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
+            if node.dst_instance is not None:
+                instances_set.add((hex(node.dst_instance.inst_id), node.dst_instance.prof_uid))
         instances_list = sorted(instances_set, key=by_prof_uid)
         instances = dump_json(instances_list)
         return instances
@@ -2706,7 +2722,7 @@ class TimePoint(object):
 
 class Processor(object):
     __slots__ = [
-        'proc_id', 'node_id', 'proc_in_node', 'kind',
+        'proc_id', 'node_id', 'proc_in_node', 'kind', 'visible',
         'last_time', 'tasks', 'max_levels', 'max_levels_ready', 'time_points',
         'util_time_points'
     ]
@@ -2720,6 +2736,7 @@ class Processor(object):
         self.node_id = (proc_id >> 40) & ((1 << 16) - 1)
         self.proc_in_node = (proc_id) & ((1 << 12) - 1)
         self.kind = kind
+        self.visible = True
         self.last_time: Optional[float] = None
         self.tasks: List[Union[MetaTask, ProfTask, Task, MapperCall, RuntimeCall]] = list()
         self.max_levels = 0
@@ -2970,7 +2987,7 @@ class MemProcAffinity(object):
 
 class Memory(object):
     __slots__ = [
-        'mem_id', 'node_id', 'kind', 'capacity', 'instances',
+        'mem_id', 'node_id', 'kind', 'visible', 'capacity', 'instances',
         'time_points', 'max_live_instances', 'last_time', 'affinity'
     ]
 
@@ -2985,6 +3002,7 @@ class Memory(object):
         # owner_node = mem_id[55:40]
         self.node_id = (mem_id >> 40) & ((1 << 16) - 1)
         self.kind = kind
+        self.visible = True
         self.capacity = capacity
         self.instances: Set[Instance] = set()
         self.time_points: List[TimePoint] = list()
@@ -3140,7 +3158,7 @@ class Memory(object):
 
 class Channel(object):
     __slots__ = [
-        'src', 'dst', 'channel_kind', 'copies', 'time_points', 'max_live_copies', 'last_time'
+        'src', 'dst', 'channel_kind', 'visible', 'copies', 'time_points', 'max_live_copies', 'last_time'
     ]
 
     @typecheck
@@ -3152,6 +3170,7 @@ class Channel(object):
         self.src = src
         self.dst = dst
         self.channel_kind = channel_kind
+        self.visible = True
         self.copies: Set[Union[Copy, DepPart, Fill]] = set()
         self.time_points: List[TimePoint] = list()
         self.max_live_copies = 0
@@ -3437,16 +3456,17 @@ class LFSR(object):
 
 class State(object):
     __slots__ = [
-        'max_dim', 'processors', 'memories', 'mem_proc_affinity', 'channels',
+        'max_dim', 'num_nodes', 'processors', 'memories', 'mem_proc_affinity', 'channels',
         'task_kinds', 'variants', 'meta_variants', 'op_kinds', 'operations',
         'prof_uid_map', 'multi_tasks', 'first_times', 'last_times',
         'last_time', 'mapper_call_kinds', 'mapper_calls', 'runtime_call_kinds', 
         'runtime_calls', 'instances', 'index_spaces', 'partitions', 'logical_regions', 
         'field_spaces', 'fields', 'has_spy_data', 'spy_state', 'callbacks', 'copy_map',
-        'fill_map'
+        'fill_map', 'visible_nodes', 'always_parsed_callbacks', 'current_node_id'
     ]
     def __init__(self) -> None:
         self.max_dim = 3
+        self.num_nodes = 0
         self.processors: Dict[int, Processor] = {}
         self.memories: Dict[int, Memory] = {}
         self.mem_proc_affinity: Dict[int, MemProcAffinity] = {}
@@ -3475,11 +3495,14 @@ class State(object):
         self.fill_map: Dict[int, Fill] = {}
         self.has_spy_data = False
         self.spy_state: Optional[legion_spy.State] = None
+        self.visible_nodes: Optional[List[int]] = None
         self.callbacks = {
             "MapperCallDesc": self.log_mapper_call_desc,
             "RuntimeCallDesc": self.log_runtime_call_desc,
             "MetaDesc": self.log_meta_desc,
             "OpDesc": self.log_op_desc,
+            "MaxDimDesc": self.log_max_dim,
+            "MachineDesc": self.log_machine_desc,
             "ProcDesc": self.log_proc_desc,
             "MemDesc": self.log_mem_desc,
             "TaskKind": self.log_kind,
@@ -3516,10 +3539,10 @@ class State(object):
             "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
             "PhysicalInstDimOrderDesc": self.log_physical_inst_layout_dim_desc,
             "PhysicalInstanceUsage": self.log_physical_inst_usage,
-            "IndexSpaceSizeDesc": self.log_index_space_size_desc,
-            "MaxDimDesc": self.log_max_dim
+            "IndexSpaceSizeDesc": self.log_index_space_size_desc
             #"UserInfo": self.log_user_info
         }
+        self.current_node_id: Optional[int] = None
 
     #############################################################
     # process logging statement
@@ -3529,6 +3552,16 @@ class State(object):
     @typecheck
     def log_max_dim(self, max_dim: int) -> None:
         self.max_dim = max_dim
+
+    # MachineDesc
+    @typecheck
+    def log_machine_desc(self, node_id: int, num_nodes: int) -> int:
+        if self.num_nodes == 0:
+            self.num_nodes = num_nodes
+        else:
+            assert self.num_nodes == num_nodes
+        self.current_node_id = node_id
+        return node_id
 
     # IndexSpacePointDesc
     @typecheck
@@ -3819,6 +3852,7 @@ class State(object):
     ) -> None:
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant)
+        assert task.variant == variant
         assert wait_ready >= wait_start
         assert wait_end >= wait_ready
         task.add_wait_interval(wait_start, wait_ready, wait_end)
@@ -3836,6 +3870,7 @@ class State(object):
         # We know that meta wait infos are logged in order so we always add
         # the wait intervals to the last element in the list
         variant.ops[op_id][-1].add_wait_interval(wait_start, wait_ready, wait_end)
+
 
     # TaskKind
     @typecheck
@@ -3978,7 +4013,7 @@ class State(object):
     def log_runtime_call_info(self, kind: int, proc_id: int, 
                               start: float, stop: float
     ) -> None:
-        assert start <= stop 
+        assert start <= stop
         assert kind in self.runtime_call_kinds
         if stop > self.last_time:
             self.last_time = stop
@@ -4083,6 +4118,12 @@ class State(object):
         return self.meta_variants[lg_id]
 
     @typecheck
+    def find_op(self, op_id: int) -> Optional[Operation]:
+        if op_id not in self.operations:
+            return None
+        return self.operations[op_id]
+
+    @typecheck
     def find_or_create_op(self, op_id: int) -> Operation:
         if op_id not in self.operations:
             op = Operation(op_id) 
@@ -4092,9 +4133,19 @@ class State(object):
         return self.operations[op_id]
 
     @typecheck
+    def find_task(self, op_id: int) -> Optional[Task]:
+        op = self.find_op(op_id)
+        if op is None or op.is_task == False:
+            return None
+        else:
+            return op
+
+    @typecheck
     def find_or_create_task(self, op_id: int, variant: Variant, 
-                            create: Optional[float] =None, ready: Optional[float] =None, 
-                            start: Optional[float] =None, stop: Optional[float] =None
+                            create: Optional[float] = None, 
+                            ready: Optional[float] = None, 
+                            start: Optional[float] = None, 
+                            stop: Optional[float] = None
     ) -> Task:
         task = self.find_or_create_op(op_id)
         # Upgrade this operation to a task if necessary
@@ -4332,14 +4383,16 @@ class State(object):
     @typecheck
     def add_copy_to_channel(self) -> None:
         for copy in self.copy_map.values():
-            copy.add_channel(self)
+            if len(copy.copy_inst_infos) > 0:
+                copy.add_channel(self)
  
     # called after all fills are parsed
     #   add the channel info into Fill and then add fill into Channel
     @typecheck
     def add_fill_to_channel(self) -> None:
         for fill in self.fill_map.values():
-            fill.add_channel(self)
+            if len(fill.fill_inst_infos) > 0:
+                fill.add_channel(self)
 
     @typecheck
     def trim_time_ranges(self, start: float, stop: float) -> None:
@@ -4685,7 +4738,7 @@ class State(object):
     ) -> None:
         # procs
         for proc in self.processors.values():
-            if len(proc.tasks) >= 0:
+            if len(proc.tasks) >= 0 and proc.visible:
                 # add this processor kind to both all and the node group
                 groups = [str(proc.node_id), "all"]
                 for node in groups:
@@ -4699,7 +4752,7 @@ class State(object):
                         timepoints_dict[group].append(proc.util_time_points)
         # memories
         for mem in self.memories.values():
-            if len(mem.time_points) > 0:
+            if len(mem.time_points) > 0 and mem.visible:
                 # add this memory kind to both the all and the node group
                 groups = [str(mem.node_id), "all"]
                 for node in groups:
@@ -4710,7 +4763,7 @@ class State(object):
                         timepoints_dict[group].append(mem.time_points)
         # channels
         for channel in self.channels.values():
-            if len(channel.time_points) > 0:
+            if len(channel.time_points) > 0 and channel.visible:
                 # add this channel to both the all and the node group
                 if (channel.node_id() != None):
                     groups = [str(channel.node_id()), "all"]
@@ -4719,18 +4772,20 @@ class State(object):
                     if channel.node_id_src() != channel.node_id() and channel.node_id_src() != None:
                         groups.append(str(channel.node_id_src()))
                     for node in groups:
-                        group = node + " (" + "Channel)"
-                        if group not in timepoints_dict:
-                            timepoints_dict[group] = [channel.time_points]
-                        else:
-                            timepoints_dict[group].append(channel.time_points)
+                        if node == "all" or serializer.is_on_visible_nodes(self.visible_nodes, (int(node),), True):
+                            group = node + " (" + "Channel)"
+                            if group not in timepoints_dict:
+                                timepoints_dict[group] = [channel.time_points]
+                            else:
+                                timepoints_dict[group].append(channel.time_points)
 
     @typecheck
-    def get_nodes(self) -> List[str]:
+    def __get_nodes(self) -> List[str]:
         nodes = {}
         for proc in self.processors.values():
+            if proc.visible:
             #if len(proc.tasks) > 0:
-            nodes[str(proc.node_id)] = 1
+                nodes[str(proc.node_id)] = 1
         if (len(nodes) > 1):
             return ["all"] + sorted(nodes.keys())
         else:
@@ -4747,7 +4802,7 @@ class State(object):
 
         # now we compute the structure of the stats (the parent-child
         # relationships
-        nodes = self.get_nodes()
+        nodes = self.__get_nodes()
         stats_structure: Dict[str, List[str]] = {node: [] for node in sorted(nodes)}
 
         # for each node grouping, add all the subtypes of processors
@@ -5171,6 +5226,45 @@ class State(object):
 
         for fill in self.fill_map.values():
             fill.link_instance(self.instances)
+
+    @typecheck
+    def filter_output(self) -> None:
+        if self.visible_nodes is None:
+            return
+        # if filter input is enabled, we remove invisible proc/mem/chan
+        # otherwise, we keep a full state
+        global filter_input
+        proc_to_be_deleted = []
+        for proc_id, proc in self.processors.items():
+            if proc.node_id not in self.visible_nodes:
+                proc.visible = False
+                proc_to_be_deleted.append(proc_id)
+        if filter_input:
+            for proc_key in proc_to_be_deleted:
+                del self.processors[proc_key]
+
+        mem_to_be_deleted = []
+        for mem_id, mem in self.memories.items():
+            if mem.node_id not in self.visible_nodes:
+                mem.visible = False
+                mem_to_be_deleted.append(mem_id)
+        if filter_input:
+            for mem_key in mem_to_be_deleted:
+                del self.memories[mem_key]
+
+        chan_to_be_deleted = []
+        for chan_id, chan in self.channels.items():
+            # DepPart
+            if chan.node_id() == None:
+                continue
+            else:
+                if chan.node_id_src() not in self.visible_nodes and chan.node_id_dst() not in self.visible_nodes:
+                    chan.visible = False
+                    print(chan_id)
+                    chan_to_be_deleted.append(chan_id)
+        if filter_input:
+            for chan_key in chan_to_be_deleted:
+                del self.channels[chan_key]
     
     @typecheck
     def emit_interactive_visualization(self, 
@@ -5235,25 +5329,27 @@ class State(object):
         #     json.dump(op_dependencies, dep_json_file)
 
         ops_file = open(ops_file_name, "w")
-        ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\n")
-        for op_id, operation in sorted(self.operations.items()):
-            if operation.is_trimmed():
-                continue
-            proc_str = ""
-            level = ""
-            provenance = ""
-            if operation.proc is not None:
-                proc_str = repr(operation.proc)
-                assert operation.level is not None
-                level = str(operation.level+1)
-            if operation.provenance is not None:
-                provenance = operation.provenance
-            if operation.parent_id is None:
-                parent_id = ""
-            else:
-                parent_id = str(operation.parent_id)
-            ops_file.write("%d\t%s\t%s\t%s\t%s\t%s\n" % \
-                            (op_id, parent_id, str(operation), proc_str, level, provenance))
+        # when subnode is enabled, we could get empty result
+        if len(self.operations) > 0:
+            ops_file.write("op_id\tparent_id\tdesc\tproc\tlevel\tprovenance\n")
+            for op_id, operation in sorted(self.operations.items()):
+                if operation.is_trimmed():
+                    continue
+                proc_str = ""
+                level = ""
+                provenance = ""
+                if operation.proc is not None:
+                    proc_str = repr(operation.proc)
+                    assert operation.level is not None
+                    level = str(operation.level+1)
+                if operation.provenance is not None:
+                    provenance = operation.provenance
+                if operation.parent_id is None:
+                    parent_id = ""
+                else:
+                    parent_id = str(operation.parent_id)
+                ops_file.write("%d\t%s\t%s\t%s\t%s\t%s\n" % \
+                                (op_id, parent_id, str(operation), proc_str, level, provenance))
         ops_file.close()
 
         if show_procs:
@@ -5264,7 +5360,7 @@ class State(object):
                     self.convert_op_ids_to_tuples(op_dependencies)
 
             for p,proc in sorted(self.processors.items(), key=lambda x: x[1]):
-                if len(proc.tasks) > 0:
+                if len(proc.tasks) > 0 and proc.visible:
                     if self.has_spy_data:
                         proc.attach_dependencies(self, op_dependencies,
                                                  transitive_map)
@@ -5285,7 +5381,7 @@ class State(object):
                     last_time = max(last_time, proc.last_time)
         if show_channels:
             for c,chan in sorted(self.channels.items(), key=lambda x: x[1]):
-                if len(chan.copies) > 0:
+                if len(chan.copies) > 0 and chan.visible:
                     chan_name = slugify(str(c))
                     chan_tsv_file_name = os.path.join(tsv_dir, chan_name + ".tsv")
                     with open(chan_tsv_file_name, "w") as chan_tsv_file:
@@ -5303,7 +5399,7 @@ class State(object):
                     last_time = max(last_time, chan.last_time)
         if show_instances:
             for m,mem in sorted(self.memories.items(), key=lambda x: x[1]):
-                if len(mem.instances) > 0:
+                if len(mem.instances) > 0 and mem.visible:
                     mem_name = slugify("Mem_" + str(hex(m)))
                     mem_tsv_file_name = os.path.join(tsv_dir, mem_name + ".tsv")
                     with open(mem_tsv_file_name, "w") as mem_tsv_file:
@@ -5334,25 +5430,27 @@ class State(object):
             json.dump(list(critical_path), critical_path_json_file)
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
-        processor_tsv_file.write("full_text\ttext\ttsv\tlevels\n")
-        if show_procs:
-            for proc in sorted(proc_list):
-                tsv = processor_levels[proc]['tsv']
-                levels = processor_levels[proc]['levels']
-                processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
-                                (repr(proc), proc.get_short_text(), tsv, levels))
-        if show_channels:
-            for channel in sorted(chan_list):
-                tsv = channel_levels[channel]['tsv']
-                levels = channel_levels[channel]['levels']
-                processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
-                                (repr(channel), channel.get_short_text(), tsv, levels))
-        if show_instances:
-            for memory in sorted(mem_list):
-                tsv = memory_levels[memory]['tsv']
-                levels = memory_levels[memory]['levels']
-                processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
-                                (repr(memory), memory.get_short_text(), tsv, levels))
+        # when subnode is enabled, we could get empty result
+        if len(proc_list) != 0 or len(chan_list) != 0 or len(mem_list) != 0: 
+            processor_tsv_file.write("full_text\ttext\ttsv\tlevels\n")
+            if show_procs:
+                for proc in sorted(proc_list):
+                    tsv = processor_levels[proc]['tsv']
+                    levels = processor_levels[proc]['levels']
+                    processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
+                                    (repr(proc), proc.get_short_text(), tsv, levels))
+            if show_channels:
+                for channel in sorted(chan_list):
+                    tsv = channel_levels[channel]['tsv']
+                    levels = channel_levels[channel]['levels']
+                    processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
+                                    (repr(channel), channel.get_short_text(), tsv, levels))
+            if show_instances:
+                for memory in sorted(mem_list):
+                    tsv = memory_levels[memory]['tsv']
+                    levels = memory_levels[memory]['levels']
+                    processor_tsv_file.write("%s\t%s\t%s\t%d\n" % 
+                                    (repr(memory), memory.get_short_text(), tsv, levels))
         processor_tsv_file.close()
 
         num_utils = self.emit_utilization_tsv(output_dirname)
@@ -5477,6 +5575,13 @@ def main() -> None:
         '--message-percentage', dest='message_percentage', action='store',
         type=float, default=5.0,
         help='perentage of messages that must be over the threshold to trigger a warning')
+    parser.add_argument(
+        '--nodes', dest='nodes', action='store',
+        type=str,
+        help='a list of nodes that will be visualized')
+    parser.add_argument(
+        '--no-filter-input', dest='no_filter_input', action='store_true',
+        help='all log files are processed and only filter output is enabled')
     args = parser.parse_args()
 
     file_names = args.filenames
@@ -5492,10 +5597,20 @@ def main() -> None:
     verbose = args.verbose
     start_trim = args.start_trim
     stop_trim = args.stop_trim
+    nodes = args.nodes
+    global all_logs
+    global filter_input
+    global assert_verbose
+    assert_verbose = verbose
 
     state = State()
     has_matches = False
     has_binary_files = False # true if any of the files are a binary file
+
+    if nodes is not None:
+        node_list = list(map(int, list(nodes.split(','))))
+        state.visible_nodes = node_list
+        filter_input = not args.no_filter_input
 
     asciiDeserializer = serializer.LegionProfASCIIDeserializer(state, state.callbacks)
     binaryDeserializer = serializer.LegionProfBinaryDeserializer(state, state.callbacks)
@@ -5517,7 +5632,7 @@ def main() -> None:
             # only parse the log if it's a binary file, or if all the files
             # are ascii files
             print('Reading log file %s...' % file_name)
-            total_matches = deserializer.parse(file_name, verbose)
+            total_matches = deserializer.parse(file_name, verbose, state.visible_nodes, filter_input)
             print('Matched %s objects' % total_matches)
             if total_matches > 0:
                 has_matches = True
@@ -5531,6 +5646,16 @@ def main() -> None:
     if not has_matches:
         print('No matches found! Exiting...')
         return
+
+    # if number of files
+    if state.num_nodes > len(file_names):
+        print("Warning: This run only involved %d nodes, but only %d log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error." % (state.num_nodes, len(file_names)))
+        all_logs = False
+
+    # check if subnodes is enabled and filter input is true
+    if state.visible_nodes is not None and len(state.visible_nodes) < state.num_nodes and filter_input:
+        print("Warning: This run only involved %d nodes, but only %d log files were used. If --verbose is enabled, subsequent warnings may not indicate a true error." % (state.num_nodes, len(state.visible_nodes)))
+        all_logs = False
 
     # once all logs are parsed, let's figure out the channel for fill
     state.add_fill_to_channel()
@@ -5560,6 +5685,9 @@ def main() -> None:
 
     # link instance with Copy/Fill/Operation
     state.link_instances()
+
+    # remove nodes that are not visualized
+    state.filter_output()
 
     if print_stats:
         state.print_stats(verbose)

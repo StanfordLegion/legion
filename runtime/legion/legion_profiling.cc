@@ -1594,6 +1594,15 @@ namespace Legion {
                 "Invalid serializer (%s), must be 'binary' "
                 "or 'ascii'\n", serializer_type)
 
+      // log machine info, this needs to be the first log
+      LegionProfDesc::MachineDesc machine_desc;
+
+      machine_desc.node_id = static_cast<unsigned>(rt->address_space);
+      machine_desc.num_nodes = static_cast<unsigned>(
+        rt->total_address_spaces);
+
+      serializer->serialize(machine_desc);
+
       for (unsigned idx = 0; idx < num_meta_tasks; idx++)
       {
         LegionProfDesc::MetaDesc meta_desc;

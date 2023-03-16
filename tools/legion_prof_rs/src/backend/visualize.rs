@@ -14,10 +14,12 @@ use crate::backend::common::{
     CopyInstInfoDumpInstVec, FillInstInfoDumpInstVec, MemGroup, ProcGroup, StatePostprocess,
 };
 use crate::state::{
-    Chan, ChanEntry, ChanID, ChanPoint, Container, ContainerEntry, Mem, MemID, MemKind, MemPoint,
-    MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint, ProfUID,
-    SpyState, State, Timestamp,
+    Chan, ChanEntry, ChanID, ChanPoint, Config, Container, ContainerEntry, Mem, MemID, MemKind,
+    MemPoint, MemProcAffinity, NodeID, OperationInstInfo, Proc, ProcEntryKind, ProcID, ProcPoint,
+    ProfUID, SpyState, State, Timestamp,
 };
+
+use crate::conditional_assert;
 
 static INDEX_HTML_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/index.html");
 static TIMELINE_JS_CONTENT: &[u8] = include_bytes!("../../../legion_prof_files/js/timeline.js");
@@ -131,9 +133,15 @@ impl fmt::Display for OperationInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            let inst = self.1.find_inst(elt.inst_uid);
-            if let Some(inst) = inst {
+            if let Some(inst) = self.1.find_inst(elt.inst_uid) {
                 insts_set.insert(inst);
+            } else {
+                conditional_assert!(
+                    false,
+                    Config::all_logs(),
+                    "Operation can not find inst:0x{:x}",
+                    elt.inst_uid.0
+                );
             }
         }
         write!(f, "[")?;
@@ -1013,7 +1021,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let procs = state.procs.values().collect::<Vec<_>>();
     let proc_records: BTreeMap<_, _> = procs
         .par_iter()
-        .filter(|proc| !proc.is_empty())
+        .filter(|proc| !proc.is_empty() && proc.is_visible())
         .map(|proc| {
             proc.emit_tsv(&path, state, spy_state)
                 .map(|record| (proc.proc_id, record))
@@ -1028,7 +1036,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let chans = state.chans.values().collect::<Vec<_>>();
     let chan_records: BTreeMap<_, _> = chans
         .par_iter()
-        .filter(|chan| !chan.is_empty())
+        .filter(|chan| !chan.is_empty() && chan.is_visible())
         .map(|chan| {
             chan.emit_tsv(&path, state)
                 .map(|record| (chan.chan_id, record))
@@ -1042,7 +1050,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
     let mems = state.mems.values().collect::<Vec<_>>();
     let mem_records: BTreeMap<_, _> = mems
         .par_iter()
-        .filter(|mem| !mem.is_empty())
+        .filter(|mem| !mem.is_empty() && mem.is_visible())
         .map(|mem| {
             mem.emit_tsv(&path, state)
                 .map(|record| (mem.mem_id, record))
@@ -1081,7 +1089,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
             let provenance = Some(op.provenance.as_deref().unwrap_or(""));
             if let Some(proc_id) = state.tasks.get(op_id) {
                 let proc = state.procs.get(proc_id).unwrap();
-                let proc_record = proc_records.get(proc_id).unwrap();
+                let proc_full_text = format!("{:?} Processor 0x{:x}", proc.kind, proc.proc_id);
                 let task = proc.find_task(*op_id).unwrap();
                 let (task_id, variant_id) = match task.kind {
                     ProcEntryKind::Task(task_id, variant_id) => (task_id, variant_id),
@@ -1104,7 +1112,7 @@ pub fn emit_interactive_visualization<P: AsRef<Path>>(
                     op_id: op_id.0,
                     parent_id,
                     desc: &desc,
-                    proc: Some(&proc_record.full_text),
+                    proc: Some(&proc_full_text),
                     level: task.base.level.map(|x| x + 2),
                     provenance,
                 })?;
