@@ -14,6 +14,8 @@ use crate::num_util::Postincrement;
 use crate::serialize::Record;
 use crate::spy;
 
+use once_cell::sync::OnceCell;
+
 const TASK_GRANULARITY_THRESHOLD: Timestamp = Timestamp::from_us(10);
 
 #[derive(Debug, Clone)]
@@ -138,6 +140,62 @@ pub enum DimKind {
     OuterDimS = 25,
     InnerDimR = 26,
     OuterDimR = 27,
+}
+
+// the class used to save configurations
+#[derive(Debug, PartialEq)]
+pub struct Config {
+    filter_input: bool,
+    verbose: bool,
+    all_logs: bool,
+}
+
+// CONFIG can be only accessed by Config::name_of_the_member()
+static CONFIG: OnceCell<Config> = OnceCell::new();
+
+impl Config {
+    // this function can be only called once, and it will be called in main
+    pub fn set_config(filter_input: bool, verbose: bool, all_logs: bool) {
+        let config = Config {
+            filter_input,
+            verbose,
+            all_logs,
+        };
+        assert_eq!(CONFIG.set(config), Ok(()));
+    }
+    // return the singleton of CONFIG, usually we do not need to call it unless
+    // we want to retrieve multiple members from the CONFIG
+    pub fn global() -> &'static Config {
+        let config = CONFIG.get();
+        config.expect("config was not set")
+    }
+    pub fn filter_input() -> bool {
+        let config = Config::global();
+        config.filter_input
+    }
+    pub fn verbose() -> bool {
+        let config = Config::global();
+        config.verbose
+    }
+    pub fn all_logs() -> bool {
+        let config = Config::global();
+        config.all_logs
+    }
+}
+
+#[macro_export]
+macro_rules! conditional_assert {
+    ($cond:expr, $mode:expr, $($arg:tt)*) => (
+        if !$cond {
+            if $mode {
+                panic!("Error: {}", format_args!($($arg)*));
+            } else {
+                if Config::verbose() {
+                    eprintln!("Warning: {}", format_args!($($arg)*));
+                }
+            }
+        }
+    )
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Add, Sub, From)]
@@ -395,6 +453,7 @@ pub struct Proc {
     pub max_levels_ready: u32,
     pub time_points: Vec<ProcPoint>,
     pub util_time_points: Vec<ProcPoint>,
+    visible: bool,
 }
 
 impl Proc {
@@ -409,6 +468,7 @@ impl Proc {
             max_levels_ready: 0,
             time_points: Vec::new(),
             util_time_points: Vec::new(),
+            visible: true,
         }
     }
 
@@ -558,6 +618,10 @@ impl Proc {
         self.time_points = points;
         self.util_time_points = util_points;
     }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
 }
 
 impl Container for Proc {
@@ -609,6 +673,7 @@ pub struct Mem {
     pub insts: BTreeMap<InstUID, Inst>,
     pub time_points: Vec<MemPoint>,
     pub max_live_insts: u32,
+    visible: bool,
 }
 
 impl Mem {
@@ -620,6 +685,7 @@ impl Mem {
             insts: BTreeMap::new(),
             time_points: Vec::new(),
             max_live_insts: 0,
+            visible: true,
         }
     }
 
@@ -688,6 +754,10 @@ impl Mem {
                 free_levels.push(Reverse(level));
             }
         }
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
     }
 }
 
@@ -931,6 +1001,7 @@ pub struct Chan {
     pub depparts: BTreeMap<OpID, Vec<ProfUID>>,
     pub time_points: Vec<ChanPoint>,
     pub max_levels: u32,
+    visible: bool,
 }
 
 impl Chan {
@@ -943,6 +1014,7 @@ impl Chan {
             depparts: BTreeMap::new(),
             time_points: Vec::new(),
             max_levels: 0,
+            visible: true,
         }
     }
 
@@ -1012,6 +1084,10 @@ impl Chan {
         }
 
         self.time_points = points;
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
     }
 }
 
@@ -2193,6 +2269,7 @@ impl ProfUIDAllocator {
 pub struct State {
     prof_uid_allocator: ProfUIDAllocator,
     max_dim: i32,
+    pub num_nodes: u32,
     pub procs: BTreeMap<ProcID, Proc>,
     pub mems: BTreeMap<MemID, Mem>,
     pub mem_proc_affinity: BTreeMap<MemID, MemProcAffinity>,
@@ -2216,6 +2293,7 @@ pub struct State {
     logical_regions: BTreeMap<(ISpaceID, FSpaceID, TreeID), Region>,
     pub field_spaces: BTreeMap<FSpaceID, FSpace>,
     pub has_prof_data: bool,
+    pub visible_nodes: Vec<NodeID>,
 }
 
 impl State {
@@ -2490,22 +2568,26 @@ impl State {
         }
         // put fills into channels
         for mut fill in fills.into_values() {
-            fill.add_channel();
-            if let Some(chan_id) = fill.chan_id {
-                let chan = self.find_chan_mut(chan_id);
-                chan.add_fill(fill);
-            } else {
-                unreachable!();
+            if !fill.fill_inst_infos.is_empty() {
+                fill.add_channel();
+                if let Some(chan_id) = fill.chan_id {
+                    let chan = self.find_chan_mut(chan_id);
+                    chan.add_fill(fill);
+                } else {
+                    unreachable!();
+                }
             }
         }
         // put copies into channels
         for mut copy in copies.into_values() {
-            copy.add_channel();
-            if let Some(chan_id) = copy.chan_id {
-                let chan = self.find_chan_mut(chan_id);
-                chan.add_copy(copy);
-            } else {
-                unreachable!();
+            if !copy.copy_inst_infos.is_empty() {
+                copy.add_channel();
+                if let Some(chan_id) = copy.chan_id {
+                    let chan = self.find_chan_mut(chan_id);
+                    chan.add_copy(copy);
+                } else {
+                    unreachable!();
+                }
             }
         }
         self.has_prof_data = true;
@@ -2649,6 +2731,75 @@ impl State {
         for kind in self.runtime_call_kinds.values_mut() {
             kind.set_color(compute_color(lfsr.next(), num_colors));
         }
+    }
+
+    pub fn filter_output(&mut self) {
+        if self.visible_nodes.is_empty() {
+            return;
+        }
+        for (_, proc) in self.procs.iter_mut() {
+            let node_id = proc.proc_id.node_id();
+            if !self.visible_nodes.contains(&node_id) {
+                proc.visible = false;
+            }
+        }
+
+        let mut memid_to_be_deleted: Vec<MemID> = Vec::new();
+        for (mem_id, mem) in self.mems.iter_mut() {
+            let node_id = mem.mem_id.node_id();
+            if !self.visible_nodes.contains(&node_id) {
+                mem.visible = false;
+                memid_to_be_deleted.push(*mem_id);
+            }
+        }
+
+        for (_, chan) in self.chans.iter_mut() {
+            let mut src_node_id: Option<NodeID> = None;
+            let mut dst_node_id: Option<NodeID> = None;
+            if let Some(src_mem) = chan.chan_id.src {
+                src_node_id = Some(src_mem.node_id());
+            }
+            if let Some(dst_mem) = chan.chan_id.dst {
+                dst_node_id = Some(dst_mem.node_id());
+            }
+            // DepPart
+            if src_node_id.is_none() && dst_node_id.is_none() {
+                continue;
+            } else {
+                if !src_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
+                    && !dst_node_id.map_or(false, |n| self.visible_nodes.contains(&n))
+                {
+                    chan.visible = false;
+                } else {
+                    // we need to keep memory if it is chan.src/dst
+                    if let Some(src_mem) = chan.chan_id.src {
+                        memid_to_be_deleted.retain(|value| *value != src_mem);
+                    }
+                    if let Some(dst_mem) = chan.chan_id.dst {
+                        memid_to_be_deleted.retain(|value| *value != dst_mem);
+                    }
+                }
+            }
+        }
+
+        // if filter input is enabled, we remove invisible proc/mem/chan
+        // otherwise, we keep a full state
+        if Config::filter_input() {
+            self.procs.retain(|_, proc| proc.visible);
+        }
+        if Config::filter_input() {
+            self.mems
+                .retain(|&mem_id, _| !memid_to_be_deleted.contains(&mem_id));
+            self.mem_proc_affinity
+                .retain(|&mem_id, _| !memid_to_be_deleted.contains(&mem_id));
+        }
+        if Config::filter_input() {
+            self.chans.retain(|_, chan| chan.visible);
+        }
+    }
+
+    pub fn is_on_visible_nodes<'a>(visible_nodes: &'a Vec<NodeID>, node_id: NodeID) -> bool {
+        visible_nodes.is_empty() || visible_nodes.contains(&node_id)
     }
 }
 
@@ -3064,6 +3215,12 @@ fn process_record(
                 .entry(kind)
                 .or_insert_with(|| OpKind::new(name.clone()));
         }
+        Record::MaxDimDesc { max_dim } => {
+            state.max_dim = *max_dim;
+        }
+        Record::MachineDesc { num_nodes, .. } => {
+            state.num_nodes = *num_nodes;
+        }
         Record::ProcDesc { proc_id, kind } => {
             let kind = match ProcKind::try_from(*kind) {
                 Ok(x) => x,
@@ -3073,9 +3230,6 @@ fn process_record(
                 .procs
                 .entry(*proc_id)
                 .or_insert_with(|| Proc::new(*proc_id, kind));
-        }
-        Record::MaxDimDesc { max_dim } => {
-            state.max_dim = *max_dim;
         }
         Record::MemDesc {
             mem_id,
