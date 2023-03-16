@@ -774,7 +774,8 @@ namespace Legion {
       // failed_constraint will be the one from 'other' that wasn't entailed
       bool entails(const LayoutConstraintSet &other, 
                    unsigned total_dims = 0,
-                   const LayoutConstraint **failed_constraint = NULL) const;
+                   const LayoutConstraint **failed_constraint = NULL,
+                   bool test_pointer = true) const;
       // conflict_constraint will be the one from 'this' that conficted
       // with a constraint from 'other'
       bool conflicts(const LayoutConstraintSet &other,

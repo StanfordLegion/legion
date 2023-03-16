@@ -771,8 +771,9 @@ impl fmt::Display for FillInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
-            insts_set.insert(dst_inst);
+            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                insts_set.insert(dst_inst);
+            }
         }
         write!(f, "[")?;
         for (i, inst) in insts_set.iter().enumerate() {

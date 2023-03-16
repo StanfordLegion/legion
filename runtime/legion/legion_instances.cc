@@ -854,9 +854,9 @@ namespace Legion {
           return false;
         }
       }
-      return layout->constraints->entails_without_pointer(constraints,
+      return layout->constraints->entails(constraints,
               (instance_domain != NULL) ? instance_domain->get_num_dims() : 0,
-              failed_constraint);
+              failed_constraint, false/*test pointer*/);
     }
 
     //--------------------------------------------------------------------------
@@ -876,9 +876,9 @@ namespace Legion {
           return false;
         }
       }
-      return layout->constraints->entails_without_pointer(constraints,
+      return layout->constraints->entails(constraints,
               (instance_domain != NULL) ? instance_domain->get_num_dims() : 0,
-              failed_constraint);
+              failed_constraint, false/*test pointer*/);
     }
 
     //--------------------------------------------------------------------------
