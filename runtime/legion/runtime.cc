@@ -11847,15 +11847,14 @@ namespace Legion {
       if (!pending_constraints.empty())
       {
         // Update the next available constraint
-        while (pending_constraints.find(unique_constraint_id) !=
-                pending_constraints.end())
-          unique_constraint_id += runtime_stride;
+        LayoutConstraintID largest;
         // Now do the registrations
         std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
+          largest = it->first;
           // Figure out the distributed ID that we expect and then
           // check against what we expect on the owner node. This
           // is slightly brittle, but we'll always catch it when
@@ -11893,6 +11892,8 @@ namespace Legion {
           }
           register_layout(it->second, it->first, expected_did);
         }
+        // Update all the next unique constraint IDs
+        unique_constraint_id += largest;
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
