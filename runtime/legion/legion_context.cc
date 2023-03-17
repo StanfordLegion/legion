@@ -1078,15 +1078,51 @@ namespace Legion {
       // Now we go through and delete anything that the user leaked
       if (!created_regions.empty())
       {
-        for (std::map<LogicalRegion,unsigned>::const_iterator it = 
-              created_regions.begin(); it != created_regions.end(); it++)
+        for (std::map<LogicalRegion,unsigned>::const_iterator rit = 
+              created_regions.begin(); rit != created_regions.end(); rit++)
         {
           if (runtime->report_leaks)
             REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
                 "Logical region (%x,%x,%x) was leaked out of task tree rooted "
-                "by task %s", it->first.index_space.id, 
-                it->first.field_space.id, it->first.tree_id, get_task_name())
-          runtime->forest->destroy_logical_region(it->first, preconditions);
+                "by task %s", rit->first.index_space.id, 
+                rit->first.field_space.id, rit->first.tree_id, get_task_name())
+          runtime->forest->destroy_logical_region(rit->first, preconditions);
+          // Remove any latent field spaces and therefore any created fields
+          // since they might not be able to be cleaned up after this since
+          // this region might be holding the last reference to the field space
+          if (!latent_field_spaces.empty())
+          {
+            std::map<FieldSpace,std::set<LogicalRegion> >::iterator finder =
+              latent_field_spaces.find(rit->first.get_field_space());
+            if (finder != latent_field_spaces.end())
+            {
+              std::set<LogicalRegion>::iterator latent_finder = 
+                finder->second.find(rit->first);
+#ifdef DEBUG_LEGION
+              assert(latent_finder != finder->second.end());
+#endif
+              finder->second.erase(latent_finder);
+              if (finder->second.empty())
+              {
+                // Now that all the regions using this field space have
+                // been deleted we can clean up all the created_fields
+                for (std::set<std::pair<FieldSpace,FieldID> >::iterator it =
+                      created_fields.begin(); it != 
+                      created_fields.end(); /*nothing*/)
+                {
+                  if (it->first == finder->first)
+                  {
+                    std::set<std::pair<FieldSpace,FieldID> >::iterator 
+                      to_delete = it++;
+                    created_fields.erase(to_delete);
+                  }
+                  else
+                    it++;
+                }
+                latent_field_spaces.erase(finder);
+              }
+            }
+          }
         }
         created_regions.clear();
       }

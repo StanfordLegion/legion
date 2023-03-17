@@ -85,6 +85,12 @@ namespace Legion {
          << "max_dim:maxdim:" << sizeof(unsigned)
          << "}" << std::endl;
 
+      ss << "MachineDesc {"
+         << "id:" << MACHINE_DESC_ID                 << delim
+         << "node_id:unsigned:" << sizeof(unsigned)  << delim
+         << "num_nodes:unsigned:" << sizeof(unsigned)
+         << "}" << std::endl;
+
       ss << "MemDesc {" 
          << "id:" << MEM_DESC_ID                               << delim
          << "mem_id:MemID:"                << sizeof(MemID)    << delim
@@ -489,6 +495,21 @@ namespace Legion {
 		sizeof(max_dim_desc.max_dim));
 
     }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                                      const LegionProfDesc::MachineDesc
+				      &machine_desc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = MACHINE_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(machine_desc.node_id),
+		sizeof(machine_desc.node_id));
+      lp_fwrite(f, (char*)&(machine_desc.num_nodes),
+		sizeof(machine_desc.num_nodes));
+    }
+
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
                const LegionProfInstance::IndexSpacePointDesc &ispace_point_desc)
@@ -1552,6 +1573,16 @@ namespace Legion {
     {
       log_prof.print("Max Dim Desc %d",
                      max_dim_desc.max_dim);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                      const LegionProfDesc::MachineDesc
+				      &machine_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Machine Desc %d %d",
+                     machine_desc.node_id, machine_desc.num_nodes);
     }
 
     //--------------------------------------------------------------------------

@@ -9672,6 +9672,10 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
+          // If we need a padding constraint make sure we're
+          // checking for tight region bounds
+          if (constraints.padding_constraint.delta.get_dim() > 0)
+            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9780,6 +9784,10 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
+          // If we need a padding constraint make sure we're
+          // checking for tight region bounds
+          if (constraints.padding_constraint.delta.get_dim() > 0)
+            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9870,6 +9878,10 @@ namespace Legion {
       bool found = false;
       if (!candidates.empty())
       {
+        // If we need a padding constraint make sure we're
+        // checking for tight region bounds
+        if (constraints.padding_constraint.delta.get_dim() > 0)
+          tight_region_bounds = true;
         std::set<IndexSpaceExpression*> region_exprs;
         RegionTreeForest *forest = runtime->forest;
         for (std::vector<LogicalRegion>::const_iterator it = 
@@ -17061,6 +17073,8 @@ namespace Legion {
         &pending_constraints = get_pending_constraint_table();
       if (!pending_constraints.empty())
       {
+        // Update the next available constraint
+        LayoutConstraintID largest;
         // Create a collective mapping for all the nodes
         std::vector<AddressSpaceID> all_spaces(total_address_spaces);
         for (unsigned idx = 0; idx < all_spaces.size(); idx++)
@@ -17068,16 +17082,13 @@ namespace Legion {
         CollectiveMapping *mapping = 
           new CollectiveMapping(all_spaces, legion_collective_radix);
         mapping->add_reference();
-        // Update the next available constraint
-        while (pending_constraints.find(unique_constraint_id) !=
-                pending_constraints.end())
-          unique_constraint_id += runtime_stride;
         // Now do the registrations
         std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
+          largest = it->first;
           // Figure out the distributed ID that we expect and then
           // check against what we expect on the owner node. This
           // is slightly brittle, but we'll always catch it when
@@ -17115,6 +17126,13 @@ namespace Legion {
           }
           register_layout(it->second, it->first, expected_did, mapping);
         }
+        // Round largest up to the next biggest multiple of the total spaces
+        // so that the new unique constraint id still maps to this node
+        size_t remainder = largest % total_address_spaces;
+        if (remainder != 0)
+          largest += (total_address_spaces - remainder);
+        // Update all the next unique constraint IDs
+        unique_constraint_id += largest;
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();

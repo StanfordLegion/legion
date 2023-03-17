@@ -25,17 +25,34 @@ import gzip
 import io
 import sys
 from abc import ABC
-from typing import Union, Dict, List, Tuple, Callable, Type, ItemsView, Any
+from typing import Union, Dict, List, Tuple, Callable, Type, ItemsView, Any, Optional
 
 import legion_spy
 from legion_util import typeassert, typecheck
 from legion_prof import State
 
-long_type = int
-
 binary_filetype_pat = re.compile(b"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
 max_dim_val = 0
+
+# use to parse the node id from mem_id, proc_id
+@typecheck
+def parse_node_id(id: int) -> int:
+    return (id >> 40) & ((1 << 16) - 1)
+
+@typeassert(ids=tuple, is_node=bool)
+def is_on_visible_nodes(visible_nodes: List[int], ids: Tuple[int], is_node: bool = False) -> bool:
+    if visible_nodes is not None:
+        ret_val = False
+        for id in ids:
+            if is_node:
+                node_id = id
+            else:
+                node_id = parse_node_id(id)
+            ret_val = ret_val or (node_id in visible_nodes)
+        return ret_val
+    else:
+        return True
 
 #TODO: fix return type
 @typeassert(filename=str, compressed=bool, buffer_size=int)
@@ -47,7 +64,7 @@ def getFileObj(filename: str, compressed: bool =False, buffer_size: int =32768) 
 
 class LegionDeserializer(ABC):
     """This is a generic class for our deserializer"""
-    __slots__ = ["state", "callbacks"]
+    __slots__ = ["state", "callbacks", "always_parsed_logs", "visible_nodes"]
 
     def __init__(self, state: State, callbacks: Dict[str, Callable]):
         """The constructor for the initializer.
@@ -59,6 +76,8 @@ class LegionDeserializer(ABC):
         """
         self.state = state
         self.callbacks: Dict[Any, Callable] = callbacks # type: ignore # Any is str or int
+        self.always_parsed_logs = ["ProcDesc", "MemDesc", "ProcMDesc", "TaskInfo", "GPUTaskInfo", "MetaInfo", "CopyInfo", "CopyInstInfo", "FillInfo", "FillInstInfo", "InstTimelineInfo", "PartitionInfo"]
+        self.visible_nodes: Optional[List[int]] = None
 
     def deserialize(self, filename: str) -> None:
         """ The generic deserialize method
@@ -67,9 +86,26 @@ class LegionDeserializer(ABC):
         """
         raise NotImplementedError
 
+    def filter_record(self, node_id: Optional[int], log: str, **kwargs: Dict) -> bool:
+        assert (self.visible_nodes is not None) and (node_id is not None)
+        if node_id not in self.visible_nodes:
+            if log in ["ProcDesc", "MemDesc", "ProcMDesc", "CopyInfo", "FillInfo", "PartitionInfo"]:
+                return True
+            elif log in ["TaskInfo", "GPUTaskInfo", "MetaInfo"]:
+                return is_on_visible_nodes(self.visible_nodes, (kwargs["proc_id"],))
+            elif log == "CopyInstInfo":
+                return is_on_visible_nodes(self.visible_nodes, (kwargs["src"], kwargs["dst"]))
+            elif log == "FillInstInfo":
+                return is_on_visible_nodes(self.visible_nodes, (kwargs["dst"],))
+            elif log == "InstTimelineInfo":
+                return is_on_visible_nodes(self.visible_nodes, (kwargs["mem_id"],))
+            else:
+                return False
+        return True
+
 @typecheck
 def read_time(string: str) -> float:
-    return long_type(string) / 1000
+    return int(string) / 1000
 
 @typecheck
 def read_max_dim(string: str) -> int:
@@ -96,10 +132,11 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "RuntimeCallDesc": re.compile(prefix + r'Prof Runtime Call Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "MetaDesc": re.compile(prefix + r'Prof Meta Desc (?P<kind>[0-9]+) (?P<message>[0-1]) (?P<ordered_vc>[0-1]) (?P<name>[a-zA-Z0-9_ ]+)'),
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
+        "MachineDesc": re.compile(prefix + r'Machine Desc (?P<node_id>[0-9]+) (?P<num_nodes>[0-9]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
         "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<bandwidth>[0-9]+) (?P<latency>[0-9]+)'),
-        "MaxDimDesc": re.compile(prefix + r'Max Dim Desc (?P<max_dim>[0-9]+)'),
         "IndexSpacePointDesc": re.compile(prefix + r'Index Space Point Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
         "IndexSpaceRectDesc": re.compile(prefix + r'Index Space Rect Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
         "IndexSpaceEmptyDesc": re.compile(prefix + r'Index Space Empty Desc (?P<unique_id>[0-9]+)'),
@@ -137,10 +174,10 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
-        "op_id": long_type,
-        "parent_id": long_type,
-        "size": long_type,
-        "capacity": long_type,
+        "op_id": int,
+        "parent_id": int,
+        "size": int,
+        "capacity": int,
         "variant_id": int,
         "lg_id": int,
         "uid": int,
@@ -152,15 +189,15 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "point": int,
         "bandwidth": int,
         "latency": int,
-        "point0": long_type,
-        "point1": long_type,
-        "point2": long_type,
+        "point0": int,
+        "point1": int,
+        "point2": int,
         "dim": int,
         "index_id": int,
         "field_id": int,
         "fspace_id": int,
-        "ispace_id": long_type,
-        "unique_id": long_type,
+        "ispace_id": int,
+        "unique_id": int,
         "disjoint": bool,
         "has_align": int,
         "is_sparse": int,
@@ -194,15 +231,17 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "align_desc": int,
         "eqk": int,
         "dim_kind": int,
-        "dense_size": long_type,
-        "sparse_size": long_type,
+        "dense_size": int,
+        "sparse_size": int,
         "name": lambda x: x,
         "request_type": int,
         "num_hops": int,
         "message" : bool,
         "ordered_vc" : bool,
         "desc": lambda x: x,
-        "provenance": lambda x: x
+        "provenance": lambda x: x,
+        "node_id": int,
+        "num_nodes": int,
     }
 
     def __init__(self, state: State, callbacks: Dict[str, Callable]) -> None:
@@ -233,14 +272,16 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
                    self.state.has_spy_data = True
                    break
 
-    @typecheck
-    def parse(self, filename: str, verbose: bool) -> int:
+    @typeassert(filename=str, verbose=bool)
+    def parse(self, filename: str, verbose: bool, visible_nodes: Optional[List[int]], filter_input: bool) -> int:
         skipped = 0
+        self.visible_nodes = visible_nodes
         with open(filename, 'rb') as log:
             matches = 0
             # Keep track of the first and last times
             first_time = 0
             last_time = 0
+            node_id: Optional[int] = None
             for line_bytes in log:
                 line = line_bytes.decode('utf-8')
                 if not self.state.has_spy_data and \
@@ -254,8 +295,18 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
                     if m is not None:
                         callback = self.callbacks[prof_event]
                         kwargs = self.parse_regex_matches(m)
-                        callback(**kwargs)
-                        matched = True
+                        if prof_event == "MachineDesc":
+                            # parse node id
+                            node_id = callback(**kwargs)
+                            matched = True
+                        else:
+                            if filter_input:
+                                if self.filter_record(node_id, prof_event, **kwargs):
+                                    callback(**kwargs)
+                                    matched = True
+                            else:
+                                callback(**kwargs)
+                                matched = True
                         break
                 if matched:
                     matches += 1
@@ -274,6 +325,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
     preamble_data: Dict[int, List[Tuple[str, Callable]]] = {}
     name_to_id: Dict[str, int] = {}
+    id_to_name: Dict[int, str] = {}
 
     # XXX: Make sure these are consistent with legion_profiling.h and legion_types.h!
     fmt_dict = {
@@ -382,6 +434,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
             LegionProfBinaryDeserializer.preamble_data[_id] = param_data
             LegionProfBinaryDeserializer.name_to_id[name] = _id
+            LegionProfBinaryDeserializer.id_to_name[_id] = name
 
         # change the callbacks to be by id
         if not self.callbacks_translated:
@@ -399,23 +452,36 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         #     callbacks_valid = callbacks_valid and cur_valid
         # assert callbacks_valid
 
-    @typecheck
-    def parse(self, filename: str, verbose: bool) -> int:
-        print("parsing " + str(filename))
+    @typeassert(filename=str, verbose=bool)
+    def parse(self, filename: str, verbose: bool, visible_nodes: Optional[List[int]], filter_input: bool) -> int:
+        print("parsing " + str(filename) + " filter input " + str(filter_input))
+        self.visible_nodes = visible_nodes
         def parse_file(log: io.BufferedReader) -> int:
             matches = 0
+            node_id: Optional[int] = None
             self.parse_preamble(log)
             _id_raw = log.read(4)
             while _id_raw:
-                matches += 1
                 _id = int(struct.unpack('i', _id_raw)[0])
                 param_data = LegionProfBinaryDeserializer.preamble_data[_id]
                 kwargs = {}
                 for (param_name, reader) in param_data:
                     val = reader(log)
                     kwargs[param_name] = val
-                self.callbacks[_id](**kwargs)
                 _id_raw = log.read(4)
+                callback_name = self.id_to_name[_id]
+                if callback_name == "MachineDesc":
+                    # parse node id
+                    node_id = self.callbacks[_id](**kwargs)
+                    matches += 1
+                else:
+                    if filter_input:
+                        if self.filter_record(node_id, callback_name, **kwargs):
+                            self.callbacks[_id](**kwargs)
+                            matches += 1
+                    else:
+                        self.callbacks[_id](**kwargs)
+                        matches += 1
             return matches
         try:
             # Try it as a gzip file first
