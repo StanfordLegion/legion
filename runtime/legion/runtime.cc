@@ -11859,7 +11859,7 @@ namespace Legion {
       if (!pending_constraints.empty())
       {
         // Update the next available constraint
-        LayoutConstraintID largest;
+        LayoutConstraintID largest = 0;
         // Now do the registrations
         std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
