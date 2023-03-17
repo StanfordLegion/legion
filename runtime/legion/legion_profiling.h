@@ -88,6 +88,10 @@ namespace Legion {
       struct MaxDimDesc {
 	unsigned max_dim;
       };
+      struct MachineDesc {
+        unsigned node_id;
+	unsigned num_nodes;
+      };
     };
 
     class LegionProfInstance {

@@ -18,8 +18,10 @@
 
 #include "realm/realm_config.h"
 
+#if defined (__CUDACC__) || defined (__HIPCC__)
 #ifdef REALM_USE_HIP
 #include <hip/hip_runtime.h>
+#endif
 #endif
 
 namespace Realm {
