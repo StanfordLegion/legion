@@ -17074,7 +17074,7 @@ namespace Legion {
       if (!pending_constraints.empty())
       {
         // Update the next available constraint
-        LayoutConstraintID largest;
+        LayoutConstraintID largest = 0;
         // Create a collective mapping for all the nodes
         std::vector<AddressSpaceID> all_spaces(total_address_spaces);
         for (unsigned idx = 0; idx < all_spaces.size(); idx++)
