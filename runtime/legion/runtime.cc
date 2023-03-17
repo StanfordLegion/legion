@@ -11892,6 +11892,11 @@ namespace Legion {
           }
           register_layout(it->second, it->first, expected_did);
         }
+        // Round largest up to the next biggest multiple of the total spaces
+        // so that the new unique constraint id still maps to this node
+        size_t remainder = largest % total_address_spaces;
+        if (remainder != 0)
+          largest += (total_address_spaces - remainder);
         // Update all the next unique constraint IDs
         unique_constraint_id += largest;
         // avoid races if we are doing separate runtime creation
