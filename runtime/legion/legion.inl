@@ -9050,28 +9050,43 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<N,T>& p) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           return accessor.read(p); 
         }
       __CUDA_HD__
       inline void write(const Point<N,T>& p, FT val) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           accessor.write(p, val); 
         }
       __CUDA_HD__
       inline FT* ptr(const Point<N,T>& p) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           return accessor.ptr(p); 
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<N,T>& r, size_t field_size = sizeof(FT)) const
         {
           const Rect<N,T> contained = outer.intersection(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(contained.volume() == r.volume());
+#else
           if (contained.volume() < r.volume())
           {
             if (outer.contains(r.lo))
@@ -9079,9 +9094,14 @@ namespace Legion {
             else
               PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
           }
+#endif
           const Rect<N,T> overlap = inner.overlaps(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(overlap.empty());
+#else
           if (!overlap.empty())
             PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -9089,6 +9109,9 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           const Rect<N,T> contained = outer.intersection(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(contained.volume() == r.volume());
+#else
           if (contained.volume() < r.volume())
           {
             if (outer.contains(r.lo))
@@ -9096,9 +9119,14 @@ namespace Legion {
             else
               PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
           }
+#endif
           const Rect<N,T> overlap = inner.overlaps(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(overlap.empty());
+#else
           if (!overlap.empty())
             PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+#endif
           for (int i = 0; i < N; i++)
             strides[i] = accessor.strides[i] / field_size;
           return accessor.ptr(r.lo);
@@ -9106,8 +9134,12 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Point<N,T>& p) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           return accessor[p]; 
         }
       __CUDA_HD__
@@ -9125,8 +9157,12 @@ namespace Legion {
       inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
@@ -9257,28 +9293,43 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Point<1,T>& p) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           return accessor.read(p); 
         }
       __CUDA_HD__
       inline void write(const Point<1,T>& p, FT val) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           accessor.write(p, val); 
         }
       __CUDA_HD__
       inline FT* ptr(const Point<1,T>& p) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           return accessor.ptr(p); 
         }
       __CUDA_HD__
       inline FT* ptr(const Rect<1,T>& r, size_t field_size = sizeof(FT)) const
         {
           const Rect<1,T> contained = outer.intersection(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(contained.volume() == r.volume());
+#else
           if (contained.volume() < r.volume())
           {
             if (outer.contains(r.lo))
@@ -9286,9 +9337,14 @@ namespace Legion {
             else
               PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
           }
+#endif
           const Rect<1,T> overlap = inner.overlaps(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(overlap.empty());
+#else
           if (!overlap.empty())
             PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+#endif
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
@@ -9296,6 +9352,9 @@ namespace Legion {
                      size_t field_size = sizeof(FT)) const
         {
           const Rect<1,T> contained = outer.intersection(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(contained.volume() == r.volume());
+#else
           if (contained.volume() < r.volume())
           {
             if (outer.contains(r.lo))
@@ -9303,25 +9362,38 @@ namespace Legion {
             else
               PhysicalRegion::fail_padding_check(DomainPoint(r.hi), field);
           }
+#endif
           const Rect<1,T> overlap = inner.overlaps(r);
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(overlap.empty());
+#else
           if (!overlap.empty())
             PhysicalRegion::fail_padding_check(DomainPoint(overlap.lo), field);
+#endif
           strides[0] = accessor.strides[0] / field_size;
           return accessor.ptr(r.lo);
         }
       __CUDA_HD__
       inline FT& operator[](const Point<1,T>& p) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           return accessor[p]; 
         }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+          assert(outer.contains(p) && !inner.contains(p));
+#else
           if (!outer.contains(p) || inner.contains(p))
             PhysicalRegion::fail_padding_check(DomainPoint(p), field);
+#endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
