@@ -2108,7 +2108,7 @@ namespace Legion {
         ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
         Provenance *prov, CollectiveMapping *mapping, bool tree_valid)
       : IndexSpaceNode(ctx, handle, parent, color, did, ready, expr_id, init,
-          dep, prov, mapping, tree_valid), linearization_ready(false)
+          dep, prov, mapping, tree_valid), linearization(NULL)
     //--------------------------------------------------------------------------
     {
       if (bounds != NULL)
@@ -2136,6 +2136,9 @@ namespace Legion {
       if (is_owner())
         realm_index_space.destroy(
             tight_index_space ? tight_index_space_set : realm_index_space_set);
+      ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
+      if (linear != NULL)
+        delete linear;
     }
 
     //--------------------------------------------------------------------------
@@ -2911,10 +2914,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::contains_point(const Realm::Point<DIM,T> &p)
+    bool IndexSpaceNodeT<DIM,T>::contains_point(const Point<DIM,T> &p)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> test_space;
+      DomainT<DIM,T> test_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
       return test_space.contains(p);
@@ -2925,46 +2928,32 @@ namespace Legion {
     LegionColor IndexSpaceNodeT<DIM,T>::get_max_linearized_color(void)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> color_bounds;
-      get_realm_index_space(color_bounds, true/*tight*/);
-      return color_bounds.bounds.volume();
+      ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
+      if (linear == NULL)
+        linear = compute_linearization_metadata();
+      return linear->get_max_linearized_color();
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::compute_linearization_metadata(void)
+    ColorSpaceLinearizationT<DIM,T>*
+                    IndexSpaceNodeT<DIM,T>::compute_linearization_metadata(void)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> space;
+      DomainT<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
-      // Don't need to wait for full index space since we just need bounds
-      const Realm::Rect<DIM,T> &bounds = space.bounds;
-      const long long volume = bounds.volume();
-      if (volume > 0)
+      ColorSpaceLinearizationT<DIM,T> *result = 
+        new ColorSpaceLinearizationT<DIM,T>(space);
+      ColorSpaceLinearizationT<DIM,T> *expected = NULL;
+      if (!linearization.compare_exchange_strong(expected, result))
       {
-        long long stride = 1;
-        for (int idx = 0; idx < DIM; idx++)
-        {
-          offset[idx] = bounds.lo[idx];
-          strides[idx] = stride;
-          stride *= ((bounds.hi[idx] - bounds.lo[idx]) + 1);
-        }
+        delete result;
 #ifdef DEBUG_LEGION
-        assert(stride == volume);
+        assert(expected != NULL);
 #endif
+        result = expected;
       }
-      else
-      {
-        for (int idx = 0; idx < DIM; idx++)
-        {
-          offset[idx] = 0;
-          strides[idx] = 0;
-        }
-      }
-      // Need a memory fence here to make sure that writes propagate on 
-      // non-total-store-ordered memory consistency machines like PowerPC
-      __sync_synchronize();
-      linearization_ready = true;
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2973,7 +2962,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Point<DIM,T> point = p;
-      return linearize_color(&point, type_tag);
+      return linearize_color(point);
     }
 
     //--------------------------------------------------------------------------
@@ -2982,9 +2971,10 @@ namespace Legion {
                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      if (!linearization_ready)
-        compute_linearization_metadata();
-      Realm::Point<DIM,T> point;
+      ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
+      if (linear == NULL)
+        linear = compute_linearization_metadata();
+      Point<DIM,T> point;
       if (type_tag != handle.get_type_tag())
       {
         DomainPoint dp;
@@ -2993,28 +2983,32 @@ namespace Legion {
         point = dp;
       }
       else
-        point = *(static_cast<const Realm::Point<DIM,T>*>(realm_color));
-      // First subtract the offset to get to the origin
-      point -= offset;
-      LegionColor color = 0;
-      for (int idx = 0; idx < DIM; idx++)
-        color += point[idx] * strides[idx];
-      return color;
+        point = *(static_cast<const Point<DIM,T>*>(realm_color));
+      return linear->linearize(point);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    LegionColor IndexSpaceNodeT<DIM,T>::linearize_color(Point<DIM,T> point)
+    LegionColor IndexSpaceNodeT<DIM,T>::linearize_color(
+                                                      const Point<DIM,T> &point)
     //--------------------------------------------------------------------------
     {
-      if (!linearization_ready)
-        compute_linearization_metadata();
-      // First subtract the offset to get to the origin
-      point -= offset;
-      LegionColor color = 0;
-      for (int idx = 0; idx < DIM; idx++)
-        color += point[idx] * strides[idx];
-      return color;
+      ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
+      if (linear == NULL)
+        linear = compute_linearization_metadata();
+      return linear->linearize(point);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::delinearize_color(LegionColor color,
+                                                   Point<DIM,T> &point)
+    //--------------------------------------------------------------------------
+    {
+      ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
+      if (linear == NULL)
+        linear = compute_linearization_metadata();
+      linear->delinearize(color, point);
     }
 
     //--------------------------------------------------------------------------
@@ -3023,31 +3017,16 @@ namespace Legion {
                                             void *realm_color, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
-      if (!linearization_ready)
-        compute_linearization_metadata();
-      if (type_tag == handle.get_type_tag())
-      {
-        Realm::Point<DIM,T> &point = 
-          *(static_cast<Realm::Point<DIM,T>*>(realm_color));
-        for (int idx = DIM-1; idx >= 0; idx--)
-        {
-          point[idx] = color/strides[idx]; // truncates
-          color -= point[idx] * strides[idx];
-        }
-        point += offset;
-      }
-      else
-      {
-        Realm::Point<DIM,T> point;
-        for (int idx = DIM-1; idx >= 0; idx--)
-        {
-          point[idx] = color/strides[idx]; // truncates
-          color -= point[idx] * strides[idx];
-        }
-        point += offset;
+      ColorSpaceLinearizationT<DIM,T> *linear = linearization.load();
+      if (linear == NULL)
+        linear = compute_linearization_metadata();
+      Point<DIM,T> point;
+      linear->delinearize(color, point);
+      if (type_tag != handle.get_type_tag())
         RealmPointConverter<DIM,Realm::DIMTYPES>::convert_to(
             DomainPoint(point), realm_color, type_tag, "delinearize_color");
-      }
+      else
+        *(static_cast<Point<DIM,T>*>(realm_color)) = point;
     }
 
     //--------------------------------------------------------------------------
@@ -3056,7 +3035,7 @@ namespace Legion {
                        IndexSpaceNodeT<DIM,T>::create_color_space_iterator(void)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> color_space;
+      DomainT<DIM,T> color_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(color_space, true/*tight*/); 
       return new ColorSpaceIteratorT<DIM,T>(color_space, this);
@@ -3068,8 +3047,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<DIM,T> color_point;
-      delinearize_color(color, &color_point, handle.get_type_tag());
-      Realm::IndexSpace<DIM,T> color_space;
+      delinearize_color(color, color_point);
+      DomainT<DIM,T> color_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(color_space, true/*tight*/);
       Realm::IndexSpaceIterator<DIM,T> itr(color_space);
@@ -3104,8 +3083,8 @@ namespace Legion {
                                                 bool report_error/*=false*/)
     //--------------------------------------------------------------------------
     {
-      Realm::Point<DIM,T> point;
-      delinearize_color(color, &point, handle.get_type_tag());
+      Point<DIM,T> point;
+      delinearize_color(color, point);
       Realm::IndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
       if (!space.contains(point))
@@ -3164,8 +3143,8 @@ namespace Legion {
                                                                   LegionColor c)
     //--------------------------------------------------------------------------
     {
-      Realm::Point<DIM,T> color_point;
-      delinearize_color(c, &color_point, handle.get_type_tag());
+      Point<DIM,T> color_point;
+      delinearize_color(c, color_point);
       return DomainPoint(Point<DIM,T>(color_point));
     } 
 
@@ -6021,6 +6000,495 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Templated Linearized Color Space
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ColorSpaceLinearizationT<DIM,T>::ColorSpaceLinearizationT(
+                                                   const DomainT<DIM,T> &domain)
+    //--------------------------------------------------------------------------
+    {
+      // Check for the common case of a dense color space that we can traverse
+      // with a single Morton curve
+      if (domain.dense())
+      {
+        unsigned interesting_count = 0;
+        int interesting_dims[DIM] = { -1 };
+        size_t largest_extent= 0;
+        for (int i = 0; i < DIM; i++)
+        {
+          size_t extent = (domain.bounds.hi[i] - domain.bounds.lo[i]) + 1;
+#ifdef DEBUG_LEGION
+          assert(extent > 0);
+          assert(extent < SIZE_MAX);
+#endif
+          if (extent == 1)
+            continue;
+          interesting_dims[interesting_count++] = i;
+          if (largest_extent < extent)
+            largest_extent = extent;
+        }
+        if ((interesting_count == 0) || (interesting_count == 1))
+        {
+          // This is a rectangle that represents a single point or a 
+          // "pencil" in N-dimensions and therefore doesn't need a Morton curve
+          morton_tiles.push_back(new MortonTile(domain.bounds,
+                interesting_count, interesting_dims, 0/*order*/));
+          kdtree = NULL;
+          return;
+        }
+        // Find the least power of 2 >= extent
+        unsigned power2 = largest_extent - 1;
+        constexpr unsigned log2bits = STATIC_LOG2(8*sizeof(power2));
+        for (unsigned idx = 0; idx < log2bits; idx++)
+          power2 = power2 | (power2 >> (1 << idx));
+        power2++;
+        // Take the log to get the number of bits to represent it
+        unsigned order = STATIC_LOG2(power2);
+        // Check to see if we can fit this in the available bits
+        const size_t max_morton = 8*sizeof(LegionColor) / interesting_count;
+        if (order <= max_morton)
+        {
+          // It fits so we just need a single MortonTile
+          morton_tiles.push_back(new MortonTile(domain.bounds,
+                interesting_count, interesting_dims, order));
+          kdtree = NULL;
+          return;
+        }
+      }
+      // Iterate over the rectangles of the domain
+      std::vector<std::pair<Rect<DIM,T>,MortonTile*> > tiles;
+      for (RectInDomainIterator<DIM,T> itr(domain); itr(); itr++)
+      {
+        // Find the extent of the smallest dimension of the rectangle
+        // that is > 1. Any dimensions that have extent one are not interesting
+        // and will be ignored by the Morton curve
+        unsigned interesting_count = 0;
+        int interesting_dims[DIM] = { -1 };
+        size_t smallest_extent = SIZE_MAX;
+        for (int i = 0; i < DIM; i++)
+        {
+          size_t extent = (itr->hi[i] - itr->lo[i]) + 1;
+#ifdef DEBUG_LEGION
+          assert(extent > 0);
+          assert(extent < SIZE_MAX);
+#endif
+          if (extent == 1)
+            continue;
+          interesting_dims[interesting_count++] = i;
+          if (extent < smallest_extent)
+            smallest_extent = extent;
+        }
+        if ((interesting_count == 0) || (interesting_count == 1))
+        {
+          // This is a rectangle that represents a single point or a 
+          // "pencil" in N-dimensions and therefore doesn't need a Morton curve
+          tiles.push_back(std::make_pair(*itr, new MortonTile(*itr,
+                  interesting_count, interesting_dims, 0/*order*/)));
+          continue;
+        }
+        // Find the least power of 2 >= extent
+        size_t power2 = smallest_extent - 1;
+        constexpr unsigned log2bits = STATIC_LOG2(8*sizeof(power2));
+        for (unsigned idx = 0; idx < log2bits; idx++)
+          power2 = power2 | (power2 >> (1 << idx));
+        power2++;
+        // Take the log to get the number of bits to represent it
+        unsigned order = STATIC_LOG2(power2);
+        // For small dimensions over-approximating is not too bad, but in
+        // larger dimensions it can become expensive as the amount of waste
+        // is proportion to 2^DIM, so we deicde that for more than four 
+        // dimensions we we'll look for the largest power of 2 <= extent
+        if (DIM > 4)
+        {
+          // This is the least power of 2 >= extent, check if it is the
+          // same as the extent, if not subtract by one to get the 
+          // largest power of 2 <= the extent
+#ifdef DEBUG_LEGION
+          assert(smallest_extent <= (1 << order));
+#endif
+          if (smallest_extent != (1 << order))
+            order--;
+        }
+        // If this is bigger than the largest order we support for the
+        // given number of interesting dimensions then bound it
+        const size_t max_morton = 8*sizeof(LegionColor) / interesting_count;
+        if (order > max_morton)
+          order = max_morton;
+        // Tile the rectangle
+        // We could do this in a Morton-ordered way too, but for now we're
+        // just going to let the KD-tree figure out the right way to sort
+        // things in the case that we have to make lots of tiles
+        // The KD-tree sorting algorithm should be good enough to give us
+        // locality where we actually need it
+        Point<DIM,T> strides = Point<DIM,T>::ZEROES();
+        for (unsigned idx = 0; idx < interesting_count; idx++)
+          strides[interesting_dims[idx]] = (1 << order);
+        Point<DIM,T> lower = itr->lo;
+        bool done = false;
+        while (!done)
+        {
+          Rect<DIM,T> next(lower, lower + strides);
+          if (interesting_count < DIM)
+          {
+            for (unsigned idx = 0; idx < interesting_count; idx++)
+              next.hi[interesting_dims[idx]] -= 1;
+          }
+          else
+            next.hi -= Point<DIM,T>::ONES();
+          next = itr->intersection(next);
+#ifdef DEBUG_LEGION
+          assert(next.volume() > 0);
+#endif
+          tiles.push_back(std::make_pair(next, new MortonTile(next,
+                  interesting_count, interesting_dims, order)));
+          done = true;
+          for (unsigned idx = 0; idx < interesting_count; idx++)
+          {
+            int dim = interesting_dims[idx];
+            lower[dim] += strides[dim];
+            if (lower[dim] <= itr->hi[dim])
+            {
+              done = false;
+              break;
+            }
+            // Otherwise reset this dimension and ripple-carry add
+            lower[dim] = itr->lo[dim];
+          }
+        }
+      }
+      // Put the Morton Tiles in a KD-tree for fast lookups
+      kdtree = new KDNode<DIM,T,MortonTile*>(domain.bounds, tiles);
+      // Assign an order to the Morton Tiles based on their order in the
+      // KD-tree which should give us good locality between the tiles
+      kdtree->record_inorder_traversal(morton_tiles);
+      // Now we can go through and compute the color offsets for each tile
+      LegionColor offset = 0;
+      color_offsets.resize(morton_tiles.size());
+      for (unsigned idx = 0; idx < morton_tiles.size(); idx++)
+      {
+        color_offsets[idx] = offset;
+        MortonTile *tile = morton_tiles[idx];
+        tile->index = idx;
+        LegionColor new_offset = offset;
+        if (tile->morton_order == 0)
+        {
+          if (tile->interesting_count == 1)
+          {
+            int dim = tile->interesting_dims[0];
+            new_offset += ((tile->bounds.hi[dim] - tile->bounds.lo[dim]) + 1);
+          }
+          else // single element
+            new_offset++;
+        }
+        else
+          new_offset += (1 << (tile->morton_order * tile->interesting_count));
+        // Check for overflow which would be very bad
+        if (new_offset <= offset)
+          REPORT_LEGION_FATAL(LEGION_FATAL_MORTON_TILING_FAILURE,
+              "Failure during Morton tiling of color space. Please "
+              "report this issue as a bug and provide a reproducer.")
+        offset = new_offset;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ColorSpaceLinearizationT<DIM,T>::~ColorSpaceLinearizationT(void)
+    //--------------------------------------------------------------------------
+    {
+      if (kdtree != NULL)
+        delete kdtree;
+      for (unsigned idx = 0; idx < morton_tiles.size(); idx++)
+        delete morton_tiles[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LegionColor ColorSpaceLinearizationT<DIM,T>::get_max_linearized_color(void) 
+                                                                           const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!morton_tiles.empty());
+#endif
+      MortonTile *last = morton_tiles.back();
+      LegionColor max_color = 
+        (1 << (last->morton_order * last->interesting_count)); 
+      if (!color_offsets.empty())
+        max_color += color_offsets.back();
+      return max_color;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LegionColor ColorSpaceLinearizationT<DIM,T>::linearize(
+                                                const Point<DIM,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+      if (morton_tiles.size() > 1)
+      {
+        // Find the Morton Tile that contains the point
+        MortonTile *tile = kdtree->find(point);
+#ifdef DEBUG_LEGION
+        assert(tile != NULL);
+#endif
+        return color_offsets[tile->index] + tile->linearize(point);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!morton_tiles.empty());
+#endif
+        MortonTile *tile = morton_tiles.front();
+        return tile->linearize(point);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void ColorSpaceLinearizationT<DIM,T>::delinearize(LegionColor color,
+                                                      Point<DIM,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+      if ((morton_tiles.size() > 1) && (color > 0))
+      {
+        std::vector<LegionColor>::const_iterator finder = 
+          std::upper_bound(color_offsets.begin(), color_offsets.end(), color);
+#ifdef DEBUG_LEGION
+        assert(finder != color_offsets.begin());
+#endif
+        finder = std::prev(finder);
+        unsigned index = std::distance(color_offsets.begin(), finder);
+#ifdef DEBUG_LEGION
+        assert(index < morton_tiles.size());
+        assert(index < color_offsets.size());
+#endif
+        color -= color_offsets[index];
+        return morton_tiles[index]->delinearize(color, point);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!morton_tiles.empty());
+#endif
+        MortonTile *tile = morton_tiles.front();
+        tile->delinearize(color, point);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    LegionColor ColorSpaceLinearizationT<DIM,T>::MortonTile::linearize(
+                                                const Point<DIM,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(bounds.contains(point));
+#endif
+      if (morton_order == 0)
+      {
+#ifdef DEBUG_LEGION
+        assert((interesting_count == 0) || (interesting_count == 1));
+#endif
+        // No need for a Morton curve in these case of 0 or 1 interesting dims
+        if (interesting_count == 0)
+          return 0;
+        return point[interesting_dims[0]] - bounds.lo[interesting_dims[0]];
+      }
+      else if (interesting_count < DIM)
+      {
+        // Slow path, not all dimensions are interesting
+        // Pull them down to the localized dimensions
+        unsigned coords[DIM];
+        for (unsigned i = 0; i < interesting_count; i++)
+          coords[i] = point[interesting_dims[i]]-bounds.lo[interesting_dims[i]];
+        // Shift the bits for each of the coordinates
+        // We could do this more efficiently by moving groups
+        // of bits by the same offsets but that's more complicated
+        // and error prone so we don't do it currently
+        LegionColor codes[DIM] = { 0 };
+        unsigned andbit = 1; unsigned shift = 0; 
+        for (unsigned idx = 0; idx < morton_order; idx++)
+        {
+          for (unsigned i = 0; i < interesting_count; i++)
+            codes[i] |= (LegionColor)(coords[i] & andbit) << shift;
+          andbit <<= 1;
+          shift += (interesting_count - 1);
+        }
+        // Interleave the bits from each coordinate
+        LegionColor result = 0;
+        for (unsigned i = 0; i < interesting_count; i++)
+          result |= (codes[i] << i);
+        return result;
+      }
+      else
+      {
+        // Fast path, all dimensions are interesting
+        unsigned coords[DIM];
+        for (int i = 0; i < DIM; i++)
+          coords[i] = point[i] - bounds.lo[i];
+        // Shift the bits for each of the coordinates
+        // We could do this more efficiently by moving groups
+        // of bits by the same offsets but that's more complicated
+        // and error prone so we don't do it currently
+        LegionColor codes[DIM] = { 0 };
+        unsigned andbit = 1, shift = 0;
+        for (unsigned idx = 0; idx < morton_order; idx++)
+        {
+          for (int i = 0; i < DIM; i++)
+            codes[i] |= (LegionColor)(coords[i] & andbit) << shift;
+          andbit <<= 1;
+          shift += (DIM - 1);
+        }
+        // Interleave the bits from each coordinate
+        LegionColor result = 0;
+        for (int i = 0; i < DIM; i++)
+          result |= (codes[i] << i);
+        return result;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void ColorSpaceLinearizationT<DIM,T>::MortonTile::delinearize(
+                                   LegionColor color, Point<DIM,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+      point = Point<DIM,T>::ZEROES(); 
+      if (morton_order == 0)
+      {
+#ifdef DEBUG_LEGION
+        assert((interesting_count == 0) || (interesting_count == 1));
+#endif
+        if (interesting_count == 1)
+          point[interesting_dims[0]] = color;
+      }
+      else if (interesting_count < DIM)
+      {
+        // Slow path, not all dimensions are interesting
+        unsigned coords[DIM] = { 0 };
+        unsigned selector = 0, shift = 0;
+        for (unsigned idx = 0; idx < morton_order; idx++)
+        {
+          for (unsigned i = 0; i < interesting_count; i++)
+            coords[i] |= (color & (1 << (selector + i))) >> (shift + i);
+          selector += interesting_count;
+          shift += (interesting_count - 1);
+        }
+        for (unsigned i = 0; i < interesting_count; i++)
+          point[interesting_dims[i]] = coords[i];
+      }
+      else
+      {
+        unsigned coords[DIM] = { 0 };
+        unsigned selector = 0, shift = 0;
+        for (unsigned idx = 0; idx < morton_order; idx++)
+        {
+          for (int i = 0; i < DIM; i++)
+            coords[i] |= (color & (1 << (selector + i))) >> (shift + i);
+          selector += DIM;
+          shift += (DIM-1);
+        }
+        for (int i = 0; i < DIM; i++)
+          point[i] = coords[i];
+      }
+      point += bounds.lo;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Templated Linearized Color Space (for DIM=1)
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    ColorSpaceLinearizationT<1,T>::ColorSpaceLinearizationT(
+                                                     const DomainT<1,T> &domain)
+    //--------------------------------------------------------------------------
+    {
+      if (!domain.dense())
+      {
+        std::map<T,size_t> tile_sizes;
+        for (RectInDomainIterator<1,T> itr(domain); itr(); itr++)
+          tile_sizes[itr->lo[0]] = (itr->hi[0] - itr->lo[0]) + 1;
+        LegionColor offset = 0;
+        tiles.reserve(tile_sizes.size());
+        extents.reserve(tile_sizes.size());
+        color_offsets.reserve(tiles.size());
+        for (typename std::map<T,size_t>::const_iterator it =
+              tile_sizes.begin(); it != tile_sizes.end(); it++)
+        {
+          tiles.push_back(it->first);
+          extents.push_back(it->second);
+          color_offsets.push_back(offset);
+          offset += it->second;
+        }
+      }
+      else
+      {
+        tiles.push_back(domain.bounds.lo[0]); 
+        extents.push_back(domain.bounds.volume());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    LegionColor ColorSpaceLinearizationT<1,T>::get_max_linearized_color(void)
+                                                                           const
+    //--------------------------------------------------------------------------
+    {
+      LegionColor max_color = extents.back();
+      if (!color_offsets.empty())
+        max_color += color_offsets.back();
+      return max_color;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    LegionColor ColorSpaceLinearizationT<1,T>::linearize(
+                                                  const Point<1,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+      if (tiles.size() > 1)
+      {
+        typename std::vector<T>::const_iterator finder = 
+          std::upper_bound(tiles.begin(), tiles.end(), point[0]);
+        if (finder != tiles.begin())
+        {
+          finder = std::prev(finder);
+          unsigned index = std::distance(tiles.begin(), finder);
+          return color_offsets[index] + (point[0] - tiles[index]);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!tiles.empty());
+#endif
+      return (point[0] - tiles.front());
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void ColorSpaceLinearizationT<1,T>::delinearize(
+                                     LegionColor color, Point<1,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+      if ((tiles.size() > 1) && (color > 0))
+      {
+        std::vector<LegionColor>::const_iterator finder =
+          std::upper_bound(color_offsets.begin(), color_offsets.end(), color);
+#ifdef DEBUG_LEGION
+        assert(finder != color_offsets.begin());
+#endif
+        finder = std::prev(finder);
+        unsigned index = std::distance(color_offsets.begin(), finder);
+        point[0] = tiles[index] + (color - *finder);
+      }
+      else
+        point[0] = tiles.front() + color;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Templated Color Space Iterator
     /////////////////////////////////////////////////////////////
 
@@ -6277,6 +6745,38 @@ namespace Legion {
             const_iterator it = rects.begin(); it != rects.end(); it++)
         if (it->first.overlaps(test))
           interfering.insert(it->second);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, typename RT>
+    void KDNode<DIM,T,RT>::record_inorder_traversal(std::vector<RT> &out) const
+    //--------------------------------------------------------------------------
+    {
+      if (left != NULL)
+        left->record_inorder_traversal(out);
+      for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::
+            const_iterator it = rects.begin(); it != rects.end(); it++)
+        out.push_back(it->second);
+      if (right != NULL)
+        right->record_inorder_traversal(out);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T, typename RT>
+    RT KDNode<DIM,T,RT>::find(const Point<DIM,T> &point) const
+    //--------------------------------------------------------------------------
+    {
+      for (typename std::vector<std::pair<Rect<DIM,T>,RT> >::
+            const_iterator it = rects.begin(); it != rects.end(); it++)
+        if (it->first.contains(point))
+          return it->second;
+      if ((left != NULL) && left->bounds.contains(point))
+        return left->find(point);
+      if ((right != NULL) && right->bounds.contains(point))
+        return right->find(point);
+      // Should always find it currently
+      assert(false);
+      return 0;
     }
 
     //--------------------------------------------------------------------------

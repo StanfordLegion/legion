@@ -2423,9 +2423,10 @@ namespace Legion {
       virtual LegionColor linearize_color(const DomainPoint &point);
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag);
-      LegionColor linearize_color(Point<DIM,T> color); 
+      LegionColor linearize_color(const Point<DIM,T> &color); 
       virtual void delinearize_color(LegionColor color, 
                                      void *realm_color, TypeTag type_tag);
+      void delinearize_color(LegionColor color, Point<DIM,T> &point);
       virtual bool contains_color(LegionColor color,
                                   bool report_error = false);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
@@ -2669,15 +2670,13 @@ namespace Legion {
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards);
     public:
-      bool contains_point(const Realm::Point<DIM,T> &point);
+      bool contains_point(const Point<DIM,T> &point);
     protected:
-      void compute_linearization_metadata(void);
+      ColorSpaceLinearizationT<DIM,T>* compute_linearization_metadata(void);
     protected:
-      Realm::IndexSpace<DIM,T> realm_index_space;
-    protected: // linearization meta-data, computed on demand
-      Realm::Point<DIM,long long> strides;
-      Realm::Point<DIM,long long> offset;
-      bool linearization_ready;
+      DomainT<DIM,T> realm_index_space;
+    protected:
+      std::atomic<ColorSpaceLinearizationT<DIM,T>*> linearization;
     public:
       struct CreateByDomainHelper {
       public:
@@ -2884,6 +2883,86 @@ namespace Legion {
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
       };
+    };
+
+    /**
+     * \class ColorSpaceLinearization
+     * A color space linearation maps N-D color spaces to an
+     * (almost) contiguous 1-D space that can be traversed by
+     * the runtime with good locality between the points in 
+     * N dimensions. It does this using generalized N-D Morton
+     * curves. There are some catches though that prevent us 
+     * from just using one big Morton curve in most cases. 
+     * The first problem is that Morton curves must be done
+     * on hypercubes with powers of 2 dimensions, which means we
+     * either need to under approximate most rectangles in 
+     * the color space. The second problem is in higher that
+     * in higher dimenstions we might end up exceeding the
+     * maximum number of bits we can use to represent the 
+     * Morton curve since we only have 64-bits in our the
+     * LegionColor type. We therefore often will end up tiling
+     * the color space to meet these constraints.
+     */
+    template<int DIM, typename T>
+    class ColorSpaceLinearizationT {
+    public:
+      class MortonTile {
+      public:
+        MortonTile(const Rect<DIM,T> &b, unsigned count, 
+                    const int dims[DIM], unsigned order)
+          : bounds(b), interesting_count(count), morton_order(order), index(0)
+        {
+          for (unsigned idx = 0; idx < DIM; idx++)
+            interesting_dims[idx] = dims[idx];
+        }
+      public:
+        LegionColor linearize(const Point<DIM,T> &point) const;
+        void delinearize(LegionColor color, Point<DIM,T> &point) const;
+      public:
+        Rect<DIM,T> bounds;
+        int interesting_dims[DIM];
+        unsigned interesting_count;
+        unsigned morton_order;
+        unsigned index;
+      };
+    public:
+      ColorSpaceLinearizationT(const DomainT<DIM,T> &domain); 
+      ColorSpaceLinearizationT(const ColorSpaceLinearizationT &rhs) = delete;
+      ~ColorSpaceLinearizationT(void);
+    public:
+      ColorSpaceLinearizationT& operator=(
+                              const ColorSpaceLinearizationT &rhs) = delete;
+    public:
+      LegionColor get_max_linearized_color(void) const;
+      LegionColor linearize(const Point<DIM,T> &point) const;
+      void delinearize(LegionColor color, Point<DIM,T> &point) const;
+    protected:
+      // Bounds of a rectangle contained in the color space
+      std::vector<MortonTile*> morton_tiles;
+      // The starting color for each tile (sorted)
+      std::vector<LegionColor> color_offsets;
+      // KD-Tree for looking up the owner tile for points
+      KDNode<DIM,T,MortonTile*> *kdtree;
+    };
+
+    // Specialization for the case of DIM==1 since that is easy
+    // No need for any fancy Morton curves here, we can pack
+    // all the points nice and densely
+    template<typename T>
+    class ColorSpaceLinearizationT<1,T> {
+    public:
+      ColorSpaceLinearizationT(const DomainT<1,T> &domain);
+    public:
+      LegionColor get_max_linearized_color(void) const;
+      LegionColor linearize(const Point<1,T> &point) const;
+      void delinearize(LegionColor color, Point<1,T> &point) const;
+    protected:
+      // The lo point for each tile (sorted)
+      std::vector<T> tiles;
+      // Extents of each tile
+      std::vector<size_t> extents;
+      // The starting color for each tile
+      std::vector<LegionColor> color_offsets;
     };
 
     /**
@@ -3259,6 +3338,8 @@ namespace Legion {
     public:
       void find_interfering(const Rect<DIM,T> &test,
                             std::set<RT> &interfering) const;
+      void record_inorder_traversal(std::vector<RT> &order) const;
+      RT find(const Point<DIM,T> &point) const;
     public:
       const Rect<DIM,T> bounds;
     protected:
