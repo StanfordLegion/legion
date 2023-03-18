@@ -2337,6 +2337,10 @@ namespace Legion {
           target_memory.kind() == Memory::Z_COPY_MEM)
         return result;
 
+      // Need to use the exact region if the padding constraint is requested
+      if (layout_constraints.padding_constraint.delta.get_dim() > 0)
+        return result;
+
       // Simple heuristic here, if we are on a single node, we go all the
       // way to the root since the first-level partition is likely just
       // across processors in the node, however, if we are on multiple nodes
