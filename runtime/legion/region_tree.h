@@ -2190,8 +2190,6 @@ namespace Legion {
       virtual Domain get_color_space_domain(void) = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
       virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
-      // Caller takes ownership for the iterator
-      virtual ColorSpaceIterator* create_color_space_iterator(void) = 0;
       virtual size_t compute_color_offset(LegionColor color) = 0;
     public:
       bool intersects_with(IndexSpaceNode *rhs,bool compute = true);
@@ -2433,8 +2431,6 @@ namespace Legion {
       virtual Domain get_color_space_domain(void);
       virtual DomainPoint get_domain_point_color(void) const;
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
-      // Caller takes ownership for the iterator
-      virtual ColorSpaceIterator* create_color_space_iterator(void);
       virtual size_t compute_color_offset(LegionColor color);
     public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
@@ -2916,8 +2912,11 @@ namespace Legion {
             interesting_dims[idx] = dims[idx];
         }
       public:
+        LegionColor get_max_linearized_color(void) const;
         LegionColor linearize(const Point<DIM,T> &point) const;
         void delinearize(LegionColor color, Point<DIM,T> &point) const;
+        bool contains_color(LegionColor color) const;
+        size_t compute_color_offset(LegionColor color) const;
       public:
         Rect<DIM,T> bounds;
         int interesting_dims[DIM];
@@ -2936,6 +2935,8 @@ namespace Legion {
       LegionColor get_max_linearized_color(void) const;
       LegionColor linearize(const Point<DIM,T> &point) const;
       void delinearize(LegionColor color, Point<DIM,T> &point) const;
+      bool contains_color(LegionColor color) const;
+      size_t compute_color_offset(LegionColor color) const;
     protected:
       // Bounds of a rectangle contained in the color space
       std::vector<MortonTile*> morton_tiles;
@@ -2956,6 +2957,8 @@ namespace Legion {
       LegionColor get_max_linearized_color(void) const;
       LegionColor linearize(const Point<1,T> &point) const;
       void delinearize(LegionColor color, Point<1,T> &point) const;
+      bool contains_color(LegionColor color) const;
+      size_t compute_color_offset(LegionColor color) const;
     protected:
       // The lo point for each tile (sorted)
       std::vector<T> tiles;
@@ -2967,30 +2970,24 @@ namespace Legion {
 
     /**
      * \class ColorSpaceIterator
-     * A helper class for iterating over sparse color spaces
-     * It can be used for non-sparse spaces as well, but we
-     * usually have more efficient ways of iterating over those
+     * A color space iterator helps iterating over a (subset)
+     * of the colors in a color space for a particular partition.
+     * It abstracts the details of whether the colors space is
+     * sparse or dense and can deal with chunking for sharding.
      */
     class ColorSpaceIterator {
     public:
-      virtual ~ColorSpaceIterator(void) { }
+      ColorSpaceIterator(IndexPartNode *partition,
+          ShardID shard = 0, size_t total_shards = 1);
     public:
-      virtual bool is_valid(void) const = 0;
-      virtual LegionColor yield_color(void) = 0;
-    };
-
-    template<int DIM, typename T>
-    class ColorSpaceIteratorT : public ColorSpaceIterator, 
-                                public PointInDomainIterator<DIM,T> {
-    public:
-      ColorSpaceIteratorT(const DomainT<DIM,T> &d,
-                          IndexSpaceNodeT<DIM,T> *color_space);
-      virtual ~ColorSpaceIteratorT(void) { }
-    public:
-      virtual bool is_valid(void) const;
-      virtual LegionColor yield_color(void);
-    public:
-      IndexSpaceNodeT<DIM,T> *const color_space;
+      operator bool(void) const;
+      LegionColor operator*(void) const;
+      ColorSpaceIterator& operator++(int/*postfix*/);
+      void step(void);
+    private:
+      IndexSpaceNode *color_space;
+      LegionColor current, end;
+      bool simple_step;
     };
 
     /**

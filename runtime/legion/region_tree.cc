@@ -394,37 +394,16 @@ namespace Legion {
         // If this is the first time through populate the existing colors
         if ((lower_bound == 0) && existing_colors.empty())
         {
-          if (base->total_children == base->max_linearized_color)
+          for (ColorSpaceIterator itr(base); itr; itr++)
           {
-            for (LegionColor color = 0; color < base->total_children; color++)
-            {
-              IndexSpaceNode *child_node = base->get_child(color);
-              children_nodes.push_back(child_node);
-              std::vector<LegionColor> colors;
-              LegionColor bound = child_node->get_colors(colors);
-              if (!colors.empty())
-                existing_colors.insert(colors.begin(), colors.end());
-              if (bound > lower_bound)
-                lower_bound = bound;
-            }
-          }
-          else
-          {
-            ColorSpaceIterator *itr =
-              base->color_space->create_color_space_iterator();
-            while (itr->is_valid())
-            {
-              const LegionColor color = itr->yield_color();
-              IndexSpaceNode *child_node = base->get_child(color);
-              children_nodes.push_back(child_node);
-              std::vector<LegionColor> colors;
-              LegionColor bound = child_node->get_colors(colors);
-              if (!colors.empty())
-                existing_colors.insert(colors.begin(), colors.end());
-              if (bound > lower_bound)
-                lower_bound = bound;
-            }
-            delete itr;
+            IndexSpaceNode *child_node = base->get_child(*itr);
+            children_nodes.push_back(child_node);
+            std::vector<LegionColor> colors;
+            LegionColor bound = child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+            if (bound > lower_bound)
+              lower_bound = bound;
           }
         }
         // Prune out any colors below the lower bound, we know they are never
@@ -466,8 +445,12 @@ namespace Legion {
       // Iterate over all our sub-regions and generate partitions
       if (!children_nodes.empty())
       {
-        for (unsigned idx = shard; 
-              idx < children_nodes.size(); idx += total_shards)
+        const unsigned chunk = 
+          (children_nodes.size() + total_shards - 1) / total_shards;
+        const unsigned start = shard * chunk;
+        const unsigned stop = ((start + chunk) < children_nodes.size()) ?
+          (start + chunk) : children_nodes.size();
+        for (unsigned idx = start; idx < stop; idx++)
         {
           IndexSpaceNode *child_node = children_nodes[idx];
           IndexPartition pid(runtime->get_unique_index_partition_id(),
@@ -485,12 +468,11 @@ namespace Legion {
             safe_events.insert(safe);
         }
       }
-      else if (base->total_children == base->max_linearized_color)
+      else
       {
-        for (LegionColor color = shard; 
-              color < base->total_children; color += total_shards)
+        for (ColorSpaceIterator itr(base); itr; itr++)
         {
-          IndexSpaceNode *child_node = base->get_child(color);
+          IndexSpaceNode *child_node = base->get_child(*itr);
           IndexPartition pid(runtime->get_unique_index_partition_id(),
                              handle1.get_tree_id(), handle1.get_type_tag()); 
           DistributedID did = 
@@ -505,44 +487,6 @@ namespace Legion {
           if (safe.exists())
             safe_events.insert(safe);
         }
-      }
-      else
-      {
-        ColorSpaceIterator *itr = 
-          base->color_space->create_color_space_iterator();
-        // Skip ahead if necessary for our shard
-        for (unsigned idx = 0; idx < shard; idx++)
-        {
-          itr->yield_color();
-          if (!itr->is_valid())
-            break;
-        }
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          IndexSpaceNode *child_node = base->get_child(color);
-          IndexPartition pid(runtime->get_unique_index_partition_id(),
-                             handle1.get_tree_id(), handle1.get_type_tag()); 
-          DistributedID did = 
-            runtime->get_available_distributed_id();
-          const RtEvent safe = 
-            create_pending_partition(ctx, pid, child_node->handle, 
-                                     source->color_space->handle, 
-                                     part_color, kind, did, 
-                                     provenance, domain_ready);
-          // If the user requested the handle for this point return it
-          user_handles[child_node->handle] = pid;
-          // Skip ahead for the next color if necessary
-          for (unsigned idx = 0; idx < (total_shards-1); idx++)
-          {
-            itr->yield_color();
-            if (!itr->is_valid())
-              break;
-          }
-          if (safe.exists())
-            safe_events.insert(safe);
-        }
-        delete itr;
       }
     }
 
@@ -917,46 +861,13 @@ namespace Legion {
       IndexPartNode *base_node = get_node(base);
       IndexPartNode *source_node = get_node(source);
       std::set<ApEvent> ready_events;
-      if (base_node->total_children == base_node->max_linearized_color)
+      for (ColorSpaceIterator itr(base_node, shard, total_shards); itr; itr++)
       {
-        for (LegionColor color = shard; 
-              color < base_node->total_children; color+=total_shards)
-        {
-          IndexSpaceNode *child_node = base_node->get_child(color);
-          IndexPartNode *part_node = child_node->get_child(part_color);
-          ApEvent ready = 
-            child_node->create_by_intersection(op, part_node, source_node);
-          ready_events.insert(ready);
-        }
-      }
-      else
-      {
-        ColorSpaceIterator *itr = 
-          base_node->color_space->create_color_space_iterator();
-        // Skip ahead if necessary for our shard
-        for (unsigned idx = 0; idx < shard; idx++)
-        {
-          itr->yield_color();
-          if (!itr->is_valid())
-            break;
-        }
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          IndexSpaceNode *child_node = base_node->get_child(color);
-          IndexPartNode *part_node = child_node->get_child(part_color);
-          ApEvent ready =
-            child_node->create_by_intersection(op, part_node, source_node);
-          ready_events.insert(ready);
-          // Skip ahead for the next color if necessary
-          for (unsigned idx = 0; idx < (total_shards-1); idx++)
-          {
-            itr->yield_color();
-            if (!itr->is_valid())
-              break;
-          }
-        }
-        delete itr;
+        IndexSpaceNode *child_node = base_node->get_child(*itr);
+        IndexPartNode *part_node = child_node->get_child(part_color);
+        ApEvent ready = 
+          child_node->create_by_intersection(op, part_node, source_node);
+        ready_events.insert(ready);
       }
       return Runtime::merge_events(NULL, ready_events);
     } 
@@ -9962,29 +9873,12 @@ namespace Legion {
           // by suming up the volumes of all the children
           const size_t parent_volume = parent->get_volume();
           size_t children_volume = 0;
-          if (total_children == max_linearized_color)
+          for (ColorSpaceIterator itr(this); itr; itr++)
           {
-            for (LegionColor color = 0; color < max_linearized_color; color++)
-            {
-              IndexSpaceNode *child = get_child(color);
-              children_volume += child->get_volume();
-              if (children_volume > parent_volume)
-                break;
-            }
-          }
-          else
-          {
-            ColorSpaceIterator *itr =
-              color_space->create_color_space_iterator();
-            while (itr->is_valid())
-            {
-              const LegionColor color = itr->yield_color();
-              IndexSpaceNode *child = get_child(color);
-              children_volume += child->get_volume();
-              if (children_volume > parent_volume)
-                break;
-            }
-            delete itr;
+            IndexSpaceNode *child = get_child(color);
+            children_volume += child->get_volume();
+            if (children_volume > parent_volume)
+              break;
           }
 #ifdef DEBUG_LEGION
           assert(parent_volume <= children_volume);
@@ -10649,30 +10543,13 @@ namespace Legion {
           return;
         if (!find_interfering_children_kd(expr, colors))
         {
-          if (total_children == max_linearized_color)
+          for (ColorSpaceIterator itr(this); itr; itr++)
           {
-            for (LegionColor color = 0; color < total_children; color++)
-            {
-              IndexSpaceNode *child = get_child(color);
-              IndexSpaceExpression *intersection = 
-                context->intersect_index_spaces(expr, child);
-              if (!intersection->is_empty())
-                colors.push_back(color);
-            }
-          }
-          else
-          {
-            ColorSpaceIterator *itr = color_space->create_color_space_iterator();
-            while (itr->is_valid())
-            {
-              const LegionColor color = itr->yield_color();
-              IndexSpaceNode *child = get_child(color);
-              IndexSpaceExpression *intersection = 
-                context->intersect_index_spaces(expr, child);
-              if (!intersection->is_empty())
-                colors.push_back(color);
-            }
-            delete itr;
+            IndexSpaceNode *child = get_child(color);
+            IndexSpaceExpression *intersection = 
+              context->intersect_index_spaces(expr, child);
+            if (!intersection->is_empty())
+              colors.push_back(color);
           }
         }
       }
@@ -11404,6 +11281,65 @@ namespace Legion {
         tracker->process_remote_interfering_response(derez);
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Color Space Iterator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ColorSpaceIterator::ColorSpaceIterator(IndexPartNode *partition,
+                                           ShardID shard, size_t total_shards)
+      : color_space(partition->color_space)
+    //--------------------------------------------------------------------------
+    {
+      simple_step = 
+        (partition->total_children == partition->max_linearized_color);
+      LegionColor chunk = 
+        (partition->max_linearized_color + total_shards - 1) / total_shards;
+      current = shard * chunk;
+      end = ((current + chunk) < partition->max_linearized_color) ?
+        (current + chunk) : partition->max_linearized_color;
+      if (!simple_step && (current < end) &&
+          !color_space->contains_color(current))
+        step();
+    }
+
+    //--------------------------------------------------------------------------
+    ColorSpaceIterator::operator bool(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (current < end);
+    }
+
+    //--------------------------------------------------------------------------
+    LegionColor ColorSpaceIterator::operator*(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current < end);
+#endif
+      return current;
+    }
+
+    //--------------------------------------------------------------------------
+    ColorSpaceIterator& ColorSpaceIterator::operator++(int)
+    //--------------------------------------------------------------------------
+    {
+      step();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ColorSpaceIterator::step(void)
+    //--------------------------------------------------------------------------
+    {
+      current++;
+      if (!simple_step)
+      {
+        while ((current < end) && !color_space->contains_color(current))
+          current++;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -21200,29 +21136,12 @@ namespace Legion {
         const bool break_early = traverser->break_early();
         if (traverser->force_instantiation)
         {
-          if (row_source->total_children == row_source->max_linearized_color)
+          for (ColorSpaceIterator itr(row_source); itr; itr++)
           {
-            for (LegionColor c = 0; c < row_source->total_children; c++)
-            {
-              bool result = get_child(c)->visit_node(traverser);
-              continue_traversal = continue_traversal && result;
-              if (!result && break_early)
-                break;
-            }
-          }
-          else
-          {
-            ColorSpaceIterator *itr = 
-              row_source->color_space->create_color_space_iterator();
-            while (itr->is_valid())
-            {
-              const LegionColor c = itr->yield_color();
-              bool result = get_child(c)->visit_node(traverser);
-              continue_traversal = continue_traversal && result;
-              if (!result && break_early)
-                break;
-            }
-            delete itr;
+            bool result = get_child(*itr)->visit_node(traverser);
+            continue_traversal = continue_traversal && result;
+            if (!result && break_early)
+              break;
           }
         }
         else
@@ -21565,67 +21484,32 @@ namespace Legion {
       // regions which have no partition refinements of their own
       FieldMaskSet<RegionTreeNode> unrefined_children;
       // Have to iterate over all the chlidren here
-      if (row_source->total_children == row_source->max_linearized_color)
+      for (ColorSpaceIterator itr(row_source); itr; itr++)
       {
-        for (LegionColor color = 0; color < row_source->total_children; color++)
+        RegionNode *child = get_child(*itr);
+        // Traverse it here and perform our checks that all the 
+        // children are refined the same way
+        FieldMask refined_child;
+        child->as_region_node()->update_disjoint_complete_tree(ctx,
+            refinement_op, child_overlap, refined_child, applied_events);
+        if (!!refined_child)
         {
-          RegionNode *child = get_child(color);
-          // Traverse it here and perform our checks that all the 
-          // children are refined the same way
-          FieldMask refined_child;
-          child->as_region_node()->update_disjoint_complete_tree(ctx,
-              refinement_op, child_overlap, refined_child, applied_events);
-          if (!!refined_child)
+          const FieldMask unrefined = child_overlap - refined_child;
+          if (!!unrefined)
           {
-            const FieldMask unrefined = child_overlap - refined_child;
-            if (!!unrefined)
-            {
-              unrefined_children.insert(child, unrefined);
-              if (!!all_unrefined_children)
-                all_unrefined_children &= unrefined;
-            }
-            else if (!!all_unrefined_children)
-              all_unrefined_children.clear();
+            unrefined_children.insert(child, unrefined);
+            if (!!all_unrefined_children)
+              all_unrefined_children &= unrefined;
           }
-          else
-            unrefined_children.insert(child, child_overlap);
-          // Add it to the current set
-          if (state.disjoint_complete_children.insert(child, child_overlap))
-            child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+          else if (!!all_unrefined_children)
+            all_unrefined_children.clear();
         }
+        else
+          unrefined_children.insert(child, child_overlap);
+        // Add it to the current set
+        if (state.disjoint_complete_children.insert(child, child_overlap))
+          child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
       }
-      else
-      {
-        ColorSpaceIterator *itr = 
-          row_source->color_space->create_color_space_iterator();
-        while (itr->is_valid())
-        {
-          RegionNode *child = get_child(itr->yield_color());
-          // Traverse it here and perform our checks that all the 
-          // children are refined the same way
-          FieldMask refined_child;
-          child->as_region_node()->update_disjoint_complete_tree(ctx,
-              refinement_op, child_overlap, refined_child, applied_events);
-          if (!!refined_child)
-          {
-            const FieldMask unrefined = child_overlap - refined_child;
-            if (!!unrefined)
-            {
-              unrefined_children.insert(child, unrefined);
-              if (!!all_unrefined_children)
-                all_unrefined_children &= unrefined;
-            }
-            else if (!!all_unrefined_children)
-              all_unrefined_children.clear();
-          }
-          else
-            unrefined_children.insert(child, child_overlap);
-          // Add it to the current set
-          if (state.disjoint_complete_children.insert(child, child_overlap))
-            child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-        }
-        delete itr;
-      } 
       // Record that the refinement operation should perform refinements for
       // this partition if all the children were unrefined for some fields
       if (!!all_unrefined_children)
@@ -21698,20 +21582,9 @@ namespace Legion {
         {
           // Expr covers so all the children interfere
           if (row_source->total_children == row_source->max_linearized_color)
-          {
-            interfering_children.resize(row_source->total_children);
-            for (LegionColor color = 0; 
-                  color < row_source->total_children; color++)
-              interfering_children[color] = color;
-          }
-          else
-          {
-            ColorSpaceIterator *iterator =
-              row_source->color_space->create_color_space_iterator();
-            while (iterator->is_valid())
-              interfering_children.push_back(iterator->yield_color());
-            delete iterator;
-          }
+            interfering_children.reserve(row_source->total_children);
+          for (ColorSpaceIterator itr(row_source); itr; itr++)
+            interfering_children.push_back(*itr);
         }
         else
           row_source->find_interfering_children(expr, interfering_children);
@@ -21748,20 +21621,9 @@ namespace Legion {
           {
             // Expr covers so all the children interfere
             if (row_source->total_children == row_source->max_linearized_color)
-            {
-              interfering_children.resize(row_source->total_children);
-              for (LegionColor color = 0;
-                    color < row_source->total_children; color++)
-                interfering_children[color] = color;
-            }
-            else
-            {
-              ColorSpaceIterator *iterator =
-                row_source->color_space->create_color_space_iterator();
-              while (iterator->is_valid())
-                interfering_children.push_back(iterator->yield_color());
-              delete iterator;
-            }
+              interfering_children.reserve(row_source->total_children);
+            for (ColorSpaceIterator itr(row_source); itr; itr++)
+              interfering_children.push_back(*itr);
           }
           else
             row_source->find_interfering_children(expr, interfering_children);
