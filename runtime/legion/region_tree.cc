@@ -9875,7 +9875,7 @@ namespace Legion {
           size_t children_volume = 0;
           for (ColorSpaceIterator itr(this); itr; itr++)
           {
-            IndexSpaceNode *child = get_child(color);
+            IndexSpaceNode *child = get_child(*itr);
             children_volume += child->get_volume();
             if (children_volume > parent_volume)
               break;
@@ -10545,11 +10545,11 @@ namespace Legion {
         {
           for (ColorSpaceIterator itr(this); itr; itr++)
           {
-            IndexSpaceNode *child = get_child(color);
+            IndexSpaceNode *child = get_child(*itr);
             IndexSpaceExpression *intersection = 
               context->intersect_index_spaces(expr, child);
             if (!intersection->is_empty())
-              colors.push_back(color);
+              colors.push_back(*itr);
           }
         }
       }

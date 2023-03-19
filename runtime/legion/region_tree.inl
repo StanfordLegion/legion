@@ -3307,9 +3307,9 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition, shard, total_shards); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *left_child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(color));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(*itr));
         IndexSpaceNodeT<DIM,T> *right_child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(*itr));
         lhs_spaces.resize(lhs_spaces.size() + 1);
         rhs_spaces.resize(rhs_spaces.size() + 1);
         ApEvent left_ready = 
@@ -3318,7 +3318,7 @@ namespace Legion {
         ApEvent right_ready = 
           right_child->get_realm_index_space(rhs_spaces.back(),
                                              false/*tight*/);
-        colors.push_back(color);
+        colors.push_back(*itr);
         if (!left_ready.has_triggered())
           preconditions.insert(left_ready);
         if (!right_ready.has_triggered())
@@ -3379,9 +3379,9 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *left_child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(color));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(left->get_child(*itr));
         IndexSpaceNodeT<DIM,T> *right_child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < count);
 #endif
@@ -3528,7 +3528,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *right_child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < count);
 #endif
@@ -3738,7 +3738,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < subspaces.size());
 #endif
@@ -4386,10 +4386,10 @@ namespace Legion {
       // Always use the partitions color space
       for (ColorSpaceIterator itr(partition, shard, total_shards); itr; itr++)
       {
-        child_colors.push_back(color);
+        child_colors.push_back(*itr);
         // Get the child of the projection partition
         IndexSpaceNodeT<DIM2,T2> *child = 
-         static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(color));
+         static_cast<IndexSpaceNodeT<DIM2,T2>*>(projection->get_child(*itr));
         sources.resize(sources.size() + 1);
         ApEvent ready = child->get_realm_index_space(sources.back(),
                                                      false/*tight*/);
