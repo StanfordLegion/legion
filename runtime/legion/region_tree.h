@@ -2984,6 +2984,8 @@ namespace Legion {
       LegionColor operator*(void) const;
       ColorSpaceIterator& operator++(int/*postfix*/);
       void step(void);
+      static LegionColor compute_chunk(LegionColor max_color, 
+                                       size_t total_shards);
     private:
       IndexSpaceNode *color_space;
       LegionColor current, end;

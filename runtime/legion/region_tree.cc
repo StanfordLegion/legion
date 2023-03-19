@@ -470,7 +470,7 @@ namespace Legion {
       }
       else
       {
-        for (ColorSpaceIterator itr(base); itr; itr++)
+        for (ColorSpaceIterator itr(base, shard, total_shards); itr; itr++)
         {
           IndexSpaceNode *child_node = base->get_child(*itr);
           IndexPartition pid(runtime->get_unique_index_partition_id(),
@@ -11295,14 +11295,22 @@ namespace Legion {
     {
       simple_step = 
         (partition->total_children == partition->max_linearized_color);
-      LegionColor chunk = 
-        (partition->max_linearized_color + total_shards - 1) / total_shards;
+      const LegionColor chunk = 
+        compute_chunk(partition->max_linearized_color, total_shards);
       current = shard * chunk;
       end = ((current + chunk) < partition->max_linearized_color) ?
         (current + chunk) : partition->max_linearized_color;
       if (!simple_step && (current < end) &&
           !color_space->contains_color(current))
         step();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ LegionColor ColorSpaceIterator::compute_chunk(
+                                     LegionColor max_color, size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      return (max_color + total_shards - 1) / total_shards;
     }
 
     //--------------------------------------------------------------------------

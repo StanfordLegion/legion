@@ -21341,17 +21341,10 @@ namespace Legion {
       // this region node or not
       IndexPartNode *index_part = region->parent->row_source;
       // See if we can find its shard owner the easy way or the hard way
-      ShardID target_shard;
       const LegionColor color = region->get_color();
-      if (index_part->total_children != index_part->max_linearized_color)
-      {
-        // Have to do this the hard way
-        const size_t index_offset = 
-          index_part->color_space->compute_color_offset(color);
-        target_shard = index_offset % total_shards;
-      }
-      else // This is the easy way, we can just linearize the color 
-        target_shard = color % total_shards;
+      const size_t chunk = ColorSpaceIterator::compute_chunk(
+              index_part->max_linearized_color, total_shards);
+      ShardID target_shard = color / chunk;
       if (target_shard != owner_shard->shard_id)
       {
         // We're not the owner so forward this to the owner shard
