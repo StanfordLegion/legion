@@ -7339,7 +7339,7 @@ namespace Legion {
             if (space.empty())
               continue;
             for (RectInDomainIterator<DIM,T> it(space); it(); it++)
-              bounds.push_back(std::make_pair(*it, color));
+              bounds.push_back(std::make_pair(*it, *itr));
           }
           if (parent_ready.exists() && !parent_ready.has_triggered())
             parent_ready.wait();

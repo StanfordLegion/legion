@@ -443,50 +443,22 @@ namespace Legion {
         }
       }
       // Iterate over all our sub-regions and generate partitions
-      if (!children_nodes.empty())
+      for (ColorSpaceIterator itr(base, shard, total_shards); itr; itr++)
       {
-        const unsigned chunk = 
-          (children_nodes.size() + total_shards - 1) / total_shards;
-        const unsigned start = shard * chunk;
-        const unsigned stop = ((start + chunk) < children_nodes.size()) ?
-          (start + chunk) : children_nodes.size();
-        for (unsigned idx = start; idx < stop; idx++)
-        {
-          IndexSpaceNode *child_node = children_nodes[idx];
-          IndexPartition pid(runtime->get_unique_index_partition_id(),
-                             handle1.get_tree_id(), handle1.get_type_tag()); 
-          DistributedID did = 
-            runtime->get_available_distributed_id();
-          const RtEvent safe =
-            create_pending_partition(ctx, pid, child_node->handle, 
-                                     source->color_space->handle, 
-                                     part_color, kind, did, 
-                                     provenance, domain_ready); 
-          // If the user requested the handle for this point return it
-          user_handles[child_node->handle] = pid;
-          if (safe.exists())
-            safe_events.insert(safe);
-        }
-      }
-      else
-      {
-        for (ColorSpaceIterator itr(base, shard, total_shards); itr; itr++)
-        {
-          IndexSpaceNode *child_node = base->get_child(*itr);
-          IndexPartition pid(runtime->get_unique_index_partition_id(),
-                             handle1.get_tree_id(), handle1.get_type_tag()); 
-          DistributedID did = 
-            runtime->get_available_distributed_id();
-          const RtEvent safe =
-            create_pending_partition(ctx, pid, child_node->handle, 
-                                     source->color_space->handle, 
-                                     part_color, kind, did, 
-                                     provenance, domain_ready); 
-          // If the user requested the handle for this point return it
-          user_handles[child_node->handle] = pid;
-          if (safe.exists())
-            safe_events.insert(safe);
-        }
+        IndexSpaceNode *child_node = base->get_child(*itr);
+        IndexPartition pid(runtime->get_unique_index_partition_id(),
+                           handle1.get_tree_id(), handle1.get_type_tag());
+        DistributedID did =
+          runtime->get_available_distributed_id();
+        const RtEvent safe =
+          create_pending_partition(ctx, pid, child_node->handle,
+                                   source->color_space->handle,
+                                   part_color, kind, did,
+                                   provenance, domain_ready);
+        // If the user requested the handle for this point return it
+        user_handles[child_node->handle] = pid;
+        if (safe.exists())
+          safe_events.insert(safe);
       }
     }
 
@@ -21589,8 +21561,7 @@ namespace Legion {
         if (expr_covers)
         {
           // Expr covers so all the children interfere
-          if (row_source->total_children == row_source->max_linearized_color)
-            interfering_children.reserve(row_source->total_children);
+          interfering_children.reserve(row_source->total_children);
           for (ColorSpaceIterator itr(row_source); itr; itr++)
             interfering_children.push_back(*itr);
         }
@@ -21628,8 +21599,7 @@ namespace Legion {
           if (expr_covers)
           {
             // Expr covers so all the children interfere
-            if (row_source->total_children == row_source->max_linearized_color)
-              interfering_children.reserve(row_source->total_children);
+            interfering_children.reserve(row_source->total_children);
             for (ColorSpaceIterator itr(row_source); itr; itr++)
               interfering_children.push_back(*itr);
           }
