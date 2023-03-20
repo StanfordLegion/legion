@@ -2371,10 +2371,24 @@ namespace Legion {
         {
           // If we didn't pack by value, pack the other options as well
           // so that we can choose to copy from them as well
-          rez.serialize<size_t>(instances.size());
-          for (std::map<Memory,FutureInstance*>::const_iterator it =
-                instances.begin(); it != instances.end(); it++)
-            it->second->pack_instance(rez, false/*move ownership*/);
+          // Don't pack the canonical instance again though since we 
+          // already did that part
+#ifdef DEBUG_LEGION
+          assert(instances.find(canonical_instance->memory) !=
+                  instances.end());
+          assert(canonical_instance == 
+              instances.find(canonical_instance->memory)->second);
+#endif
+          if (instances.size() > 1)
+          {
+            rez.serialize<size_t>(instances.size() - 1);
+            for (std::map<Memory,FutureInstance*>::const_iterator it =
+                  instances.begin(); it != instances.end(); it++)
+              if (it->second != canonical_instance)
+                it->second->pack_instance(rez, false/*move ownership*/);
+          }
+          else
+            rez.serialize<size_t>(0);
         }
         else
           rez.serialize<size_t>(0);
