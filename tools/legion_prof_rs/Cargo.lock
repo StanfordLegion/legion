@@ -1324,6 +1324,7 @@ dependencies = [
  "legion_prof_viewer",
  "nom",
  "num_enum",
+ "once_cell",
  "rayon",
  "serde",
  "serde_json",

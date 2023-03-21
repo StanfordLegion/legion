@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::state::{
-    Bounds, ChanID, ChanPoint, CopyInstInfo, DimKind, FSpace, FieldID, FillInstInfo, ISpaceID,
-    Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind, ProcPoint, State, TimePoint,
-    Timestamp,
+    Bounds, ChanID, ChanPoint, Config, CopyInstInfo, DimKind, FSpace, FieldID, FillInstInfo,
+    ISpaceID, Inst, InstUID, MemID, MemKind, MemPoint, NodeID, ProcID, ProcKind, ProcPoint, State,
+    TimePoint, Timestamp,
 };
+
+use crate::conditional_assert;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProcGroup(pub Option<NodeID>, pub ProcKind);
@@ -72,6 +74,9 @@ impl StatePostprocess for State {
     fn has_multiple_nodes(&self) -> bool {
         let mut node = None;
         for proc in self.procs.values() {
+            if !proc.is_visible() {
+                continue;
+            }
             match node {
                 Some(n) => {
                     if n != proc.proc_id.node_id() {
@@ -89,6 +94,9 @@ impl StatePostprocess for State {
     fn group_procs(&self) -> BTreeMap<ProcGroup, Vec<ProcID>> {
         let mut groups = BTreeMap::new();
         for proc in self.procs.values() {
+            if !proc.is_visible() {
+                continue;
+            }
             // Do NOT filter empty procs here because they count towards
             // utilization totals
             let nodes = [None, Some(proc.proc_id.node_id())];
@@ -106,6 +114,9 @@ impl StatePostprocess for State {
     fn group_mems(&self) -> BTreeMap<MemGroup, Vec<MemID>> {
         let mut groups = BTreeMap::new();
         for mem in self.mems.values() {
+            if !mem.is_visible() {
+                continue;
+            }
             if !mem.time_points.is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
@@ -124,6 +135,9 @@ impl StatePostprocess for State {
         let mut groups = BTreeMap::new();
 
         for (chan_id, chan) in &self.chans {
+            if !chan.is_visible() {
+                continue;
+            }
             if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
@@ -147,7 +161,9 @@ impl StatePostprocess for State {
         let mut timepoints = Vec::new();
         for proc_id in procs {
             let proc = self.procs.get(proc_id).unwrap();
-            timepoints.push(&proc.util_time_points);
+            if proc.is_visible() {
+                timepoints.push(&proc.util_time_points);
+            }
         }
         timepoints
     }
@@ -156,7 +172,9 @@ impl StatePostprocess for State {
         let mut timepoints = Vec::new();
         for mem_id in mems {
             let mem = self.mems.get(mem_id).unwrap();
-            timepoints.push(&mem.time_points);
+            if mem.is_visible() {
+                timepoints.push(&mem.time_points);
+            }
         }
         timepoints
     }
@@ -165,7 +183,9 @@ impl StatePostprocess for State {
         let mut timepoints = Vec::new();
         for chan_id in chans {
             let chan = self.chans.get(chan_id).unwrap();
-            timepoints.push(&chan.time_points);
+            if chan.is_visible() {
+                timepoints.push(&chan.time_points);
+            }
         }
         timepoints
     }
@@ -180,6 +200,9 @@ impl StatePostprocess for State {
         let mut proc_count = BTreeMap::new();
 
         for proc in self.procs.values() {
+            if !proc.is_visible() {
+                continue;
+            }
             let nodes = [None, Some(proc.proc_id.node_id())];
             for node in nodes {
                 let group = ProcGroup(node, proc.kind);
@@ -199,6 +222,9 @@ impl StatePostprocess for State {
     fn group_node_mem_kind_timepoints(&self) -> BTreeMap<MemGroup, Vec<(MemID, &Vec<MemPoint>)>> {
         let mut result = BTreeMap::new();
         for mem in self.mems.values() {
+            if !mem.is_visible() {
+                continue;
+            }
             if !mem.time_points.is_empty() {
                 let nodes = [None, Some(mem.mem_id.node_id())];
                 for node in nodes {
@@ -220,6 +246,9 @@ impl StatePostprocess for State {
         let mut result = BTreeMap::new();
 
         for (chan_id, chan) in &self.chans {
+            if !chan.is_visible() {
+                continue;
+            }
             if !chan.time_points.is_empty() && chan_id.node_id().is_some() {
                 // gathers/scatters
                 let mut nodes = vec![None];
@@ -231,10 +260,12 @@ impl StatePostprocess for State {
                 }
                 nodes.dedup();
                 for node in nodes {
-                    result
-                        .entry(node)
-                        .or_insert_with(Vec::new)
-                        .push((*chan_id, &chan.time_points))
+                    if node.map_or(true, |n| State::is_on_visible_nodes(&self.visible_nodes, n)) {
+                        result
+                            .entry(node)
+                            .or_insert_with(Vec::new)
+                            .push((*chan_id, &chan.time_points))
+                    }
                 }
             }
         }
@@ -715,9 +746,23 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         for elt in self.0.iter() {
             if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
                 insts_set.insert(src_inst);
+            } else {
+                conditional_assert!(
+                    false,
+                    Config::all_logs(),
+                    "Copy can not find src_inst:0x{:x}",
+                    elt.src_inst_uid.0
+                );
             }
             if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
                 insts_set.insert(dst_inst);
+            } else {
+                conditional_assert!(
+                    false,
+                    Config::all_logs(),
+                    "Copy can not find dst_inst:0x{:x}",
+                    elt.dst_inst_uid.0
+                );
             }
         }
         write!(f, "[")?;
@@ -771,8 +816,16 @@ impl fmt::Display for FillInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            let dst_inst = self.1.find_inst(elt.dst_inst_uid).unwrap();
-            insts_set.insert(dst_inst);
+            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                insts_set.insert(dst_inst);
+            } else {
+                conditional_assert!(
+                    false,
+                    Config::all_logs(),
+                    "Fill can not find dst_inst:0x{:x}",
+                    elt.dst_inst_uid.0
+                );
+            }
         }
         write!(f, "[")?;
         for (i, inst) in insts_set.iter().enumerate() {

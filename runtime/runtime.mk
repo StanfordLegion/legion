@@ -499,7 +499,7 @@ ifeq ($(strip $(USE_HIP)),1)
       HIPCC_FLAGS	+= -O2
     endif
     ifneq ($(strip $(HIP_ARCH)),)
-      HIPCC_FLAGS	+= --amdgpu-target=$(HIP_ARCH)
+      HIPCC_FLAGS	+= --offload-target=$(HIP_ARCH)
     endif
     LEGION_LD_FLAGS	+= -lm -L$(HIP_PATH)/lib -lamdhip64
   else ifeq ($(strip $(HIP_TARGET)),CUDA)

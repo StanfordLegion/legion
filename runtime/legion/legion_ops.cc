@@ -21689,7 +21689,6 @@ namespace Legion {
     void IndexAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<RtEvent> mapped_preconditions(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         map_applied_conditions.insert(points[idx]->get_mapped_event());
@@ -22777,15 +22776,14 @@ namespace Legion {
     void IndexDetachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<RtEvent> mapped_preconditions(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        map_applied_conditions.insert(points[idx]->get_mapped_event());
         points[idx]->trigger_ready();
       }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
-      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_mapping(Runtime::merge_events(map_applied_conditions));
       complete_execution();
     }
 
