@@ -5464,9 +5464,9 @@ namespace Legion {
           // same as the extent, if not subtract by one to get the 
           // largest power of 2 <= the extent
 #ifdef DEBUG_LEGION
-          assert(smallest_extent <= (1 << order));
+          assert(smallest_extent <= (1ULL << order));
 #endif
-          if (smallest_extent != (1 << order))
+          if (smallest_extent != (1ULL << order))
             order--;
         }
         // If this is bigger than the largest order we support for the
