@@ -7,6 +7,11 @@ Version 23.03.0 (March ??, 2023)
        continue to require even newer versions.)
     - Minimum supported GCC version is now 8.
     - Minimum supported CUDA version is now 10.
+  * Legion
+    - Added support for padded layout constraints to provide scratch space
+      in instances for tasks to use (see examples/padded_instances)
+    - Added support for tiled layout constraints to provide an ability to 
+      layout instances by breaking down dimensions (see examples/tiling) 
   * Realm
     - An experimental UCX network backend has been added.
   * Regent
