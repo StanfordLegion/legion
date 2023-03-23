@@ -2152,9 +2152,9 @@ namespace Legion {
             // Enough subregions to shard them across all the shards
             if (index_part->total_children == index_part->max_linearized_color)
             {
-              for (LegionColor color = repl_ctx->owner_shard->shard_id; 
-                    color < index_part->total_children; 
-                    color += repl_ctx->total_shards)
+              RegionNode *child = part_node->get_child(*itr);
+              bool found = false;
+              for (unsigned idx = 0; idx < max_check; idx++)
               {
                 RegionNode *child = part_node->get_child(color);
                 sharded_regions.insert(child, version_mask);
@@ -2183,8 +2183,13 @@ namespace Legion {
                   if (!itr->is_valid())
                     break;
                 }
+                if (children[idx] != child)
+                    continue;
+                found = true;
+                break;
               }
-              delete itr;
+              if (!found)
+                children.push_back(child);
             }
           }
         }
