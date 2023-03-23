@@ -1327,6 +1327,59 @@ namespace Legion {
 #endif
 
     /**
+     * \class ProjectionTreeExchange
+     * This class provides a way of exchanging the projection trees 
+     * data structures between the shards in a way that is memory 
+     * efficient and won't involve materializing all the data for
+     * each subtree on every node.
+     */
+    class ProjectionTreeExchange : public AllGatherCollective<false> {
+    public:
+      ProjectionTreeExchange(ProjectionNode *n, 
+                             ReplicateContext *ctx,CollectiveIndexLocation loc);
+      ProjectionTreeExchange(const ProjectionTreeExchange &rhs) = delete;
+      ~ProjectionTreeExchange(void);
+    public:
+      ProjectionTreeExchange& operator=(const ProjectionTreeExchange&) = delete;
+    public:
+      virtual void pack_collective_stage(ShardID target, 
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      ProjectionNode *const node;
+    protected:
+      typedef ProjectionNode::RegionSummary RegionSummary; 
+      typedef ProjectionNode::PartitionSummary PartitionSummary; 
+      std::map<LogicalRegion,RegionSummary> region_summaries;
+      std::map<LogicalPartition,PartitionSummary> partition_summaries;
+    };
+
+    /**
+     * \class TimeoutMatchExchange
+     * This class helps perform all all-reduce exchange between the shards
+     * to see which logical users that have timed out on their analyses
+     * can be collected across all the shards. To be collected all the 
+     * shards must agree on what they are pruning.
+     */
+    class TimeoutMatchExchange : public AllGatherCollective<false> {
+    public:
+      TimeoutMatchExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      TimeoutMatchExchange(const TimeoutMatchExchange &rhs) = delete;
+    public:
+      TimeoutMatchExchange& operator=(const TimeoutMatchExchange &rhs) = delete;
+    public:
+      virtual void pack_collective_stage(ShardID target, 
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void match_timeouts(const std::vector<LogicalUser*> &timeouts,
+                          std::vector<LogicalUser*> &to_delete);
+    protected:
+      // Pair represents <context index,region requirement index> for each user
+      std::vector<std::pair<size_t,unsigned> > all_timeouts;
+    };
+
+    /**
      * \class MaskExchange
      * This class will perform an all-reduce of a field mask between
      * the shards so that all participants either get the union or

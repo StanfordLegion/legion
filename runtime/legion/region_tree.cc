@@ -1687,7 +1687,7 @@ namespace Legion {
       FieldMask user_mask = 
         parent_node->column_source->get_field_mask(req.privilege_fields);
       // Then compute the logical user
-      ProjectionNode *shard_proj = NULL;
+      ProjectionSummary *shard_proj = NULL;
       if (proj_info.is_sharding() && proj_info.is_projecting())
       {
         // If we're doing a projection in a control replicated context then
@@ -15783,7 +15783,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionNode* RegionTreeNode::compute_projection_summary(
+    ProjectionSummary* RegionTreeNode::compute_projection_summary(
                    Operation *op, unsigned index, const RegionRequirement &req,
                    LogicalAnalysis &analysis, const ProjectionInfo &proj_info)
     //--------------------------------------------------------------------------
@@ -18942,7 +18942,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<LogicalUser*> to_delete;
-      for (FieldMaskSet<LogicalUser>::iterator it =
+      for (OrderedFieldMaskUsers::iterator it =
             state.prev_epoch_users.begin(); it !=
             state.prev_epoch_users.end(); it++)
       {
@@ -18965,7 +18965,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<LogicalUser*> to_delete;
-      for (FieldMaskSet<LogicalUser>::iterator it =
+      for (OrderedFieldMaskUsers::iterator it =
             state.curr_epoch_users.begin(); it !=
             state.curr_epoch_users.end(); it++)
       {
@@ -19856,7 +19856,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<bool TRACK_DOM>
     FieldMask RegionTreeNode::perform_dependence_checks(LogicalRegion root,
-                LogicalUser &user, FieldMaskSet<LogicalUser> &prev_users,
+                LogicalUser &user, OrderedFieldMaskUsers &prev_users,
                 const FieldMask &check_mask, const FieldMask &open_below,
                 const bool arrived, const ProjectionInfo &proj_info,
                 LogicalState &state, LogicalAnalysis &logical_analysis)
@@ -19873,8 +19873,8 @@ namespace Legion {
                                 proj_info.is_complete_projection(this, user));
       if (!(check_mask * prev_users.get_valid_mask()))
       {
-        std::vector<LogicalUser*> to_delete;
-        for (FieldMaskSet<LogicalUser>::iterator it =
+        std::vector<LogicalUser*> to_delete, timeouts;
+        for (OrderedFieldMaskUsers::iterator it =
               prev_users.begin(); it != prev_users.end(); it++)
         {
           // Don't record dependences on any other users from the same op
@@ -19941,16 +19941,16 @@ namespace Legion {
                       assert(proj_info.is_sharding());
                       assert(user.shard_proj != NULL);
 #endif
-                      if (!state.test_interfering_shard_projections(
-                                    prev.shard_proj, user.shard_proj))
-                        continue;
+                      if (state.test_interfering_summaries(logical_analysis,
+                                          prev.shard_proj, user.shard_proj))
+                        break;
                     }
-                    // We weren't able to provie that the projections were
+                    // We weren't able to prove that the projections were
                     // non-interfering with each other so we need a close
                     // Not able to do the symbolic elision so we need a fence
                     // across the shards to be safe
                     logical_analysis.record_close_dependence(root,
-                                              this, &user, overlap);
+                                              this, &prev, overlap);
                     it.filter(overlap);
                     if (!it->second)
                       to_delete.push_back(it->first);
@@ -19966,20 +19966,9 @@ namespace Legion {
                   // If we can validate a region record which of our
                   // predecessors regions we are validating, otherwise
                   // just register a normal dependence
-                  if (!user.op->register_region_dependence(user.idx, prev.op,
-                                                          prev.gen, prev.idx,
-                                                          dtype, validate,
-                                                          overlap))
-                    // hasn't commited, reset timeout and continue
-                    prev.timeout = LogicalUser::TIMEOUT;
-#ifndef LEGION_SPY
-                  // We cannot prune shard projection users out 
-                  // non-deterministically because we need the shards to
-                  // agree on what close operations to perform
-                  else if (prev.shard_proj == NULL)
-                    // Now we can prune it from the list and continue
-                    to_delete.push_back(it->first);
-#endif
+                  user.op->register_region_dependence(user.idx, prev.op,
+                                                      prev.gen, prev.idx,
+                                                      dtype, validate, overlap);
                   continue;
                 }
               default:
@@ -19990,34 +19979,28 @@ namespace Legion {
           // to see if the timeout has expired.  Note that it is
           // unsound to do this if we are tracing so don't perform
           // the check in that case.
-          if (!tracing)
-          {
-            if (prev.timeout <= 0)
-            {
-              // Timeout has expired.  Check whether the operation
-              // has committed. If it has prune it from the list.
-              // Otherwise reset its timeout and continue.
-              if (prev.op->is_operation_committed(prev.gen))
-              {
 #ifndef LEGION_SPY
-                to_delete.push_back(it->first);
-#else
-                // Can't prune things early for these cases
-                prev.timeout = LogicalUser::TIMEOUT;
+          if (!tracing && prev.has_timed_out())
+            timeouts.push_back(it->first);
 #endif
-              }
-              else
-              {
-                // Operation hasn't committed, reset timeout
-                prev.timeout = LogicalUser::TIMEOUT;
-              }
-            }
-            else
-            {
-              // Timeout hasn't expired, decrement it and continue
-              prev.timeout--;
-            }
+        }
+        // Note that timeouts should be deterministic across all the
+        // shards so that this set should always be empty or not empty
+        // for all shards so we can rendezvous safely
+        if (!timeouts.empty())
+        {
+          // Test to see if the timeouts are done
+          for (std::vector<LogicalUser*>::iterator it =
+                timeouts.begin(); it != timeouts.end(); /*nothing*/)
+          {
+            if ((*it)->op->is_operation_committed((*it)->gen))
+              it++;
+            else // Not committed yet so don't prune it
+              it = timeouts.erase(it);
           }
+          // Do any exchanges between the shards (if replicated) to see 
+          // if they agree that all these operations have timed out
+          logical_analysis.context->match_timeouts(timeouts, to_delete);
         }
         if (!to_delete.empty())
         {
@@ -20134,7 +20117,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RegionTreeNode::perform_closing_checks(
-        LogicalAnalysis &logical_analysis, FieldMaskSet<LogicalUser> &users,
+        LogicalAnalysis &logical_analysis, OrderedFieldMaskUsers &users,
         const LogicalUser &user, const FieldMask &check_mask, 
         LogicalRegion root, RegionTreeNode *path_node, FieldMask &still_open)
     //--------------------------------------------------------------------------
@@ -20145,7 +20128,7 @@ namespace Legion {
       if (check_mask * users.get_valid_mask())
         return;
       std::vector<LogicalUser*> to_delete;
-      for (FieldMaskSet<LogicalUser>::iterator it = 
+      for (OrderedFieldMaskUsers::iterator it = 
             users.begin(); it != users.end(); it++)
       {
         const FieldMask overlap = check_mask & it->second;

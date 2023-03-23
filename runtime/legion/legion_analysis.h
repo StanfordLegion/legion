@@ -71,7 +71,7 @@ namespace Legion {
     struct LogicalUser : public Collectable {
     public:
       LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                  ProjectionNode *node);
+                  ProjectionSummary *proj);
       LogicalUser(Operation *o, GenerationID gen, unsigned id,
                   const RegionUsage &u);
       LogicalUser(const LogicalUser &rhs) = delete;
@@ -79,11 +79,36 @@ namespace Legion {
     public:
       LogicalUser& operator=(const LogicalUser &rhs) = delete;
     public:
+      // For providing deterministic ordering of users in sorted
+      // sets which is crucial for control replication
+      inline bool deterministic_pointer_less(const LogicalUser *rhs) const
+        {
+          if (ctx_index < rhs->ctx_index)
+            return true;
+          if (ctx_index > rhs->ctx_index)
+            return false;
+          return (idx < rhs->idx);
+        }
+      inline bool has_timed_out(void)
+        {
+#ifdef DEBUG_LEGION
+          assert(timeout < TIMEOUT);
+#endif
+          if (++timeout == TIMEOUT)
+          {
+            timeout = 0;
+            return true;
+          }
+          else
+            return false;
+        }
+    public:
       const RegionUsage usage;
       Operation *const op;
+      const size_t ctx_index;
       const unsigned idx;
       const GenerationID gen;
-      ProjectionNode *const shard_proj;
+      ProjectionSummary *const shard_proj;
       // This field addresses a problem regarding when
       // to prune tasks out of logical region tree data
       // structures.  If no later task ever performs a
@@ -92,12 +117,14 @@ namespace Legion {
       // prevents that from happening by forcing a
       // test to be performed whenever the timeout
       // reaches zero.
-      int timeout;
+      unsigned timeout;
 #ifdef LEGION_SPY
       UniqueID uid;
 #endif
     public:
-      static const int TIMEOUT = LEGION_DEFAULT_LOGICAL_USER_TIMEOUT;
+      static constexpr unsigned TIMEOUT = LEGION_DEFAULT_LOGICAL_USER_TIMEOUT;
+      static_assert(TIMEOUT > 0,
+          "LEGION_DEFAULT_LOGICAL_USER_TIMEOUT must be positive");
     };
 
     /**
@@ -938,8 +965,56 @@ namespace Legion {
      */
     class ProjectionNode : public Collectable {
     public:
-      virtual ~ProjectionNode(void) = 0;
+      /**
+       * This class defines an interval tree on colors that we can
+       * that we can use to test if a projection node interferes with
+       * children from a remote shard. The tree is defined for the ranges
+       * of colors represented by remote shards. These ranges are 
+       * exclusive from our local children. The reason to use 
+       * ranges here is to compress the representation of the colors
+       * from all the remote shards. We need a way to test if children
+       * are represented on remote shards, but we don't care what's
+       * in their subtrees. The ranges are semi-inclusive [start,end)
+       * Note that the ranges by definition cannot overlap with eachother
+       * It's important to realized that the only reason that this 
+       * compression works is that we linearize colors in N-d color
+       * spaces using Morton codes which gives good locality for 
+       * nearest neighbors and encourages this compressibility so
+       * we can efficiently store the children as ranges to query.
+       */
+      class IntervalTree {
+      public:
+        inline void swap(IntervalTree &rhs) { ranges.swap(rhs.ranges); }
+        inline bool empty(void) const { return ranges.empty(); }
+        void add_child(LegionColor color);
+        void remove_child(LegionColor color);
+        void add_range(LegionColor start, LegionColor stop);
+        bool has_child(LegionColor color) const;
+        void serialize(Serializer &rez) const;
+        void deserialize(Deserializer &derez);
+      public:
+        std::map<LegionColor/*start*/,LegionColor/*end*/> ranges;
+      };
+      // These structures are used for exchanging summary information
+      // between different shards with control replication
+      struct RegionSummary {
+        ProjectionNode::IntervalTree children;
+        std::vector<ShardID> users;
+      };
+      struct PartitionSummary {
+        ProjectionNode::IntervalTree children;
+      };
+    public:
+      virtual ~ProjectionNode(void) { };
       virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
+      virtual void extract_summaries(
+          std::map<LogicalRegion,RegionSummary> &regions,
+          std::map<LogicalPartition,PartitionSummary> &partitions) const = 0;
+      virtual void update_summaries(
+          std::map<LogicalRegion,RegionSummary> &regions,
+          std::map<LogicalPartition,PartitionSummary> &partitions) = 0;
+    public:
+      IntervalTree shard_children;
     };
 
     class ProjectionRegion : public ProjectionNode {
@@ -951,13 +1026,19 @@ namespace Legion {
       ProjectionRegion& operator=(const ProjectionRegion &rhs) = delete;
     public:
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      virtual void extract_summaries(
+          std::map<LogicalRegion,RegionSummary> &regions,
+          std::map<LogicalPartition,PartitionSummary> &partitions) const;
+      virtual void update_summaries(
+          std::map<LogicalRegion,RegionSummary> &regions,
+          std::map<LogicalPartition,PartitionSummary> &partitions);
       bool has_interference(ProjectionRegion *other, ShardID local) const;
       void add_user(ShardID shard);
       void add_child(ProjectionPartition *child);
     public:
       RegionNode *const region;
-      std::map<LegionColor,ProjectionPartition*> children;
-      std::vector<ShardID> users;
+      std::map<LegionColor,ProjectionPartition*> local_children;
+      std::vector<ShardID> shard_users;
     };
 
     class ProjectionPartition : public ProjectionNode {
@@ -969,11 +1050,17 @@ namespace Legion {
       ProjectionPartition& operator=(const ProjectionPartition &rhs) = delete;
     public:
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
+      virtual void extract_summaries(
+          std::map<LogicalRegion,RegionSummary> &regions,
+          std::map<LogicalPartition,PartitionSummary> &partitions) const;
+      virtual void update_summaries(
+          std::map<LogicalRegion,RegionSummary> &regions,
+          std::map<LogicalPartition,PartitionSummary> &partitions);
       bool has_interference(ProjectionPartition *other, ShardID local) const;
       void add_child(ProjectionRegion *child);
     public:
       PartitionNode *const partition;
-      std::map<LegionColor,ProjectionRegion*> children;
+      std::map<LegionColor,ProjectionRegion*> local_children;
     };
 
 #if 0
@@ -1027,7 +1114,36 @@ namespace Legion {
       static constexpr unsigned REFINEMENT_CHANGE_COUNT = 16;
     protected:
       std::map<LegionColor,RefinementNode*> children;
+      std::map<LegionColor,ShardID> shard_children; // only for partitions
       LegionMap<unsigned,FieldMask> touches;
+    };
+
+    /**
+     * \class ProjectionSummary
+     * A projection summary tracks the meta-data associated with a
+     * particular projection including the projection tree that was
+     * produced to represent it.
+     */
+    class ProjectionSummary : public Collectable {
+    public:
+      ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
+                        const RegionRequirement &req, LogicalState *owner);
+      ProjectionSummary(const ProjectionSummary &rhs) = delete;
+      ~ProjectionSummary(void);
+    public:
+      ProjectionSummary& operator=(const ProjectionSummary &rhs) = delete;
+    public:
+      bool matches(const ProjectionInfo &rhs,
+                   const RegionRequirement &req) const;
+    public:
+      LogicalState *const owner;
+      IndexSpaceNode *const domain;
+      ProjectionFunction *const projection;
+      ShardingFunction *const sharding;
+      IndexSpaceNode *const sharding_domain;
+      ProjectionNode *const result;
+      void *args;
+      size_t arglen;
     };
 
     /**
@@ -1053,13 +1169,14 @@ namespace Legion {
       void clear_deleted_state(const FieldMask &deleted_mask);
       void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
       void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
-      bool test_interfering_shard_projections(ProjectionNode *one,
-                                              ProjectionNode *two);
-      ProjectionNode* find_or_create_projection_summary(
+      ProjectionSummary* find_or_create_projection_summary(
                                           Operation *op, unsigned index,
                                           const RegionRequirement &req,
                                           LogicalAnalysis &analysis,
                                           const ProjectionInfo &proj_info);
+      void remove_projection_summary(ProjectionSummary *summary);
+      bool test_interfering_summaries(LogicalAnalysis &analysis,
+                          ProjectionSummary *one, ProjectionSummary *two);
 #if 0
     public:
       bool find_symbolic_elide_close_result(const ProjectionSummary &prev, 
@@ -1072,8 +1189,12 @@ namespace Legion {
     public:
       LegionList<FieldState,
                  LOGICAL_FIELD_STATE_ALLOC> field_states;
-      FieldMaskSet<LogicalUser> curr_epoch_users;
-      FieldMaskSet<LogicalUser> prev_epoch_users;
+      // Note that even though these are field mask sets keyed on pointers
+      // we mark them as determinsitic so that shards always iterate over
+      // these elements in the same order
+      typedef FieldMaskSet<LogicalUser,UNTRACKED_ALLOC,true/*determinisitic*/>
+        OrderedFieldMaskUsers;
+      OrderedFieldMaskUsers curr_epoch_users, prev_epoch_users; 
     public:
       // The nodes that make up the current disjoint-complete refinement tree
       // On region nodes this points to the next partition in the refinement
@@ -1088,29 +1209,14 @@ namespace Legion {
       FieldMaskSet<RefinementNode> candidate_refinement_trees;
     public:
       static constexpr size_t PROJECTION_CACHE_SIZE = 32;
-      struct ProjectionSummary {
-      public:
-        ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
-                          const RegionRequirement &req);
-        ProjectionSummary(const ProjectionSummary &rhs) = delete;
-        ProjectionSummary(ProjectionSummary &&rhs);
-        ~ProjectionSummary(void);
-      public:
-        ProjectionSummary& operator=(const ProjectionSummary &rhs) = delete;
-        ProjectionSummary& operator=(ProjectionSummary &&rhs);
-      public:
-        bool matches(const ProjectionInfo &rhs,
-                     const RegionRequirement &req) const;
-      public:
-        IndexSpaceNode *domain;
-        ProjectionFunction *projection;
-        ShardingFunction *sharding;
-        IndexSpaceNode *sharding_domain;
-        ProjectionNode *result;
-        void *args;
-        size_t arglen;
-      };
-      std::list<ProjectionSummary> projection_summary_cache;
+      // Note that this list can grow bigger than PROJECTION_CACHE_SIZE
+      // but we only references on the entries within the size of the
+      // cache. This allows us to still hit on projections that are still
+      // alive from othe references, but still allows those entries to
+      // be pruned out once they are no longer alive
+      std::list<ProjectionSummary*> projection_summary_cache;
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,bool> > interferences;
 #if 0
       // Track whether this node is part of the disjoint-complete tree
       FieldMask disjoint_complete_tree;

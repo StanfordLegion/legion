@@ -38,9 +38,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                             ProjectionNode *n)
-      : Collectable(), usage(u), op(o), idx(id), gen(o->get_generation()),
-        shard_proj(n), timeout(TIMEOUT)
+                             ProjectionSummary *p)
+      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()), idx(id),
+        gen(o->get_generation()), shard_proj(p), timeout(0)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
@@ -55,8 +55,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LogicalUser::LogicalUser(Operation *o, GenerationID g, unsigned id, 
                              const RegionUsage &u)
-      : Collectable(), usage(u), op(o), idx(id), gen(g), shard_proj(NULL),
-        timeout(TIMEOUT)
+      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()), idx(id),
+        gen(g), shard_proj(NULL), timeout(0)
 #ifdef LEGION_SPY
         , uid(o->get_unique_op_id())
 #endif
@@ -2476,6 +2476,130 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // ProjectionNode
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::add_child(LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      add_range(color, color+1);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::remove_child(LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      // Don't contain the color
+      if (ranges.empty())
+        return;
+      std::map<LegionColor,LegionColor>::iterator finder =
+        ranges.upper_bound(color);
+      // Don't contain the color
+      if (finder == ranges.begin())
+        return;
+      // Get the interval right before
+      finder = std::prev(finder);
+      // Don't have the color in the previous interval
+      if (finder->second <= color)
+        return;
+      // Start a new range if this wasn't the last color in the range
+      if ((color+1) < finder->second)
+        ranges[color+1] = finder->second;
+      // See if it is at the start of the range in which case this is easy
+      if (finder->first == color)
+        // Remove the old range
+        ranges.erase(finder);
+      else
+        // Update the range to end at the color which was removed
+        finder->second = color;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::add_range(LegionColor start,
+                                                 LegionColor stop)
+    //--------------------------------------------------------------------------
+    {
+      if (!ranges.empty())
+      {
+        // Find the first range that might contain the start point
+        std::map<LegionColor,LegionColor>::iterator next = 
+          ranges.upper_bound(start);
+        if (next != ranges.begin())
+        {
+          std::map<LegionColor,LegionColor>::iterator prev = std::prev(next);
+          // Note that prev->first <= start because of upper_bound
+          // Start is contained in this interval so we can merge it
+          if (start < prev->second)
+          {
+            // Interval contained in already existing range
+            if (stop <= prev->second)
+              return;
+            start = prev->first;
+            ranges.erase(prev);
+          }
+        }
+        // Now merge forwards with any future ranges
+        while ((next != ranges.end()) && (next->first <= stop))
+        {
+          if (stop < next->second)
+            stop = next->second;
+          std::map<LegionColor,LegionColor>::iterator to_delete = next++;
+          ranges.erase(to_delete);
+        }
+      }
+      // Add this range to the tree
+      ranges[start] = stop;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionNode::IntervalTree::has_child(LegionColor color) const
+    //--------------------------------------------------------------------------
+    {
+      if (ranges.empty())
+        return false;
+      // Find the first interval that starts after the color
+      std::map<LegionColor,LegionColor>::const_iterator finder =
+        ranges.upper_bound(color);
+      // If it's the first interval, then we can't contain the color
+      if (finder == ranges.begin())
+        return false;
+      // Otherwise step backwards to get the interval right before
+      finder = std::prev(finder);
+      // See if that interval includes it or not
+      // Note that (finder->first <= color) is already implied by upper_bound
+      return (color < finder->second);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::serialize(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(ranges.size());
+      for (std::map<LegionColor,LegionColor>::const_iterator it =
+            ranges.begin(); it != ranges.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionNode::IntervalTree::deserialize(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_ranges;
+      derez.deserialize(num_ranges);
+      for (unsigned idx = 0; idx < num_ranges; idx++)
+      {
+        LegionColor start, end;
+        derez.deserialize(start);
+        derez.deserialize(end);
+        add_range(start, end);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // ProjectionRegion
     /////////////////////////////////////////////////////////////
 
@@ -2492,8 +2616,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-        if ((it->second != NULL) && it->second->remove_reference())
+            local_children.begin(); it != local_children.end(); it++)
+        if (it->second->remove_reference())
           delete it->second;
       if (region->remove_base_gc_ref(PROJECTION_REF))
         delete region;
@@ -2516,31 +2640,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionRegion::extract_summaries(
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(region_summaries.find(region->handle) == region_summaries.end());
+#endif
+      RegionSummary &summary = region_summaries[region->handle];
+      summary.users = shard_users;
+      for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
+            local_children.begin(); it != local_children.end(); it++)
+      {
+        summary.children.add_child(it->first);
+        it->second->extract_summaries(region_summaries, partition_summaries);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::update_summaries(
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(region_summaries.find(region->handle) != region_summaries.end());
+#endif
+      RegionSummary &summary = region_summaries[region->handle];
+      shard_users.swap(summary.users);
+      shard_children.swap(summary.children);
+      // Remove all our local children from the shard children
+      for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
+            local_children.begin(); it != local_children.end(); it++)
+      {
+        shard_children.remove_child(it->first);
+        it->second->update_summaries(region_summaries, partition_summaries);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool ProjectionRegion::has_interference(ProjectionRegion *other,
                                             ShardID local_shard) const
     //--------------------------------------------------------------------------
     {
       // If either one has more than one shard ID then we're done
-      if ((users.size() > 1) || (other->users.size() > 1))
+      if ((shard_users.size() > 1) || (other->shard_users.size() > 1))
         return true;
-      if (!users.empty() && (users.back() != local_shard))
+      if (!shard_users.empty() && (shard_users.back() != local_shard))
         return true;
-      if (!other->users.empty() && (other->users.back() != local_shard))
+      if (!other->shard_users.empty() &&
+          (other->shard_users.back() != local_shard))
+        return true;
+      // If either has any shard children we're immediately interfering 
+      if (!shard_children.empty() || !other->shard_children.empty())
         return true;
       // If we have different numbers of partitions then we are definitely
       // going ot be interfering on something
-      if (children.size() != other->children.size())
+      if (local_children.size() != other->local_children.size())
         return true;
       for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
+            local_children.begin(); it != local_children.end(); it++)
       {
-        if (it->second == NULL)
-          return true;
         std::map<LegionColor,ProjectionPartition*>::const_iterator finder =
-          other->children.find(it->first);
-        if (finder == other->children.end())
-          return true;
-        if (finder->second == NULL)
+          other->local_children.find(it->first);
+        if (finder == other->local_children.end())
           return true;
         if (it->second->has_interference(finder->second, local_shard))
           return true;
@@ -2552,11 +2716,11 @@ namespace Legion {
     void ProjectionRegion::add_user(ShardID user)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < users.size(); idx++)
-        if (users[idx] == user)
+      for (unsigned idx = 0; idx < shard_users.size(); idx++)
+        if (shard_users[idx] == user)
           return;
-      users.push_back(user);
-      std::sort(users.begin(), users.end());
+      shard_users.push_back(user);
+      std::sort(shard_users.begin(), shard_users.end());
     }
 
     //--------------------------------------------------------------------------
@@ -2565,9 +2729,9 @@ namespace Legion {
     {
       LegionColor color = child->partition->row_source->color;
 #ifdef DEBUG_LEGION
-      assert(children.find(color) == children.end());
+      assert(local_children.find(color) == local_children.end());
 #endif
-      children[color] = child;
+      local_children[color] = child;
       child->add_reference();
     }
 
@@ -2588,8 +2752,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-        if ((it->second != NULL) && it->second->remove_reference())
+            local_children.begin(); it != local_children.end(); it++)
+        if (it->second->remove_reference())
           delete it->second;
       if (partition->remove_base_gc_ref(PROJECTION_REF))
         delete partition;
@@ -2612,6 +2776,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ProjectionPartition::extract_summaries(
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition_summaries.find(partition->handle) ==
+              partition_summaries.end());
+#endif
+      PartitionSummary &summary = partition_summaries[partition->handle];
+      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
+            local_children.begin(); it != local_children.end(); it++)
+      {
+        summary.children.add_child(it->first);
+        it->second->extract_summaries(region_summaries, partition_summaries);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::update_summaries(
+        std::map<LogicalRegion,RegionSummary> &region_summaries,
+        std::map<LogicalPartition,PartitionSummary> &partition_summaries)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition_summaries.find(partition->handle) != 
+              partition_summaries.end());
+#endif
+      PartitionSummary &summary = partition_summaries[partition->handle];
+      shard_children.swap(summary.children);
+      // Remove all our local children from the shard children
+      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
+            local_children.begin(); it != local_children.end(); it++)
+      {
+        shard_children.remove_child(it->first);
+        it->second->update_summaries(region_summaries, partition_summaries);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     bool ProjectionPartition::has_interference(ProjectionPartition *other,
                                                ShardID local_shard) const
     //--------------------------------------------------------------------------
@@ -2620,48 +2824,51 @@ namespace Legion {
       {
         // Disjoint partition, check all the children against each other
         for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-              children.begin(); it != children.end(); it++)
+              local_children.begin(); it != local_children.end(); it++)
         {
           std::map<LegionColor,ProjectionRegion*>::const_iterator finder =
-            other->children.find(it->first);
-          if (finder == other->children.end())
-            continue;
-          if (finder->second == NULL)
-            return true;
-          if (it->second->has_interference(finder->second, local_shard))
+            other->local_children.find(it->first);
+          if (finder == other->local_children.end())
+          {
+            // Check to see if there is a remote shard with that child
+            if (other->shard_children.has_child(it->first))
+              return true;
+          }
+          else if (it->second->has_interference(finder->second, local_shard))
             return true;
         }
         // Check in the opposite direction too
         for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-              other->children.begin(); it != other->children.end(); it++)
+              other->local_children.begin(); it != 
+              other->local_children.end(); it++)
         {
           std::map<LegionColor,ProjectionRegion*>::const_iterator finder =
-            children.find(it->first);
-          if (finder == children.end())
-            continue;
-          // We've already done interferences with anything else
-          if (finder->second == NULL)
-            return true;
+            local_children.find(it->first);
+          if (finder == local_children.end())
+          {
+            if (shard_children.has_child(it->first))
+              return true;
+          }
+          // Else we've already done interferences with ourself locally
         }
         return false;
       }
       else
       {
         // Aliased partition
+        // If either has any shard children we're immediately interfering 
+        if (!shard_children.empty() || !other->shard_children.empty())
+          return true;
         // If we have different numbers of partitions then we are definitely
-        // going ot be interfering on something
-        if (children.size() != other->children.size())
+        // going to be interfering on something
+        if (local_children.size() != other->local_children.size())
           return true;
         for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-              children.begin(); it != children.end(); it++)
+              local_children.begin(); it != local_children.end(); it++)
         {
-          if (it->second == NULL)
-            return true;
           std::map<LegionColor,ProjectionRegion*>::const_iterator finder =
-            other->children.find(it->first);
-          if (finder == other->children.end())
-            return true;
-          if (finder->second == NULL)
+            other->local_children.find(it->first);
+          if (finder == other->local_children.end())
             return true;
           if (it->second->has_interference(finder->second, local_shard))
             return true;
@@ -2676,9 +2883,9 @@ namespace Legion {
     {
       LegionColor color = child->region->row_source->color;
 #ifdef DEBUG_LEGION
-      assert(children.find(color) == children.end());
+      assert(local_children.find(color) == local_children.end());
 #endif
-      children[color] = child;
+      local_children[color] = child;
       child->add_reference();
     }
 
@@ -3010,6 +3217,74 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // ProjectionSummary
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(
+                          const ProjectionInfo &proj_info, ProjectionNode *node,
+                          const RegionRequirement &req, LogicalState *own)
+      : owner(own), domain(proj_info.projection_space),
+        projection(proj_info.projection), sharding(proj_info.sharding_function),
+        sharding_domain(proj_info.sharding_space), result(node)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(proj_info.is_projecting());
+      assert(result != NULL);
+#endif
+      domain->add_base_gc_ref(PROJECTION_REF);
+      sharding_domain->add_base_gc_ref(PROJECTION_REF);
+      result->add_reference();
+      const void *projection_args = req.get_projection_args(&arglen);
+      if (arglen > 0)
+      {
+        args = malloc(arglen);
+        memcpy(args, projection_args, arglen);
+      }
+      else
+        args = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::~ProjectionSummary(void)
+    //--------------------------------------------------------------------------
+    {
+      owner->remove_projection_summary(this);
+      if ((domain != NULL) && domain->remove_base_gc_ref(PROJECTION_REF))
+        delete domain;
+      if ((sharding_domain != NULL) && 
+          sharding_domain->remove_base_gc_ref(PROJECTION_REF))
+        delete sharding_domain;
+      if ((result != NULL) && result->remove_reference())
+        delete result;
+      if (args != NULL)
+        free(args);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::matches(const ProjectionInfo &rhs,
+                                    const RegionRequirement &req) const
+    //--------------------------------------------------------------------------
+    {
+      if (domain != rhs.projection_space)
+        return false;
+      if (projection != rhs.projection)
+        return false;
+      if (sharding != rhs.sharding_function)
+        return false;
+      if (sharding_domain != rhs.sharding_space)
+        return false;
+      size_t proj_arglen;
+      const void *projection_args = req.get_projection_args(&proj_arglen);
+      if (arglen != proj_arglen)
+        return false;
+      if ((arglen > 0) && (memcmp(args, projection_args, arglen) == 0))
+        return false;
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // LogicalState 
     ///////////////////////////////////////////////////////////// 
 
@@ -3064,7 +3339,7 @@ namespace Legion {
     {
       if (!curr_epoch_users.empty())
       {
-        for (FieldMaskSet<LogicalUser>::const_iterator it =
+        for (OrderedFieldMaskUsers::const_iterator it =
               curr_epoch_users.begin(); it != curr_epoch_users.end(); it++)
           if (it->first->remove_reference())
             delete it->first;
@@ -3072,7 +3347,7 @@ namespace Legion {
       }
       if (!prev_epoch_users.empty())
       {
-        for (FieldMaskSet<LogicalUser>::const_iterator it =
+        for (OrderedFieldMaskUsers::const_iterator it =
               prev_epoch_users.begin(); it != prev_epoch_users.end(); it++)
           if (it->first->remove_reference())
             delete it->first;
@@ -3104,7 +3379,14 @@ namespace Legion {
             delete it->first;
         candidate_refinement_trees.clear();
       }
-      projection_summary_cache.clear();
+      while (!projection_summary_cache.empty())
+      {
+        ProjectionSummary *summary = projection_summary_cache.back();
+        projection_summary_cache.pop_back();
+        if ((projection_summary_cache.size() < PROJECTION_CACHE_SIZE) &&
+            summary->remove_reference())
+          delete summary;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3147,12 +3429,12 @@ namespace Legion {
           field_states.push_back(*fit);
       }
       src.field_states.clear();
-      for (FieldMaskSet<LogicalUser>::const_iterator it =
+      for (OrderedFieldMaskUsers::const_iterator it =
             src.curr_epoch_users.begin(); it != 
             src.curr_epoch_users.end(); it++)
         if (curr_epoch_users.insert(it->first, it->second))
           it->first->add_reference();
-      for (FieldMaskSet<LogicalUser>::const_iterator it =
+      for (OrderedFieldMaskUsers::const_iterator it =
             src.prev_epoch_users.begin(); it != 
             src.prev_epoch_users.end(); it++)
         if (prev_epoch_users.insert(it->first, it->second))
@@ -3204,7 +3486,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionNode* LogicalState::find_or_create_projection_summary(
+    ProjectionSummary* LogicalState::find_or_create_projection_summary(
                    Operation *op, unsigned index, const RegionRequirement &req,
                    LogicalAnalysis &analysis, const ProjectionInfo &proj_info)
     //--------------------------------------------------------------------------
@@ -3213,144 +3495,126 @@ namespace Legion {
       if (proj_info.projection->is_functional)
       {
         // Check to see if we can find this in the cache
-        for (std::list<ProjectionSummary>::iterator it =
+        unsigned index = 0;
+        ProjectionSummary *invalidated = NULL;
+        for (std::list<ProjectionSummary*>::iterator it =
               projection_summary_cache.begin(); it !=
-              projection_summary_cache.end(); it++)
+              projection_summary_cache.end(); it++, index++)
         {
-          if (it->matches(proj_info, req))
+          if ((*it)->matches(proj_info, req))
           {
-            ProjectionNode *result = it->result;
+            ProjectionSummary *result = *it;
             // Move it to the front of the list if it wasn't already there
             if (it != projection_summary_cache.begin())
+            {
               projection_summary_cache.splice(projection_summary_cache.begin(),
                   projection_summary_cache, it);
+              // If this wasn't already in the cache range with a reference
+              // then we need to update the reference counts
+              if (PROJECTION_CACHE_SIZE <= index)
+              {
+                // Add a reference to the result
+                result->add_reference();
+#ifdef DEBUG_LEGION
+                assert(invalidated != NULL);
+#endif
+                if (invalidated->remove_reference())
+                  delete invalidated;
+              }
+            }
             return result;
           }
+          if (index == (PROJECTION_CACHE_SIZE - 1))
+          {
+            // If we make it here then this is the last entry in the
+            // cache currenty and we're either going to match on an
+            // entry outside the cache and move it into the cache
+            // or we're going to make a new entry so this summary
+            // is going to be invalidated either way, so save it
+            // so we can do the invalidation after we're done 
+            // traversing the list when we won't mess with the iterator
+            invalidated = (*it);
+          }
         }
+        if ((invalidated != NULL) && invalidated->remove_reference())
+          delete invalidated;
       }
       ProjectionNode *node = analysis.context->construct_projection_tree(op,
                                               index, req, owner, proj_info);
+      ProjectionSummary *result = 
+        new ProjectionSummary(proj_info, node, req, this);
       // If the projection functor is functional then we can save it for
       // the future and evict the least recently used projection
       if (proj_info.projection->is_functional)
       {
-#ifdef DEBUG_LEGION
-        assert(projection_summary_cache.size() <= PROJECTION_CACHE_SIZE);
-#endif
-        if (projection_summary_cache.size() == PROJECTION_CACHE_SIZE) 
-          projection_summary_cache.pop_back();
-        projection_summary_cache.emplace_back(
-            ProjectionSummary(proj_info, node, req));
+        result->add_reference();
+        projection_summary_cache.push_front(result);
       }
-      return node;
-    }
+      return result;
+    } 
 
     //--------------------------------------------------------------------------
-    LogicalState::ProjectionSummary::ProjectionSummary(
-                          const ProjectionInfo &proj_info, ProjectionNode *node,
-                          const RegionRequirement &req)
-      : domain(proj_info.projection_space), projection(proj_info.projection),
-        sharding(proj_info.sharding_function), 
-        sharding_domain(proj_info.sharding_space), result(node)
+    void LogicalState::remove_projection_summary(ProjectionSummary *summary)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(proj_info.is_projecting());
-      assert(result != NULL);
+      assert(summary->owner == this);
 #endif
-      domain->add_base_gc_ref(PROJECTION_REF);
-      sharding_domain->add_base_gc_ref(PROJECTION_REF);
-      result->add_reference();
-      const void *projection_args = req.get_projection_args(&arglen);
-      if (arglen > 0)
+      if (summary->projection->is_functional &&
+          (PROJECTION_CACHE_SIZE < projection_summary_cache.size()))
       {
-        args = malloc(arglen);
-        memcpy(args, projection_args, arglen);
+        // Only need to filter from things not in the cache so start
+        // from the back and only go up to the last element not in the cache
+        unsigned stop = projection_summary_cache.size() - PROJECTION_CACHE_SIZE;
+        std::list<ProjectionSummary*>::reverse_iterator finder =
+          projection_summary_cache.rbegin();
+        for (unsigned idx = 0; idx < stop; idx++)
+        {
+          if ((*finder) == summary)
+          {
+            // Reverse iterators are stupid
+            projection_summary_cache.erase(std::next(finder).base());
+            break;
+          }
+          finder++;
+        }
       }
-      else
-        args = NULL;
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,bool> >::iterator finder =
+          interferences.find(summary);
+      if (finder != interferences.end())
+      {
+        for (std::unordered_map<ProjectionSummary*,bool>::const_iterator it =
+              finder->second.begin(); it != finder->second.end(); it++)
+          interferences[it->first].erase(summary);
+        interferences.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
-    LogicalState::ProjectionSummary::ProjectionSummary(ProjectionSummary &&rhs)
-      : domain(rhs.domain), projection(rhs.projection), sharding(rhs.sharding),
-        sharding_domain(rhs.sharding_domain), result(rhs.result),
-        args(rhs.args), arglen(rhs.arglen)
+    bool LogicalState::test_interfering_summaries(LogicalAnalysis &analysis,
+                                 ProjectionSummary *one, ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
-      // References move over with move constructor
-      rhs.domain = NULL;
-      rhs.sharding_domain = NULL;
-      rhs.result = NULL;
-      rhs.args = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalState::ProjectionSummary::~ProjectionSummary(void)
-    //--------------------------------------------------------------------------
-    {
-      if ((domain != NULL) && domain->remove_base_gc_ref(PROJECTION_REF))
-        delete domain;
-      if ((sharding_domain != NULL) && 
-          sharding_domain->remove_base_gc_ref(PROJECTION_REF))
-        delete sharding_domain;
-      if ((result != NULL) && result->remove_reference())
-        delete result;
-      if (args != NULL)
-        free(args);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalState::ProjectionSummary& LogicalState::ProjectionSummary::operator=(
-                                                        ProjectionSummary &&rhs)
-    //--------------------------------------------------------------------------
-    {
-      // Remove existing references
-      if ((domain != NULL) && domain->remove_base_gc_ref(PROJECTION_REF))
-        delete domain;
-      if ((sharding_domain != NULL) && 
-          sharding_domain->remove_base_gc_ref(PROJECTION_REF))
-        delete sharding_domain;
-      if ((result != NULL) && result->remove_reference())
-        delete result;
-      if (args != NULL)
-        free(args);
-      // Move over pointers with references
-      domain = rhs.domain;
-      projection = rhs.projection;
-      sharding = rhs.sharding;
-      sharding_domain = rhs.sharding_domain;
-      result = rhs.result;
-      args = rhs.args;
-      arglen = rhs.arglen;
-      // Remove pointers from rhs
-      rhs.domain = NULL;
-      rhs.sharding_domain = NULL;
-      rhs.result = NULL;
-      rhs.args = NULL;
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LogicalState::ProjectionSummary::matches(
-                  const ProjectionInfo &rhs, const RegionRequirement &req) const
-    //--------------------------------------------------------------------------
-    {
-      if (domain != rhs.projection_space)
-        return false;
-      if (projection != rhs.projection)
-        return false;
-      if (sharding != rhs.sharding_function)
-        return false;
-      if (sharding_domain != rhs.sharding_space)
-        return false;
-      size_t proj_arglen;
-      const void *projection_args = req.get_projection_args(&proj_arglen);
-      if (arglen != proj_arglen)
-        return false;
-      if ((arglen > 0) && (memcmp(args, projection_args, arglen) == 0))
-        return false;
-      return true;
+#ifdef DEBUG_LEGION
+      assert(one->owner == this);
+      assert(two->owner == this);
+#endif
+      std::unordered_map<ProjectionSummary*,
+        std::unordered_map<ProjectionSummary*,bool> >::const_iterator
+          one_finder = interferences.find(one);
+      if (one_finder != interferences.end())
+      {
+        std::unordered_map<ProjectionSummary*,bool>::const_iterator
+          two_finder = one_finder->second.find(two);
+        if (two_finder != one_finder->second.end())
+          return two_finder->second;
+      }
+      // Do the test and save the results for later
+      const bool result = analysis.context->test_interfering_summaries(one,two);
+      interferences[one][two] = result;
+      interferences[two][one] = result;
+      return result;
     }
 
 #if 0

@@ -12803,6 +12803,7 @@ namespace Legion {
     }
 
     // Instantiate this for a common use case
+    template class AllReduceCollective<SumReduction<bool> >;
     template class AllReduceCollective<ProdReduction<bool> >;
 
     /////////////////////////////////////////////////////////////
@@ -16342,6 +16343,169 @@ namespace Legion {
     {
       concurrent_processors.swap(processors);
       perform_collective_async();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Projection Tree Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionTreeExchange::ProjectionTreeExchange(ProjectionNode *n,
+        ReplicateContext *ctx, CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(ctx,
+          ctx->get_next_collective_index(loc, true/*logical*/)), node(n)
+    //--------------------------------------------------------------------------
+    {
+      // Extract our local summaries
+      node->extract_summaries(region_summaries, partition_summaries);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionTreeExchange::~ProjectionTreeExchange(void)
+    //--------------------------------------------------------------------------
+    {
+      // Update our local summaries
+      node->update_summaries(region_summaries, partition_summaries);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionTreeExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(region_summaries.size());
+      for (std::map<LogicalRegion,RegionSummary>::const_iterator it =
+            region_summaries.begin(); it != region_summaries.end(); it++)
+      {
+        rez.serialize(it->first);
+        it->second.children.serialize(rez);
+        rez.serialize(it->second.users.size());
+        for (unsigned idx = 0; idx < it->second.users.size(); it++)
+          rez.serialize(it->second.users[idx]);
+      }
+      rez.serialize<size_t>(partition_summaries.size());
+      for (std::map<LogicalPartition,PartitionSummary>::const_iterator it =
+            partition_summaries.begin(); it != partition_summaries.end(); it++)
+      {
+        rez.serialize(it->first);
+        it->second.children.serialize(rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionTreeExchange::unpack_collective_stage(Deserializer &derez,
+                                                         int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_regions;
+      derez.deserialize(num_regions);
+      for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
+      {
+        LogicalRegion region;
+        derez.deserialize(region);
+        RegionSummary &summary = region_summaries[region];
+        summary.children.deserialize(derez);
+        size_t num_users;
+        derez.deserialize(num_users);
+        if (summary.users.empty())
+        {
+          summary.users.resize(num_users);
+          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+            derez.deserialize(summary.users[idx2]);
+        }
+        else
+        {
+          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+          {
+            ShardID user;
+            derez.deserialize(user);
+            if (std::binary_search(summary.users.begin(),
+                                   summary.users.end(), user))
+              continue;
+            summary.users.push_back(user);
+            std::sort(summary.users.begin(), summary.users.end());
+          }
+        }
+      }
+      size_t num_partitions;
+      derez.deserialize(num_partitions);
+      for (unsigned idx = 0; idx < num_partitions; idx++)
+      {
+        LogicalPartition partition;
+        derez.deserialize(partition);
+        PartitionSummary &summary = partition_summaries[partition];
+        summary.children.deserialize(derez);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Timeout Match Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TimeoutMatchExchange::TimeoutMatchExchange(ReplicateContext *ctx,
+                                               CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(ctx,
+          ctx->get_next_collective_index(loc, true/*logical*/))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void TimeoutMatchExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(all_timeouts.size());
+      for (unsigned idx = 0; idx < all_timeouts.size(); idx++)
+      {
+        rez.serialize(all_timeouts[idx].first);
+        rez.serialize(all_timeouts[idx].second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TimeoutMatchExchange::unpack_collective_stage(Deserializer &derez,
+                                                       int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_timeouts;
+      derez.deserialize(num_timeouts);
+      std::vector<std::pair<size_t,unsigned> > next;
+      for (unsigned idx = 0; idx < num_timeouts; idx++)
+      {
+        std::pair<size_t,unsigned> key;
+        derez.deserialize(key.first);
+        derez.deserialize(key.second);
+        if (std::binary_search(all_timeouts.begin(), all_timeouts.end(), key))
+          next.emplace_back(key);
+      }
+      if (next.size() < all_timeouts.size())
+        all_timeouts.swap(next);
+    }
+
+    //--------------------------------------------------------------------------
+    void TimeoutMatchExchange::match_timeouts(
+                                      const std::vector<LogicalUser*> &timeouts,
+                                      std::vector<LogicalUser*> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      all_timeouts.reserve(timeouts.size());
+      for (std::vector<LogicalUser*>::const_iterator it =
+            timeouts.begin(); it != timeouts.end(); it++)
+        all_timeouts.emplace_back(std::make_pair((*it)->ctx_index, (*it)->idx));
+      std::sort(all_timeouts.begin(), all_timeouts.end());
+      perform_collective_sync();
+      if (!all_timeouts.empty())
+      {
+        for (std::vector<LogicalUser*>::const_iterator it =
+              timeouts.begin(); it != timeouts.end(); it++)
+        {
+          const std::pair<size_t,unsigned> key((*it)->ctx_index, (*it)->idx);
+          if (std::binary_search(all_timeouts.begin(), all_timeouts.end(), key))
+            to_delete.push_back(*it);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////

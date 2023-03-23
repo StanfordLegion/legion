@@ -1674,9 +1674,14 @@ namespace Legion {
                                       std::vector<EquivalenceSet*> &to_release);
       virtual void report_leaks_and_duplicates(std::set<RtEvent> &preconds);
       virtual void free_region_tree_context(void);
+    public:
       virtual ProjectionNode* construct_projection_tree(
           Operation *op, unsigned index, const RegionRequirement &req,
           RegionTreeNode *root, const ProjectionInfo &proj_info);
+      virtual bool test_interfering_summaries(ProjectionSummary *one,
+                                              ProjectionSummary *two);
+      virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
+                                  std::vector<LogicalUser*> &to_delete);
     public:
       void record_fill_view_creation(FillView *view);
       void record_fill_view_creation(DistributedID future_did, FillView *view);
@@ -2834,9 +2839,14 @@ namespace Legion {
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
+    public:
       virtual ProjectionNode* construct_projection_tree(
           Operation *op, unsigned index, const RegionRequirement &req,
           RegionTreeNode *root, const ProjectionInfo &proj_info);
+      virtual bool test_interfering_summaries(ProjectionSummary *one,
+                                              ProjectionSummary *two);
+      virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
+                                  std::vector<LogicalUser*> &to_delete);
     public:
       virtual Lock create_lock(void);
       virtual void destroy_lock(Lock l);

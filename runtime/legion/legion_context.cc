@@ -10561,6 +10561,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool InnerContext::test_interfering_summaries(ProjectionSummary *one,
+                                                  ProjectionSummary *two)
+    //--------------------------------------------------------------------------
+    {
+      return one->result->interferes(two->result, 0/*local shard*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::match_timeouts(const std::vector<LogicalUser*> &timeouts,
+                                      std::vector<LogicalUser*> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      // Everything can be deleted here since there is no match
+      to_delete.insert(to_delete.end(), timeouts.begin(), timeouts.end());
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::report_leaks_and_duplicates(std::set<RtEvent> &preconds)
     //--------------------------------------------------------------------------
     {
@@ -19708,6 +19725,60 @@ namespace Legion {
       else
         return InnerContext::find_or_create_collective_view(tid, 
                                                 instances, ready);
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    ProjectionNode* ReplicateContext::construct_projection_tree(
+                    Operation *op, unsigned index, const RegionRequirement &req,
+                    RegionTreeNode *root, const ProjectionInfo &proj_info)
+    //--------------------------------------------------------------------------
+    {
+      ProjectionNode *result = proj_info.projection->construct_projection_tree(
+                        op, index, req, owner_shard->shard_id, root, proj_info);
+      // Now we need to exchange this between the shards. The secret to this
+      // function is knowing that it is only called in the logical dependence
+      // analysis stage of the pipeline so we can get a collective ID here to
+      // perform the exchange between the shards of their neighbor sharding
+      // information. This is unfortunately a blocking process, but it should
+      // be memoized in most cases to reduce the latency of it happening
+      if (req.projection == 0)
+      {
+        // For the identity projection function we know how to compute this
+        // without performing any communication between the shards
+        
+      }
+      else
+      {
+        // For all other projection functors though we need to do the exchange
+        ProjectionTreeExchange exchange(result, this, COLLECTIVE_LOC_50);
+        exchange.perform_collective_sync(); 
+      }
+      return result;
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::test_interfering_summaries(ProjectionSummary *one,
+                                                  ProjectionSummary *two)
+    //--------------------------------------------------------------------------
+    {
+      bool result = one->result->interferes(two->result, owner_shard->shard_id);
+      // Now we need to perform a collective to make sure that all the 
+      // shards agree on the result of the interference
+      AllReduceCollective<SumReduction<bool> > any_interfering(this,
+          get_next_collective_index(COLLECTIVE_LOC_105, true/*logical*/));
+      return any_interfering.sync_all_reduce(result);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::match_timeouts(
+                                      const std::vector<LogicalUser*> &timeouts, 
+                                      std::vector<LogicalUser*> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      TimeoutMatchExchange exchange(this, COLLECTIVE_LOC_79);
+      exchange.match_timeouts(timeouts, to_delete);
     }
 
     //--------------------------------------------------------------------------

@@ -34,6 +34,7 @@
 #include <vector>
 #include <typeinfo>
 #include <type_traits>
+#include <unordered_map>
 
 #include "legion/legion_config.h"
 #include "legion/legion_template_help.h"
@@ -1618,7 +1619,7 @@ namespace Legion {
       COLLECTIVE_LOC_47 = 47,
       COLLECTIVE_LOC_48 = 48,
       COLLECTIVE_LOC_49 = 49,
-      //COLLECTIVE_LOC_50 = 50,
+      COLLECTIVE_LOC_50 = 50,
       COLLECTIVE_LOC_51 = 51,
       COLLECTIVE_LOC_52 = 52,
       COLLECTIVE_LOC_53 = 53,
@@ -1647,7 +1648,7 @@ namespace Legion {
       COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
-      //COLLECTIVE_LOC_79 = 79,
+      COLLECTIVE_LOC_79 = 79,
       COLLECTIVE_LOC_80 = 80,
       COLLECTIVE_LOC_81 = 81,
       COLLECTIVE_LOC_82 = 82,
@@ -1673,6 +1674,7 @@ namespace Legion {
       COLLECTIVE_LOC_102 = 102,
       COLLECTIVE_LOC_103 = 103,
       COLLECTIVE_LOC_104 = 104,
+      COLLECTIVE_LOC_105 = 105,
     };
 
     // legion_types.h
@@ -1932,7 +1934,7 @@ namespace Legion {
     struct CloseInfo; 
     struct FieldDataDescriptor;
     struct PendingRemoteExpression;
-    struct ProjectionSummary;
+    class ProjectionSummary;
     class ProjectionInfo;
 
 

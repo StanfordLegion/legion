@@ -483,7 +483,6 @@ namespace Legion {
     public:
       TraceOp& operator=(const TraceOp &rhs);
     public:
-      virtual void execute_dependence_analysis(void);
       virtual bool is_tracing_fence(void) const override { return true; }
     };
 

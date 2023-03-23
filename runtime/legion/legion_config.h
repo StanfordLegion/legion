@@ -369,7 +369,7 @@
 // result in checks always being performed
 #ifndef DEFAULT_LOGICAL_USER_TIMEOUT // For backwards compatibility
 #ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
-#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    32
+#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    256
 #endif
 #else
 #ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT

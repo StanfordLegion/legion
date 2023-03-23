@@ -3922,7 +3922,8 @@ namespace Legion {
                               RegionTreeNode *path_node,
                               LogicalAnalysis &analysis,
                               FieldMask &still_open);
-      ProjectionNode* compute_projection_summary(Operation *op, unsigned index,
+      ProjectionSummary* compute_projection_summary(Operation *op, 
+                                                 unsigned index,
                                                  const RegionRequirement &req,
                                                  LogicalAnalysis &analysis,
                                                  const ProjectionInfo &info);
@@ -4068,14 +4069,16 @@ namespace Legion {
 #endif
     public:
       // Logical helper operations
+      typedef FieldMaskSet<LogicalUser,UNTRACKED_ALLOC,true/*deterministic*/>
+        OrderedFieldMaskUsers;
       template<bool TRACK_DOM>
       FieldMask perform_dependence_checks(LogicalRegion privilege_root,
-          LogicalUser &user, FieldMaskSet<LogicalUser> &users,
+          LogicalUser &user, OrderedFieldMaskUsers &users,
           const FieldMask &check_mask, const FieldMask &open_below,
           const bool arrived, const ProjectionInfo &proj_info,
           LogicalState &state, LogicalAnalysis &logical_analysis);
       static void perform_closing_checks(LogicalAnalysis &analysis,
-          FieldMaskSet<LogicalUser> &users, const LogicalUser &user,
+          OrderedFieldMaskUsers &users, const LogicalUser &user,
           const FieldMask &check_mask, LogicalRegion root_privilege,
           RegionTreeNode *path_node, FieldMask &still_open);
     public:
