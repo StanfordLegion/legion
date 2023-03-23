@@ -5448,171 +5448,83 @@ namespace Legion {
       IndexPartNode *node = runtime->forest->get_node(pid);
       // Check containment first because our implementation of the algorithms
       // for disjointnss and completeness rely upon it.
-      if (node->total_children == node->max_linearized_color)
+      for (ColorSpaceIterator itr(node); itr; itr++)
       {
-        for (LegionColor color = 0; color < node->total_children; color++)
+        IndexSpaceNode *child_node = node->get_child(*itr);
+        IndexSpaceExpression *diff = 
+          runtime->forest->subtract_index_spaces(child_node, node->parent);
+        if (!diff->is_empty())
         {
-          IndexSpaceNode *child_node = node->get_child(color);
-          IndexSpaceExpression *diff = 
-            runtime->forest->subtract_index_spaces(child_node, node->parent);
-          if (!diff->is_empty())
+          const DomainPoint bad = 
+            node->color_space->delinearize_color_to_point(*itr);
+          switch (bad.get_dim())
           {
-            const DomainPoint bad = 
-              node->color_space->delinearize_color_to_point(color);
-            switch (bad.get_dim())
-            {
-              case 1:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0])
-              case 2:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1])
-              case 3:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2])
-              case 4:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3])
-              case 5:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4])
-              case 6:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
-              case 7:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
-              case 8:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7])
-              case 9:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7], bad[8])
-              default:
-                assert(false);
-            }
+            case 1:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0])
+            case 2:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1])
+            case 3:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2])
+            case 4:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3])
+            case 5:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4])
+            case 6:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
+            case 7:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
+            case 8:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                  bad[7])
+            case 9:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                  bad[7], bad[8])
+            default:
+              assert(false);
           }
         }
-      }
-      else
-      {
-        ColorSpaceIterator *itr =
-          node->color_space->create_color_space_iterator();
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          IndexSpaceNode *child_node = node->get_child(color);
-          IndexSpaceExpression *diff = 
-            runtime->forest->subtract_index_spaces(child_node, node->parent);
-          if (!diff->is_empty())
-          {
-            const DomainPoint bad = 
-              node->color_space->delinearize_color_to_point(color);
-            switch (bad.get_dim())
-            {
-              case 1:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0])
-              case 2:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1])
-              case 3:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2])
-              case 4:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3])
-              case 5:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4])
-              case 6:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
-              case 7:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
-              case 8:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7])
-              case 9:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7], bad[8])
-              default:
-                assert(false);
-            }
-          }
-        }
-        delete itr;
       }
       // Check disjointness
       if ((kind == LEGION_DISJOINT_KIND) || 
@@ -16016,186 +15928,84 @@ namespace Legion {
     {
       IndexPartNode *node = runtime->forest->get_node(pid);
       // Check containment first
-      if (node->total_children == node->max_linearized_color)
+      for (ColorSpaceIterator itr(node, 
+            owner_shard->shard_id, total_shards); itr; itr++)
       {
-        for (LegionColor color = owner_shard->shard_id; 
-              color < node->total_children; color+=total_shards)
+        IndexSpaceNode *child_node = node->get_child(*itr);
+        IndexSpaceExpression *diff = 
+          runtime->forest->subtract_index_spaces(child_node, node->parent);
+        if (!diff->is_empty())
         {
-          IndexSpaceNode *child_node = node->get_child(color);
-          IndexSpaceExpression *diff = 
-            runtime->forest->subtract_index_spaces(child_node, node->parent);
-          if (!diff->is_empty())
+          const DomainPoint bad = 
+            node->color_space->delinearize_color_to_point(*itr);
+          switch (bad.get_dim())
           {
-            const DomainPoint bad = 
-              node->color_space->delinearize_color_to_point(color);
-            switch (bad.get_dim())
-            {
-              case 1:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0])
-              case 2:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1])
-              case 3:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2])
-              case 4:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3])
-              case 5:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4])
-              case 6:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
-              case 7:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
-              case 8:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7])
-              case 9:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7], bad[8])
-              default:
-                assert(false);
-            }
+            case 1:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0])
+            case 2:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1])
+            case 3:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2])
+            case 4:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3])
+            case 5:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4])
+            case 6:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
+            case 7:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
+            case 8:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                  bad[7])
+            case 9:
+              REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
+                  "Call to partition function %s in %s (UID %lld) has "
+                  "non-dominated child sub-region at color (%lld,%lld,"
+                  "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
+                  function_name, get_task_name(), get_unique_id(),
+                  bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
+                  bad[7], bad[8])
+            default:
+              assert(false);
           }
         }
-      }
-      else
-      {
-        ColorSpaceIterator *itr =
-          node->color_space->create_color_space_iterator();
-        // Skip ahead if necessary for our shard
-        for (unsigned idx = 0; idx < owner_shard->shard_id; idx++)
-        {
-          itr->yield_color();
-          if (!itr->is_valid())
-            break;
-        }
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          IndexSpaceNode *child_node = node->get_child(color);
-          IndexSpaceExpression *diff = 
-            runtime->forest->subtract_index_spaces(child_node, node->parent);
-          if (!diff->is_empty())
-          {
-            const DomainPoint bad = 
-              node->color_space->delinearize_color_to_point(color);
-            switch (bad.get_dim())
-            {
-              case 1:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0])
-              case 2:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1])
-              case 3:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2])
-              case 4:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3])
-              case 5:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4])
-              case 6:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5])
-              case 7:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6])
-              case 8:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7])
-              case 9:
-                REPORT_LEGION_ERROR(ERROR_PARTITION_VERIFICATION,
-                    "Call to partition function %s in %s (UID %lld) has "
-                    "non-dominated child sub-region at color (%lld,%lld,"
-                    "%lld,%lld,%lld,%lld,%lld,%lld,%lld).",
-                    function_name, get_task_name(), get_unique_id(),
-                    bad[0], bad[1], bad[2], bad[3], bad[4], bad[5], bad[6],
-                    bad[7], bad[8])
-              default:
-                assert(false);
-            }
-            // Skip ahead for the next color if necessary
-            for (unsigned idx = 0; idx < (total_shards-1); idx++)
-            {
-              itr->yield_color();
-              if (!itr->is_valid())
-                break;
-            }
-          }
-        }
-        delete itr;
       }
       // Only need to do the rest of this on shard 0
       if (owner_shard->shard_id > 0)
@@ -21531,17 +21341,10 @@ namespace Legion {
       // this region node or not
       IndexPartNode *index_part = region->parent->row_source;
       // See if we can find its shard owner the easy way or the hard way
-      ShardID target_shard;
       const LegionColor color = region->get_color();
-      if (index_part->total_children != index_part->max_linearized_color)
-      {
-        // Have to do this the hard way
-        const size_t index_offset = 
-          index_part->color_space->compute_color_offset(color);
-        target_shard = index_offset % total_shards;
-      }
-      else // This is the easy way, we can just linearize the color 
-        target_shard = color % total_shards;
+      const size_t chunk = ColorSpaceIterator::compute_chunk(
+              index_part->max_linearized_color, total_shards);
+      ShardID target_shard = color / chunk;
       if (target_shard != owner_shard->shard_id)
       {
         // We're not the owner so forward this to the owner shard
