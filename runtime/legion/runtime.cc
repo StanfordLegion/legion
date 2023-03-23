@@ -2371,10 +2371,24 @@ namespace Legion {
         {
           // If we didn't pack by value, pack the other options as well
           // so that we can choose to copy from them as well
-          rez.serialize<size_t>(instances.size());
-          for (std::map<Memory,FutureInstance*>::const_iterator it =
-                instances.begin(); it != instances.end(); it++)
-            it->second->pack_instance(rez, false/*move ownership*/);
+          // Don't pack the canonical instance again though since we 
+          // already did that part
+#ifdef DEBUG_LEGION
+          assert(instances.find(canonical_instance->memory) !=
+                  instances.end());
+          assert(canonical_instance == 
+              instances.find(canonical_instance->memory)->second);
+#endif
+          if (instances.size() > 1)
+          {
+            rez.serialize<size_t>(instances.size() - 1);
+            for (std::map<Memory,FutureInstance*>::const_iterator it =
+                  instances.begin(); it != instances.end(); it++)
+              if (it->second != canonical_instance)
+                it->second->pack_instance(rez, false/*move ownership*/);
+          }
+          else
+            rez.serialize<size_t>(0);
         }
         else
           rez.serialize<size_t>(0);
@@ -4859,6 +4873,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::add_padded_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      padded_fields.push_back(fid);
+      // Resort to keep things in order
+      if (padded_fields.size() > 1)
+        std::sort(padded_fields.begin(), padded_fields.end());
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegionImpl::set_reference(const InstanceRef &ref, bool safe)
     //--------------------------------------------------------------------------
     {
@@ -5169,8 +5193,16 @@ namespace Legion {
                               context->get_unique_id(),
                               (warning_string == NULL) ? "" : warning_string)
       // Get the index space to use for the accessor
-      runtime->get_index_space_domain(req.region.get_index_space(),
-                                      realm_is, type_tag);
+      IndexSpaceNode *bounds = 
+        runtime->forest->get_node(req.region.get_index_space());
+      // Check to see if this is a padded field, if it is then we need to 
+      // merge the padding into the resulting domain that is allowed
+      // to be accessed by the accessor for bounds checks
+      bool need_padded_bounds = false;
+      if (!std::binary_search(padded_fields.begin(), padded_fields.end(), fid))
+        bounds->get_index_space_domain(realm_is, type_tag);
+      else
+        need_padded_bounds = true;
       // Wait until we are valid before returning the accessor
       wait_until_valid(silence_warnings, warning_string,
                        runtime->runtime_warnings, "Accessor Construction");
@@ -5195,6 +5227,36 @@ namespace Legion {
                             fid, field_size, actual_size, 
                             context->get_task_name(), context->get_unique_id()) 
           }
+          if (need_padded_bounds)
+          {
+            Domain domain;
+            bounds->get_launch_space_domain(domain);
+#ifdef DEBUG_LEGION
+            assert(domain.dense());
+#endif
+            // Now we can compute the bounds on this instance
+            const Domain &delta= 
+              manager->layout->constraints->padding_constraint.delta;
+#ifdef DEBUG_LEGION
+            assert(domain.get_dim() == delta.get_dim());
+#endif
+            const Domain padded_bounds =
+              Domain(domain.lo() - delta.lo(), domain.hi() + delta.hi());
+            switch (domain.get_dim())
+            {
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  RealmSpaceConverter<DIM,Realm::DIMTYPES>::convert_to( \
+                      padded_bounds, realm_is, type_tag, "get_instance_info"); \
+                  break; \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+              default:
+                assert(false);
+            }
+          }
           return manager->get_instance();
         }
       }
@@ -5202,7 +5264,100 @@ namespace Legion {
       // error raised earlier in this function
       assert(false);
       return PhysicalInstance::NO_INST;
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalRegionImpl::get_padding_info(FieldID fid,
+                              size_t field_size, Domain *inner, Domain &outer,
+                              const char *warning_string, bool silence_warnings,
+                              bool generic_accessor, bool check_field_size)
+    //--------------------------------------------------------------------------
+    {
+      if (!std::binary_search(padded_fields.begin(), padded_fields.end(), fid))
+        REPORT_LEGION_ERROR(ERROR_INVALID_PADDED_ACCESSOR,
+            "Illegal request to create a padded accessor for field %d in "
+            "parent task %s (UID %lld) which does not have padded privileges. "
+            "You must record a layout constraint with an explicit for padding "
+            "constraint when registering this task variant in order to be able "
+            "to access the padded space on this instance.",
+            fid, context->get_task_name(), context->get_unique_id())
+      if (context != NULL)
+      {
+        if (context->is_inner_context())
+          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
+            "Illegal padding accessor construction inside "
+            "task %s (UID %lld) for a variant that was labeled as an 'inner' "
+            "variant.", context->get_task_name(), context->get_unique_id())
+        else if (runtime->runtime_warnings && !silence_warnings &&
+                  !context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
+              "Padding ccessor construction in non-leaf "
+              "task %s (UID %lld) is a blocking operation in violation of "
+              "Legion's deferred execution model best practices. You may "
+              "notice a severe performance degradation. Warning string: %s",
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
+      }
+      if (req.privilege_fields.find(fid) == req.privilege_fields.end())
+        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
+                       "Padding accessor construction for field %d in task %s "
+                       "without privileges!", fid, context->get_task_name())
+      if (generic_accessor && runtime->runtime_warnings && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_GENERIC_ACCESSOR,
+                              "Using a generic accessor for accessing a "
+                              "physical instance of task %s (UID %lld). "
+                              "Generic accessors are very slow and are "
+                              "strongly discouraged for use in high "
+                              "performance code. Warning string: %s", 
+                              context->get_task_name(),
+                              context->get_unique_id(),
+                              (warning_string == NULL) ? "" : warning_string)
+      const InstanceSet &instances = references;
+      for (unsigned idx = 0; idx < instances.size(); idx++)
+      {
+        const InstanceRef &ref = instances[idx];
+        if (ref.is_field_set(fid))
+        {
+          PhysicalManager *manager = ref.get_physical_manager();
+          if (check_field_size)
+          {
+            const size_t actual_size = 
+              manager->field_space_node->get_field_size(fid);
+            if (actual_size != field_size)
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
+                            "Error creating accessor for field %d with a "
+                            "type of size %zd bytes when the field was "
+                            "originally allocated with a size of %zd bytes "
+                            "in task %s (UID %lld)",
+                            fid, field_size, actual_size, 
+                            context->get_task_name(), context->get_unique_id()) 
+          }
+          // If this is a padded instance, then we know that this is an affine
+          // instance so we can get it's index space expression and it should
+          // be dense so then we can just add the offsets
+          ApEvent dom_ready;
+          Domain bounds = 
+            manager->instance_domain->get_domain(dom_ready,true/*tight*/);
+#ifdef DEBUG_LEGION
+          assert(bounds.dense());
+#endif
+          if (inner != NULL)
+            *inner = bounds;
+          // Now we can compute the bounds on this instance
+          const Domain &delta= 
+            manager->layout->constraints->padding_constraint.delta;
+#ifdef DEBUG_LEGION
+          assert(bounds.get_dim() == delta.get_dim());
+#endif
+          outer = Domain(bounds.lo() - delta.lo(), bounds.hi() + delta.hi());
+          return manager->get_instance();
+        }
+      }
+      // should never get here at worst there should have been an
+      // error raised earlier in this function
+      assert(false);
+      return PhysicalInstance::NO_INST;
+    }
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::report_incompatible_accessor(
@@ -5471,6 +5626,29 @@ namespace Legion {
         default:
           assert(false);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegionImpl::fail_padding_check(DomainPoint p,
+                                                           FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      char point_string[128];
+      sprintf(point_string," (");
+      for (int d = 0; d < p.get_dim(); d++)
+      {
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", p[0]);
+        else
+          sprintf(buffer,",%lld", p[d]);
+        strcat(point_string, buffer);
+      }
+      strcat(point_string,")");
+      REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
+                          "Bounds check failure accessing padded point %s from "
+                          "field %d in task %s\n", point_string, fid,
+                          implicit_context->get_task_name())
     }
 
     /////////////////////////////////////////////////////////////
@@ -9508,6 +9686,10 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
+          // If we need a padding constraint make sure we're
+          // checking for tight region bounds
+          if (constraints.padding_constraint.delta.get_dim() > 0)
+            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9616,6 +9798,10 @@ namespace Legion {
       {
         if (tree_id != 0)
         {
+          // If we need a padding constraint make sure we're
+          // checking for tight region bounds
+          if (constraints.padding_constraint.delta.get_dim() > 0)
+            tight_region_bounds = true;
           std::set<IndexSpaceExpression*> region_exprs;
           RegionTreeForest *forest = runtime->forest;
           for (std::vector<LogicalRegion>::const_iterator it = 
@@ -9706,6 +9892,10 @@ namespace Legion {
       bool found = false;
       if (!candidates.empty())
       {
+        // If we need a padding constraint make sure we're
+        // checking for tight region bounds
+        if (constraints.padding_constraint.delta.get_dim() > 0)
+          tight_region_bounds = true;
         std::set<IndexSpaceExpression*> region_exprs;
         RegionTreeForest *forest = runtime->forest;
         for (std::vector<LogicalRegion>::const_iterator it = 
@@ -12210,6 +12400,17 @@ namespace Legion {
               runtime->handle_send_atomic_reservation_response(derez);
               break;
             }
+          case SEND_PADDED_RESERVATION_REQUEST:
+            {
+              runtime->handle_send_padded_reservation_request(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_PADDED_RESERVATION_RESPONSE:
+            {
+              runtime->handle_send_padded_reservation_response(derez);
+              break;
+            }
           case SEND_CREATED_REGION_CONTEXTS:
             {
               runtime->handle_created_region_contexts(derez,
@@ -14303,6 +14504,7 @@ namespace Legion {
                              const CodeDescriptor &realm,
                              const void *udata/*=NULL*/,size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
+        needs_padding(check_padding(rt, registrar.layout_constraints)),
         has_return_type_size(has_return_size), return_type_size(return_size),
         descriptor_id(runtime->get_unique_code_descriptor_id()),
         realm_descriptor(realm),
@@ -14590,6 +14792,133 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VariantImpl::find_padded_locks(SingleTask *task,
+                        const std::vector<RegionRequirement> &regions,
+                        const std::deque<InstanceSet> &physical_instances) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(needs_padding);
+#endif
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.begin(); it != 
+            layout_constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->padding_constraint.delta.get_dim() == 0)
+          continue;
+#ifdef DEBUG_LEGION
+        assert(it->first < regions.size());
+        assert(it->first < physical_instances.size());
+#endif
+        const RegionRequirement &req = regions[it->first];
+        const InstanceSet &instances = physical_instances[it->first];
+        // Check to see if we have any explicit fields
+        std::set<FieldID> padded_fields;
+        if (!layout->field_constraint.field_set.empty())
+        {
+          for (std::vector<FieldID>::const_iterator fit =
+                layout->field_constraint.field_set.begin(); fit !=
+                layout->field_constraint.field_set.end(); fit++)
+          {
+#ifdef DEBUG_LEGION
+            assert(req.privilege_fields.find(*fit) != 
+                    req.privilege_fields.end());
+#endif
+            padded_fields.insert(*fit);
+          }
+        }
+        else // Add all the fields for this region requirement
+          padded_fields.insert(req.privilege_fields.begin(),
+                               req.privilege_fields.end());
+        FieldSpaceNode *fs = 
+          runtime->forest->get_node(req.region.get_field_space());
+        FieldMask padded_mask = fs->get_field_mask(padded_fields);
+        for (unsigned idx = 0; idx < instances.size(); idx++)
+        {
+          const InstanceRef &ref = instances[idx];
+          const FieldMask &overlap = padded_mask & ref.get_valid_fields();
+          if (!overlap)
+            continue;
+          PhysicalManager *manager = ref.get_physical_manager();
+          manager->find_padded_reservations(overlap, task, it->first);
+          padded_mask -= overlap;
+          if (!padded_mask)
+            break;
+        }
+#ifdef DEBUG_LEGION
+        assert(!padded_mask);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VariantImpl::record_padded_fields(
+                      const std::vector<RegionRequirement> &regions,
+                      const std::vector<PhysicalRegion> &physical_regions) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(needs_padding);
+#endif
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            layout_constraints.layouts.begin(); it != 
+            layout_constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->padding_constraint.delta.get_dim() == 0)
+          continue;
+#ifdef DEBUG_LEGION
+        assert(it->first < regions.size());
+        assert(it->first < physical_regions.size());
+#endif
+        const RegionRequirement &req = regions[it->first];
+        const PhysicalRegion &region = physical_regions[it->first];
+        // Check to see if we have any explicit fields
+        if (layout->field_constraint.field_set.empty())
+        {
+          // Add all the fields for this region requirement
+          for (std::set<FieldID>::const_iterator fit =
+                req.privilege_fields.begin(); fit !=
+                req.privilege_fields.end(); fit++)
+            region.impl->add_padded_field(*fit);
+        }
+        else
+        {
+          // Only add the fields specified by the constraint
+          for (std::vector<FieldID>::const_iterator fit =
+                layout->field_constraint.field_set.begin(); fit !=
+                layout->field_constraint.field_set.end(); fit++)
+          {
+#ifdef DEBUG_LEGION
+            assert(req.privilege_fields.find(*fit) != 
+                    req.privilege_fields.end());
+#endif
+            region.impl->add_padded_field(*fit);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool VariantImpl::check_padding(Runtime *runtime,
+                                     const TaskLayoutConstraintSet &constraints)
+    //--------------------------------------------------------------------------
+    {
+      for (std::multimap<unsigned,LayoutConstraintID>::const_iterator it = 
+            constraints.layouts.begin(); it != constraints.layouts.end(); it++)
+      {
+        const LayoutConstraints *layout =
+          runtime->find_layout_constraints(it->second);
+        if (layout->padding_constraint.delta.get_dim() > 0)
+          return true;
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void VariantImpl::handle_variant_broadcast(Runtime *runtime,
                                                           Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -14833,12 +15162,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(LayoutConstraints *constraints,
-                unsigned total_dims, const LayoutConstraint **failed_constraint)
+                unsigned total_dims, const LayoutConstraint **failed_constraint,
+                bool test_pointer)
     //--------------------------------------------------------------------------
     {
       const std::pair<LayoutConstraintID,unsigned> 
         key(constraints->layout_id, total_dims);
       // Check to see if the result is in the cache
+      if (test_pointer)
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
         std::map<std::pair<LayoutConstraintID,unsigned>,
@@ -14856,26 +15187,50 @@ namespace Legion {
             return true;
         }
       }
+      else
+      {
+        AutoLock lay(layout_lock,1,false/*exclusive*/);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+            no_pointer_entailment_cache.find(key);
+        if (finder != no_pointer_entailment_cache.end())
+        {
+          if (finder->second != NULL)
+          {
+            if (failed_constraint != NULL)
+              *failed_constraint = finder->second;
+            return false;
+          }
+          else
+            return true;
+        }
+      }
       // Didn't find it, so do the test for real
       const LayoutConstraint *result = NULL;
-      const bool entailment = entails(*constraints, total_dims, &result);
+      const bool entailment =
+        entails(*constraints, total_dims, &result, test_pointer);
 #ifdef DEBUG_LEGION
       assert(entailment ^ (result != NULL)); // only one should be true
 #endif
-      // Save the result in the cache
-      AutoLock lay(layout_lock);
-      entailment_cache[key] = result;
       if (!entailment && (failed_constraint != NULL))
         *failed_constraint = result;
+      // Save the result in the cache
+      AutoLock lay(layout_lock);
+      if (test_pointer)
+        entailment_cache[key] = result;
+      else
+        no_pointer_entailment_cache[key] = result;
       return entailment;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(const LayoutConstraintSet &other,
-          unsigned total_dims, const LayoutConstraint **failed_constraint) const
+          unsigned total_dims, const LayoutConstraint **failed_constraint,
+          bool test_pointer) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::entails(other, total_dims, failed_constraint);
+      return LayoutConstraintSet::entails(other, total_dims,
+                                          failed_constraint, test_pointer);
     }
 
     //--------------------------------------------------------------------------
@@ -14924,154 +15279,6 @@ namespace Legion {
     {
       return LayoutConstraintSet::conflicts(other, total_dims, 
                                             conflict_constraint);
-    }
-
-    //--------------------------------------------------------------------------
-    bool LayoutConstraints::entails_without_pointer(
-                            LayoutConstraints *constraints, unsigned total_dims,
-                            const LayoutConstraint **failed_constraint)
-    //--------------------------------------------------------------------------
-    {
-      const std::pair<LayoutConstraintID,unsigned> 
-        key(constraints->layout_id, total_dims);
-      // See if we have it in the cache
-      {
-        AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<std::pair<LayoutConstraintID,unsigned>,
-                  const LayoutConstraint*>::const_iterator finder = 
-            no_pointer_entailment_cache.find(key);
-        if (finder != no_pointer_entailment_cache.end())
-        {
-          if (finder->second != NULL)
-          {
-            if (failed_constraint != NULL)
-              *failed_constraint = finder->second;
-            return false;
-          }
-          else
-            return true;
-        }
-      }
-      // Didn't find it so do the test for real
-      const LayoutConstraint *result = NULL;
-      const bool entailment = 
-        entails_without_pointer(*constraints, total_dims, &result);
-      // Save the result in the cache
-      AutoLock lay(layout_lock);
-      no_pointer_entailment_cache[key] = result;
-      if (!entailment && (failed_constraint != NULL))
-        *failed_constraint = result;
-      return entailment;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LayoutConstraints::entails_without_pointer(
-                          const LayoutConstraintSet &other, unsigned total_dims,
-                          const LayoutConstraint **failed_constraint) const
-    //--------------------------------------------------------------------------
-    {
-      // Do all the normal entailment but don't check the pointer constraint 
-      if (!specialized_constraint.entails(other.specialized_constraint))
-      {
-        if (failed_constraint != NULL)
-          *failed_constraint = &other.specialized_constraint; 
-        return false;
-      }
-      if (!field_constraint.entails(other.field_constraint))
-      {
-        if (failed_constraint != NULL)
-          *failed_constraint = &other.field_constraint;
-        return false;
-      }
-      if (!memory_constraint.entails(other.memory_constraint))
-      {
-        if (failed_constraint != NULL)
-          *failed_constraint = &other.memory_constraint;
-        return false;
-      }
-      if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
-        return false;
-      for (std::vector<TilingConstraint>::const_iterator it = 
-            other.tiling_constraints.begin(); it !=
-            other.tiling_constraints.end(); it++)
-      {
-        bool entailed = false;
-        for (unsigned idx = 0; idx < tiling_constraints.size(); idx++)
-        {
-          if (tiling_constraints[idx].entails(*it))
-          {
-            entailed = true;
-            break;
-          }
-        }
-        if (!entailed)
-        {
-          if (failed_constraint != NULL)
-            *failed_constraint = &(*it);
-          return false;
-        }
-      }
-      for (std::vector<DimensionConstraint>::const_iterator it = 
-            other.dimension_constraints.begin(); it != 
-            other.dimension_constraints.end(); it++)
-      {
-        bool entailed = false;
-        for (unsigned idx = 0; idx < dimension_constraints.size(); idx++)
-        {
-          if (dimension_constraints[idx].entails(*it))
-          {
-            entailed = true;
-            break;
-          }
-        }
-        if (!entailed)
-        {
-          if (failed_constraint != NULL)
-            *failed_constraint = &(*it);
-          return false;
-        }
-      }
-      for (std::vector<AlignmentConstraint>::const_iterator it = 
-            other.alignment_constraints.begin(); it != 
-            other.alignment_constraints.end(); it++)
-      {
-        bool entailed = false;
-        for (unsigned idx = 0; idx < alignment_constraints.size(); idx++)
-        {
-          if (alignment_constraints[idx].entails(*it))
-          {
-            entailed = true;
-            break;
-          }
-        }
-        if (!entailed)
-        {
-          if (failed_constraint != NULL)
-            *failed_constraint = &(*it);
-          return false;
-        }
-      }
-      for (std::vector<OffsetConstraint>::const_iterator it = 
-            other.offset_constraints.begin(); it != 
-            other.offset_constraints.end(); it++)
-      {
-        bool entailed = false;
-        for (unsigned idx = 0; idx < offset_constraints.size(); idx++)
-        {
-          if (offset_constraints[idx].entails(*it))
-          {
-            entailed = true;
-            break;
-          }
-        }
-        if (!entailed)
-        {
-          if (failed_constraint != NULL)
-            *failed_constraint = &(*it);
-          return false;
-        }
-      }
-      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -16968,6 +17175,8 @@ namespace Legion {
         &pending_constraints = get_pending_constraint_table();
       if (!pending_constraints.empty())
       {
+        // Update the next available constraint
+        LayoutConstraintID largest = 0;
         // Create a collective mapping for all the nodes
         std::vector<AddressSpaceID> all_spaces(total_address_spaces);
         for (unsigned idx = 0; idx < all_spaces.size(); idx++)
@@ -16975,16 +17184,13 @@ namespace Legion {
         CollectiveMapping *mapping = 
           new CollectiveMapping(all_spaces, legion_collective_radix);
         mapping->add_reference();
-        // Update the next available constraint
-        while (pending_constraints.find(unique_constraint_id) !=
-                pending_constraints.end())
-          unique_constraint_id += runtime_stride;
         // Now do the registrations
         std::map<AddressSpaceID,unsigned> address_counts;
         for (std::map<LayoutConstraintID,LayoutConstraintRegistrar>::
               const_iterator it = pending_constraints.begin(); 
               it != pending_constraints.end(); it++)
         {
+          largest = it->first;
           // Figure out the distributed ID that we expect and then
           // check against what we expect on the owner node. This
           // is slightly brittle, but we'll always catch it when
@@ -17022,6 +17228,13 @@ namespace Legion {
           }
           register_layout(it->second, it->first, expected_did, mapping);
         }
+        // Round largest up to the next biggest multiple of the total spaces
+        // so that the new unique constraint id still maps to this node
+        size_t remainder = largest % total_address_spaces;
+        if (remainder != 0)
+          largest += (total_address_spaces - remainder);
+        // Update all the next unique constraint IDs
+        unique_constraint_id += largest;
         // avoid races if we are doing separate runtime creation
         if (!separate_runtime_instances)
           pending_constraints.clear();
@@ -17415,8 +17628,8 @@ namespace Legion {
       if (mpi_rank_table != NULL)
         mpi_rank_table->perform_rank_exchange();
       // Pull in any static registrations that were done
-      register_static_variants();
       register_static_constraints();
+      register_static_variants();
       register_static_projections();
       register_static_sharding_functors();
       // Initialize our virtual manager and our mappers
@@ -21832,6 +22045,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_padded_reservation_request(AddressSpaceID target,
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_PADDED_RESERVATION_REQUEST>(rez,
+                                                                 true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_padded_reservation_response(AddressSpaceID target,
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_PADDED_RESERVATION_RESPONSE>(
+                                        rez, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_materialized_view(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24119,6 +24350,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndividualView::handle_atomic_reservation_response(this, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_padded_reservation_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_padded_reservation_request(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_padded_reservation_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalManager::handle_padded_reservation_response(this, derez);
     }
 
     //--------------------------------------------------------------------------

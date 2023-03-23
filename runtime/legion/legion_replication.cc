@@ -2178,59 +2178,21 @@ namespace Legion {
           if (children.size() < index_part->get_num_children())
           {
             const size_t max_check = children.size();
-            if (index_part->total_children == index_part->max_linearized_color)
+            for (ColorSpaceIterator itr(index_part,
+                  repl_ctx->owner_shard->shard_id, 
+                  repl_ctx->total_shards); itr; itr++)
             {
-              for (LegionColor color = repl_ctx->owner_shard->shard_id; 
-                    color < index_part->total_children; 
-                    color += repl_ctx->total_shards)
+              RegionNode *child = part_node->get_child(*itr);
+              bool found = false;
+              for (unsigned idx = 0; idx < max_check; idx++)
               {
-                RegionNode *child = part_node->get_child(color);
-                bool found = false;
-                for (unsigned idx = 0; idx < max_check; idx++)
-                {
-                  if (children[idx] != child)
-                      continue;
-                  found = true;
-                  break;
-                }
-                if (!found)
-                  children.push_back(child);
-              }
-            }
-            else
-            {
-              ColorSpaceIterator *itr = 
-                index_part->color_space->create_color_space_iterator();
-              // Skip ahead for our shard
-              for (unsigned idx = 0; 
-                    idx < repl_ctx->owner_shard->shard_id; idx++)
-              {
-                itr->yield_color();
-                if (!itr->is_valid())
-                  break;
-              }
-              while (itr->is_valid())
-              {
-                RegionNode *child = part_node->get_child(itr->yield_color());
-                bool found = false;
-                for (unsigned idx = 0; idx < max_check; idx++)
-                {
-                  if (children[idx] != child)
+                if (children[idx] != child)
                     continue;
-                  found = true;
-                  break;
-                }
-                if (!found)
-                  children.push_back(child);
-                // Skip ahead to the next color
-                for (unsigned idx = 0; idx < (repl_ctx->total_shards-1); idx++)
-                {
-                  itr->yield_color();
-                  if (!itr->is_valid())
-                    break;
-                }
+                found = true;
+                break;
               }
-              delete itr;
+              if (!found)
+                children.push_back(child);
             }
           }
         }
@@ -2407,50 +2369,22 @@ namespace Legion {
           assert(!!mask);
 #endif
           // Iterate over each child and make an equivalence set  
-          if (index_part->total_children == index_part->max_linearized_color)
+          for (ColorSpaceIterator itr(index_part); itr; itr++)
           {
-            for (LegionColor color = 0; 
-                  color < index_part->total_children; color++)
-            {
-              RegionNode *child = it->second->get_child(color);
-              bool first = false;
-              const DistributedID did = 
-                collective_dids[did_index++]->get_value(false/*block*/);
-              EquivalenceSet *set = 
-                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                    child, context, did, first);
-              // If we're the first shard of the owner we initialize the state
-              if (first && set->is_owner())
-                initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask);
-              // Remove the CONTEXT_REF on the set now that it is registered
-              if (set->remove_base_gc_ref(CONTEXT_REF))
-                assert(false); // should never actually hit this
-            }
-          }
-          else
-          {
-            ColorSpaceIterator *itr = 
-              index_part->color_space->create_color_space_iterator();
-            while (itr->is_valid())
-            {
-              const LegionColor color = itr->yield_color();
-              RegionNode *child = it->second->get_child(color);
-              bool first = false;
-              const DistributedID did = 
-                collective_dids[did_index++]->get_value(false/*block*/);
-              EquivalenceSet *set = 
-                repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                                    child, context, did, first);
-              // If we're the first shard of the owner we initialize the state
-              if (first && set->is_owner())
-                initialize_replicated_set(set, mask, map_applied_conditions);
-              child->record_refinement(ctx, set, mask);
-              // Remove the CONTEXT_REF on the set now that it is registered
-              if (set->remove_base_gc_ref(CONTEXT_REF))
-                assert(false); // should never actually hit this
-            }
-            delete itr;
+            RegionNode *child = it->second->get_child(*itr);
+            bool first = false;
+            const DistributedID did = 
+              collective_dids[did_index++]->get_value(false/*block*/);
+            EquivalenceSet *set = 
+              repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
+                                                  child, context, did, first);
+            // If we're the first shard of the owner we initialize the state
+            if (first && set->is_owner())
+              initialize_replicated_set(set, mask, map_applied_conditions);
+            child->record_refinement(ctx, set, mask);
+            // Remove the CONTEXT_REF on the set now that it is registered
+            if (set->remove_base_gc_ref(CONTEXT_REF))
+              assert(false); // should never actually hit this
           }
         }
         for (std::map<LogicalRegion,RegionNode*>::const_iterator it =
@@ -7840,7 +7774,10 @@ namespace Legion {
       if (points.empty())
       {
         // Still need to wait for our collectives to be done
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
@@ -8036,7 +7973,10 @@ namespace Legion {
       if (points.empty())
       {
         // Still need to make sure our collective is done
-        complete_mapping();
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         const RtEvent collective_done =
           participants->perform_collective_wait(false/*block*/);
         std::set<RtEvent> done_events;
@@ -12719,6 +12659,19 @@ namespace Legion {
            (last_stage_sends == (shard_collective_last_radix-1)) &&
            (pending.size() == size_t(shard_collective_last_radix-1))))
         finalize();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureAllReduceCollective::elide_collective(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(finished.exists());
+#endif
+      // Clean up the finished event we aren't going to trigger
+      Runtime::trigger_event(NULL, finished);
+      // elide the collective for the base class
+      AllGatherCollective<false>::elide_collective(); 
     }
 
     //--------------------------------------------------------------------------

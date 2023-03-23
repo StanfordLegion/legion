@@ -185,7 +185,7 @@ namespace Legion {
       inline bool is_target(void) const { return (target == local_shard); }
       inline RtEvent get_done_event(void) const { return done_event; }
       // Use this method in case we don't actually end up using the collective
-      void elide_collective(void);
+      virtual void elide_collective(void);
     protected:
       void send_message(void);
       int compute_expected_notifications(void) const;
@@ -222,7 +222,7 @@ namespace Legion {
       virtual RtEvent perform_collective_wait(bool block = true);
       virtual void handle_collective_message(Deserializer &derez);
       // Use this method in case we don't actually end up using the collective
-      void elide_collective(void);
+      virtual void elide_collective(void);
     protected:
       void initialize_collective(void);
       void construct_message(ShardID target, int stage, Serializer &rez);
@@ -275,6 +275,7 @@ namespace Legion {
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
+      virtual void elide_collective(void);
     public:
       void set_shadow_instance(FutureInstance *shadow);
       RtEvent async_reduce(FutureInstance *instance, ApEvent &ready_event);

@@ -74,8 +74,8 @@ INTER_CLOSE_OP_KIND = 4
 #READ_ONLY_CLOSE_OP_KIND = 5
 POST_CLOSE_OP_KIND = 6
 #OPEN_OP_KIND = 7
-#ADVANCE_OP_KIND = 8
-FENCE_OP_KIND = 9
+MAPPING_FENCE_OP_KIND = 8
+EXECUTION_FENCE_OP_KIND = 9
 COPY_OP_KIND = 10 
 FILL_OP_KIND = 11
 ACQUIRE_OP_KIND = 12 
@@ -5093,7 +5093,8 @@ class DataflowTraverser(object):
             # occur on the second entry in the reduction stack back
             # because we will have already traversed through the 
             # next copy that is going to be writing to it
-            if len(self.reduction_stack[-1]) >= 2 and  \
+            if len(self.reduction_stack) > 0 and \
+                len(self.reduction_stack[-1]) >= 2 and  \
                     dst is self.reduction_stack[-1][-2]:
                 self.dataflow_traversal.append(True)
                 self.dataflow_fill.append(False)
@@ -6202,6 +6203,9 @@ class Operation(object):
     def is_close(self):
         return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
+    def is_fence(self):
+        return self.kind == MAPPING_FENCE_OP_KIND or self.kind == EXECUTION_FENCE_OP_KIND
+
     def is_internal(self):
         return self.is_close() or self.kind == REFINEMENT_OP_KIND
 
@@ -6686,7 +6690,7 @@ class Operation(object):
 
     def compute_physical_reachable(self):
         # We can skip some of these
-        if not self.is_physical_operation() or self.kind is INDEX_TASK_KIND:
+        if not self.is_physical_operation() or self.points is not None:
             return
         # Once we reach something that is not an event
         # then we record it and return
@@ -7278,7 +7282,7 @@ class Operation(object):
         if self.reqs is None:
             # If this is a fence, check or record dependences on everything from
             # either the begining or from the previous fence
-            if self.kind == FENCE_OP_KIND:
+            if self.is_fence():
                 # Record dependences on all the users in the region tree 
                 if not self.analyze_logical_fence(perform_checks):
                     return False
@@ -7316,7 +7320,7 @@ class Operation(object):
         if self.reqs is None:
             # If this is a fence, check or record dependences on everything from
             # either the begining or from the previous fence
-            if self.kind == FENCE_OP_KIND:
+            if self.is_fence():
                 assert logical_op is self
                 # Record dependences on all the users in the region tree 
                 if not self.analyze_logical_fence(True):
@@ -7534,7 +7538,7 @@ class Operation(object):
     def analyze_previous_interference(self, next_op, next_req, reachable):
         if not self.reqs:
             # Check to see if this is a fence operation
-            if self.kind == FENCE_OP_KIND:
+            if self.is_fence():
                 # If we've got a fence operation, it should have a transitive
                 # dependence on all operations that came before it
                 if not self in reachable:
@@ -8432,7 +8436,8 @@ class Operation(object):
             POST_CLOSE_OP_KIND : "darkslateblue",
             #OPEN_OP_KIND : "royalblue",
             #ADVANCE_OP_KIND : "magenta",
-            FENCE_OP_KIND : "darkorchid2",
+            MAPPING_FENCE_OP_KIND : "darkorchid2",
+            EXECUTION_FENCE_OP_KIND : "darkorchid2",
             COPY_OP_KIND : "darkgoldenrod3",
             FILL_OP_KIND : "darkorange1",
             ACQUIRE_OP_KIND : "darkolivegreen",
@@ -8599,7 +8604,7 @@ class Operation(object):
             return False
         if self.kind is FILL_OP_KIND:
             return False
-        if self.kind is FENCE_OP_KIND:
+        if self.kind is MAPPING_FENCE_OP_KIND:
             return False
         if self.kind is CREATION_OP_KIND:
             return False
@@ -11694,7 +11699,7 @@ refinement_pat           = re.compile(
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
 fence_pat                = re.compile(
-    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
+    prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+) (?P<execution>[0-1])")
 trace_pat                = re.compile(
     prefix+"Trace Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 copy_op_pat              = re.compile(
@@ -12374,8 +12379,12 @@ def parse_legion_spy_line(line, state):
     m = fence_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(FENCE_OP_KIND)
-        op.set_name("Fence Op")
+        if int(m.group('execution')) == 1:
+            op.set_op_kind(EXECUTION_FENCE_OP_KIND)
+            op.set_name("Execution Fence Op")
+        else:
+            op.set_op_kind(MAPPING_FENCE_OP_KIND)
+            op.set_name("Mapping Fence Op")
         context = state.get_task(int(m.group('ctx')))
         op.set_context(context, int(m.group('index')))
         return True

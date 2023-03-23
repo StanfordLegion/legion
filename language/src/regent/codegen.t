@@ -993,12 +993,16 @@ function value:address(cx)
 end
 
 function value:read(cx)
-  local actions = self.expr.actions
-  local result = self.expr.value
-  for _, field_name in ipairs(self.field_path) do
-    result = `([result].[field_name])
+  if #self.field_path > 0 then
+    local actions = self.expr.actions
+    local result = self.expr.value
+    for _, field_name in ipairs(self.field_path) do
+      result = `([result].[field_name])
+    end
+    return expr.just(actions, result)
+  else
+    return self.expr
   end
-  return expr.just(actions, result)
 end
 
 function value:write(cx, value)
@@ -9514,8 +9518,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
             rhs,
           }),
           conditions = terralib.newlist(),
-          predicate = false,
-          predicate_else_value = false,
+          predicate = node.call.predicate,
+          predicate_else_value = node.reduce_lhs,
           replicable = false,
           expr_type = std.as_read(node.reduce_lhs.expr_type),
           annotations = node.annotations,

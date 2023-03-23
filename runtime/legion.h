@@ -2506,6 +2506,8 @@ namespace Legion {
         add_constraint(const OffsetConstraint &constraint);
       inline LayoutConstraintRegistrar&
         add_constraint(const PointerConstraint &constraint); 
+      inline LayoutConstraintRegistrar&
+        add_constraint(const PaddingConstraint &constraint);
     public:
       FieldSpace                                handle;
       LayoutConstraintSet                       layout_constraints;
@@ -2683,6 +2685,8 @@ namespace Legion {
       friend class ReductionAccessor;
       template<typename, int, typename, typename, bool, bool, int>
       friend class MultiRegionAccessor;
+      template<typename, int, typename, typename, bool>
+      friend class PaddingAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
       template<typename, PrivilegeMode>
@@ -2712,6 +2716,12 @@ namespace Legion {
                                               bool check_field_size,
                                               bool need_bounds,
                                               ReductionOpID redop = 0) const;
+      Realm::RegionInstance get_padding_info(FieldID fid, size_t field_size,
+                                              Domain *inner, Domain &outer,
+                                              const char *warning_string,
+                                              bool silence_warnings,
+                                              bool generic_accessor,
+                                              bool check_field_size) const;
       void report_incompatible_accessor(const char *accessor_kind,
                              Realm::RegionInstance instance, FieldID fid) const;
       void report_incompatible_multi_accessor(unsigned index, FieldID fid,
@@ -2732,6 +2742,7 @@ namespace Legion {
                                        PrivilegeMode mode);
       static void fail_privilege_check(Domain d, FieldID fid,
                                        PrivilegeMode mode); 
+      static void fail_padding_check(DomainPoint p, FieldID fid);
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     }; 
@@ -3344,6 +3355,52 @@ namespace Legion {
       typedef typename REDOP::RHS& reference;
       typedef const typename REDOP::RHS& const_reference;
       static const int dim = N;
+    };
+
+    /**
+     * \class PaddingAccessor
+     * A padding accessor is used to obtain access to the padding space
+     * available on a PhysicalRegion object. Note that all padding access
+     * is always read-write (even if the privileges on the physical region
+     * or less than read-write), because tasks are always guaranteed to not
+     * interfere with other tasks using the padding area. Note that this
+     * accessor only provides access to the padding space and you cannot
+     * access other parts of the physical region (due to potential illegal
+     * privilege escalation). Use a normal field accessor if you want access
+     * to both the scratch space and the logical region part of the physical
+     * region from the same accessor.
+     *  - FT read(const Point<N,T>&) const
+     *  - void write(const Point<N,T>&, FT val) const
+     *  ------ Methods below here for Affine Accessors only ------
+     *  - FT* ptr(const Point<N,T>&) const
+     *  - FT* ptr(const Rect<N,T>&, size_t = sizeof(FT)) const (must be dense)
+     *  - FT* ptr(const Rect<N,T>&, size_t strides[N], size_t=sizeof(FT)) const
+     *  - FT& operator[](const Point<N,T>&) const
+     *  - template<typename REDOP, bool EXCLUSIVE> 
+     *      void reduce(const Point<N,T>&, REDOP::RHS) const
+     */
+    template<typename FT, int N, typename COORD_T = coord_t,
+             typename A = Realm::GenericAccessor<FT,N,COORD_T>,
+#ifdef LEGION_BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true>
+#else
+             bool CHECK_BOUNDS = false>
+#endif
+    class PaddingAccessor {
+    public:
+      PaddingAccessor(void) { }
+      PaddingAccessor(const PhysicalRegion &region, FieldID fid,
+                      // The actual field size in case it is different from the
+                      // one being used in FT and we still want to check it
+                      size_t actual_field_size = sizeof(FT),
+#ifdef DEBUG_LEGION
+                      bool check_field_size = true,
+#else
+                      bool check_field_size = false,
+#endif
+                      bool silence_warnings = false,
+                      const char *warning_string = NULL,
+                      size_t subfield_offset = 0) { }
     };
 
 #ifdef LEGION_MULTI_REGION_ACCESSOR

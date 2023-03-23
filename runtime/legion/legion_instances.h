@@ -453,6 +453,17 @@ namespace Legion {
                          bool tight_region_bounds = false) const;
       bool meets_expression(IndexSpaceExpression *expr, 
                             bool tight_bounds = false) const;
+    public:
+      void find_padded_reservations(const FieldMask &mask,
+                                    Operation *op, unsigned index);
+      void find_field_reservations(const FieldMask &mask,
+                                   std::vector<Reservation> &results);
+      static void handle_padded_reservation_request(Runtime *runtime,
+                                  Deserializer &derez, AddressSpaceID source);
+      void update_field_reservations(const FieldMask &mask,
+                                  const std::vector<Reservation> &reservations);
+      static void handle_padded_reservation_response(Runtime *runtime,
+                                                     Deserializer &derez);
     protected:
       void pack_garbage_collection_state(Serializer &rez,
                                          AddressSpaceID target, bool need_lock);
@@ -555,6 +566,7 @@ namespace Legion {
       std::atomic<int> valid_references;
 #endif
       uint64_t sent_valid_references, received_valid_references;
+      std::map<unsigned,Reservation> *padded_reservations;
 #ifdef DEBUG_LEGION_GC
     private:
       std::map<ReferenceSource,int> detailed_base_valid_references;

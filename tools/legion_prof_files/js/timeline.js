@@ -1344,19 +1344,21 @@ function timelineEventMouseDown(_timelineEvent) {
   // draw instances
   var hasInstances = timelineEvent.instances.length != 0;	
   if (hasInstances) {
-    if (d3.event.button === 0) { 
-      searchInstRegexLength = timelineEvent.instances.length;
-      state.searchInstEnabled = true;
-      clickBoxProf_uid = timelineEvent.prof_uid;
-      searchInstRegex = new Array(searchInstRegexLength);
-      for (let i = 0; i < searchInstRegexLength; i++) {
-        var re = timelineEvent.instances[i][1];
-        searchInstRegex[i] = new RegExp(re);
+    if (d3.event.button === 0) {
+      if (!state.searchInstEnabled) {
+        searchInstRegexLength = timelineEvent.instances.length;
+        state.searchInstEnabled = true;
+        clickBoxProf_uid = timelineEvent.prof_uid;
+        searchInstRegex = new Array(searchInstRegexLength);
+        for (let i = 0; i < searchInstRegexLength; i++) {
+          var re = timelineEvent.instances[i][1];
+          searchInstRegex[i] = new RegExp(re);
+        }
+      } else {
+        state.searchInstEnabled = false;
+        searchInstRegex = null;
+        clickBoxProf_uid = null;
       }
-    } else {
-      state.searchInstEnabled = false;
-      searchInstRegex = null;
-      clickBoxProf_uid = null;
     }
     redraw();
   }

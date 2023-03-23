@@ -17,8 +17,8 @@ use nom::{
 };
 
 use crate::state::{
-    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID, OpID,
-    ProcID, RuntimeCallKindID, TaskID, Timestamp, TreeID, VariantID,
+    EventID, FSpaceID, FieldID, IPartID, ISpaceID, InstID, InstUID, MapperCallKindID, MemID,
+    NodeID, OpID, ProcID, RuntimeCallKindID, State, TaskID, Timestamp, TreeID, VariantID,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -83,8 +83,9 @@ pub enum Record {
     RuntimeCallDesc { kind: RuntimeCallKindID, name: String },
     MetaDesc { kind: VariantID, message: bool, ordered_vc: bool, name: String },
     OpDesc { kind: u32, name: String },
-    ProcDesc { proc_id: ProcID, kind: ProcKind },
     MaxDimDesc { max_dim: MaxDim },
+    MachineDesc { node_id: NodeID, num_nodes: u32 },
+    ProcDesc { proc_id: ProcID, kind: ProcKind },
     MemDesc { mem_id: MemID, kind: MemKind, capacity: u64 },
     ProcMDesc { proc_id: ProcID, mem_id: MemID, bandwidth: u32, latency: u32 },
     IndexSpacePointDesc { ispace_id: ISpaceID, dim: u32, rem: Point },
@@ -355,14 +356,20 @@ fn parse_op_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, name) = parse_string(input)?;
     Ok((input, Record::OpDesc { kind, name }))
 }
+fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, max_dim) = le_i32(input)?;
+    Ok((input, Record::MaxDimDesc { max_dim }))
+}
+fn parse_machine_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
+    let (input, nodeid) = le_u32(input)?;
+    let (input, num_nodes) = le_u32(input)?;
+    let node_id = NodeID(u64::from(nodeid));
+    Ok((input, Record::MachineDesc { node_id, num_nodes }))
+}
 fn parse_proc_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, proc_id) = parse_proc_id(input)?;
     let (input, kind) = le_i32(input)?;
     Ok((input, Record::ProcDesc { proc_id, kind }))
-}
-fn parse_max_dim_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
-    let (input, max_dim) = le_i32(input)?;
-    Ok((input, Record::MaxDimDesc { max_dim }))
 }
 fn parse_mem_desc(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     let (input, mem_id) = parse_mem_id(input)?;
@@ -902,6 +909,50 @@ fn parse_proftask_info(input: &[u8], _max_dim: i32) -> IResult<&[u8], Record> {
     ))
 }
 
+fn filter_record<'a>(
+    record: &'a Record,
+    visible_nodes: &'a Vec<NodeID>,
+    node_id: Option<NodeID>,
+) -> bool {
+    assert!(!visible_nodes.is_empty());
+    if let Some(nodeid) = node_id {
+        if !visible_nodes.contains(&nodeid) {
+            match record {
+                Record::ProcDesc { .. } => true,
+                Record::MemDesc { .. } => true,
+                Record::ProcMDesc { .. } => true,
+                Record::TaskInfo { proc_id, .. } => {
+                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+                }
+                Record::GPUTaskInfo { proc_id, .. } => {
+                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+                }
+                Record::MetaInfo { proc_id, .. } => {
+                    State::is_on_visible_nodes(visible_nodes, proc_id.node_id())
+                }
+                Record::CopyInfo { .. } => true,
+                Record::CopyInstInfo { src, dst, .. } => {
+                    State::is_on_visible_nodes(visible_nodes, src.node_id())
+                        || State::is_on_visible_nodes(visible_nodes, dst.node_id())
+                }
+                Record::FillInfo { .. } => true,
+                Record::FillInstInfo { dst, .. } => {
+                    State::is_on_visible_nodes(visible_nodes, dst.node_id())
+                }
+                Record::InstTimelineInfo { mem_id, .. } => {
+                    State::is_on_visible_nodes(visible_nodes, mem_id.node_id())
+                }
+                Record::PartitionInfo { .. } => true,
+                _ => false,
+            }
+        } else {
+            true
+        }
+    } else {
+        true
+    }
+}
+
 fn parse_record<'a>(
     input: &'a [u8],
     parsers: &BTreeMap<u32, fn(&[u8], i32) -> IResult<&[u8], Record>>,
@@ -912,7 +963,11 @@ fn parse_record<'a>(
     parser(input, max_dim)
 }
 
-fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
+fn parse<'a>(
+    input: &'a [u8],
+    visible_nodes: &'a Vec<NodeID>,
+    filter_input: bool,
+) -> IResult<&'a [u8], Vec<Record>> {
     let (input, version) = parse_filetype(input)?;
     assert_eq!(version, (1, 0));
     let (input, record_formats) = many1(parse_record_format)(input)?;
@@ -927,8 +982,9 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
     parsers.insert(ids["RuntimeCallDesc"], parse_runtime_call_desc);
     parsers.insert(ids["MetaDesc"], parse_meta_desc);
     parsers.insert(ids["OpDesc"], parse_op_desc);
-    parsers.insert(ids["ProcDesc"], parse_proc_desc);
     parsers.insert(ids["MaxDimDesc"], parse_max_dim_desc);
+    parsers.insert(ids["MachineDesc"], parse_machine_desc);
+    parsers.insert(ids["ProcDesc"], parse_proc_desc);
     parsers.insert(ids["MemDesc"], parse_mem_desc);
     parsers.insert(ids["ProcMDesc"], parse_mem_proc_affinity_desc);
     parsers.insert(ids["IndexSpacePointDesc"], parse_index_space_point_desc);
@@ -977,23 +1033,33 @@ fn parse(input: &[u8]) -> IResult<&[u8], Vec<Record>> {
 
     let mut input = input;
     let mut max_dim = -1;
+    let mut node_id: Option<NodeID> = None;
     let mut records = Vec::new();
     while let Ok((input_, record)) = parse_record(input, &parsers, max_dim) {
         if let Record::MaxDimDesc { max_dim: d } = &record {
             max_dim = *d;
         }
-        records.push(record);
+        if let Record::MachineDesc { node_id: d, .. } = &record {
+            node_id = Some(*d);
+        }
         input = input_;
+        if !filter_input || filter_record(&record, visible_nodes, node_id) {
+            records.push(record);
+        }
     }
     Ok((input, records))
 }
 
-pub fn deserialize<P: AsRef<Path>>(path: P) -> io::Result<Vec<Record>> {
+pub fn deserialize<P: AsRef<Path>>(
+    path: P,
+    visible_nodes: &Vec<NodeID>,
+    filter_input: bool,
+) -> io::Result<Vec<Record>> {
     let mut gz = GzDecoder::new(File::open(path)?);
     let mut s = Vec::<u8>::new();
     gz.read_to_end(&mut s)?;
     // throw error here if parse failed
-    let (rest, records) = parse(&s).unwrap();
+    let (rest, records) = parse(&s, visible_nodes, filter_input).unwrap();
     assert_eq!(rest.len(), 0);
     Ok(records)
 }

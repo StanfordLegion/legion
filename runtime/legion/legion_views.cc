@@ -7978,7 +7978,7 @@ namespace Legion {
       assert(collective_mapping != NULL);
 #endif
       const AddressSpaceID space = memory.address_space();
-      if (space != local_space)
+      if ((space != local_space) || !collective_mapping->contains(local_space))
       {
         if (collective_mapping->contains(space))
         {

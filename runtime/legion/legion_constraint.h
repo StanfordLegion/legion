@@ -40,7 +40,8 @@ namespace Legion {
   __op__(DIMENSION_CONSTRAINT, "Dimension") \
   __op__(ALIGNMENT_CONSTRAINT, "Alignment") \
   __op__(OFFSET_CONSTRAINT, "Offset") \
-  __op__(POINTER_CONSTRAINT, "Pointer")
+  __op__(POINTER_CONSTRAINT, "Pointer") \
+  __op__(PADDING_CONSTRAINT, "Padding")
 
     /**
      * \class ISAConstraint
@@ -276,6 +277,8 @@ namespace Legion {
         { return NULL; }
       virtual PointerConstraint* as_pointer_constraint(void)
         { return NULL; }
+      virtual PaddingConstraint* as_padding_constraint(void)
+        { return NULL; }
     public:
       virtual const SpecializedConstraint* 
         as_specialized_constraint(void) const { return NULL; }
@@ -295,6 +298,8 @@ namespace Legion {
         as_offset_constraint(void) const { return NULL; }
       virtual const PointerConstraint* 
         as_pointer_constraint(void) const { return NULL; }
+      virtual const PaddingConstraint*
+        as_padding_constraint(void) const { return NULL; }
     };
 
     /**
@@ -693,6 +698,43 @@ namespace Legion {
     };
 
     /**
+     * \class PaddingConstraint
+     * Specify additional scratch space padding around the instance.
+     * This can only be specified for non-compact instances
+     */
+    class PaddingConstraint : public LayoutConstraint {
+    public:
+      static const LayoutConstraintKind constraint_kind =
+                                          LEGION_PADDING_CONSTRAINT;
+    public:
+      PaddingConstraint(void) = default;
+      PaddingConstraint(const Domain &delta);
+      PaddingConstraint(const DomainPoint &lower, const DomainPoint &upper);
+    public:
+      inline bool operator==(const PaddingConstraint &rhs) const 
+      { return (delta == rhs.delta); }
+      inline bool operator!=(const PaddingConstraint &other) const
+      { return !(*this == other); }
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return constraint_kind; }
+      virtual PaddingConstraint* as_padding_constraint(void) 
+        { return this; }
+      virtual const PaddingConstraint* as_padding_constraint(void) const
+        { return this; }
+    public:
+      bool entails(const PaddingConstraint &other) const;
+      bool conflicts(const PaddingConstraint &other) const;
+    public:
+      void swap(PaddingConstraint &rhs);
+      void serialize(Serializer &rez) const;
+      void deserialize(Deserializer &derez);
+    public:
+      // Should be positive integers for offsets
+      Domain delta;
+    };
+
+    /**
      * \class LayoutConstraintSet
      * Provide a class for tracking all the associated 
      * layout constraints for a given region requirement
@@ -720,6 +762,8 @@ namespace Legion {
         add_constraint(const OffsetConstraint &constraint);
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
+      LayoutConstraintSet&
+        add_constraint(const PaddingConstraint &constraint);
     public:
       bool operator==(const LayoutConstraintSet &other) const;
       bool operator!=(const LayoutConstraintSet &other) const;
@@ -730,7 +774,8 @@ namespace Legion {
       // failed_constraint will be the one from 'other' that wasn't entailed
       bool entails(const LayoutConstraintSet &other, 
                    unsigned total_dims = 0,
-                   const LayoutConstraint **failed_constraint = NULL) const;
+                   const LayoutConstraint **failed_constraint = NULL,
+                   bool test_pointer = true) const;
       // conflict_constraint will be the one from 'this' that conficted
       // with a constraint from 'other'
       bool conflicts(const LayoutConstraintSet &other,
@@ -747,6 +792,7 @@ namespace Legion {
       FieldConstraint                  field_constraint;
       MemoryConstraint                 memory_constraint;
       PointerConstraint                pointer_constraint;
+      PaddingConstraint                padding_constraint;
       OrderingConstraint               ordering_constraint;
       std::vector<TilingConstraint>    tiling_constraints;
       std::vector<DimensionConstraint> dimension_constraints;

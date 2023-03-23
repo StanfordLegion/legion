@@ -29,6 +29,7 @@ local desugar = require("regent/desugar")
 local std = require("regent/std")
 local type_check = require("regent/type_check")
 local validate = require("regent/validate")
+local validate_futures = require("regent/validate_futures")
 local profile = require("regent/profile")
 
 local passes = {}
@@ -42,6 +43,7 @@ function passes.codegen(node, allow_pretty)
 
   if allow_pretty and std.config["pretty"] then print(profile("pretty", node, pretty.entry)(node)) end
   if std.config["validate"] then profile("validate", node, validate.entry)(node) end
+  if std.config["validate"] and std.config["future"] then profile("validate_futures", node, validate_futures.entry)(node) end
   return profile("codegen", node, codegen.entry)(node)
 end
 

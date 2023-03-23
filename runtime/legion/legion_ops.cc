@@ -5314,6 +5314,48 @@ namespace Legion {
                           parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id())
         }
+        // See if there is a padding constraint to get reservations for
+        if (constraints->padding_constraint.delta.get_dim() > 0)
+        {
+          FieldMask padding_mask;
+          FieldSpaceNode *fs = 
+            runtime->forest->get_node(requirement.region.get_field_space());
+          if (!constraints->field_constraint.field_set.empty())
+          {
+            std::set<FieldID> field_set;
+            for (std::vector<FieldID>::const_iterator it =
+                  constraints->field_constraint.field_set.begin(); it !=
+                  constraints->field_constraint.field_set.end(); it++)
+            {
+              field_set.insert(*it);
+              region.impl->add_padded_field(*it);
+            }
+            padding_mask = fs->get_field_mask(field_set);
+          }
+          else
+          {
+            padding_mask = fs->get_field_mask(requirement.privilege_fields);
+            for (std::set<FieldID>::const_iterator it =
+                  requirement.privilege_fields.begin(); it !=
+                  requirement.privilege_fields.end(); it++)
+              region.impl->add_padded_field(*it);
+          }
+          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+          {
+            const InstanceRef &ref = chosen_instances[idx];
+            const FieldMask overlap = padding_mask & ref.get_valid_fields();
+            if (!overlap)
+              continue;
+            PhysicalManager *manager = ref.get_physical_manager();
+            manager->find_padded_reservations(overlap, this, 0/*index*/);
+            padding_mask -= overlap;
+            if (!padding_mask)
+              break;
+          }
+#ifdef DEBUG_LEGION
+          assert(!padding_mask);
+#endif
+        }
       }
       return output.track_valid_region;
     }
@@ -9534,7 +9576,7 @@ namespace Legion {
               get_provenance(), track ? this : NULL));
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                       unique_op_id, context_index);
+            unique_op_id, context_index, (kind == EXECUTION_FENCE));
       return result;
     }
 
@@ -12096,60 +12138,27 @@ namespace Legion {
       if (add_children)
         children.reserve(index_part->total_children);
       // Iterate over each child and make an equivalence set  
-      if (index_part->total_children == index_part->max_linearized_color)
+      for (ColorSpaceIterator itr(index_part); itr; itr++)
       {
-        for (LegionColor color = 0; 
-              color < index_part->total_children; color++)
+        RegionNode *child = node->get_child(*itr);
+        PendingEquivalenceSet *pending =
+          new PendingEquivalenceSet(child, context);
+        initialize_pending(pending, mask);
+        // Parent context takes ownership here
+        parent_ctx->record_pending_disjoint_complete_set(pending, mask);
+        if (add_children)
         {
-          RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending =
-            new PendingEquivalenceSet(child, context);
-          initialize_pending(pending, mask);
-          // Parent context takes ownership here
-          parent_ctx->record_pending_disjoint_complete_set(pending, mask);
-          if (add_children)
+          bool found = false;
+          for (unsigned idx = 0; idx < max_check; idx++)
           {
-            bool found = false;
-            for (unsigned idx = 0; idx < max_check; idx++)
-            {
-              if (children[idx] != child)
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              children.push_back(child);
+            if (children[idx] != child)
+              continue;
+            found = true;
+            break;
           }
+          if (!found)
+            children.push_back(child);
         }
-      }
-      else
-      {
-        ColorSpaceIterator *itr = 
-          index_part->color_space->create_color_space_iterator();
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending =
-            new PendingEquivalenceSet(child, context);
-          initialize_pending(pending, mask);
-          // Parent context takes ownership here
-          parent_ctx->record_pending_disjoint_complete_set(pending, mask);
-          if (add_children)
-          {
-            bool found = false;
-            for (unsigned idx = 0; idx < max_check; idx++)
-            {
-              if (children[idx] != child)
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              children.push_back(child);
-          }
-        }
-        delete itr;
       }
       refinement_partitions.insert(node, mask);
     }
@@ -21676,7 +21685,6 @@ namespace Legion {
     void IndexAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<RtEvent> mapped_preconditions(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
         map_applied_conditions.insert(points[idx]->get_mapped_event());
@@ -22764,15 +22772,14 @@ namespace Legion {
     void IndexDetachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<RtEvent> mapped_preconditions(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
-        mapped_preconditions[idx] = points[idx]->get_mapped_event();
+        map_applied_conditions.insert(points[idx]->get_mapped_event());
         points[idx]->trigger_ready();
       }
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
-      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_mapping(Runtime::merge_events(map_applied_conditions));
       complete_execution();
     }
 

@@ -2823,6 +2823,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Realm::RegionInstance PhysicalRegion::get_padding_info(FieldID fid,
+                            size_t field_size, Domain *inner, Domain &outer, 
+                            const char *warning_string, bool silence_warnings,
+                            bool generic_accessor, bool check_field_size) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        REPORT_LEGION_ERROR(ERROR_PHYSICAL_REGION_UNMAPPED,
+            "Illegal request to create a padding accessor for uninitialized "
+            "physical region in task %s (UID %lld)",
+            Internal::implicit_context->get_task_name(),
+            Internal::implicit_context->get_unique_id())
+      return impl->get_padding_info(fid, field_size, inner, outer,
+          warning_string, silence_warnings, generic_accessor, check_field_size);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalRegion::report_incompatible_accessor(const char *accessor_kind,
                               Realm::RegionInstance instance, FieldID fid) const
     //--------------------------------------------------------------------------
@@ -2888,6 +2905,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Internal::PhysicalRegionImpl::fail_privilege_check(d, fid, mode);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void PhysicalRegion::fail_padding_check(DomainPoint p, 
+                                                       FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      Internal::PhysicalRegionImpl::fail_padding_check(p, fid);
     }
 
     /////////////////////////////////////////////////////////////

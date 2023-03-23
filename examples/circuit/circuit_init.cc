@@ -141,7 +141,7 @@ void InitWiresTask::cpu_base_impl(const Task *task,
     // Pick a random node within our piece
     int in_index = int(erand48(xsubi) * nodes_per_piece);
     fa_wire_in_ptr[*itr] = Point<1>(task->index_point[0] * nodes_per_piece + in_index);
-    if ((100 * erand48(xsubi)) < pct_wire_in_piece)
+    if ((num_pieces == 1) || ((100 * erand48(xsubi)) < pct_wire_in_piece))
     {
       // Stay within our piece
       int out_index = int(erand48(xsubi) * nodes_per_piece);
