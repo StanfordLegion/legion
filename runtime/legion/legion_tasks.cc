@@ -1672,14 +1672,20 @@ namespace Legion {
           if (manager->conflicts(constraints, &conflict_constraint))
             break;
           // Check to see if we need an exact match on the layouts
-          if (constraints->specialized_constraint.is_exact())
+          // Either because it was asked for or because the task 
+          // variant needs padding and therefore must match precisely
+          if (constraints->specialized_constraint.is_exact() ||
+              (constraints->padding_constraint.delta.get_dim() > 0))
           {
             std::vector<LogicalRegion> regions_to_check(1, 
                                 regions[it->first].region);
             PhysicalManager *phy = manager->as_physical_manager();
-            if (!phy->meets_regions(regions_to_check,true/*tight*/))
+            if (!phy->meets_regions(regions_to_check, true/*tight*/))
             {
-              conflict_constraint = &constraints->specialized_constraint;
+              if (constraints->specialized_constraint.is_exact())
+                conflict_constraint = &constraints->specialized_constraint;
+              else
+                conflict_constraint = &constraints->padding_constraint;
               break;
             }
           }

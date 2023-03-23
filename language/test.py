@@ -165,6 +165,51 @@ def run_prof_rs(out_dir, logfiles, verbose, legion_prof_rs):
         raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
     return result_dir
 
+def run_prof_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path):
+    result_dir = os.path.join(out_dir, 'legion_prof_filter_input')
+    cmd = [
+        py_exe_path,
+        os.path.join(regent.root_dir(), 'tools', 'legion_prof_verify_subnodes.py'),
+        '--outdir', out_dir,
+        '--nodes', str(subnodes),
+    ] + logfiles
+    if verbose: 
+        print('Running', ' '.join(cmd))
+    cmd_env = dict(os.environ.items())
+    cmd_env["USE_TYPE_CHECK"] = "1"
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT,
+        env=cmd_env)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
+def run_prof_rs_subnode(out_dir, logfiles, verbose, subnodes, py_exe_path, legion_prof_rs):
+    result_dir = os.path.join(out_dir, 'legion_prof_filter_input_rs')
+    cmd = [
+        py_exe_path,
+        os.path.join(regent.root_dir(), 'tools', 'legion_prof_verify_subnodes.py'),
+        '--outdir', out_dir,
+        '--nodes', str(subnodes),
+        '--rust',
+        '--rustexe', legion_prof_rs,
+    ] +  logfiles
+    if verbose:
+        print('Running rs', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), retcode, output.decode('utf-8') if output is not None else None)
+    return result_dir
+
 def compare_prof_results(verbose, py_exe_path, profile_dirs):
     cmd = ['diff', '-r', '-u',
            '--exclude', 'critical_path.json',
@@ -281,6 +326,11 @@ def test_prof(filename, debug, verbose, short, timelimit, py_exe_path, legion_pr
             result_py = run_prof(prof_dir, prof_logs, verbose, py_exe_path)
             result_rs = run_prof_rs(prof_dir, prof_logs, verbose, legion_prof_rs)
             compare_prof_results(verbose, py_exe_path, [result_py, result_rs])
+            # we only test subnodes when running on multi-node
+            if os.environ.get('LAUNCHER'):
+                result_subnodes_py = run_prof_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path)
+                result_subnodes_rs = run_prof_rs_subnode(prof_dir, prof_logs, verbose, 1, py_exe_path, legion_prof_rs)
+                compare_prof_results(verbose, py_exe_path, [result_subnodes_py, result_subnodes_rs])
     finally:
         shutil.rmtree(prof_dir)
 

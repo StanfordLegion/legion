@@ -11753,60 +11753,27 @@ namespace Legion {
       if (add_children)
         children.reserve(index_part->total_children);
       // Iterate over each child and make an equivalence set  
-      if (index_part->total_children == index_part->max_linearized_color)
+      for (ColorSpaceIterator itr(index_part); itr; itr++)
       {
-        for (LegionColor color = 0; 
-              color < index_part->total_children; color++)
+        RegionNode *child = node->get_child(*itr);
+        PendingEquivalenceSet *pending =
+          new PendingEquivalenceSet(child, context);
+        initialize_pending(pending, mask);
+        // Parent context takes ownership here
+        parent_ctx->record_pending_disjoint_complete_set(pending, mask);
+        if (add_children)
         {
-          RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending =
-            new PendingEquivalenceSet(child, context);
-          initialize_pending(pending, mask);
-          // Parent context takes ownership here
-          parent_ctx->record_pending_disjoint_complete_set(pending, mask);
-          if (add_children)
+          bool found = false;
+          for (unsigned idx = 0; idx < max_check; idx++)
           {
-            bool found = false;
-            for (unsigned idx = 0; idx < max_check; idx++)
-            {
-              if (children[idx] != child)
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              children.push_back(child);
+            if (children[idx] != child)
+              continue;
+            found = true;
+            break;
           }
+          if (!found)
+            children.push_back(child);
         }
-      }
-      else
-      {
-        ColorSpaceIterator *itr = 
-          index_part->color_space->create_color_space_iterator();
-        while (itr->is_valid())
-        {
-          const LegionColor color = itr->yield_color();
-          RegionNode *child = node->get_child(color);
-          PendingEquivalenceSet *pending =
-            new PendingEquivalenceSet(child, context);
-          initialize_pending(pending, mask);
-          // Parent context takes ownership here
-          parent_ctx->record_pending_disjoint_complete_set(pending, mask);
-          if (add_children)
-          {
-            bool found = false;
-            for (unsigned idx = 0; idx < max_check; idx++)
-            {
-              if (children[idx] != child)
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-              children.push_back(child);
-          }
-        }
-        delete itr;
       }
       refinement_partitions.insert(node, mask);
     }

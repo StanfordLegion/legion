@@ -7,7 +7,7 @@ use legion_prof::backend::viewer;
 use legion_prof::backend::{analyze, trace_viewer, visualize};
 use legion_prof::serialize::deserialize;
 use legion_prof::spy;
-use legion_prof::state::{Records, SpyState, State, Timestamp};
+use legion_prof::state::{Config, NodeID, Records, SpyState, State, Timestamp};
 
 fn main() -> io::Result<()> {
     let matches = clap::App::new("Legion Prof")
@@ -51,6 +51,18 @@ fn main() -> io::Result<()> {
                 .help("perentage of messages that must be over the threshold to trigger a warning"),
         )
         .arg(
+            clap::Arg::with_name("nodes")
+                .long("nodes")
+                .takes_value(true)
+                .help("a list of nodes that will be visualized"),
+        )
+        .arg(
+            clap::Arg::with_name("no-filter-input")
+                .long("no-filter-input")
+                .hidden(true)
+                .help("parse all log files, even when a subset of nodes are being shown (uses more memory)"),
+        )
+        .arg(
             clap::Arg::with_name("force")
                 .short("f")
                 .long("force")
@@ -73,6 +85,12 @@ fn main() -> io::Result<()> {
                 .long("view")
                 .help("start interactive profile viewer"),
         )
+        .arg(
+            clap::Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .help("print verbose profiling information"),
+        )
         .get_matches();
 
     let filenames = matches.values_of_os("filenames").unwrap();
@@ -81,6 +99,7 @@ fn main() -> io::Result<()> {
     let statistics = matches.is_present("stats");
     let trace = matches.is_present("trace");
     let view = matches.is_present("view");
+    let verbose = matches.is_present("verbose");
     let start_trim = matches
         .value_of("start-trim")
         .map(|x| Timestamp::from_us(x.parse::<u64>().unwrap()));
@@ -93,6 +112,15 @@ fn main() -> io::Result<()> {
     let message_percentage = matches
         .value_of("message-percentage")
         .map_or(5.0, |x| x.parse::<f64>().unwrap());
+    let mut node_list: Vec<NodeID> = Vec::new();
+    let mut filter_input = false;
+    if let Some(nodes_str) = matches.value_of("nodes") {
+        node_list = nodes_str
+            .split(",")
+            .map(|x| NodeID(x.parse::<u64>().unwrap()))
+            .collect();
+        filter_input = !matches.is_present("no-filter-input");
+    }
 
     #[cfg(not(feature = "viewer"))]
     if view {
@@ -107,14 +135,18 @@ fn main() -> io::Result<()> {
         .par_iter()
         .map(|filename| {
             println!("Reading log file {:?}...", filename);
-            deserialize(filename).map_or_else(
+            deserialize(filename, &node_list, filter_input).map_or_else(
                 |_| spy::serialize::deserialize(filename).map(Records::Spy),
                 |r| Ok(Records::Prof(r)),
             )
         })
         .collect();
     let mut state = State::default();
+    state.visible_nodes = node_list;
     let mut spy_state = SpyState::default();
+    if filter_input {
+        println!("Filtering profiles to nodes: {:?}", state.visible_nodes);
+    }
     for record in records? {
         match record {
             Records::Prof(r) => {
@@ -133,12 +165,28 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    let mut have_alllogs = true;
+    // if number of files
+    if state.num_nodes > filenames.len().try_into().unwrap() {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were provided. If --verbose is enabled, subsequent warnings may not indicate a true error.", state.num_nodes, filenames.len());
+        have_alllogs = false;
+    }
+
+    // check if subnodes is enabled and filter input is true
+    if state.visible_nodes.len() < state.num_nodes.try_into().unwrap() && filter_input {
+        println!("Warning: This run involved {:?} nodes, but only {:?} log files were used. If --verbose ie enabled, subsequent warnings may not indicate a true error.", state.num_nodes, state.visible_nodes.len());
+        have_alllogs = false;
+    }
+
+    Config::set_config(filter_input, verbose, have_alllogs);
+
     spy_state.postprocess_spy_records(&state);
 
     state.trim_time_range(start_trim, stop_trim);
     println!("Sorting time ranges");
     state.sort_time_range();
     state.check_message_latencies(message_threshold, message_percentage);
+    state.filter_output();
     if statistics {
         analyze::print_statistics(&state);
     } else if trace {
