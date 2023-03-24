@@ -9604,7 +9604,7 @@ namespace Legion {
       if (redop != 0)
       {
         // Set the future if we actually ran the task or we speculated
-        if (predication_state != RESOLVE_FALSE_STATE)
+        if (predication_state != PREDICATED_FALSE_STATE)
         {
 #ifdef DEBUG_LEGION
           assert(!reduction_instances.empty());

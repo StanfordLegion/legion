@@ -1118,8 +1118,8 @@ namespace Legion {
     public:
       enum PredState {
         PENDING_PREDICATE_STATE,
-        RESOLVE_TRUE_STATE,
-        RESOLVE_FALSE_STATE,
+        PREDICATED_TRUE_STATE,
+        PREDICATED_FALSE_STATE,
       };
     public:
       PredicatedOp(Runtime *rt);
@@ -1136,12 +1136,8 @@ namespace Legion {
       // needs to wait for the value
       bool get_predicate_value(void);
     public:
-      // Every speculative operation will always get exactly one
-      // call back to one of these methods after the predicate has
-      // resolved. The 'speculated' parameter indicates whether the
-      // operation was speculated by the mapper. The 'launch' parameter
-      // indicates whether the operation has been issued into the 
-      // pipeline for execution yet
+      // This method gets invoked if a predicate for a predicated
+      // operation resolves to false before we try to map the operation 
       virtual void predicate_false(void) = 0;
     protected:
       PredState     predication_state;

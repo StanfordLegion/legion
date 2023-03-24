@@ -3922,12 +3922,12 @@ namespace Legion {
       initialize_operation(ctx, track, regions, provenance, dependences);
       if (p == Predicate::TRUE_PRED)
       {
-        predication_state = RESOLVE_TRUE_STATE;
+        predication_state = PREDICATED_TRUE_STATE;
         predicate = NULL;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        predication_state = RESOLVE_FALSE_STATE;
+        predication_state = PREDICATED_FALSE_STATE;
         predicate = NULL;
       }
       else
@@ -3960,7 +3960,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(predicate != NULL);
 #endif
-        bool value = predicate->get_predicate(true_guard, false_guard);
+        bool value =
+          predicate->get_predicate(context_index, true_guard, false_guard);
         if (false_guard.exists())
           // Wait for the predicate to resolve
           // If false was poisoned then the predicate resolved true
@@ -3968,7 +3969,7 @@ namespace Legion {
         return value;
       }
       else
-        return (predication_state == RESOLVE_TRUE_STATE);
+        return (predication_state == PREDICATED_TRUE_STATE);
     }
 
     /////////////////////////////////////////////////////////////

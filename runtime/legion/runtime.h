@@ -200,7 +200,8 @@ namespace Legion {
     public:
       // This returns the predicate value if it is set or returns the
       // names of the guards to use if has not been set
-      bool get_predicate(PredEvent &true_guard, PredEvent &false_guard);
+      bool get_predicate(size_t context_index,
+          PredEvent &true_guard, PredEvent &false_guard);
       bool get_predicate(RtEvent &ready);
       void set_predicate(bool value);
     public:
@@ -214,6 +215,11 @@ namespace Legion {
       PredUserEvent true_guard, false_guard;
       RtUserEvent ready_event;
       int value; // <0 is unset, 0 is false, >0 is true
+    protected:
+      // Only for use in control replicated contexts
+      CollectiveID collective_id;
+      size_t max_observed_index;
+      AllReduceCollective<MaxReduction<uint64_t> > *collective;
     };
 
     /**

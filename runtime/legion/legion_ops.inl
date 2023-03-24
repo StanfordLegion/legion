@@ -184,8 +184,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(this->predicate != NULL);
 #endif
-        bool value =
-          this->predicate->get_predicate(this->true_guard, this->false_guard);
+        bool value = this->predicate->get_predicate(
+            this->context_index, this->true_guard, this->false_guard);
         bool ready = !this->false_guard.exists();
 #ifdef LEGION_SPY
         // We don't support speculation for legion spy validation runs
@@ -201,11 +201,11 @@ namespace Legion {
         // We do the mapping if we resolve true or if the predicate isn't ready
         // If it's already resolved false then we can take the easy way out
         if (ready && !value)
-          this->predication_state = OP::RESOLVE_FALSE_STATE;
+          this->predication_state = OP::PREDICATED_FALSE_STATE;
         else
-          this->predication_state = OP::RESOLVE_TRUE_STATE;
+          this->predication_state = OP::PREDICATED_TRUE_STATE;
       }
-      if (this->predication_state == OP::RESOLVE_FALSE_STATE)
+      if (this->predication_state == OP::PREDICATED_FALSE_STATE)
       {
         if (this->runtime->legion_spy_enabled)
           LegionSpy::log_predicated_false_op(this->unique_op_id);

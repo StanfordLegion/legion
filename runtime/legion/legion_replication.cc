@@ -1294,7 +1294,7 @@ namespace Legion {
       assert(redop != 0);
 #endif
       // Set the future if we actually ran the task or we speculated
-      if (predication_state == RESOLVE_FALSE_STATE)
+      if (predication_state == PREDICATED_FALSE_STATE)
         return;
       if (serdez_redop_fns != NULL)
       {
@@ -1371,7 +1371,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((output_size_collective != NULL) &&
-          (predication_state != RESOLVE_FALSE_STATE))
+          (predication_state != PREDICATED_FALSE_STATE))
       {
         // Make a copy of the output sizes before we perform all-gather
         local_output_sizes = all_output_sizes;
@@ -12944,6 +12944,7 @@ namespace Legion {
 
     // Instantiate this for a common use case
     template class AllReduceCollective<ProdReduction<bool> >;
+    template class AllReduceCollective<MaxReduction<uint64_t> >;
 
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast
