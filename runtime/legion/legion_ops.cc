@@ -14140,7 +14140,7 @@ namespace Legion {
 #endif
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       future = f;
-      predicate = Predicate(new PredicateImpl(this));
+      predicate = Predicate(ctx->create_predicate_impl(this));
       to_predicate = true;
       if (runtime->legion_spy_enabled)
       {
@@ -14290,7 +14290,7 @@ namespace Legion {
       assert(ctx != NULL);
 #endif
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      to_set = Predicate(new PredicateImpl(this));
+      to_set = Predicate(ctx->create_predicate_impl(this));
       previous = p;
       if (runtime->legion_spy_enabled)
       {
@@ -14413,7 +14413,7 @@ namespace Legion {
       assert(ctx != NULL);
 #endif
       initialize_operation(ctx, true/*track*/,0/*regions*/, provenance);
-      to_set = Predicate(new PredicateImpl(this));
+      to_set = Predicate(ctx->create_predicate_impl(this));
       previous.swap(predicates);
       if (runtime->legion_spy_enabled)
       {
@@ -14557,7 +14557,7 @@ namespace Legion {
 #endif
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       previous.swap(predicates);
-      to_set = Predicate(new PredicateImpl(this));
+      to_set = Predicate(ctx->create_predicate_impl(this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);

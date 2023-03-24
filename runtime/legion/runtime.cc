@@ -630,24 +630,10 @@ namespace Legion {
     PredicateImpl::PredicateImpl(Operation *op)
       : context(op->get_context()), creator(op),
         creator_gen(op->get_generation()), creator_uid(op->get_unique_op_id()),
-        creator_ctx_index(op->get_ctx_index()), value(-1), collective_id(0),
-        max_observed_index(0), collective(NULL)
+        creator_ctx_index(op->get_ctx_index()), value(-1)
     //--------------------------------------------------------------------------
     {
       context->add_base_resource_ref(APPLICATION_REF);
-      if (context->get_replication_id() > 0)
-      {
-#ifdef DEBUG_LEGION
-        ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context);
-#endif
-        collective_id = repl_ctx->get_next_collective_index(COLLECTIVE_LOC_1);
-#ifdef DEBUG_LEGION
-        assert(collective_id > 0);
-#endif
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -656,12 +642,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(0 <= value);
-#endif
-      if (collective != NULL)
-      {
-        collective->wait_all_reduce();
-        delete collective;
-      }
+#endif 
       if (context->remove_base_resource_ref(APPLICATION_REF))
         delete context;
     }
@@ -673,28 +654,7 @@ namespace Legion {
     {
       AutoLock p_lock(predicate_lock);
       if (0 <= value)
-      {
-        const bool is_true = (0 < value);
-        // If the result is true or we're not in a control replicated
-        // context then there is no need to do anything special and we
-        // can return the result right away.
-        if (is_true || (collective_id == 0))
-          return is_true;
-        // The is the control replicated false case where we need to check
-        // to see if it is safe to give back the false value to this operation
-        if (collective != NULL)
-        {
-          max_observed_index = collective->get_result(); 
-          delete collective;
-          collective = NULL;
-        }
-        // Can safely return false here
-        if (max_observed_index < context_index)
-          return false;
-        // Othewise we fall through and pretend like we don't know that
-        // it is false yet so that we align the predication decision
-        // across all the shards
-      }
+        return (0 < value);
       // Not ready yet, make guards if they don't exist yet
       if (!true_guard.exists())
       {
@@ -703,8 +663,6 @@ namespace Legion {
       }
       true_g = true_guard;
       false_g = false_guard;
-      if (context_index > max_observed_index)
-        max_observed_index = context_index;
       return false;
     }
 
@@ -723,6 +681,112 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PredicateImpl::set_predicate(bool result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+#ifdef DEBUG_LEGION
+      assert(value < 0);
+#endif
+      if (result)
+        value = 1;
+      else
+        value = 0;
+      if (ready_event.exists())
+        Runtime::trigger_event(ready_event);
+      if (true_guard.exists())
+      {
+        if (result)
+        {
+          Runtime::trigger_event(true_guard);
+          Runtime::poison_event(false_guard);
+        }
+        else
+        {
+          Runtime::poison_event(true_guard);
+          Runtime::trigger_event(false_guard);
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Predicate Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplPredicateImpl::ReplPredicateImpl(Operation *op, CollectiveID id)
+      : PredicateImpl(op), collective_id(id), max_observed_index(0),
+        collective(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplPredicateImpl::~ReplPredicateImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      if (collective != NULL)
+      {
+        collective->wait_all_reduce();
+        delete collective;
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplPredicateImpl::get_predicate(size_t context_index,
+                                          PredEvent &true_g, PredEvent &false_g)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger_guards = false;
+      AutoLock p_lock(predicate_lock);
+      // If the result is true then we can just return that
+      if (0 < value)
+        return true;
+      if (value == 0)
+      {
+        // For the false case, check to see if we already got the
+        // maximum observed false case
+        if (collective != NULL)
+        {
+          max_observed_index = collective->get_result(); 
+          delete collective;
+          collective = NULL;
+        }
+        // Can safely return false here since it's later than the 
+        // maximum observed index across all the shards so all shards
+        // will return the same false decision
+        if (max_observed_index < context_index)
+          return false;
+        // Othewise we fall through and pretend like we don't know that
+        // it is false yet so that we align the predication decision
+        // across all the shards
+        trigger_guards = true;
+      }
+      // Not ready yet, make guards if they don't exist yet
+      if (!true_guard.exists())
+      {
+        true_guard = Runtime::create_pred_event();
+        false_guard = Runtime::create_pred_event(); 
+        if (trigger_guards)
+        {
+          // We're doing the fall-through case where we know its false
+          // but we have to make sure that all the shards do the same
+          // thing so we're pretending like we don't know the result yet
+#ifdef DEBUG_LEGION
+          assert(value == 0);
+#endif
+          Runtime::poison_event(true_guard);
+          Runtime::trigger_event(false_guard);
+        }
+      }
+      true_g = true_guard;
+      false_g = false_guard;
+      if (context_index > max_observed_index)
+        max_observed_index = context_index;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplPredicateImpl::set_predicate(bool result)
     //--------------------------------------------------------------------------
     {
       AutoLock p_lock(predicate_lock);

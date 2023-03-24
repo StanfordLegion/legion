@@ -7747,6 +7747,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PredicateImpl* InnerContext::create_predicate_impl(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      return new PredicateImpl(op);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::perform_window_wait(void)
     //--------------------------------------------------------------------------
     {
@@ -19682,6 +19689,14 @@ namespace Legion {
       }
       else
         return InnerContext::add_to_dependence_queue(op, unordered, outermost);
+    }
+
+    //--------------------------------------------------------------------------
+    PredicateImpl* ReplicateContext::create_predicate_impl(Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      return new ReplPredicateImpl(op,
+          get_next_collective_index(COLLECTIVE_LOC_1));
     }
 
     //--------------------------------------------------------------------------

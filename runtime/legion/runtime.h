@@ -194,16 +194,16 @@ namespace Legion {
     public:
       PredicateImpl(Operation *creator);
       PredicateImpl(const PredicateImpl &rhs) = delete;
-      ~PredicateImpl(void);
+      virtual ~PredicateImpl(void);
     public:
       PredicateImpl& operator=(const PredicateImpl &rhs) = delete;
     public:
       // This returns the predicate value if it is set or returns the
       // names of the guards to use if has not been set
-      bool get_predicate(size_t context_index,
+      virtual bool get_predicate(size_t context_index,
           PredEvent &true_guard, PredEvent &false_guard);
       bool get_predicate(RtEvent &ready);
-      void set_predicate(bool value);
+      virtual void set_predicate(bool value);
     public:
       InnerContext *const context;
       Operation *const creator;
@@ -215,9 +215,30 @@ namespace Legion {
       PredUserEvent true_guard, false_guard;
       RtUserEvent ready_event;
       int value; // <0 is unset, 0 is false, >0 is true
+    };
+
+    /**
+     * \class ReplPredicateImpl
+     * This is a predicate implementation for control replication
+     * contexts. It provides the same functionality as the normal
+     * version, but it also has one extra invariant, which is that
+     * it guarantees that it will not return a false predicate
+     * result until it guarantees that all the shards will return
+     * the same false result for all equivalent operations.
+     */
+    class ReplPredicateImpl : public PredicateImpl {
+    public:
+      ReplPredicateImpl(Operation *creator, CollectiveID id);
+      ReplPredicateImpl(const ReplPredicateImpl &rhs) = delete;
+      virtual ~ReplPredicateImpl(void);
+    public:
+      ReplPredicateImpl& operator=(const ReplPredicateImpl &rhs) = delete;
+    public:
+      virtual bool get_predicate(size_t context_index,
+          PredEvent &true_guard, PredEvent &false_guard);
+      virtual void set_predicate(bool value);
     protected:
-      // Only for use in control replicated contexts
-      CollectiveID collective_id;
+      const CollectiveID collective_id;
       size_t max_observed_index;
       AllReduceCollective<MaxReduction<uint64_t> > *collective;
     };
