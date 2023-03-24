@@ -2463,18 +2463,15 @@ namespace Legion {
         }
         return;
       }
-      Serializer rez;
-      bool packed = false;
       for (std::set<AddressSpaceID>::const_iterator it = 
             subscribers.begin(); it != subscribers.end(); it++)
       {
         if (((*it) == local_space) || ((*it) == result_set_space))
           continue;
-        if (!packed)
-        {
-          pack_future_result(rez);
-          packed = true;
-        }
+        // Need to pack each of these separately in case we need to make
+        // events for each future instance being packed
+        Serializer rez;
+        pack_future_result(rez);
         pack_global_ref();
         runtime->send_future_result(*it, rez);
       }
