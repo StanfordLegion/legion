@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 23.03.0 (March ??, 2023)
+Version 23.03.0 (March 27, 2023)
   * Build
     - Minimum supported CMake version is now 3.16. (Some optional features may
        continue to require even newer versions.)
@@ -9,11 +9,14 @@ Version 23.03.0 (March ??, 2023)
     - Minimum supported CUDA version is now 10.
   * Legion
     - Added support for padded layout constraints to provide scratch space
-      in instances for tasks to use (see examples/padded_instances)
-    - Added support for tiled layout constraints to provide an ability to 
-      layout instances by breaking down dimensions (see examples/tiling) 
+       in instances for tasks to use (see examples/padded_instances).
+    - Added support for tiled layout constraints to provide an ability to
+       layout instances by breaking down dimensions (see examples/tiling).
   * Realm
     - An experimental UCX network backend has been added.
+    - Updated the Kokkos interop to support Kokkos 4.0.
+  * Python
+    - Support loading Legion as a library from a stock Python interpreter.
   * Regent
     - Fixes to avoid leaking futures.
     - Improvements to Regent's predicate optimization.
@@ -21,6 +24,10 @@ Version 23.03.0 (March ??, 2023)
     - Legion Prof now supports a native viewer UI. Enable it with the `viewer`
        feature (e.g., `cargo run --features=viewer`) and use the flag
        `--view`.
+    - Legion Prof now has better support for rendering a subset of available
+       nodes. Pass all log files (from all nodes) into Legion Prof and add the
+       `--subnodes` flag to specify which ones to render. This ensures all
+       copies in/out of those nodes will be shown correctly.
 
 Version 22.12.0 (December 30, 2022)
   * Regent
