@@ -95,6 +95,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_mappable_t);
   NEW_OPAQUE_TYPE(legion_region_requirement_t);
   NEW_OPAQUE_TYPE(legion_machine_t);
+  NEW_OPAQUE_TYPE(legion_logger_t);
   NEW_OPAQUE_TYPE(legion_mapper_t);
   NEW_OPAQUE_TYPE(legion_default_mapper_t);
   NEW_OPAQUE_TYPE(legion_processor_query_t);
@@ -5837,6 +5838,37 @@ extern "C" {
   legion_future_t
   legion_issue_timing_op_nanoseconds(legion_runtime_t runtime,
                                      legion_context_t ctx);
+
+  // -----------------------------------------------------------------------
+  // Logging Operations
+  // -----------------------------------------------------------------------
+
+  legion_logger_t
+  legion_logger_create(const char* name);
+
+  void
+  legion_logger_destroy(legion_logger_t handle);
+
+  void
+  legion_logger_spew(legion_logger_t handle, const char *msg);
+
+  void
+  legion_logger_debug(legion_logger_t handle, const char *msg);
+
+  void
+  legion_logger_info(legion_logger_t handle, const char *msg);
+
+  void
+  legion_logger_print(legion_logger_t handle, const char *msg);
+
+  void
+  legion_logger_warning(legion_logger_t handle, const char *msg);
+
+  void
+  legion_logger_error(legion_logger_t handle, const char *msg);
+
+  void
+  legion_logger_fatal(legion_logger_t handle, const char *msg);
 
   // -----------------------------------------------------------------------
   // Machine Operations

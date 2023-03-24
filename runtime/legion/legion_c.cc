@@ -7976,6 +7976,82 @@ legion_issue_timing_op_nanoseconds(legion_runtime_t runtime_,
 }
 
 // -----------------------------------------------------------------------
+// Logging Operations
+// -----------------------------------------------------------------------
+
+legion_logger_t
+legion_logger_create(const char* name)
+{
+  Realm::Logger *result = new Realm::Logger(name);
+
+  return CObjectWrapper::wrap(result);
+}
+
+void
+legion_logger_destroy(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  delete handle;
+}
+
+void
+legion_logger_spew(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->spew() << msg;
+}
+
+void
+legion_logger_debug(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->debug() << msg;
+}
+
+void
+legion_logger_info(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->info() << msg;
+}
+
+void
+legion_logger_print(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->print() << msg;
+}
+
+void
+legion_logger_warning(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->warning() << msg;
+}
+
+void
+legion_logger_error(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->error() << msg;
+}
+
+void
+legion_logger_fatal(legion_logger_t handle_, const char *msg)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->fatal() << msg;
+}
+
+// -----------------------------------------------------------------------
 // Machine Operations
 // -----------------------------------------------------------------------
 
