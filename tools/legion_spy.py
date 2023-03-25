@@ -8388,7 +8388,7 @@ class Operation(object):
 
     def print_op_mapping_decisions(self, depth):
         if self.internal_ops:
-            assert not self.is_close()
+            assert self.kind != INTER_CLOSE_OP_KIND
             for internal in self.internal_ops:
                 internal.print_op_mapping_decisions(depth)
         # If we are an index task just do our points and return
