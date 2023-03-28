@@ -32,6 +32,11 @@
 
 #include "realm/custom_serdez.h"
 
+/**
+ * \file indexspace.h
+ * This file provides a C++ interface to Realm's index spaces.
+ */
+
 namespace Realm {
   // NOTE: all these interfaces are templated, which means partitions.cc is going
   //  to have to somehow know which ones to instantiate - this is controlled by the
@@ -82,10 +87,14 @@ namespace Realm {
   template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
-  // a FieldDataDescriptor is used to describe field data provided for partitioning
-  //  operations - it is templated on the dimensionality (N) and base type (T) of the
-  //  index space that defines the domain over which the data is defined, and the
-  //  type of the data contained in the field (FT)
+  /**
+   * \class FieldDataDescriptor
+   * A FieldDataDescriptor is used to describe field data provided for
+   * partitioninga operations - it is templated on the dimensionality (N)
+   * and base type (T) of the index space that defines the domain over
+   * which the data is defined, and the type of the data contained in
+   * the field (FT).
+   */
   template <typename IS, typename FT>
   struct FieldDataDescriptor {
     IS index_space;
@@ -105,9 +114,13 @@ namespace Realm {
     Point<N, T> offset;
   };
 
-  // AffineTransform is used to describe an affine transformation
-  // Ax + b on point where A is a transform matrix and b is an offset
-  // vector.
+  /**
+   * \class AffineTransform
+   * An affine transform is used to transform points in one
+   * coordinate space into points in another coordinate space
+   * using the basic Ax + b transformation, where A is a
+   * transform matrix and b is an offset vector
+   */
   template <int M, int N, typename T = int>
   class REALM_PUBLIC_API AffineTransform {
    public:
@@ -122,29 +135,37 @@ namespace Realm {
     Point<M, T> offset;
   };
 
-  // Represents a generic structured transform.
+  /**
+   * \class StructuredTransform
+   * A structured transform represents a generic structure that takes
+   * is able to represent all existing transforms.
+   */
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API StructuredTransform {
-  public:
-   StructuredTransform(void) = default;
-   StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
-   StructuredTransform(const TranslationTransform<N, T2>& _transform);
+   public:
+    StructuredTransform(void) = default;
+    StructuredTransform(const AffineTransform<N, N2, T2>& _transform);
+    StructuredTransform(const TranslationTransform<N, T2>& _transform);
 
-   enum StructuredTransformType {
-    NONE = 0,
-    AFFINE = 1,
-    TRANSLATION = 2,
-   };
+    enum StructuredTransformType {
+      NONE = 0,
+      AFFINE = 1,
+      TRANSLATION = 2,
+    };
 
-   Point<N, T> operator[](const Point<N2, T>& point) const;
+    Point<N, T> operator[](const Point<N2, T>& point) const;
 
-   // protected:
-   Realm::Matrix<N, N2, T2> transform_matrix;
-   Point<N, T2> offset;
-   StructuredTransformType type = StructuredTransformType::NONE;
+    // protected:
+    Realm::Matrix<N, N2, T2> transform_matrix;
+    Point<N, T2> offset;
+    StructuredTransformType type = StructuredTransformType::NONE;
   };
 
-  // Represents a generic domain transform.
+  /**
+   * \class DomainTransform
+   * A domain transform is used to represent both structured and
+   * unstructrured transforms.
+   */
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API DomainTransform {
    public:
@@ -173,6 +194,10 @@ namespace Realm {
 
   class IndirectionInfo;
 
+  /**
+   * \class CopyIndirection
+   * A copy indirect represents indirect copies in Realm.
+   */
   template <int N, typename T = int>
   class REALM_PUBLIC_API CopyIndirection {
   public:
@@ -223,11 +248,14 @@ namespace Realm {
     };
   };
 
-  // an IndexSpace is a POD type that contains a bounding rectangle and an optional SparsityMap - the
-  //  contents of the IndexSpace are the intersection of the bounding rectangle's volume and the
-  //  optional SparsityMap's contents
-  // application code may directly manipulate the bounding rectangle - this will be common for structured
-  //  index spaces
+  /**
+   * \class IndexSpace
+   * An IndexSpace is a POD type that contains a bounding rectangle and an
+   * optional SparsityMap - the contents of the IndexSpace are the intersection
+   * of the bounding rectangle's volume and the optional SparsityMap's contents
+   * - application code may directly manipulate the bounding rectangle
+   * - this will be common for structured index spaces.
+   */
   template <int N, typename T>
   struct REALM_PUBLIC_API IndexSpace {
     Rect<N,T> bounds;
@@ -672,11 +700,14 @@ namespace Realm {
   REALM_PUBLIC_API
   std::ostream& operator<<(std::ostream& os, const IndexSpace<N,T>& p);
 
-  // a type-erased IndexSpace that can be used to avoid template explosion
-  //  at the cost of run-time indirection - avoid using this in
-  //  performance-critical code
   class IndexSpaceGenericImpl;
 
+  /**
+   * \class IndexSpaceGeneric
+   * A type-erased IndexSpace that can be used to avoid template explosion
+   * at the cost of run-time indirection - avoid using this in
+   * performance-critical code.
+   */
   class REALM_PUBLIC_API IndexSpaceGeneric {
   public:
     IndexSpaceGeneric();
@@ -729,16 +760,17 @@ namespace Realm {
 
   };
 
-  // instances are based around the concept of a "linearization" of some index space, which is
-  //  responsible for mapping (valid) points in the index space into a hopefully-fairly-dense
-  //  subset of [0,size) (for some size)
-  //
-  // because index spaces can have arbitrary dimensionality, this description is wrapped in an
-  //  abstract interface - all implementations must inherit from the approriate LinearizedIndexSpace<N,T>
-  //  intermediate
-
   template <int N, typename T> class LinearizedIndexSpace;
 
+  /**
+   * \class LinearizedIndexSpaceIntfc
+   * Instances are based around the concept of a "linearization" of some index
+   * space, which is responsible for mapping (valid) points in the index space
+   * into a hopefully-fairly-dense subset of [0,size) (for some size) because
+   * index spaces can have arbitrary dimensionality, this description is wrapped
+   * in an abstract interface - all implementations must inherit from the
+   * approriate LinearizedIndexSpace<N,T> intermediate.
+   */
   class LinearizedIndexSpaceIntfc {
   protected:
     // cannot be created directly
@@ -773,8 +805,12 @@ namespace Realm {
     IndexSpace<N,T> indexspace;
   };
 
-  // the simplest way to linearize an index space is build an affine translation from its
-  //  bounding box to the range [0, volume)
+  /**
+   * \class AffineLinearizedIndexSpace
+   * The simplest possible linearization of an index space is to use an affine
+   * transformation to map the bounding box of the index space to the
+   * range [0, volume)
+   */
   template <int N, typename T>
   class AffineLinearizedIndexSpace : public LinearizedIndexSpace<N,T> {
   public:
@@ -795,7 +831,11 @@ namespace Realm {
   template <int N, typename T>
   class SparsityMapPublicImpl;
 
-  // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
+  /**
+   * \class IndexSpaceIterator
+   * An IndexSpaceIterator iterates over the valid points in an IndexSpace,
+   * rectangles at a time.
+   */
   template <int N, typename T>
   struct REALM_PUBLIC_API IndexSpaceIterator {
     Rect<N,T> rect;
