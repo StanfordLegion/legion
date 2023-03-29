@@ -5182,6 +5182,15 @@ class DataflowTraverser(object):
                             same_fill = True
                             break
             if not same_fill:
+                # We don't rename fill views for trace replays at the moment
+                # and we don't want to report false positives, so we won't
+                # report any errors here if some of the fill views in the
+                # current state came from a replayed fill operation
+                for op in self.state.fill_ops:
+                    if op.replayed:
+                        same_fill = True
+                        break
+            if not same_fill:
                 self.failed_analysis = True
                 print("ERROR: Not using same fill operation for "+
                         str(fill)+" on field "+str(self.dst_field)+
