@@ -493,7 +493,7 @@ namespace Realm {
 
     ///@{
     /**
-     * @brief Fill values into the specified destination fields in the index
+     * Fill values into the specified destination fields in the index
      * space.
      *
      * @param dsts Vector of CopySrcDstField's describing the destination
@@ -516,7 +516,7 @@ namespace Realm {
 
     ///@{
     /**
-     * @brief Copy data from source fields to destination fields in the index
+     * Copy data from source fields to destination fields in the index
      * space.
      *
      * @param srcs Vector of CopySrcDstField's describing the source fields.
@@ -535,7 +535,7 @@ namespace Realm {
 
     ///@{
     /**
-     * @brief Copy data from source fields to destination fields in the index
+     * Copy data from source fields to destination fields in the index
      * space with indirection.
      *
      * @param srcs Vector of CopySrcDstField's describing the source fields.
@@ -556,9 +556,21 @@ namespace Realm {
                Event wait_on = Event::NO_EVENT, int priority = 0) const;
     ///@}
 
-    // partitioning operations
+    // Partitioning operations
 
-    // index-based:
+    ///@{
+    /**
+     * Create equal index spaces from this index space.
+     *
+     * @param count Number of subspaces to create.
+     * @param granularity Granularity of the subspaces.
+     * @param index Index of the subspace to create.
+     * @param subspace Index space to fill in with the result.
+     * @param reqs Set of profiling requests.
+     * @param wait_on Event to wait on before performing the partitioning
+     * operation.
+     * @return Event representing the partitioning operation.
+     * */
     Event create_equal_subspace(size_t count, size_t granularity,
                                 unsigned index, IndexSpace<N,T> &subspace,
                                 const ProfilingRequestSet &reqs,
@@ -568,7 +580,21 @@ namespace Realm {
 				 std::vector<IndexSpace<N,T> >& subspaces,
 				 const ProfilingRequestSet &reqs,
 				 Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
+    ///@{
+    /**
+     * Create index spaces from this index space based on the specified weights.
+     *
+     * @param count Number of subspaces to create.
+     * @param granularity Granularity of the subspaces.
+     * @param weights Vector of weights for each subspace.
+     * @param subspace Index space to fill in with the result.
+     * @param reqs Set of profiling requests.
+     * @param wait_on Event to wait on before performing the partitioning
+     * operation.
+     * @return Event representing the partitioning operation.
+     * */
     Event create_weighted_subspaces(size_t count, size_t granularity,
 				    const std::vector<int>& weights,
 				    std::vector<IndexSpace<N,T> >& subspaces,
@@ -580,8 +606,9 @@ namespace Realm {
 				    std::vector<IndexSpace<N,T> >& subspaces,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
-    // field-based:
+    // Field-based partitioning operations
 
     template <typename FT>
     Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
@@ -633,17 +660,18 @@ namespace Realm {
     /**
      * Computes subspaces of this index space by determining what subsets are
      * reachable from subsets of some other index space via a
-     * transformation. The transformed source data points are used to
-     * compute the images. - i.e. upon return (and waiting for the finish
-     * event), the following invariant holds: images[i] = { y | exists x, x in
-     * sources[i] ^ field_data(x) = y
-     *  }
+     * transformation. The transformed data points from source index
+     * spaces to ours are used to compute the images. - i.e. upon
+     * return (and waiting for the finish event), the following
+     * invariant holds: images[i] = { y | exists x, x in
+     * transform(sources[i]) = y }
      *  @param transform the transformation to apply
      *  @param source the source index space
      *  @param image the resulting image index space
      *  @param reqs profiling requests
-     *  @param wait_on event to wait on before starting.
+     *  @param wait_on event to wait on before starting
      *  @return an event that will trigger when the operation is
+     *  complete
      */
     template <int N2, typename T2, typename TRANSFORM>
     Event create_subspace_by_image(const TRANSFORM& transform,
@@ -747,6 +775,22 @@ namespace Realm {
         Event wait_on = Event::NO_EVENT) const;
     ///@}
 
+    ///@{
+    /**
+     * Computes subspaces of this index space by determining what subsets can
+     * reach subsets of some other index space via a transformation.
+     * The transormed data points from this index space to the other
+     * and is used to compute the preimage of each
+     * target - i.e. upon return (and waiting for the finish event), the
+     * following invariant holds: preimages[i] = { x | transform(x) in
+     * targets[i] }
+     * @param transform the transformation to use for the computation
+     * @param target the target index space
+     * @param preimage the resulting preimage index space
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting.
+     * @return an event that will trigger when the operation is
+     */
     template <int N2, typename T2, typename TRANSFORM>
     Event create_subspace_by_preimage(const TRANSFORM& transform,
                                       const IndexSpace<N2, T2>& target,
@@ -843,6 +887,17 @@ namespace Realm {
     //  IS op IS[]   -> result[] (first input applied to each element of second array)
     //  IS[] op IS   -> result[] (each element of first array applied to second input)
 
+    ///@{
+    /**
+     * Compute the union of two index spaces.
+     * @param lhs the left hand side of the union
+     * @param rhs the right hand side of the union
+     * @param result the resulting index space
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting.
+     * @return an event that will trigger when the operation is
+     * complete
+     */
     static Event compute_union(const IndexSpace<N,T>& lhs,
 				    const IndexSpace<N,T>& rhs,
 				    IndexSpace<N,T>& result,
@@ -850,8 +905,8 @@ namespace Realm {
 				    Event wait_on = Event::NO_EVENT);
 
     static Event compute_unions(const std::vector<IndexSpace<N,T> >& lhss,
-				     const std::vector<IndexSpace<N,T> >& rhss,
-				     std::vector<IndexSpace<N,T> >& results,
+        const std::vector<IndexSpace<N,T> >& rhss,
+        std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
@@ -866,7 +921,18 @@ namespace Realm {
 				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
+    ///@}
 
+    ///@{
+    /**
+     * Compute the intersection of two index spaces.
+     * @param lhs the left hand side of the intersection
+     * @param rhs the right hand side of the intersection
+     * @param result the resulting index space
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting
+     * @return an event that will trigger when the operation is complete
+     */
     static Event compute_intersection(const IndexSpace<N,T>& lhs,
 				    const IndexSpace<N,T>& rhs,
 				    IndexSpace<N,T>& result,
@@ -890,7 +956,18 @@ namespace Realm {
 				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
+    ///@}
 
+    ///@{
+    /**
+     * Compute the difference of two index spaces.
+     * @param lhs the left hand side of the difference
+     * @param rhs the right hand side of the difference
+     * @param result the resulting index space
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting
+     * @return an event that will trigger when the operation is complete
+     */
     static Event compute_difference(const IndexSpace<N,T>& lhs,
 				    const IndexSpace<N,T>& rhs,
 				    IndexSpace<N,T>& result,
@@ -914,6 +991,7 @@ namespace Realm {
 				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
+    ///@}
 
     // set reduction operations (union and intersection)
 
