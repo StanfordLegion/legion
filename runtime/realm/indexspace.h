@@ -265,106 +265,186 @@ namespace Realm {
     IndexSpace(const Rect<N,T>& _bounds);
     IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
-    // construct an index space from a list of points or rects
-    //   this construction can be significantly faster if the caller promises
-    //   that all of the 'points' or 'rects' are disjoint
+    ///@{
+    /**
+     * Construct an index space from a list of points or rects
+     *  this construction can be significantly faster if the caller promises
+     *  that all of the 'points' or 'rects' are disjoint.
+     *  @param points list of points to include in the index space.
+     *  @param disjoint true if the points are guaranteed to be disjoint.
+     */
     explicit IndexSpace(const std::vector<Point<N,T> >& points,
                         bool disjoint = false);
+
     explicit IndexSpace(const std::vector<Rect<N,T> >& rects,
                         bool disjoint = false);
+    ///@}
 
-    // constructs a guaranteed-empty index space
+    ///@{
+    /**
+     * Construct a guaranteed-empty index space.
+     */
     static IndexSpace<N,T> make_empty(void);
+    ///@}
 
-    // reclaim any physical resources associated with this index space
-    //  will clear the sparsity map of this index space if it exists
+    ///@{
+    /**
+     * Reclaim any physical resources associated with this index space
+     * will clear the sparsity map of this index space if it exists.
+     * @param wait_on event to wait on before destroying the index space.
+     */
     void destroy(Event wait_on = Event::NO_EVENT);
+    ///@}
 
-    // true if we're SURE that there are no points in the space (may be imprecise due to
-    //  lazy loading of sparsity data)
+    ///@{
+    /**
+     * Retrun true if we're SURE that there are no points in the space (may be
+     * imprecise due to lazy loading of sparsity data).
+     * @return true if the index space is empty.
+     */
     bool empty(void) const;
-    
-    // true if there is no sparsity map (i.e. the bounds fully define the domain)
+    ///@}
+
+    ///@{
+    /**
+     * Return true if there is no sparsity map (i.e. the bounds fully
+     * define the domain).
+     * @return true if the index space is dense.
+     */
     REALM_CUDA_HD
     bool dense(void) const;
+    ///@}
 
-    // kicks off any operation needed to get detailed sparsity information - asking for
-    //  approximate data can be a lot quicker for complicated index spaces
+    ///@{
+    /**
+     * Start any operation needed to get detailed sparsity information.
+     * Asking for approximate data can be a lot quicker for complicated
+     * index spaces.
+     * @param precise false is the sparsity map may be preserved even
+     * for dense spaces.
+     * @return event to wait on before using the sparsity map.
+     */
     Event make_valid(bool precise = true) const;
     bool is_valid(bool precise = true) const;
+    ///@}
 
-    // returns the tightest description possible of the index space
-    // if 'precise' is false, the sparsity map may be preserved even for dense
-    //  spaces
+    ///@{
+    /**
+     * Return the tightest description possible of the index space.
+     * @param precise false is the sparsity map may be preserved even
+     * for dense spaces.
+     * @return the tightest index space possible.
+     */
     IndexSpace<N,T> tighten(bool precise = true) const;
+    ///@}
 
-    // queries for individual points or rectangles
+    ///@{
+    /**
+     * Query for individual points or rectangles
+     * @param p point to query
+     * @param r rectangle to query
+     * @return true if the point or rectangle is contained in the index space.
+     */
     bool contains(const Point<N,T>& p) const;
     bool contains_all(const Rect<N,T>& r) const;
     bool contains_any(const Rect<N,T>& r) const;
+    ///@}
 
     bool overlaps(const IndexSpace<N,T>& other) const;
 
-    // actual number of points in index space (may be less than volume of bounding box)
+    ///@{
+    /**
+     * Return actual number of points in index space (may be less than
+     * volume of bounding box).
+     * @return the number of points in the index space.
+     */
     size_t volume(void) const;
+    ///@}
 
-    // approximate versions of the above queries - the approximation is guaranteed to be a supserset,
-    //  so if contains_approx returns false, contains would too
+    ///@{
+    /**
+     * Query approximately for points or rectangles - the approximation
+     * is guaranteed to be a supserset, so if contains_approx returns
+     * false, contains would too.
+     * @param p point to query
+     * @param r rectangle to query
+     * @return true if the point or rectangle is contained in the index space.
+     */
     bool contains_approx(const Point<N,T>& p) const;
     bool contains_all_approx(const Rect<N,T>& r) const;
     bool contains_any_approx(const Rect<N,T>& r) const;
+    ///@}
 
     bool overlaps_approx(const IndexSpace<N,T>& other) const;
 
-    // approximage number of points in index space (may be less than volume of bounding box, but larger than
-    //   actual volume)
+    ///@{
+    /**
+     * Approximate number of points in index space (may be less than
+     * volume of bounding box, but larger than actual volume).
+     * @return the approximate number of points in the index space.
+     */
     size_t volume_approx(void) const;
+    ///@}
 
-    // attempts to compute a set of covering rectangles for the index space
-    //  with the following properties:
-    // a) every point in the index space is included in (exactly) one rect
-    // b) none of the resulting rectangles overlap each other
-    // c) no more than 'max_rects' rectangles are used (0 = no limit)
-    // d) the relative storage overhead (%) is less than 'max_overhead'
-    //     i.e. 100*(volume(covering)/volume(space) - 1) <= max_overhead
-    //
-    // if successful, this function returns true and fills in 'covering'
-    //   vector
-    // if unsuccessful, it returns false and leaves 'covering' unchanged
-    //
-    // for N=1 (i.e. 1-D index spaces), this function is optimal, returning
-    //  a zero-overhead covering using a minimal number of rectangles if
-    //  that satisfies the 'max_rects' bound, or a covering (using
-    //  'max_rects' rectangles) with minimal overhead if that overhead is
-    //  acceptable, or fails if no covering exists
-    //
-    // for N>1, heuristics are used, and the guarantees are much weaker:
-    // a) a request with 'max_rects'==1 will precisely compute the overhead
-    //   and succeed/fail appropriately
-    // b) a request with 'max_rects'== 0 (no limit) will always succeed with
-    //   zero overhead, although the number of rectangles used may not be
-    //   minimal
-    // c) the computational complexity of the attempt will bounded at:
-    //      O(nm log m + nmk^2), where:
-    //         n = dimension of index space
-    //         m = size of exact internal representation (which itself is
-    //               computed by heuristics and may not be optimal for some
-    //               dependent-partitioning results)
-    //         k = maximum output rectangles
-    //      this allows for sorting the inputs and/or outputs as well as
-    //       dynamic programming approaches but precludes more "heroic"
-    //       optimizations - a use case that requires better results and/or
-    //       admits specific optimizations will need to compute its own
-    //       coverings
+    ///@{
+    /**
+     * Attempt to compute a set of covering rectangles for the index space
+     * with the following properties:
+     * a) every point in the index space is included in (exactly) one rect
+     * b) none of the resulting rectangles overlap each other
+     * c) no more than 'max_rects' rectangles are used (0 = no limit)
+     * d) the relative storage overhead (%) is less than 'max_overhead'
+     *    i.e. 100*(volume(covering)/volume(space) - 1) <= max_overhead
+     *
+     * if successful, this function returns true and fills in 'covering'
+     *  vector
+     *  if unsuccessful, it returns false and leaves 'covering' unchanged
+     *
+     *  for N=1 (i.e. 1-D index spaces), this function is optimal, returning
+     *  a zero-overhead covering using a minimal number of rectangles if
+     *  that satisfies the 'max_rects' bound, or a covering (using
+     *  max_rects rectangles) with minimal overhead if that overhead is
+     *  acceptable, or fails if not covering exists.
+     *
+     * for N>1, heuristics are used, and the quarantees are much weaker:
+     * a) a request with 'max_rects'==1 will precisely compute the overhead
+     *   and succeed/fail appropriately.
+     * b) a request with 'max_rects'== 0 (no limit) will always succeed with
+     *  zero overhead, although the number of rectangles used may not be
+     *  minimal
+     *  c) the computational complexity of the attempt will bounded at:
+     *  O(nm log m + nmk^2), where:
+     *  n = dimension of index space
+     *  m = size of exact internal representation (which itself is
+     *  computed by heuristics and may not be optimal for some dependent-
+     *  partitioning results)
+     *  k = maximum output rectangles
+     *  this allows for sorting the inputs and/or outputs as well as
+     *  dynamic programming approaches but precludes more "heroic"
+     *  optimizations - a use case that requires better results and/or
+     *  admits specific optimizations will need to compute its own coverings
+     *  @param max_rects maximum number of rectangles to use (0 = no limit)
+     *  @param max_overhead maximum relative storage overhead (0 = no limit)
+     *  @param covering vector to fill in with covering rectangles.
+     *  @return true if successful, false if not.
+     */
     bool compute_covering(size_t max_rects, int max_overhead,
-			  std::vector<Rect<N,T> >& covering) const;
+                          std::vector<Rect<N, T>>& covering) const;
+    ///@}
 
-    // as an alternative to IndexSpaceIterator's, this will internally iterate over rectangles
-    //  and call your callable/lambda for each subrectangle
+    ///@{
+    /**
+     * As an alternative to IndexSpaceIterator's, this will internally iterate
+     * over points and call your callable/lambda for each point for each
+     * subrectangle.
+     * @param lambda a callable/lambda that takes a Rect<N,T> and a Point<N,T>
+     * @param restriction a restriction on the subrectangles to iterate over
+     */
     template <typename LAMBDA>
     void foreach_subrect(LAMBDA lambda);
     template <typename LAMBDA>
     void foreach_subrect(LAMBDA lambda, const Rect<N,T>& restriction);
+    ///@}
 
     // instance creation
 #if 0
@@ -438,9 +518,21 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
-    // this version allows the "function" described by the field to be composed with a
-    //  second (computable) function before matching the colors - the second function
-    //  is provided via a CodeDescriptor object and should have the type FT->FT2
+    ///@{
+    /**
+     * Allows the "function" described by the field to be composed with a
+     * second (computable) function before matching the colors - the second
+     * function is provided via a CodeDescriptor object and should have the type
+     * FT->FT2.
+     * @param field_data the field data to use for the computation
+     * @param codedesc the code descriptor for the second function
+     * @param color the color to match
+     * @param subspace the resulting subspace
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting.
+     * @return an event that will trigger when the operation is
+     * complete.
+     */
     template <typename FT, typename FT2>
     Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
 				   const CodeDescriptor& codedesc,
@@ -448,6 +540,7 @@ namespace Realm {
 				   IndexSpace<N,T>& subspace,
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
     template <typename FT, typename FT2>
     Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
@@ -478,12 +571,22 @@ namespace Realm {
         std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
         Event wait_on = Event::NO_EVENT) const;
 
-    // computes subspaces of this index space by determining what subsets are reachable from
-    //  subsets of some other index space - the field data points from the other index space to
-    //  ours and is used to compute the image of each source - i.e. upon return (and waiting
-    //  for the finish event), the following invariant holds:
-    //    images[i] = { y | exists x, x in sources[i] ^ field_data(x) = y }
-
+    ///@{
+    /**
+     * Computes subspaces of this index space by determining what subsets are
+     * reachable from subsets of some other index space - the field data points
+     * from the other index space to ours and is used to compute the image of
+     * each source - i.e. upon return (and waiting for the finish event), the
+     * following invariant holds: images[i] = { y | exists x, x in sources[i] ^
+     * field_data(x) = y
+     *  }
+     *  @param field_data the field data to use for the computation
+     *  @param source the source index space
+     *  @param image the resulting image index space
+     *  @param reqs profiling requests
+     *  @param wait_on event to wait on before starting.
+     *  @return an event that will trigger when the operation is
+     */
     template <int N2, typename T2>
     Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
 				   const IndexSpace<N2,T2>& source,
@@ -513,6 +616,7 @@ namespace Realm {
 				    std::vector<IndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
     // a common case that is worth optimizing is when the computed image is
     //  going to be restricted by an intersection or difference operation - it
@@ -556,11 +660,21 @@ namespace Realm {
         std::vector<IndexSpace<N, T>>& preimages,
         const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
 
-    // computes subspaces of this index space by determining what subsets can reach subsets
-    //  of some other index space - the field data points from this index space to the other
-    //  and is used to compute the preimage of each target - i.e. upon return (and waiting
-    //  for the finish event), the following invariant holds:
-    //    preimages[i] = { x | field_data(x) in targets[i] }
+    ///@{
+    /**
+     * Computes subspaces of this index space by determining what subsets can
+     * reach subsets of some other index space - the field data points from this
+     * index space to the other and is used to compute the preimage of each
+     * target - i.e. upon return (and waiting for the finish event), the
+     * following invariant holds: preimages[i] = { x | field_data(x) in
+     * targets[i] }
+     * @param field_data the field data to use for the computation
+     * @param target the target index space
+     * @param preimage the resulting preimage index space
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting.
+     * @return an event that will trigger when the operation is
+     */
     template <int N2, typename T2>
     Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
 				                        Point<N2,T2> > >& field_data,
@@ -592,16 +706,25 @@ namespace Realm {
 				       std::vector<IndexSpace<N,T> >& preimages,
 				       const ProfilingRequestSet &reqs,
 				       Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
-    // create association
-    // fill in the instances described by 'field_data' with a mapping
-    // from this index space to the 'range' index space
+    ///@{
+    /**
+     * Create an association, fill in instances described by 'field_data' with a
+     * mapping from this index space to the 'range' index space.
+     * @param field_data the field data to use for the computation
+     * @param range the range index space
+     * @param reqs profiling requests
+     * @param wait_on event to wait on before starting.
+     * @return an event that will trigger when the operation is
+     */
     template <int N2, typename T2>
     Event create_association(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
                                                       Point<N2,T2> > >& field_data,
                              const IndexSpace<N2,T2> &range,
                              const ProfilingRequestSet &reqs,
                              Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
     // set operations
 
