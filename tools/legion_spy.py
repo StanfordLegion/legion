@@ -4783,10 +4783,13 @@ class DataflowTraverser(object):
         self.dst_req = dst_req
         self.src_version = src_version
         self.dst_version = dst_version
+        self.src_key = (self.point, self.src_field, self.src_tree)
+        self.dst_key = (self.point, self.dst_field, self.dst_tree)
         self.error_str = error_str
         # Across is either different fields or same field in different trees
         self.across = self.src_field.fid != self.dst_field.fid or \
                         self.src_tree != self.dst_tree
+        self.across_state = None
         self.failed_analysis = False
         # In order for this to be considered valid, we need to find a dataflow
         # path to the instance which has no other writes to it upstream
@@ -4810,20 +4813,40 @@ class DataflowTraverser(object):
         # Keep track of whether we traversed this fill on a dataflow path
         self.dataflow_fill = list()
 
-    def visit_node(self, node, eq_key): 
+    def visit_node(self, node):
         if isinstance(node, RealmCopy):
-            return self.visit_copy(node, eq_key)
+            return self.visit_copy(node)
         elif isinstance(node, RealmFill):
-            return self.visit_fill(node, eq_key)
+            return self.visit_fill(node)
         return True
 
-    def post_visit_node(self, node, eq_key):
+    def post_visit_node(self, node):
         if isinstance(node, RealmCopy):
-            self.post_visit_copy(node, eq_key)
+            self.post_visit_copy(node)
         elif isinstance(node, RealmFill):
-            self.post_visit_fill(node, eq_key)
+            self.post_visit_fill(node)
 
-    def run(self, first, eq_key):
+    def save_across(self):
+        # Save the across state
+        assert self.across
+        assert self.across_state is None
+        self.across_state = (self.dst_tree,self.dst_field,self.dst_depth,self.dst_version)
+        self.dst_tree = self.src_tree
+        self.dst_field = self.src_field
+        self.dst_depth = self.src_depth
+        self.dst_version = self.src_version
+        self.eq_key = self.src_key
+        self.across = False
+
+    def restore_across(self):
+        assert not self.across
+        assert self.across_state is not None
+        self.dst_tree,self.dst_field,self.dst_depth,self.dst_version = self.across_state
+        self.across_state = None
+        self.eq_key = self.dst_key
+        self.across = True
+
+    def run(self, first):
         # Do this with DFS since we care about paths
         # Use a stack instead of recursion to avoid stack overflow
         nodes = list()
@@ -4831,26 +4854,26 @@ class DataflowTraverser(object):
         while nodes:
             node,first_pass = nodes[-1]
             if first_pass:
-                if node.version_numbers and eq_key in node.version_numbers and \
-                        node.version_numbers[eq_key] != self.state.version_number:
+                if node.version_numbers and self.eq_key in node.version_numbers and \
+                        node.version_numbers[self.eq_key] != self.state.version_number:
                     # We can't traverse this node if it's from a previous version number
                     # because that is not the same value of the equivalence class
                     # Skip this check on the first node though for things like copy across
                     nodes.pop()
                     continue
-                if not self.visit_node(node, eq_key):
+                if not self.visit_node(node):
                     nodes.pop()
                     continue
                 eq_privileges = node.get_equivalence_privileges()
-                privilege = eq_privileges[eq_key]
+                privilege = eq_privileges[self.eq_key]
                 # We can't traverse past any operation that writes this field 
                 # unless this is the first operation which we're trying to
                 # traverse backwards from
                 if privilege == READ_ONLY or node is first:
                     # Check to see if the version number is the same, if this
                     # is an operation from a previous version then we can't traverse it
-                    if node.eq_incoming and eq_key in node.eq_incoming:
-                        incoming = node.eq_incoming[eq_key]
+                    if node.eq_incoming and self.eq_key in node.eq_incoming:
+                        incoming = node.eq_incoming[self.eq_key]
                         if incoming:
                             # Record that we haven't run the post-visit method yet
                             nodes[-1] = (node,False)
@@ -4859,7 +4882,7 @@ class DataflowTraverser(object):
                                 nodes.append((next_node,True))
                             # Can't run the post visit method yet
                             continue
-            self.post_visit_node(node, eq_key)
+            self.post_visit_node(node)
             nodes.pop()
             # See if we are done
             if self.failed_analysis:
@@ -4871,9 +4894,9 @@ class DataflowTraverser(object):
             if first_pass:
                 continue
             # Run the post visit method for any nodes on the stack
-            self.post_visit_node(node, eq_key)
+            self.post_visit_node(node)
 
-    def visit_copy(self, copy, eq_key):
+    def visit_copy(self, copy):
         # We should never traverse through indirection copies here
         if copy.indirections is not None:
             return False
@@ -4904,13 +4927,16 @@ class DataflowTraverser(object):
                     # We found the dataflow path
                     self.found_dataflow_path = True
                     # No need to continue traverse after we found the dataflow path
-                    self.perform_copy_analysis(copy, src, dst, eq_key)
+                    self.perform_copy_analysis(copy, src, dst)
                     return False
                 elif src in self.state.previous_instances:
                     # Still need to traverse to find pending reductions
                     self.found_previous_dataflow_path = True
                 self.dataflow_stack.append(src)
                 self.dataflow_traversal.append(True)
+                # Once we traverse through an across copy we don't do it again
+                if copy.is_across():
+                    self.save_across()
         else:
             # Copy from a reduction instance
             dst = copy.dsts[dst_index]
@@ -4927,8 +4953,12 @@ class DataflowTraverser(object):
                 new_stack.append(src)
                 self.reduction_stack.append(new_stack)
                 self.accumulated_reductions.append(dict())
+                # Once we traverse through an across copy we don't do it again
+                if copy.is_across():
+                    self.save_across()
             elif self.reduction_stack and len(self.reduction_stack[-1]) > 0 and \
                     dst is self.reduction_stack[-1][-1]:
+                assert not copy.is_across()
                 # Part of the reduction path
                 self.dataflow_traversal.append(True)
                 self.reduction_stack[-1].append(src)
@@ -4940,12 +4970,15 @@ class DataflowTraverser(object):
                 self.dataflow_traversal.append(False)
         return True 
 
-    def post_visit_copy(self, copy, eq_key):
+    def post_visit_copy(self, copy):
+        # Switch back the across state
+        if copy.is_across():
+            self.restore_across()
         dst_index = copy.dst_fields.index(self.dst_field)
         src = copy.srcs[dst_index]
         dst = copy.dsts[dst_index]
         # Always analyze the copy
-        self.perform_copy_analysis(copy, src, dst, eq_key)
+        self.perform_copy_analysis(copy, src, dst)
         if src.redop == 0:
             # Easy just need to pop ourselves off the dataflow stack
             if self.dataflow_traversal.pop():
@@ -4978,7 +5011,7 @@ class DataflowTraverser(object):
                                 str(inst)+"via copies "+str(self.dataflow_reductions[-1][inst])+
                                 " and "+str(reduction)+" for op "+self.error_str)
                             if self.op.state.eq_graph_on_error:
-                                self.op.state.dump_eq_graph(eq_key)
+                                self.op.state.dump_eq_graph(self.src_key, self.dst_key)
                             if self.op.state.assert_on_error:
                                 assert False
                             break
@@ -4990,6 +5023,7 @@ class DataflowTraverser(object):
                 # Pop our entries off the stacks
                 self.reduction_stack.pop()
                 self.accumulated_reductions.pop()
+                self.dataflow_traversal.pop()
             elif self.dataflow_traversal.pop():
                 # This is a copy between reduction instances
                 # Check to see if this is reduction or a write
@@ -5017,7 +5051,7 @@ class DataflowTraverser(object):
                                     str(inst)+"via copies "+str(target[inst])+" and "+
                                     str(reduction)+" for op "+self.error_str)
                                 if self.op.state.eq_graph_on_error:
-                                    self.op.state.dump_eq_graph(eq_key)
+                                    self.op.state.dump_eq_graph(self.src_key, self.dst_key)
                                 if self.op.state.assert_on_error:
                                     assert False
                                 break
@@ -5029,11 +5063,11 @@ class DataflowTraverser(object):
                         self.accumulated_reductions[-1][dst][dst] = None
                 self.reduction_stack[-1].pop()
 
-    def perform_copy_analysis(self, copy, src, dst, eq_key):
+    def perform_copy_analysis(self, copy, src, dst):
         # If we've already traversed this then we can skip the verification
         if copy.record_version_number(self.state):
             return
-        if self.across:
+        if copy.is_across():
             copy.record_across_version_number(self.point, self.dst_field,
                                               self.dst_tree, self.dst_version)
         src_preconditions = src.find_verification_copy_dependences(self.src_depth,
@@ -5046,7 +5080,7 @@ class DataflowTraverser(object):
                 " on field "+str(self.src_field)+" for op "+self.error_str+
                 " on "+str(bad))
             if self.op.state.eq_graph_on_error:
-                self.op.state.dump_eq_graph(eq_key)
+                self.op.state.dump_eq_graph(self.src_key, self.dst_key)
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -5060,7 +5094,7 @@ class DataflowTraverser(object):
                 " on field "+str(self.dst_field)+" for op "+self.error_str+
                 " on "+str(bad))
             if self.op.state.eq_graph_on_error:
-                self.op.state.dump_eq_graph(eq_key)
+                self.op.state.dump_eq_graph(self.src_key, self.dst_key)
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -5069,7 +5103,7 @@ class DataflowTraverser(object):
         dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                        copy, self.dst_req.index, False, src.redop, self.dst_version)
 
-    def visit_fill(self, fill, eq_key):
+    def visit_fill(self, fill):
         if self.dst_field not in fill.fields:
             return False
         dst_index = fill.fields.index(self.dst_field)
@@ -5084,7 +5118,7 @@ class DataflowTraverser(object):
                 else:
                     self.found_dataflow_path = True
                 # No need to traverse after we found the dataflow path
-                self.perform_fill_analysis(fill, dst, eq_key)
+                self.perform_fill_analysis(fill, dst)
                 return False
         else:
             # Fill to a reduction instance
@@ -5102,10 +5136,10 @@ class DataflowTraverser(object):
                 self.dataflow_traversal.append(False)
         return True
 
-    def post_visit_fill(self, fill, eq_key):
+    def post_visit_fill(self, fill):
         dst_index = fill.fields.index(self.dst_field)
         dst = fill.dsts[dst_index]
-        self.perform_fill_analysis(fill, dst, eq_key)
+        self.perform_fill_analysis(fill, dst)
         if self.dataflow_traversal.pop() and self.dataflow_fill.pop():
             # This has to be a fill to a reduction instance
             assert dst.redop != 0
@@ -5113,11 +5147,11 @@ class DataflowTraverser(object):
             if dst in self.accumulated_reductions[-1]:
                 self.accumulated_reductions[-1][dst].clear()
 
-    def perform_fill_analysis(self, fill, dst, eq_key):
+    def perform_fill_analysis(self, fill, dst):
         # If we've already traversed this then we can skip the verification
         if fill.record_version_number(self.state):
             return
-        if self.across:
+        if fill.is_across():
             fill.record_across_version_number(self.point, self.dst_field,
                                               self.dst_tree, self.dst_version)
         if dst.redop == 0 and fill.fill_op not in self.state.fill_ops and \
@@ -5153,12 +5187,9 @@ class DataflowTraverser(object):
                         str(fill)+" on field "+str(self.dst_field)+
                         " for op "+self.error_str)
                 if self.op.state.eq_graph_on_error:
-                    self.op.state.dump_eq_graph(eq_key)
+                    self.op.state.dump_eq_graph(self.src_key, self.dst_key)
                 if self.op.state.assert_on_error:
                     assert False
-        if self.across:
-            fill.record_across_version_number(self.point, self.dst_field,
-                                              self.dst_tree, self.dst_version)
         preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                         self.dst_field, self.point, self.op, self.dst_req.index, 
                         False, 0, self.dst_version)
@@ -5169,7 +5200,7 @@ class DataflowTraverser(object):
                 str(fill)+" on field "+str(self.dst_field)+" for op "+
                 self.error_str+" on "+str(bad))
             if self.op.state.eq_graph_on_error:
-                self.op.state.dump_eq_graph(eq_key)
+                self.op.state.dump_eq_graph(self.src_key, self.dst_key)
             if self.op.state.assert_on_error:
                 assert False
             return
@@ -5177,8 +5208,6 @@ class DataflowTraverser(object):
                              fill, self.dst_req.index, False, 0, self.dst_version)
 
     def verify(self, op, restricted = False):
-        src_key = (self.point, self.src_field, self.src_tree)
-        dst_key = (self.point, self.dst_field, self.dst_tree)
         ################################################################
         # Step 1: Traverse backwards through the graph looking for a
         #         dataflow path to the previous valid instances for 
@@ -5186,25 +5215,47 @@ class DataflowTraverser(object):
         #         to be applied to destination instance.
         ################################################################
         # The verification key is the src_key unless otherwise specified
-        ver_key = src_key
+        self.eq_key = self.src_key
         # Copies are a little weird in that they don't actually
         # depend on their region requirements so we just need
         # to traverse from their finish event
         if op.kind == COPY_OP_KIND:
+            # Only need to traverse fills directly for across cases as the 
+            # non-accross ones will be traverse by the normal copy traversasl
+            # This is a bit of a hack, but we do the fills first to handle the
+            # case where we have an across fill followed by an across reduction.
+            if op.realm_fills:
+                if self.across:
+                    self.eq_key = self.dst_key
+                    for fill in op.realm_fills:
+                        # Skip non-across fills
+                        if not fill.is_across():
+                            continue
+                        eq_privileges = fill.get_equivalence_privileges()
+                        if self.src_key not in eq_privileges and self.dst_key in eq_privileges:
+                            self.run(fill)
+                else:
+                    for fill in op.realm_fills:
+                        # Skip across fills
+                        if fill.is_across():
+                            continue
+                        eq_privileges = fill.get_equivalence_privileges()
+                        if self.src_key in eq_privileges:
+                            self.run(fill)
             # Find the latest copies that we generated
             if op.realm_copies:
                 # If we are across, we start by visiting the last
                 # copies because they are the across ones, otherwise
                 # we just traverse them
                 if self.across:
-                    ver_key = dst_key
+                    self.eq_key = self.dst_key
                     for copy in op.realm_copies:
                         # Skip non-across copies
                         if not copy.is_across():
                             continue
                         eq_privileges = copy.get_equivalence_privileges()
-                        if src_key in eq_privileges and dst_key in eq_privileges:
-                            self.run(copy, dst_key)
+                        if self.src_key in eq_privileges and self.dst_key in eq_privileges:
+                            self.run(copy)
                 else:
                     for copy in op.realm_copies:
                         if copy.is_across():
@@ -5217,32 +5268,12 @@ class DataflowTraverser(object):
                                         (op.realm_fills and node in op.realm_fills):
                                     continue
                                 eq_privileges = node.get_equivalence_privileges()
-                                if src_key in eq_privileges:
-                                    self.run(node, src_key)
+                                if self.src_key in eq_privileges:
+                                    self.run(node)
                         else:
                             eq_privileges = copy.get_equivalence_privileges()
-                            if src_key in eq_privileges:
-                                self.run(copy, src_key)
-            # Only need to traverse fills directly for across cases as the 
-            # non-accross ones will be traverse by the normal copy traversasl
-            if op.realm_fills:
-                if self.across:
-                    ver_key = dst_key
-                    for fill in op.realm_fills:
-                        # Skip non-across fills
-                        if not fill.is_across():
-                            continue
-                        eq_privileges = fill.get_equivalence_privileges()
-                        if src_key not in eq_privileges and dst_key in eq_privileges:
-                            self.run(fill, dst_key)
-                else:
-                    for fill in op.realm_fills:
-                        # Skip across fills
-                        if fill.is_across():
-                            continue
-                        eq_privileges = fill.get_equivalence_privileges()
-                        if src_key in eq_privileges:
-                            self.run(fill, src_key)
+                            if self.src_key in eq_privileges:
+                                self.run(copy)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
@@ -5252,13 +5283,13 @@ class DataflowTraverser(object):
             if op.realm_copies:
                 for copy in op.realm_copies:
                     eq_privileges = copy.get_equivalence_privileges()
-                    if src_key in eq_privileges:
-                        self.run(copy, src_key)
+                    if self.src_key in eq_privileges:
+                        self.run(copy)
             if op.realm_fills:
                 for fill in op.realm_fills:
                     eq_privileges = fill.get_equivalence_privileges()
-                    if src_key in eq_privileges:
-                        self.run(fill, src_key)
+                    if self.src_key in eq_privileges:
+                        self.run(fill)
         elif restricted:
             assert not self.across
             # If this is restricted, do the traversal from the copies
@@ -5266,26 +5297,26 @@ class DataflowTraverser(object):
             if op.realm_copies:
                 for copy in op.realm_copies:
                     eq_privileges = copy.get_equivalence_privileges()
-                    if src_key not in eq_privileges:
+                    if self.src_key not in eq_privileges:
                         continue
                     # Only look at these if the destination is correct
                     if self.target in copy.dsts and \
                             self.dst_tree == copy.dst_tree_id and \
                             self.dst_field in copy.dst_fields:
-                        self.run(copy, src_key)
+                        self.run(copy)
             if op.realm_fills:
                 for fill in op.realm_fills:
                     eq_privileges = fill.get_equivalence_privileges()
-                    if src_key not in eq_privileges:
+                    if self.src_key not in eq_privileges:
                         continue
                     # Only look at these if the destination is correct
                     if self.target in fill.dsts and \
                             self.dst_tree == fill.dst_tree_id and \
                             self.dst_field in fill.fields:
-                        self.run(fill, src_key)
+                        self.run(fill)
         else:
             # Traverse the node and then see if we satisfied everything
-            self.run(op, src_key)
+            self.run(op)
         if self.failed_analysis:
             return False
         ################################################################
@@ -5298,7 +5329,7 @@ class DataflowTraverser(object):
                     " of region requirement "+str(self.dst_req.index)+
                     " of "+str(self.op))
             if self.op.state.eq_graph_on_error:
-                self.op.state.dump_eq_graph(ver_key)
+                self.op.state.dump_eq_graph(self.src_key, self.dst_key)
             if self.op.state.assert_on_error:
                 assert False
             return False
@@ -5313,7 +5344,7 @@ class DataflowTraverser(object):
                             " of instance "+str(src)+" of region requirement "+
                             str(self.dst_req.index)+" of " +str(self.op))
                     if self.op.state.eq_graph_on_error:
-                        self.op.state.dump_eq_graph(ver_key)
+                        self.op.state.dump_eq_graph(self.src_key, self.dst_key)
                     if self.op.state.assert_on_error:
                         assert False
                     return False
@@ -5330,7 +5361,7 @@ class DataflowTraverser(object):
                     str(self.reduction_epochs[0])+" by region requirement "+
                     str(self.dst_req.index)+" of "+str(self.op))
             if self.op.state.eq_graph_on_error:
-                self.op.state.dump_eq_graph(ver_key)
+                self.op.state.dump_eq_graph(self.src_key, self.dst_key)
             if self.op.state.assert_on_error:
                 assert False
             return False
@@ -13765,17 +13796,29 @@ class State(object):
                                 ' [style=solid,color=black,penwidth=2];')
         printer.print_pdf_after_close(False)
 
-    def dump_eq_graph(self, eq_key):
+    def dump_eq_graph(self, eq_key, other_key = None):
         print('Dumping equivalence set graph for eq set (point='+str(eq_key[0])+
                 ', field='+str(eq_key[1])+', tree='+str(eq_key[2])+')')
         nodes = set()
         # Find all the nodes with this eq_key
-        def has_eq_key(node):
-            if node.eq_incoming and eq_key in node.eq_incoming:
-                return True
-            if node.eq_outgoing and eq_key in node.eq_outgoing:
-                return True
-            return False
+        if other_key is not None and other_key != eq_key:
+            def has_eq_key(node):
+                if node.eq_incoming and eq_key in node.eq_incoming:
+                    return True
+                if node.eq_outgoing and eq_key in node.eq_outgoing:
+                    return True
+                if node.eq_incoming and other_key in node.eq_incoming:
+                    return True
+                if node.eq_outgoing and other_key in node.eq_outgoing:
+                    return True
+                return False
+        else:
+            def has_eq_key(node):
+                if node.eq_incoming and eq_key in node.eq_incoming:
+                    return True
+                if node.eq_outgoing and eq_key in node.eq_outgoing:
+                    return True
+                return False
         for op in self.unique_ops:
             if has_eq_key(op):
                 nodes.add(op)
@@ -13795,6 +13838,9 @@ class State(object):
             node.print_event_node(printer)
         for node in nodes:
             node.print_incoming_eq_edges(printer, eq_key)
+        if other_key is not None and other_key != eq_key:
+            for node in nodes:
+                node.print_incoming_eq_edges(printer, other_key)
         printer.print_pdf_after_close(False)
 
     def print_realm_statistics(self):
