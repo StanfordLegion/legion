@@ -89,11 +89,10 @@ namespace Realm {
 
   /**
    * \class FieldDataDescriptor
-   * A FieldDataDescriptor is used to describe field data provided for
-   * partitioninga operations - it is templated on the dimensionality (N)
-   * and base type (T) of the index space that defines the domain over
-   * which the data is defined, and the type of the data contained in
-   * the field (FT).
+   * A template class used to describe field data provided for partitioning
+   * operations. This class is templated on the dimensionality (N) and base type
+   * (T) of the index space that defines the domain over which the data
+   * is defined, and the type of the data contained in the field (FT).
    */
   template <typename IS, typename FT>
   struct FieldDataDescriptor {
@@ -102,6 +101,13 @@ namespace Realm {
     size_t field_offset;
   };
 
+  /**
+   * \class TranslationTransform
+   * A translation transform is a special case of an affine transform
+   * that only has a translation component. It is used to transform
+   * points in one coordinate space into points in another coordinate
+   * space by adding a constant offset to each coordinate.
+   */
   template <int N, typename T = int>
   class REALM_PUBLIC_API TranslationTransform {
    public:
@@ -137,8 +143,12 @@ namespace Realm {
 
   /**
    * \class StructuredTransform
-   * A structured transform represents a generic structure that takes
-   * is able to represent all existing transforms.
+   * A structured transform is used to represent both affine and
+   * translation transforms. It is templated on the dimensionality
+   * (N) and base type (T) of the index space that defines the
+   * domain over which the transform is defined, and the dimensionality
+   * (N2) and base type (T2) of the index space that defines the
+   * range of the transform.
    */
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API StructuredTransform {
@@ -163,8 +173,12 @@ namespace Realm {
 
   /**
    * \class DomainTransform
-   * A domain transform is used to represent both structured and
-   * unstructrured transforms.
+   * A domain transform is used to represent a transform from one
+   * index space to another (both structured and unstructured).
+   * It is templated on the dimensionality (N) and base type (T) of
+   * the index space that defines the domain over which the transform
+   * is defined, and the dimensionality (N2) and base type (T2) of the
+   * index space that defines the range of the transform.
    */
   template <int N, typename T, int N2, typename T2>
   class REALM_PUBLIC_API DomainTransform {
@@ -196,7 +210,11 @@ namespace Realm {
 
   /**
    * \class CopyIndirection
-   * A copy indirect represents indirect copies in Realm.
+   * A copy indirection is a container class that is used to describe
+   * an indirection that is used to transform points in one index space
+   * into points in another index space. It is templated on the dimensionality
+   * (N) and base type (T) of source index space, and the dimensionality
+   * (N2) and base type (T2) of the destination index space.
    */
   template <int N, typename T = int>
   class REALM_PUBLIC_API CopyIndirection {
@@ -283,14 +301,15 @@ namespace Realm {
     ///@{
     /**
      * Construct a guaranteed-empty index space.
+     * @return an empty index space.
      */
     static IndexSpace<N,T> make_empty(void);
     ///@}
 
     ///@{
     /**
-     * Reclaim any physical resources associated with this index space
-     * will clear the sparsity map of this index space if it exists.
+     * Reclaim any physical resources associated with this index space.
+     * It will clear the sparsity map of this index space if it exists.
      * @param wait_on event to wait on before destroying the index space.
      */
     void destroy(Event wait_on = Event::NO_EVENT);
@@ -298,8 +317,8 @@ namespace Realm {
 
     ///@{
     /**
-     * Retrun true if we're SURE that there are no points in the space (may be
-     * imprecise due to lazy loading of sparsity data).
+     * Retrun true if there are no points in the space
+     * (may be imprecise due to lazy loading of sparsity data).
      * @return true if the index space is empty.
      */
     bool empty(void) const;
@@ -318,13 +337,18 @@ namespace Realm {
     ///@{
     /**
      * Start any operation needed to get detailed sparsity information.
-     * Asking for approximate data can be a lot quicker for complicated
-     * index spaces.
+     * This function starts an operation to compute detailed sparsity
+     * information for the index space. The operation may take some
+     * time to complete, especially for complicated index spaces.
+     * By default, the sparsity map is computed precisely, but if
+     * performance is a concern, an approximate map can be computed 
+     * by setting the \p precise parameter to \c false.
      * @param precise false is the sparsity map may be preserved even
      * for dense spaces.
      * @return event to wait on before using the sparsity map.
      */
     Event make_valid(bool precise = true) const;
+
     bool is_valid(bool precise = true) const;
     ///@}
 
@@ -340,7 +364,7 @@ namespace Realm {
 
     ///@{
     /**
-     * Query for individual points or rectangles
+     * Query for individual points or rectangles.
      * @param p point to query
      * @param r rectangle to query
      * @return true if the point or rectangle is contained in the index space.
@@ -363,9 +387,11 @@ namespace Realm {
 
     ///@{
     /**
-     * Query approximately for points or rectangles - the approximation
-     * is guaranteed to be a supserset, so if contains_approx returns
-     * false, contains would too.
+     * Query whether a point is approximately contained in the index
+     * space. This function returns \c true if the point \p p is 
+     * approximately contained in the index space. The approximation 
+     * is guaranteed to be a superset, so if \c contains_approx
+     * returns \c false, then \c contains.
      * @param p point to query
      * @param r rectangle to query
      * @return true if the point or rectangle is contained in the index space.
@@ -388,45 +414,52 @@ namespace Realm {
 
     ///@{
     /**
-     * Attempt to compute a set of covering rectangles for the index space
-     * with the following properties:
-     * a) every point in the index space is included in (exactly) one rect
-     * b) none of the resulting rectangles overlap each other
-     * c) no more than 'max_rects' rectangles are used (0 = no limit)
-     * d) the relative storage overhead (%) is less than 'max_overhead'
-     *    i.e. 100*(volume(covering)/volume(space) - 1) <= max_overhead
+     * Attempt to compute a set of covering rectangles for the index
+     * space with the following properties:
      *
-     * if successful, this function returns true and fills in 'covering'
-     *  vector
-     *  if unsuccessful, it returns false and leaves 'covering' unchanged
+     * a) Every point in the index space is included in (exactly) one rectangle.
+     * b) None of the resulting rectangles overlap each other.
+     * c) No more than 'max_rects' rectangles are used (0 = no limit).
+     * d) The relative storage overhead (%) is less than 'max_overhead', i.e.
+     * 100 * (volume(covering) / volume(space) - 1) <= max_overhead.
      *
-     *  for N=1 (i.e. 1-D index spaces), this function is optimal, returning
-     *  a zero-overhead covering using a minimal number of rectangles if
-     *  that satisfies the 'max_rects' bound, or a covering (using
-     *  max_rects rectangles) with minimal overhead if that overhead is
-     *  acceptable, or fails if not covering exists.
+     * If successful, this function returns true and fills in the 'covering'
+     * vector. If unsuccessful, it returns false and leaves 'covering'
+     * unchanged.
      *
-     * for N>1, heuristics are used, and the quarantees are much weaker:
-     * a) a request with 'max_rects'==1 will precisely compute the overhead
-     *   and succeed/fail appropriately.
-     * b) a request with 'max_rects'== 0 (no limit) will always succeed with
-     *  zero overhead, although the number of rectangles used may not be
-     *  minimal
-     *  c) the computational complexity of the attempt will bounded at:
-     *  O(nm log m + nmk^2), where:
-     *  n = dimension of index space
-     *  m = size of exact internal representation (which itself is
-     *  computed by heuristics and may not be optimal for some dependent-
-     *  partitioning results)
-     *  k = maximum output rectangles
-     *  this allows for sorting the inputs and/or outputs as well as
-     *  dynamic programming approaches but precludes more "heroic"
-     *  optimizations - a use case that requires better results and/or
-     *  admits specific optimizations will need to compute its own coverings
-     *  @param max_rects maximum number of rectangles to use (0 = no limit)
-     *  @param max_overhead maximum relative storage overhead (0 = no limit)
-     *  @param covering vector to fill in with covering rectangles.
-     *  @return true if successful, false if not.
+     * For N=1 (i.e., 1-D index spaces), this function is optimal, returning a
+     * zero-overhead covering using a minimal number of rectangles if that
+     * satisfies the 'max_rects' bound, or a covering (using max_rects
+     * rectangles) with minimal overhead if that overhead is acceptable, or
+     * fails if no covering exists.
+     *
+     * For N>1, heuristics are used, and the guarantees are much weaker:
+     *
+     * a) A request with 'max_rects'==1 will precisely compute the overhead and
+     * succeed/fail appropriately.
+     *
+     * b) A request with 'max_rects'==0 (no limit) will always succeed with zero
+     * overhead, although the number of rectangles used may not be minimal.
+     *
+     * c) The computational complexity of the attempt will be bounded at:
+     * O(nm log m + nmk^2), where:
+     *
+     *    - n = dimension of index space.
+     *    - m = size of exact internal representation (which itself is computed
+     * by heuristics and may not be optimal for some dependent-partitioning
+     * results).
+     *    - k = maximum output rectangles.
+     *
+     * This allows for sorting the inputs and/or outputs, as well as dynamic
+     * programming approaches, but precludes more "heroic" optimizations. A use
+     * case that requires better results and/or admits specific optimizations
+     * will need to compute its own coverings.
+     *
+     * @param max_rects Maximum number of rectangles to use (0 = no limit).
+     * @param max_overhead Maximum relative storage overhead (0 = no limit).
+     * @param covering Vector to fill in with covering rectangles.
+     *
+     * @return True if successful, false if not.
      */
     bool compute_covering(size_t max_rects, int max_overhead,
                           std::vector<Rect<N, T>>& covering) const;
@@ -434,16 +467,20 @@ namespace Realm {
 
     ///@{
     /**
-     * As an alternative to IndexSpaceIterator's, this will internally iterate
-     * over points and call your callable/lambda for each point for each
-     * subrectangle.
-     * @param lambda a callable/lambda that takes a Rect<N,T> and a Point<N,T>
-     * @param restriction a restriction on the subrectangles to iterate over
+     * Iterates internally over points and calls the specified callable or
+     * lambda for each point in each subrectangle, providing an alternative to
+     * using IndexSpaceIterator's.
+     *
+     * @param lambda A callable or lambda function that takes a Rect<N,T> and a
+     * Point<N,T> as input parameters.
+     * @param restriction An optional restriction on the subrectangles to
+     * iterate over. Only points and subrectangles within this restriction will
+     * be visited.
      */
     template <typename LAMBDA>
     void foreach_subrect(LAMBDA lambda);
     template <typename LAMBDA>
-    void foreach_subrect(LAMBDA lambda, const Rect<N,T>& restriction);
+    void foreach_subrect(LAMBDA lambda, const Rect<N, T>& restriction);
     ///@}
 
     // instance creation
@@ -454,28 +491,70 @@ namespace Realm {
 				   const ProfilingRequestSet& reqs) const;
 #endif
 
-    // copy and fill operations
-
-    // old versions do not support indirection, use explicit arguments for
-    //   fill values, reduction op info
-    Event fill(const std::vector<CopySrcDstField> &dsts,
-               const ProfilingRequestSet &requests,
-               const void *fill_value, size_t fill_value_size,
-               Event wait_on = Event::NO_EVENT,
+    ///@{
+    /**
+     * @brief Fill values into the specified destination fields in the index
+     * space.
+     *
+     * @param dsts Vector of CopySrcDstField's describing the destination
+     * fields.
+     * @param requests Set of profiling requests.
+     * @param fill_value Pointer to the fill value.
+     * @param fill_value_size Size of the fill value in bytes.
+     * @param wait_on Event to wait on before performing the fill operation.
+     * @param priority Task priority.
+     * @return Event representing the fill operation.
+     *
+     * Note: This version of fill() does not support indirection. Use explicit
+     * arguments for fill values and reduction operation info.
+     */
+    Event fill(const std::vector<CopySrcDstField>& dsts,
+               const ProfilingRequestSet& requests, const void* fill_value,
+               size_t fill_value_size, Event wait_on = Event::NO_EVENT,
                int priority = 0) const;
+    ///@}
 
-    Event copy(const std::vector<CopySrcDstField> &srcs,
-	       const std::vector<CopySrcDstField> &dsts,
-	       const ProfilingRequestSet &requests,
-	       Event wait_on = Event::NO_EVENT,
-	       int priority = 0) const;
+    ///@{
+    /**
+     * @brief Copy data from source fields to destination fields in the index
+     * space.
+     *
+     * @param srcs Vector of CopySrcDstField's describing the source fields.
+     * @param dsts Vector of CopySrcDstField's describing the destination
+     * fields.
+     * @param requests Set of profiling requests.
+     * @param wait_on Event to wait on before performing the copy operation.
+     * @param priority Task priority.
+     * @return Event representing the copy operation.
+     */
+    Event copy(const std::vector<CopySrcDstField>& srcs,
+               const std::vector<CopySrcDstField>& dsts,
+               const ProfilingRequestSet& requests,
+               Event wait_on = Event::NO_EVENT, int priority = 0) const;
+    ///@}
 
-    Event copy(const std::vector<CopySrcDstField> &srcs,
-	       const std::vector<CopySrcDstField> &dsts,
-	       const std::vector<const typename CopyIndirection<N,T>::Base *> &indirects,
-	       const ProfilingRequestSet &requests,
-	       Event wait_on = Event::NO_EVENT,
-	       int priority = 0) const;
+    ///@{
+    /**
+     * @brief Copy data from source fields to destination fields in the index
+     * space with indirection.
+     *
+     * @param srcs Vector of CopySrcDstField's describing the source fields.
+     * @param dsts Vector of CopySrcDstField's describing the destination
+     * fields.
+     * @param indirects Vector of pointers to the base class of the
+     * indirections.
+     * @param requests Set of profiling requests.
+     * @param wait_on Event to wait on before performing the copy operation.
+     * @param priority Task priority.
+     * @return Event representing the copy operation.
+     */
+    Event copy(const std::vector<CopySrcDstField>& srcs,
+               const std::vector<CopySrcDstField>& dsts,
+               const std::vector<const typename CopyIndirection<N, T>::Base*>&
+                   indirects,
+               const ProfilingRequestSet& requests,
+               Event wait_on = Event::NO_EVENT, int priority = 0) const;
+    ///@}
 
     // partitioning operations
 
@@ -550,6 +629,22 @@ namespace Realm {
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
+    ///@{
+    /**
+     * Computes subspaces of this index space by determining what subsets are
+     * reachable from subsets of some other index space via a
+     * transformation. The transformed source data points are used to
+     * compute the images. - i.e. upon return (and waiting for the finish
+     * event), the following invariant holds: images[i] = { y | exists x, x in
+     * sources[i] ^ field_data(x) = y
+     *  }
+     *  @param transform the transformation to apply
+     *  @param source the source index space
+     *  @param image the resulting image index space
+     *  @param reqs profiling requests
+     *  @param wait_on event to wait on before starting.
+     *  @return an event that will trigger when the operation is
+     */
     template <int N2, typename T2, typename TRANSFORM>
     Event create_subspace_by_image(const TRANSFORM& transform,
                                    const IndexSpace<N2, T2>& source,
@@ -570,6 +665,7 @@ namespace Realm {
         const std::vector<IndexSpace<N2, T2>>& sources,
         std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
         Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
     ///@{
     /**
@@ -618,11 +714,22 @@ namespace Realm {
 				    Event wait_on = Event::NO_EVENT) const;
     ///@}
 
-    // a common case that is worth optimizing is when the computed image is
-    //  going to be restricted by an intersection or difference operation - it
-    //  can often be much faster to filter the projected points before stuffing
-    //  them into an index space
-
+    ///@{
+    /**
+     * Computes subspaces of this index space by determining what subsets are
+     * reachable from subsets of some other index space taking into
+     * account that the computed image may be restricted by an intersection
+     * or difference operation. It can often be much faster to filter
+     * the projected points before stuffing them into an index space.
+     *  @param field_data the field data to use for the computation
+     *  @param sources the source index spaces
+     *  @param diff_rhs the index spaces to use for the difference operation
+     *  @param images the resulting image index spaces
+     *  @param reqs profiling requests
+     *  @param wait_on event to wait on before starting.
+     *  @return an event that will trigger when the operation is
+     *  complete.
+     */
     template <int N2, typename T2>
     Event create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
 				    const std::vector<IndexSpace<N2,T2> >& sources,
@@ -638,6 +745,7 @@ namespace Realm {
         const std::vector<IndexSpace<N, T>>& diff_rhs,
         std::vector<IndexSpace<N, T>>& images, const ProfilingRequestSet& reqs,
         Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
     template <int N2, typename T2, typename TRANSFORM>
     Event create_subspace_by_preimage(const TRANSFORM& transform,
@@ -659,6 +767,7 @@ namespace Realm {
         const std::vector<IndexSpace<N2, T2>>& targets,
         std::vector<IndexSpace<N, T>>& preimages,
         const ProfilingRequestSet& reqs, Event wait_on = Event::NO_EVENT) const;
+    ///@}
 
     ///@{
     /**
