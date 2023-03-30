@@ -1784,8 +1784,7 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "create_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -1892,8 +1891,7 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "create_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2002,9 +2000,8 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "find_or_create_physical_instance", 
-                                    regions))
-        return false;
+      check_region_consistency(ctx, "find_or_create_physical_instance",
+                               regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2143,9 +2140,8 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "find_or_create_physical_instance", 
-                                    regions))
-        return false;
+      check_region_consistency(ctx, "find_or_create_physical_instance",
+                               regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2282,8 +2278,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return false;
-      if (!check_region_consistency(ctx, "find_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2312,8 +2307,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return false;
-      if (!check_region_consistency(ctx, "find_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2343,8 +2337,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return;
-      if (!check_region_consistency(ctx, "find_physical_instances", regions))
-        return;
+      check_region_consistency(ctx, "find_physical_instances", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2376,8 +2369,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return;
-      if (!check_region_consistency(ctx, "find_physical_instances", regions))
-        return;
+      check_region_consistency(ctx, "find_physical_instances", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2742,7 +2734,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::check_region_consistency(MappingCallInfo *info,
+    void MapperManager::check_region_consistency(MappingCallInfo *info,
                                                  const char *call_name,
                                       const std::vector<LogicalRegion> &regions)
     //--------------------------------------------------------------------------
@@ -2766,7 +2758,6 @@ namespace Legion {
         else
           tree_id = regions[idx].get_tree_id();
       }
-      return (tree_id > 0);
     }
 
     //--------------------------------------------------------------------------
