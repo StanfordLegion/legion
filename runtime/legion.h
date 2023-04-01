@@ -1101,7 +1101,7 @@ namespace Legion {
     public:
       ProjectionType handle_type; /**< region or partition requirement*/
       ProjectionID projection; /**< projection function for index space tasks*/
-    protected:
+    public:
       void *projection_args; /**< projection arguments buffer*/
       size_t projection_args_size; /**< projection arguments buffer size*/
     };

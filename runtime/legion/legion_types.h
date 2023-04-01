@@ -34,6 +34,7 @@
 #include <vector>
 #include <typeinfo>
 #include <type_traits>
+#include <unordered_set>
 #include <unordered_map>
 
 #include "legion/legion_config.h"

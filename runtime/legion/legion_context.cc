@@ -10551,13 +10551,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionNode* InnerContext::construct_projection_tree(
-                    Operation *op, unsigned index, const RegionRequirement &req,
-                    RegionTreeNode *root, const ProjectionInfo &proj_info)
+    ProjectionNode* InnerContext::construct_projection_tree(Operation *op,
+            unsigned index, const RegionRequirement &req, RegionTreeNode *root,
+            const ProjectionInfo &proj_info, bool &disjoint_complete)
     //--------------------------------------------------------------------------
     {
-      return proj_info.projection->construct_projection_tree(op, index, req,
-                                          0/*local shard*/, root, proj_info);
+      ProjectionNode *result = proj_info.projection->construct_projection_tree(
+                            op, index, req, 0/*local shard*/, root, proj_info);
+      disjoint_complete = result->is_disjoint_complete();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -19727,15 +19729,16 @@ namespace Legion {
                                                 instances, ready);
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    ProjectionNode* ReplicateContext::construct_projection_tree(
-                    Operation *op, unsigned index, const RegionRequirement &req,
-                    RegionTreeNode *root, const ProjectionInfo &proj_info)
+    ProjectionNode* ReplicateContext::construct_projection_tree(Operation *op, 
+            unsigned index, const RegionRequirement &req, RegionTreeNode *root,
+            const ProjectionInfo &proj_info, bool &disjoint_complete)
     //--------------------------------------------------------------------------
     {
+      const ShardID local_shard = owner_shard->shard_id;
       ProjectionNode *result = proj_info.projection->construct_projection_tree(
-                        op, index, req, owner_shard->shard_id, root, proj_info);
+                                  op, index, req, local_shard, root, proj_info);
+      disjoint_complete = result->is_disjoint_complete();
       // Now we need to exchange this between the shards. The secret to this
       // function is knowing that it is only called in the logical dependence
       // analysis stage of the pipeline so we can get a collective ID here to
@@ -19746,17 +19749,56 @@ namespace Legion {
       {
         // For the identity projection function we know how to compute this
         // without performing any communication between the shards
-        
+        IndexSpaceNode *launch_space = proj_info.projection_space;
+        Domain launch_domain, shard_domain;
+        launch_space->get_launch_space_domain(launch_domain);
+        if (proj_info.sharding_space != NULL)
+          proj_info.sharding_space->get_launch_space_domain(shard_domain);
+        else
+          shard_domain = launch_domain;
+        if (root->is_region())
+        {
+          // Iterate all the points in the launch space and compute their
+          // shards and record them in the shard users
+          ProjectionRegion *projection = result->as_region_projection();
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            const ShardID shard =
+              proj_info.sharding_function->find_owner(*itr, shard_domain);
+            projection->add_user(shard);
+          }
+        }
+        else
+        {
+          // Iterate all the points in the launch space and linearize
+          // their colors to add to the summary
+          IndexSpaceNode *color_space = 
+            root->as_partition_node()->row_source->color_space;
+          ProjectionPartition *projection = result->as_partition_projection();
+          for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+          {
+            const ShardID shard =
+              proj_info.sharding_function->find_owner(*itr, shard_domain);
+            if (shard == local_shard)
+              continue;
+            const LegionColor color = color_space->linearize_color(*itr);
+#ifdef DEBUG_LEGION
+            assert(projection->local_children.find(color) ==
+                    projection->local_children.end());
+#endif
+            projection->shard_children.add_child(color);
+          }
+        }
       }
       else
       {
         // For all other projection functors though we need to do the exchange
-        ProjectionTreeExchange exchange(result, this, COLLECTIVE_LOC_50);
-        exchange.perform_collective_sync(); 
+        ProjectionTreeExchange exchange(result, disjoint_complete, this,
+                                        COLLECTIVE_LOC_50);
+        exchange.perform_collective_sync();
       }
       return result;
     }
-#endif
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::test_interfering_summaries(ProjectionSummary *one,

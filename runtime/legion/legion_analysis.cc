@@ -2624,6 +2624,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_disjoint_complete(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (local_children.size() > 1)
+        return false;
+      if (!local_children.empty() && 
+          !local_children.begin()->second->is_disjoint_complete())
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     bool ProjectionRegion::interferes(ProjectionNode *other,
                                       ShardID local_shard) const 
     //--------------------------------------------------------------------------
@@ -2716,9 +2728,8 @@ namespace Legion {
     void ProjectionRegion::add_user(ShardID user)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < shard_users.size(); idx++)
-        if (shard_users[idx] == user)
-          return;
+      if (std::binary_search(shard_users.begin(), shard_users.end(), user))
+        return;
       shard_users.push_back(user);
       std::sort(shard_users.begin(), shard_users.end());
     }
@@ -2757,6 +2768,21 @@ namespace Legion {
           delete it->second;
       if (partition->remove_base_gc_ref(PROJECTION_REF))
         delete partition;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_disjoint_complete(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!partition->row_source->is_disjoint(false/*from app*/))
+        return false;
+      if (!partition->row_source->is_complete(false/*from app*/))
+        return false;
+      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
+            local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_disjoint_complete())
+          return false;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -3039,6 +3065,7 @@ namespace Legion {
       node->add_base_gc_ref(DISJOINT_COMPLETE_REF);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RefinementNode::~RefinementNode(void)
     //--------------------------------------------------------------------------
@@ -3215,18 +3242,21 @@ namespace Legion {
       copy->touches = touches;
       return copy;
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // ProjectionSummary
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ProjectionSummary::ProjectionSummary(
-                          const ProjectionInfo &proj_info, ProjectionNode *node,
-                          const RegionRequirement &req, LogicalState *own)
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
+                             ProjectionNode *node, const RegionRequirement &req,
+                             LogicalState *own, bool dis_comp)
       : owner(own), domain(proj_info.projection_space),
         projection(proj_info.projection), sharding(proj_info.sharding_function),
-        sharding_domain(proj_info.sharding_space), result(node)
+        sharding_domain(proj_info.sharding_space), result(node), 
+        arglen(req.projection_args_size), 
+        args((arglen > 0) ? malloc(arglen) : NULL), disjoint_complete(dis_comp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3236,14 +3266,8 @@ namespace Legion {
       domain->add_base_gc_ref(PROJECTION_REF);
       sharding_domain->add_base_gc_ref(PROJECTION_REF);
       result->add_reference();
-      const void *projection_args = req.get_projection_args(&arglen);
       if (arglen > 0)
-      {
-        args = malloc(arglen);
-        memcpy(args, projection_args, arglen);
-      }
-      else
-        args = NULL;
+        memcpy(args, req.projection_args, arglen);
     }
 
     //--------------------------------------------------------------------------
@@ -3285,38 +3309,672 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // RegionRefinementTracker
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
+                                                     bool current)
+      : region(node), refined_child(NULL), refined_projection(NULL),
+        current_refinement(current), total_returns(0), timeout_returns(0)
+    //--------------------------------------------------------------------------
+    {
+      region->add_base_gc_ref(REFINEMENT_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
+                                                     RegionTreeNode *child)
+      : region(node), refined_child(child->as_partition_node()),
+        refined_projection(NULL), current_refinement(true), total_returns(0),
+        timeout_returns(0)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!child->is_region());
+#endif
+      region->add_base_gc_ref(REFINEMENT_REF);
+      refined_child->add_base_gc_ref(REFINEMENT_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
+                                                     ProjectionSummary *proj)
+      : region(node), refined_child(NULL), refined_projection(proj),
+        current_refinement(true), total_returns(0), timeout_returns(0)
+    //--------------------------------------------------------------------------
+    {
+      region->add_base_gc_ref(REFINEMENT_REF);
+      refined_projection->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRefinementTracker::~RegionRefinementTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+            candidate_partitions.begin(); it != 
+            candidate_partitions.end(); it++)
+        if (it->first->remove_base_gc_ref(REFINEMENT_REF))
+          delete it->first;
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      if ((refined_child != NULL) && 
+          refined_child->remove_base_gc_ref(REFINEMENT_REF))
+        delete refined_child;
+      if ((refined_projection != NULL) &&
+          refined_projection->remove_reference())
+        delete refined_projection;
+      if (region->remove_base_gc_ref(REFINEMENT_REF))
+        delete region;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker* RegionRefinementTracker::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      RegionRefinementTracker *result = (refined_child != NULL) ?
+        new RegionRefinementTracker(region, refined_child) :
+        (refined_projection != NULL) ? 
+        new RegionRefinementTracker(region, refined_projection) :
+        new RegionRefinementTracker(region, current_refinement);
+      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+            candidate_partitions.begin(); it != 
+            candidate_partitions.end(); it++)
+      {
+        it->first->add_base_gc_ref(REFINEMENT_REF);
+        result->candidate_partitions.insert(*it);
+      }
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+      {
+        it->first->add_reference();
+        result->candidate_projections.insert(*it);
+      }
+      result->total_returns = total_returns;
+      result->timeout_returns = timeout_returns;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::is_disjoint_complete(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Region nodes are always disjoint and complete regardless of 
+      // whether they have and refinements or not
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::needs_fallback_refinement(
+                                          const ProjectionInfo &proj_info) const
+    //--------------------------------------------------------------------------
+    {
+      if (!proj_info.is_projecting())
+        return false;
+      if (!current_refinement)
+        return false;
+      if (refined_child != NULL)
+        return false;
+      if (refined_projection != NULL)
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::update_refinement_child(RegionTreeNode *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!child->is_region());
+#endif
+      PartitionNode *child_node = child->as_partition_node();
+      // Check to see if we've observed this refinement before
+      std::unordered_map<PartitionNode*,uint64_t>::iterator finder =
+        candidate_partitions.find(child_node);
+      if (finder != candidate_partitions.end())
+      {
+        finder->second++;
+        // Reset the timeout since we saw a return
+        timeout_returns = 0;
+        // We've seen enough returns to perform the check to see if we're
+        // the dominant candidate and therefore we want to switch
+        if (current_refinement && 
+            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
+            is_dominant_candidate(finder->second,(child_node == refined_child)))
+        {
+          // If we're current refinement we don't switch but just end
+          // invalidating all the other candidates so they can start again
+          if (child_node == refined_child)
+            invalidate_candidates();
+          else
+            return true;
+        }
+      }
+      else if (child_node == refined_child)
+      {
+#ifdef DEBUG_LEGION
+        assert(current_refinement);
+#endif
+        // This counts as a return too since we're refined this way
+        total_returns++;
+        candidate_partitions[child_node] = 1;
+        child_node->add_base_gc_ref(REFINEMENT_REF);
+        // Reset the timeout since we saw a return
+        timeout_returns = 0;
+        // No need to switch, we're already the refinement
+      }
+      else
+      {
+        // If this is the first time we've seen a disjoint-complete child
+        // for something that is refined but not below this region then we
+        // want to switch to using it immediately because something needs it
+        if (current_refinement && (refined_child == NULL) &&
+            (refined_projection == NULL) && candidate_partitions.empty() &&
+            candidate_projections.empty())
+          return true;
+        if (++timeout_returns == CHANGE_REFINEMENT_TIMEOUT)
+          invalidate_candidates();
+        candidate_partitions[child_node] = 0;
+        child_node->add_base_gc_ref(REFINEMENT_REF);
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::update_refinement_projection(
+                                                     ProjectionSummary *summary)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we observed this refinement before
+      std::unordered_map<ProjectionSummary*,uint64_t>::iterator finder =
+        candidate_projections.find(summary);
+      if (finder != candidate_projections.end())
+      {
+        finder->second++;
+        // Reset the timeout since we saw a return
+        timeout_returns = 0;
+        // We've seen enough returns to perform the check to see if we're
+        // the dominant candidate and therefore we want to switch
+        if (current_refinement && 
+            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
+            is_dominant_candidate(finder->second, 
+                                  (summary == refined_projection)))
+        {
+          // If we're current refinement we don't switch but just end
+          // invalidating all the other candidates so they can start again
+          if (summary == refined_projection)
+            invalidate_candidates();
+          else
+            return true;
+        }
+      }
+      else if (summary == refined_projection)
+      {
+#ifdef DEBUG_LEGION
+        assert(current_refinement);
+#endif
+        // This counts as a return too since we're refined this way
+        total_returns++;
+        candidate_projections[summary] = 1;
+        summary->add_reference();
+        // Reset the timeout since we saw a return
+        timeout_returns = 0;
+        // No need to switch, we're already using the refinement
+      }
+      else
+      {
+        // If this is the first time we've seen a disjoint-complete child
+        // for something that is refined but not below this region then we
+        // want to switch to using it immediately because something needs it
+        if (current_refinement && (refined_child == NULL) &&
+            (refined_projection == NULL) && candidate_partitions.empty() &&
+            candidate_projections.empty())
+          return true;
+        if (++timeout_returns == CHANGE_REFINEMENT_TIMEOUT)
+          invalidate_candidates();
+        candidate_projections[summary] = 0;
+        summary->add_reference();
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementTracker::is_dominant_candidate(uint64_t returns, 
+                                                        bool is_current) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      // Has to have the most returns
+      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+            candidate_partitions.begin(); it != 
+            candidate_partitions.end(); it++)
+        if (returns < it->second)
+          return false;
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it != 
+            candidate_projections.end(); it++)
+        if (returns < it->second)
+          return false;
+      // If we're the current refinement then just being the largest is enough
+      // to indicate that we're the dominant candidate
+      if (!is_current)
+      {
+        // If we're not the current refinement, then we want to make sure its
+        // obvious that we should switch and not just ping-pong so we need to
+        // have at least twice as many returns as the current refinement
+        if (refined_child != NULL)
+        {
+          std::unordered_map<PartitionNode*,uint64_t>::const_iterator finder =
+            candidate_partitions.find(refined_child);
+          return ((finder == candidate_partitions.end()) ||
+            ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * finder->second) < returns));
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(refined_projection != NULL);
+#endif
+          std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator 
+            finder = candidate_projections.find(refined_projection);
+          return ((finder == candidate_projections.end()) ||
+            ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * finder->second) < returns));
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::invalidate_candidates(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!candidate_partitions.empty())
+      {
+        for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+              candidate_partitions.begin(); it != 
+              candidate_partitions.end(); it++)
+          if (it->first->remove_base_gc_ref(REFINEMENT_REF))
+            delete it->first;
+        candidate_partitions.clear();
+      }
+      if (!candidate_projections.empty())
+      {
+        for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator
+              it = candidate_projections.begin(); 
+              it != candidate_projections.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        candidate_projections.clear();
+      }
+      total_returns = 0;
+      timeout_returns = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::change_refinements(ContextID ctx,
+                               const FieldMask &refinement_mask,
+                               FieldMaskSet<RegionTreeNode> &new_children,
+                               FieldMaskSet<ProjectionSummary> &new_projections)
+    //--------------------------------------------------------------------------
+    {
+      // If we had a current refinement then we need to issue an invalidation
+      if (refined_child != NULL)
+        refined_child->invalidate_logical_refinement(ctx, refinement_mask);
+      // Now pick the best refinement option between the candidates
+      uint64_t max_returns = 0;
+      PartitionNode *best_child = NULL;
+      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+            candidate_partitions.begin(); it != 
+            candidate_partitions.end(); it++)
+      {
+        if (max_returns < it->second)
+        {
+          max_returns = it->second;
+          best_child = it->first;
+        }
+      }
+      ProjectionSummary *best_summary = NULL;
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+      {
+        if (max_returns < it->second)
+        {
+          max_returns = it->second;
+          best_summary = it->first;
+          best_child = NULL;
+        }
+      }
+      if (best_summary != NULL)
+        new_projections.insert(best_summary, refinement_mask);
+      else if (best_child != NULL)
+        new_children.insert(best_child, refinement_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::invalidate_refinement(ContextID ctx,
+                                             const FieldMask &invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (refined_child != NULL)
+        refined_child->invalidate_logical_refinement(ctx, invalidation_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::find_child_refinements(
+                                      std::set<RegionTreeNode*> &children) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (refined_child != NULL)
+        children.insert(refined_child);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PartitionRefinementTracker
+    ///////////////////////////////////////////////////////////// 
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementTracker::PartitionRefinementTracker(PartitionNode *node,
+                                                           bool current)
+      : partition(node), refined_projection(NULL), current_refinement(current),
+        children_returns(0), total_returns(0), timeout_returns(0)
+    //--------------------------------------------------------------------------
+    {
+      partition->add_base_gc_ref(REFINEMENT_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementTracker::PartitionRefinementTracker(PartitionNode *node,
+                                                        ProjectionSummary *proj) 
+      : partition(node), refined_projection(proj), current_refinement(true),
+        children_returns(0), total_returns(0), timeout_returns(0)
+    //--------------------------------------------------------------------------
+    {
+      partition->add_base_gc_ref(REFINEMENT_REF);
+      refined_projection->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementTracker::~PartitionRefinementTracker(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+        if (it->first->remove_reference())
+          delete it->first;
+      if ((refined_projection != NULL) && 
+          refined_projection->remove_reference())
+        delete refined_projection;
+      if (partition->remove_base_gc_ref(REFINEMENT_REF))
+        delete partition;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementTracker* PartitionRefinementTracker::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      PartitionRefinementTracker *result = (refined_projection == NULL) ?
+        new PartitionRefinementTracker(partition, current_refinement) :
+        new PartitionRefinementTracker(partition, refined_projection);
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+      {
+        it->first->add_reference();
+        result->candidate_projections.insert(*it);
+      }
+      result->candidate_children = candidate_children;
+      result->children_returns = children_returns;
+      result->total_returns = total_returns;
+      result->timeout_returns = timeout_returns;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::is_disjoint_complete(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (current_refinement)
+        return true;
+      if (!candidate_projections.empty())
+        return true;
+      return (partition->get_num_children() <=
+          (candidate_children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION));
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::needs_fallback_refinement(
+                                          const ProjectionInfo &proj_info) const
+    //--------------------------------------------------------------------------
+    {
+      // Never need to check for a fallback refinement on a disjoint 
+      // and complete partition because it can be part of its own tree
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::update_refinement_child(
+                                                          RegionTreeNode *child)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(child->is_region());
+#endif
+      RegionNode *child_node = child->as_region_node();
+      candidate_children.insert(child_node);
+      if ((candidate_children.size() * CHANGE_REFINEMENT_PARTITION_FRACTION) >=
+          partition->get_num_children())
+      {
+        // Reset the children and bump their return count
+        candidate_children.clear();
+        children_returns++;
+        if (current_refinement && 
+            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
+            is_dominant_candidate(children_returns, (refined_projection==NULL)))
+        {
+          // See if we're sticking with refined children or whether we're 
+          // switching to them from a refined projection
+          if (refined_projection == NULL)
+            invalidate_candidates();
+          else
+            return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::update_refinement_projection(
+                                                  ProjectionSummary *projection)
+    //--------------------------------------------------------------------------
+    {
+      std::unordered_map<ProjectionSummary*,uint64_t>::iterator finder =
+        candidate_projections.find(projection);
+      if (finder != candidate_projections.end())
+      {
+        finder->second++;
+        // Reset the timeout since we saw a return
+        timeout_returns = 0;
+        // We've seen enough returns to perform the check to see if we're
+        // the dominant candidate and therefore we want to switch
+        if (current_refinement && 
+            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
+            is_dominant_candidate(finder->second, 
+                                  (projection == refined_projection)))
+        {
+          // If we're current refinement we don't switch but just end
+          // invalidating all the other candidates so they can start again
+          if (projection == refined_projection)
+            invalidate_candidates();
+          else
+            return true;
+        }
+      }
+      else if (projection == refined_projection)
+      {
+#ifdef DEBUG_LEGION
+        assert(current_refinement);
+#endif
+        // This counts as a return too since we're refined this way
+        total_returns++;
+        candidate_projections[projection] = 1;
+        projection->add_reference();
+        // Reset the timeout since we saw a return
+        timeout_returns = 0;
+        // No need to switch, we're already using the refinement
+      }
+      else
+      {
+        if (++timeout_returns == CHANGE_REFINEMENT_TIMEOUT)
+          invalidate_candidates();
+        candidate_projections[projection] = 0;
+        projection->add_reference();
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementTracker::is_dominant_candidate(uint64_t returns,
+                                                          bool is_current) const
+    //--------------------------------------------------------------------------
+    {
+      if (returns < children_returns)
+        return false;
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++) 
+        if (returns < it->second)
+          return false;
+      if (!is_current)
+      {
+        if (refined_projection != NULL)
+        {
+          std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator 
+            finder = candidate_projections.find(refined_projection);
+          return ((finder == candidate_projections.end()) ||
+            ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * finder->second) < returns));
+        }
+        else
+          return ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * 
+                    children_returns) < returns);
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::invalidate_candidates(void)
+    //--------------------------------------------------------------------------
+    {
+      candidate_children.clear();
+      if (!candidate_projections.empty())
+      {
+        for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator
+              it = candidate_projections.begin(); 
+              it != candidate_projections.end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        candidate_projections.clear();
+      }
+      total_returns = 0;
+      timeout_returns = 0;
+      children_returns = 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::change_refinements(ContextID ctx,
+                               const FieldMask &refinement_mask,
+                               FieldMaskSet<RegionTreeNode> &new_children,
+                               FieldMaskSet<ProjectionSummary> &new_projections)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Should never get this call for a current refinement on a partition
+      // unless it was a projection based one
+      assert(!current_refinement || (refined_projection != NULL));
+#endif
+      uint64_t max_returns = children_returns;
+      ProjectionSummary *best_projection = NULL;
+      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+            candidate_projections.begin(); it !=
+            candidate_projections.end(); it++)
+      {
+        if (max_returns < it->second)
+        {
+          max_returns = it->second;
+          best_projection = it->first;
+        }
+      }
+      if (best_projection == NULL)
+      {
+        // Refining the children is the best option
+        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+          new_children.insert(partition->get_child(*itr), refinement_mask);
+      }
+      else // There was a new best projection to use
+        new_projections.insert(best_projection, refinement_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::invalidate_refinement(ContextID ctx,
+                                             const FieldMask &invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (refined_projection == NULL)
+      {
+        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+        {
+          RegionNode *child = partition->get_child(*itr);
+          child->invalidate_logical_refinement(ctx, invalidation_mask);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::find_child_refinements(
+                                      std::set<RegionTreeNode*> &children) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (refined_projection == NULL)
+      {
+        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+          children.insert(partition->get_child(*itr));
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // LogicalState 
     ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
-    LogicalState::LogicalState(RegionTreeNode *node, ContextID ctx)
+    LogicalState::LogicalState(RegionTreeNode *node, ContextID c)
       : owner(node)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    LogicalState::LogicalState(const LogicalState &rhs)
-      : owner(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalState::~LogicalState(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalState& LogicalState::operator=(const LogicalState&rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
@@ -3327,11 +3985,92 @@ namespace Legion {
       assert(field_states.empty());
       assert(curr_epoch_users.empty());
       assert(prev_epoch_users.empty());
-      assert(current_refinement_tree.empty());
-      assert(candidate_refinement_trees.empty());
+      assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
+      assert(interferences.empty());
 #endif
     }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void LogicalState::sanity_check(void) const
+    //--------------------------------------------------------------------------
+    {
+      // For every child and every field, it should only be open in one mode
+      FieldMaskSet<RegionTreeNode> previous_children;
+      for (std::list<FieldState>::const_iterator fit = 
+            field_states.begin(); fit != field_states.end(); fit++)
+      {
+        FieldMask actually_valid;
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              fit->open_children.begin(); it != 
+              fit->open_children.end(); it++)
+        {
+          actually_valid |= it->second;
+          FieldMaskSet<RegionTreeNode>::iterator finder = 
+            previous_children.find(it->first);
+          if (finder != previous_children.end())
+          {
+            assert(!(finder->second & it->second));
+            finder.merge(it->second);
+          }
+          else
+            previous_children.insert(it->first, it->second);
+        }
+        // Actually valid should be greater than or equal
+        assert(!(actually_valid - fit->valid_fields()));
+      }
+      // Also check that for each field it is either only open in one mode
+      // or two children in different modes are disjoint
+      for (std::list<FieldState>::const_iterator it1 = 
+            field_states.begin(); it1 != field_states.end(); it1++)
+      {
+        for (std::list<FieldState>::const_iterator it2 = 
+              field_states.begin(); it2 != field_states.end(); it2++)
+        {
+          // No need to do comparisons if they are the same field state
+          if (it1 == it2) 
+            continue;
+          const FieldState &f1 = *it1;
+          const FieldState &f2 = *it2;
+          for (FieldMaskSet<RegionTreeNode>::const_iterator cit1 = 
+                f1.open_children.begin(); cit1 != 
+                f1.open_children.end(); cit1++)
+          {
+            for (FieldMaskSet<RegionTreeNode>::const_iterator cit2 =
+                  f2.open_children.begin(); cit2 != 
+                  f2.open_children.end(); cit2++)
+            {
+              
+              // Disjointness check on fields
+              if (cit1->second * cit2->second)
+                continue;
+#ifndef NDEBUG
+              LegionColor c1 = cit1->first->get_color();
+              LegionColor c2 = cit2->first->get_color();
+#endif
+              // Some aliasing in the fields, so do the check 
+              // for child disjointness
+              assert(c1 != c2);
+              assert(owner->are_children_disjoint(c1, c2));
+            }
+          }
+        }
+      }
+      // Make sure that each refinement has a disjoint set of fields
+      if (!refinement_trackers.empty())
+      {
+        FieldMask disjoint_refinements;
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              refinement_trackers.begin(); it != 
+              refinement_trackers.end(); it++)
+        {
+          assert(disjoint_refinements * it->second);
+          disjoint_refinements |= it->second;
+        }
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void LogicalState::clear_logical_users(void)
@@ -3361,23 +4100,13 @@ namespace Legion {
     {
       field_states.clear();
       clear_logical_users(); 
-      if (!current_refinement_tree.empty())
+      if (!refinement_trackers.empty())
       {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              current_refinement_tree.begin(); it != 
-              current_refinement_tree.end(); it++)
-          if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
-            delete it->first;
-        current_refinement_tree.clear();
-      }
-      if (!candidate_refinement_trees.empty())
-      {
-        for (FieldMaskSet<RefinementNode>::const_iterator it =
-              candidate_refinement_trees.begin(); it !=
-              candidate_refinement_trees.end(); it++)
-          if (it->first->remove_reference())
-            delete it->first;
-        candidate_refinement_trees.clear();
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              refinement_trackers.begin(); it !=
+              refinement_trackers.end(); it++)
+          delete it->first;
+        refinement_trackers.clear();
       }
       while (!projection_summary_cache.empty())
       {
@@ -3439,21 +4168,26 @@ namespace Legion {
             src.prev_epoch_users.end(); it++)
         if (prev_epoch_users.insert(it->first, it->second))
           it->first->add_reference();
-      if (!src.current_refinement_tree.empty())
+      if (!src.refinement_trackers.empty())
       {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              src.current_refinement_tree.begin(); it !=
-              src.current_refinement_tree.end(); it++)
+        // We're only migrating the non-projected parts of the
+        // refinement since projections don't translate between
+        // contexts so we only need to move these over once
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              src.refinement_trackers.begin(); it !=
+              src.refinement_trackers.end(); it++)
+          it->first->find_child_refinements(to_traverse);
+        if (!refinement_trackers.empty())
         {
-          to_traverse.insert(it->first);
-          // Remove disjoint references if we already had it
-          // otherwise the reference automatically moves over
-          if (!current_refinement_tree.insert(it->first, it->second))
-            it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF);
+          for (FieldMaskSet<RefinementTracker>::const_iterator it =
+                src.refinement_trackers.begin(); it !=
+                src.refinement_trackers.end(); it++)
+            delete it->first;
+          src.refinement_trackers.clear();
         }
-        src.current_refinement_tree.clear();
+        else
+          refinement_trackers.swap(src.refinement_trackers);
       }
-      // No need to bother moving over the candidate refinement trees
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -3470,16 +4204,15 @@ namespace Legion {
       field_states.swap(src.field_states);
       curr_epoch_users.swap(src.curr_epoch_users);
       prev_epoch_users.swap(src.prev_epoch_users);
-      current_refinement_tree.swap(src.current_refinement_tree);
+      refinement_trackers.swap(src.refinement_trackers);
+      for (FieldMaskSet<RefinementTracker>::const_iterator it =
+            refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+        it->first->find_child_refinements(to_traverse);
       for (LegionList<FieldState>::const_iterator fit = 
             field_states.begin(); fit != field_states.end(); fit++)
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
               fit->open_children.begin(); it != fit->open_children.end(); it++)
           to_traverse.insert(it->first);
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-            current_refinement_tree.begin(); it !=
-            current_refinement_tree.end(); it++)
-        to_traverse.insert(it->first);
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif
@@ -3539,10 +4272,11 @@ namespace Legion {
         if ((invalidated != NULL) && invalidated->remove_reference())
           delete invalidated;
       }
+      bool disjoint_complete = false;
       ProjectionNode *node = analysis.context->construct_projection_tree(op,
-                                              index, req, owner, proj_info);
+                            index, req, owner, proj_info, disjoint_complete);
       ProjectionSummary *result = 
-        new ProjectionSummary(proj_info, node, req, this);
+        new ProjectionSummary(proj_info, node, req, this, disjoint_complete);
       // If the projection functor is functional then we can save it for
       // the future and evict the least recently used projection
       if (proj_info.projection->is_functional)
@@ -3615,6 +4349,421 @@ namespace Legion {
       interferences[one][two] = result;
       interferences[two][one] = result;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::update_refinement_child(
+           FieldMask &disjoint_complete_mask, FieldMask traversal_mask,
+           RegionTreeNode *next_child, FieldMask child_disjoint_complete_mask,
+           const ProjectionInfo &info, LogicalAnalysis &analysis, ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!child_disjoint_complete_mask);
+      assert(!(child_disjoint_complete_mask - traversal_mask));
+#endif
+      // child_refine is for when we decide to refine the child
+      // fallback_refine is for any fields that aren't refined for the child
+      // and therefore we need to check to see if we need a fallback refinement
+      // at this level for any projections with large fan-outs
+      FieldMask child_refine, fallback_refine;
+      // First we record the child refinements for any fields for which
+      // the next child is considered disjoint and complete
+      if (!!child_disjoint_complete_mask)
+      {
+        FieldMaskSet<RefinementTracker> to_add;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+              refinement_trackers.begin(); it !=
+              refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = child_disjoint_complete_mask & it->second;
+          if (!overlap)
+            continue;
+          if (overlap != it->second)
+          {
+            RefinementTracker *diff = it->first->clone();
+            FieldMask diff_mask = it->second - overlap;
+            to_add.insert(diff, diff_mask);
+            it.filter(diff_mask);
+          }
+          if (it->first->update_refinement_child(next_child))
+          {
+            child_refine |= overlap;
+            disjoint_complete_mask |= overlap;
+            // Don't delete this yet, it will get replaced
+            // when we update the refinements
+          }
+          else if (it->first->is_disjoint_complete())
+            disjoint_complete_mask |= overlap;
+          traversal_mask -= overlap;
+          child_disjoint_complete_mask -= overlap;
+          if (!child_disjoint_complete_mask)
+            break;
+        }
+        // If we still have child disjoint complete fields then we can
+        // make a new refinement tracker for them
+        if (!!child_disjoint_complete_mask)
+        {
+          RefinementTracker *new_tracker =
+            owner->create_refinement_tracker(false/*current refinement*/);
+          if (new_tracker->update_refinement_child(next_child))
+          {
+            child_refine |= child_disjoint_complete_mask;
+            disjoint_complete_mask |= child_disjoint_complete_mask;
+            delete new_tracker;
+          }
+          else
+          {
+            refinement_trackers.insert(new_tracker,
+                                       child_disjoint_complete_mask);
+            if (new_tracker->is_disjoint_complete())
+              disjoint_complete_mask |= child_disjoint_complete_mask;
+          }
+        }
+        // Add new entries
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          refinement_trackers.insert(it->first, it->second);
+      }
+      // If we still have fields for which the child wasn't considered
+      // disjoint and complete then we still need to check to see if 
+      // any of current refinement trackers for those other fields can
+      // be considered disjoint and complete or whether they need a 
+      // fallback refinement for projections to ensure there are enough
+      // equivalence sets for all the points in the projection
+      if (!!traversal_mask)
+      {
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+              refinement_trackers.begin(); it !=
+              refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = traversal_mask & it->second;
+          if (!overlap)
+            continue;
+          if (it->first->needs_fallback_refinement(info))
+          {
+            fallback_refine |= overlap;
+            disjoint_complete_mask |= overlap;
+            it.filter(overlap);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          else if (it->first->is_disjoint_complete())
+            disjoint_complete_mask |= overlap;
+          traversal_mask -= overlap;
+          if (!traversal_mask)
+            break;
+        }
+        // Remove old entries
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+      }
+      // If we're updating the refinement then we can do that now
+      if (!!child_refine)
+      {
+        // Starting at this node update the new subtrees to tell them
+        // that they are refined and then produce refinement trees
+        FieldMaskSet<RefinementNode> refinements;
+        owner->update_logical_refinement(ctx, child_refine, refinements);
+#ifdef DEBUG_LEGION
+        assert(refinements.get_valid_mask() == child_refine);
+#endif
+        // Record the refinement tree with the analysis  
+        for (FieldMaskSet<RefinementNode>::const_iterator it =
+              refinements.begin(); it != refinements.end(); it++)
+          analysis.record_pending_refinement(it->first, it->second);
+      }
+      if (!!fallback_refine)
+      {
+        // Create a projection summary to represent the fallback refinement
+        // subtree to use for equivalence sets
+        ProjectionSummary *fallback = find_or_create_fallback_projection();
+        // Create a new refinement for the fallback fields
+        RefinementTracker *tracker = owner->create_refinement_tracker(fallback);
+        refinement_trackers.insert(tracker, fallback_refine);
+        // Create a refinement tree and record it with the analysis
+        RefinementNode *refinement = fallback->create_refinement();
+        analysis.record_pending_refinement(refinement, fallback_refine);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::update_refinement_projection(
+              FieldMask &disjoint_complete_mask, 
+              FieldMask traversal_mask, ProjectionSummary *projection,
+              LogicalAnalysis &logical_analysis, ContextID ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (projection->result->is_disjoint_complete())
+      {
+        // The projection is disjoint and complete so we can record it
+        FieldMask refine_now;
+        FieldMaskSet<RefinementTracker> to_add;
+        std::vector<RefinementTracker*> to_delete;
+        for (FieldMaskSet<RefinementTracker>::iterator it =
+              refinement_trackers.begin(); it !=
+              refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = traversal_mask & it->second;
+          if (!overlap)
+            continue;
+          if (overlap != it->second)
+          {
+            // Need to split out the state for the unmatched fields
+            RefinementTracker *diff = it->first->clone();
+            FieldMask diff_mask = it->second - overlap;
+            to_add.insert(diff, diff_mask);
+            it.filter(diff_mask);
+          }
+          if (it->first->update_refinement_projection(projection))
+          {
+            refine_now |= overlap;
+            disjoint_complete_mask |= overlap;
+            it->first->invalidate_refinement(ctx, overlap);
+            to_delete.push_back(it->first);
+          }
+          else if (it->first->is_disjoint_complete())
+            disjoint_complete_mask |= overlap;
+          traversal_mask -= overlap;
+          if (!traversal_mask)
+            break;
+        }
+        if (!!traversal_mask)
+        {
+          RefinementTracker *new_tracker =
+            owner->create_refinement_tracker(false/*current refinement*/);
+          if (new_tracker->update_refinement_projection(projection))
+          {
+            refine_now |= traversal_mask;
+            disjoint_complete_mask |= traversal_mask;
+            delete new_tracker;
+          }
+          else
+          {
+            refinement_trackers.insert(new_tracker, traversal_mask); 
+            if (new_tracker->is_disjoint_complete())
+              disjoint_complete_mask |= traversal_mask;
+          }
+        }
+        // Remove old entries
+        for (std::vector<RefinementTracker*>::const_iterator it =
+              to_delete.begin(); it != to_delete.end(); it++)
+        {
+          refinement_trackers.erase(*it);
+          delete (*it);
+        }
+        // Add new entries
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              to_add.begin(); it != to_add.end(); it++)
+          refinement_trackers.insert(it->first, it->second);
+        if (!!refine_now)
+        {
+          // Create a new refinement tracker that knows its the new owner
+          RefinementTracker *tracker = 
+            owner->create_refinement_tracker(projection);
+          refinement_trackers.insert(tracker, refine_now);
+          // Inform the subtree that it's now refined
+          RefinementNode *refinement = projection->create_refinement();
+          // Record the refinement tree with the analysis  
+          logical_analysis.record_pending_refinement(refinement, refine_now);
+        }
+      }
+      else
+      {
+        // The projection is not disjoint and complete so we need to 
+        // iterate through and see which children are disjoint and complete
+        for (FieldMaskSet<RefinementTracker>::const_iterator it =
+              refinement_trackers.begin(); it != 
+              refinement_trackers.end(); it++)
+        {
+          const FieldMask overlap = traversal_mask & it->second;
+          if (!overlap)
+            continue;
+          if (it->first->is_disjoint_complete())
+            disjoint_complete_mask |= overlap;
+          traversal_mask -= overlap;
+          if (!traversal_mask)
+            break;
+        }
+        if (!!traversal_mask)
+        {
+          // These fields are not refined at all and we can't use the
+          // projection because its not disjoint and complete so we 
+          // need to make a default one to consider
+          ProjectionSummary *fallback = find_or_create_fallback_projection();
+          RefinementTracker *tracker =
+            owner->create_refinement_tracker(false/*current refinement*/);
+          tracker->update_refinement_projection(fallback);
+          refinement_trackers.insert(tracker, traversal_mask);
+          disjoint_complete_mask |= traversal_mask;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::change_refinements(ContextID ctx, 
+           FieldMask refinement_mask, FieldMaskSet<RefinementNode> &refinements)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate through all of our current refinements and get the
+      // children to travers and the projections to be done at this level
+      FieldMaskSet<RegionTreeNode> new_children;
+      FieldMaskSet<ProjectionSummary> new_projections;
+      std::vector<RefinementTracker*> to_delete;
+      for (FieldMaskSet<RefinementTracker>::iterator it =
+            refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+      {
+        const FieldMask overlap = refinement_mask & it->second;
+        if (!overlap)
+          continue;
+        // Ask it to find the next best refinement to use
+        it->first->change_refinements(ctx,overlap,new_children,new_projections);
+        it.filter(overlap);
+        if (!it->second)
+          to_delete.push_back(it->first);
+        refinement_mask -= overlap;
+        if (!refinement_mask)
+          break;
+      }
+      if (!!refinement_mask)
+      {
+        // If we have any fields we haven't seen before then we must be
+        // at a region node or we wouldn't have reported up the tree
+#ifdef DEBUG_LEGION
+        assert(owner->is_region());
+#endif
+        // Record a new empty refinement at this level
+        RefinementNode *new_refinement = new RefinementNode(owner);
+        refinements.insert(new_refinement, refinement_mask);
+        // Create a new empty tracker at this level
+        RefinementTracker *new_tracker = 
+          owner->create_refinement_tracker(true/*current*/);
+        refinement_trackers.insert(new_tracker, refinement_mask);
+      }
+#ifdef DEBUG_LEGION
+      // There should be no overlapping fields between these things
+      assert(new_children.get_valid_mask() * new_projections.get_valid_mask());
+#endif
+      // Create new refinements for all the children
+      if (owner->is_region())
+      {
+        // For regions, we know all the children are field disjoint with
+        // each other so we don't need to do the re-grouping
+#ifdef DEBUG_LEGION
+        FieldMask disjoint_children;
+#endif
+        for (FieldMaskSet<RegionTreeNode>::const_iterator cit =
+              new_children.begin(); cit != new_children.end(); cit++)
+        {
+#ifdef DEBUG_LEGION
+          assert(disjoint_children * cit->second);
+          disjoint_children |= cit->second;
+#endif
+          FieldMaskSet<RefinementNode> child_refinements; 
+          cit->first->update_logical_refinement(ctx, cit->second,
+                                                child_refinements);
+#ifdef DEBUG_LEGION
+          assert(child_refinements.get_valid_mask() == cit->second);
+#endif
+          // Create new refinements at this level for each one
+          for (FieldMaskSet<RefinementNode>::const_iterator it =
+                child_refinements.begin(); it != child_refinements.end(); it++)
+          {
+            RefinementNode *new_refinement = new RefinementNode(owner);
+            new_refinement->children.insert(it->first);
+            refinements.insert(new_refinement, it->second); 
+          }
+          // Create a new tracker for this child and record it
+          RefinementTracker *new_tracker =
+            owner->create_refinement_tracker(cit->first);
+          refinement_trackers.insert(new_tracker, cit->second);
+        }
+      }
+      else
+      {
+        // For partitions we might get different sets of children for each
+        // field so we need to group accordingly
+        FieldMaskSet<RefinementNode> child_refinements;
+        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+              new_children.begin(); it != new_children.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          // All the children should have the same set of fields here
+          assert(it->second == new_children.get_valid_mask());
+#endif
+          it->first->update_logical_refinement(ctx, it->second,
+                                               child_refinements);
+        }
+        // Now sort them into field groups and make refinement nodes
+        LegionList<FieldSet<RefinementNode*> > field_groups;
+        child_refinements.compute_field_sets(FieldMask(), field_groups);
+        for (LegionList<FieldSet<RefinementNode*> >::iterator it =
+              field_groups.begin(); it != field_groups.end(); it++)
+        {
+          RefinementNode *new_refinement = new RefinementNode(owner);
+          new_refinement->children.swap(it->elements);
+          refinements.insert(new_refinement, it->set_mask);
+        }
+        // Create a new tracker recording that all the children are refined
+        RefinementTracker *new_tracker = 
+          owner->create_refinement_tracker(true/*current*/);
+        refinement_trackers.insert(new_tracker, new_children.get_valid_mask());
+      }
+      // Create new refinements for all the projections
+      for (FieldMaskSet<ProjectionSummary>::const_iterator it =
+            new_projections.begin(); it != new_projections.end(); it++)
+      {
+        RefinementNode *new_refinement = it->first->create_refinement();
+        refinements.insert(new_refinement, it->second);
+        // Create a new refinement and save it in the trackers
+        RefinementTracker *new_tracker = 
+          owner->create_refinement_tracker(it->first);
+        refinement_trackers.insert(new_tracker, it->second);
+      }
+      // Delete all the refinement trackers that are no longer valid
+      for (std::vector<RefinementTracker*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        refinement_trackers.erase(*it);
+        delete (*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::invalidate_refinements(ContextID ctx, 
+                                              FieldMask invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RefinementTracker*> to_delete;
+      for (FieldMaskSet<RefinementTracker>::iterator it =
+            refinement_trackers.begin(); it != refinement_trackers.end(); it++) 
+      {
+        const FieldMask overlap = invalidation_mask & it->second;
+        if (!overlap)
+          continue;
+        it->first->invalidate_refinement(ctx, overlap);
+        it.filter(overlap);
+        if (!it->second)
+          to_delete.push_back(it->first);
+        invalidation_mask -= overlap;
+        if (!invalidation_mask)
+          break;
+      }
+#ifdef DEBUG_LEGION
+      assert(!invalidation_mask); // should have seen all the fields
+#endif
+      for (std::vector<RefinementTracker*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        refinement_trackers.erase(*it);
+        delete (*it);
+      }
+      refinement_trackers.tighten_valid_mask();
     }
 
 #if 0
@@ -4535,6 +5684,7 @@ namespace Legion {
     {
     }
 
+#if 0
     //--------------------------------------------------------------------------
     LogicalAnalysis::~LogicalAnalysis(void)
     //--------------------------------------------------------------------------
@@ -4624,6 +5774,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     RefinementOp* LogicalAnalysis::create_refinement(const LogicalUser &user,

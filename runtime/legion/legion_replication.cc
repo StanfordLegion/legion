@@ -16351,9 +16351,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionTreeExchange::ProjectionTreeExchange(ProjectionNode *n,
-        ReplicateContext *ctx, CollectiveIndexLocation loc)
+        bool &dis_comp, ReplicateContext *ctx, CollectiveIndexLocation loc)
       : AllGatherCollective<false>(ctx,
-          ctx->get_next_collective_index(loc, true/*logical*/)), node(n)
+          ctx->get_next_collective_index(loc, true/*logical*/)),
+        node(n), disjoint_complete(dis_comp)
     //--------------------------------------------------------------------------
     {
       // Extract our local summaries
@@ -16390,6 +16391,7 @@ namespace Legion {
         rez.serialize(it->first);
         it->second.children.serialize(rez);
       }
+      rez.serialize<bool>(disjoint_complete);
     }
 
     //--------------------------------------------------------------------------
@@ -16436,6 +16438,10 @@ namespace Legion {
         PartitionSummary &summary = partition_summaries[partition];
         summary.children.deserialize(derez);
       }
+      bool dis_comp;
+      derez.deserialize<bool>(dis_comp);
+      if (!dis_comp)
+        disjoint_complete = false;
     }
 
     /////////////////////////////////////////////////////////////

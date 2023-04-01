@@ -1677,7 +1677,8 @@ namespace Legion {
     public:
       virtual ProjectionNode* construct_projection_tree(
           Operation *op, unsigned index, const RegionRequirement &req,
-          RegionTreeNode *root, const ProjectionInfo &proj_info);
+          RegionTreeNode *root, const ProjectionInfo &proj_info, 
+          bool &disjoint_complete);
       virtual bool test_interfering_summaries(ProjectionSummary *one,
                                               ProjectionSummary *two);
       virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,
@@ -2842,7 +2843,8 @@ namespace Legion {
     public:
       virtual ProjectionNode* construct_projection_tree(
           Operation *op, unsigned index, const RegionRequirement &req,
-          RegionTreeNode *root, const ProjectionInfo &proj_info);
+          RegionTreeNode *root, const ProjectionInfo &proj_info,
+          bool &disjoint_complete);
       virtual bool test_interfering_summaries(ProjectionSummary *one,
                                               ProjectionSummary *two);
       virtual void match_timeouts(const std::vector<LogicalUser*> &timeouts,

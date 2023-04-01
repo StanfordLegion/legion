@@ -1717,23 +1717,21 @@ namespace Legion {
       // analysis for a single context are performed in order
       {
         FieldMask unopened_mask = user_mask;
-        FieldMask written_disjoint_complete;
+        FieldMask disjoint_complete_mask;;
         FieldMask first_touch_refinement = user_mask;
-        FieldMaskSet<RefinementOp> refinements;
-        FieldMaskSet<RefinementNode> candidates;
         const bool check_for_unversioned = 
           !op->is_parent_nonexclusive_virtual_mapping(idx);
         parent_node->register_logical_user(req.parent, *user, path,
                      trace_info, proj_info, user_mask, unopened_mask,
-                     written_disjoint_complete, candidates, refinements,
-                     logical_analysis, true/*track disjoint complete below*/, 
+                     disjoint_complete_mask, logical_analysis,
+                     true/*disjoint complete path*/, 
                      check_for_unversioned);
 #ifdef DEBUG_LEGION
         // should never flow out here unless we're not checking for versioning
         // we aren't checking when we've got an non-read-write virtual mapping
         // because in that case we are sharing equivalence sets with the
         // parent context and therefore are never permitted to do refinements
-        assert(!written_disjoint_complete || !check_for_unversioned);
+        assert(!disjoint_complete_mask || !check_for_unversioned);
 #endif
       }
 #ifdef DEBUG_LEGION
@@ -15802,9 +15800,7 @@ namespace Legion {
                                        const ProjectionInfo &proj_info,
                                        const FieldMask &user_mask,
                                        FieldMask &unopened_field_mask,
-                                       const FieldMask &track_disjoint_complete,
-                                       FieldMaskSet<RefinementNode> &candidates,
-                                       FieldMaskSet<RefinementOp> &refinements,
+                                       FieldMask &disjoint_complete_mask,
                                        LogicalAnalysis &logical_analysis,
                                        const bool disjoint_complete_path,
                                        const bool check_unversioned)
@@ -15815,22 +15811,13 @@ namespace Legion {
       const ContextID ctx = logical_analysis.context->get_context_id();
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       FieldMask open_below, unversioned;
       if (check_unversioned)
-      {
-        unversioned =
-          user_mask - state.current_refinement_tree.get_valid_mask();
-        // We'll make this look like it has been versioned for now
-        // and if we don't get a refinement to it, then we'll issue
-        // a close operation at the end to initialize the equivalence
-        // set at the root of the tree
-        if (!!unversioned)
-          state.current_refinement_tree.relax_valid_mask(unversioned);
-      }
+        state.initialized_unrefined_fields(user_mask, unversioned);
       RegionTreeNode *next_child = NULL;
       if (!arrived)
         next_child = get_tree_child(path.get_child(depth));
@@ -15874,57 +15861,29 @@ namespace Legion {
         }
         // If we've arrived add ourselves as a user
         register_local_user(state, user, user_mask);
-        if (proj_info.is_projecting())
+        if (disjoint_complete_path)
         {
-          // If we're in the disjoint-complete refinement tree and we're 
-          // performing a write for an index-space operation with a 
-          // non-invertible projection function then check if we have at 
-          // least as many equivalence sets in the disjoint-complete refined 
-          // sub-tree below this node as there are points in the index space 
-          // launch, if not then we will try to perform a refinement here 
-          // using the same rules as for the traversal below for deciding 
-          // when to switch between disjoint-complete sub-trees
-
-          
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(is_region());
-#endif
-          // If we're not in the disjoint-complete refinement tree but we're
-          // still on a path of disjoint-complete partitions, then return 
-          // that information back up the tree
-          if (!!track_disjoint_complete)
+          if (proj_info.is_projecting())
           {
-            // See if we can find an node which already represents this
-            // node being empty
-            bool create_local = true;
-            if (!(track_disjoint_complete * 
-                  state.candidate_refinement_trees.get_valid_mask()))
+            if (user.shard_proj == NULL)
             {
-              for (FieldMaskSet<RefinementNode>::iterator it =
-                    state.candidate_refinement_trees.begin(); it !=
-                    state.candidate_refinement_trees.end(); it++)
-              {
-                if (it->first->count_children() != 0)
-                  continue;
-                it.merge(track_disjoint_complete);
-                if (candidates.insert(it->first, track_disjoint_complete))
-                  it->first->add_reference();
-                create_local = false;
-                break;
-              }
+              ProjectionSummary *summary = 
+                state.find_or_create_projection_summary(user.op, user.idx,
+                              trace_info.req, logical_analysis, proj_info);
+              state.update_refinement_projection(disjoint_complete_mask,
+                              user_mask, summary, logical_analysis, ctx);
             }
-            if (create_local)
-            {
-              RefinementNode *local = new RefinementNode(this);
-              if (state.candidate_refinement_trees.insert(local, 
-                                        track_disjoint_complete))
-                local->add_reference();
-              if (candidates.insert(local, track_disjoint_complete))
-                local->add_reference();
-            }
+            else
+              state.update_refinement_projection(disjoint_complete_mask,
+                      user_mask, user.shard_proj, logical_analysis, ctx);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(is_region());
+#endif
+            // This child is complete for all fields
+            disjoint_complete_mask = user_mask;
           }
         }
       }
@@ -15980,67 +15939,22 @@ namespace Legion {
         // Mode 4: We're outside the disjoint-complete refinement tree and
         //         not on a path where all the partitions are disjoint-complete
         //         and therefore there is nothing for us to do here
-        // First figure out which fields want the child to track refinement
         const bool child_disjoint_complete = disjoint_complete_path &&
-          (is_region() || 
-           (as_partition_node()->row_source->is_disjoint(false/*app*/) &&
-            as_partition_node()->row_source->is_complete(false/*app*/)));
-        FieldMask track_disjoint_complete_below;
-        if (!!track_disjoint_complete)
-        {
-          // Mode 3
-          // At this point we're already off the path so see if should
-          // continue performing the tracking
-          if (child_disjoint_complete)
-            track_disjoint_complete_below = track_disjoint_complete;
-        }
-        FieldMask deviating_mask;
-        if (disjoint_complete_path && is_region())
-        {
-          // Check for Mode 1 and 2
-          deviating_mask =
-            user_mask & state.current_refinement_tree.get_valid_mask();
-          if (!!deviating_mask)
-          {
-            // These fields are in the current refinement tree
-            // See if the next child is also in the refinement tree
-            // for these fields and if not record that we need to 
-            // track it below
-            FieldMaskSet<RegionTreeNode>::const_iterator finder =
-              state.current_refinement_tree.find(next_child);
-            if (finder != state.current_refinement_tree.end())
-            {
-              const FieldMask overlap = deviating_mask & finder->second;
-              if (!!overlap)
-              {
-                // Mode 1: we're still on the current refinement path
-                deviating_mask -= overlap;
-                if (!(overlap * 
-                      state.candidate_refinement_trees.get_valid_mask()))
-                {
-                  // Invalidate any other candidates for these fields since it
-                  // is expensive to switch refinements
-                  for (FieldMaskSet<RefinementNode>::const_iterator it =
-                        state.candidate_refinement_trees.begin(); it !=
-                        state.candidate_refinement_trees.end(); it++)
-                    it->first->filter_touches(overlap);
-                }
-              }
-            }
-            // Any fields left are ones that are refined at this level
-            // but will not be refined at the next level so we want to 
-            // record their refinement trees
-            if (!!deviating_mask)
-              track_disjoint_complete_below |= deviating_mask;
-          }
-        }
-        // Now traverse the next child 
-        FieldMaskSet<RefinementNode> candidates_below;
+          (next_child->is_region() || 
+           (next_child->as_partition_node()->row_source->is_disjoint(false) &&
+            next_child->as_partition_node()->row_source->is_complete(false)));
+        // First figure out which fields want the child to track refinement
+        FieldMask child_disjoint_complete_mask;
         next_child->register_logical_user(privilege_root, user, path,
             trace_info, proj_info, user_mask, unopened_field_mask,
-            track_disjoint_complete_below, candidates_below,
-            refinements, logical_analysis, child_disjoint_complete,
-            false/*check unversioned*/);
+            child_disjoint_complete_mask, logical_analysis,
+            child_disjoint_complete, false/*check unversioned*/);
+        if (disjoint_complete_path)
+          state.update_refinement_child(disjoint_complete_mask, user_mask,
+                                  next_child, child_disjoint_complete_mask,
+                                  proj_info, logical_analysis, ctx);
+#if 0
+
         if (!!deviating_mask)
         {
           // Mode 2
@@ -16327,6 +16241,7 @@ namespace Legion {
             }
           }
         }
+#endif
       }
       // Check to see if we have any unversioned fields we need to initialize
       // with a close operation to make the equivalence set
@@ -16334,18 +16249,7 @@ namespace Legion {
       {
         // See if we made refinements for any of these fields, if so
         // they will make the initial batch of equivalence sets
-        if (!refinements.empty())
-        {
-          for (FieldMaskSet<RefinementOp>::const_iterator it = 
-                refinements.begin(); it != refinements.end(); it++)
-          {
-            const FieldMask overlap = unversioned & it->second;
-            if (!overlap)
-              continue;
-            it->first->record_uninitialized(overlap);
-          }
-          unversioned -= refinements.get_valid_mask();
-        }
+        state.filter_unrefined_fields(unversioned);
         if (!!unversioned)
         {
           // If we have unversioned fields and no refinements were
@@ -16394,6 +16298,25 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::update_logical_refinement(ContextID ctx,
+    const FieldMask &refinement_mask, FieldMaskSet<RefinementNode> &refinements)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+      state.change_refinements(ctx, refinement_mask, refinements);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::invalidate_logical_refinement(ContextID ctx,
+                                             const FieldMask &invalidation_mask)
+    //--------------------------------------------------------------------------
+    {
+      LogicalState &state = get_logical_state(ctx);
+      state.invalidate_refinements(ctx, invalidation_mask);
+    }
+
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::record_refinement_tree(ContextID ctx,
             const FieldMask &mask, const std::vector<RegionTreeNode*> &children)
@@ -16454,7 +16377,6 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::register_logical_user(ContextID ctx, 
                                        const LogicalUser &user,
@@ -16475,7 +16397,7 @@ namespace Legion {
                         REGION_NODE_REGISTER_LOGICAL_USER_CALL);
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
@@ -17428,12 +17350,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       FieldState new_state(user.usage, open_mask, next_child);
       merge_new_field_state(state, new_state);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
     }
     
@@ -17450,7 +17372,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       LegionDeque<FieldState> new_states;
       // Now we can look at all the children
@@ -17685,7 +17607,7 @@ namespace Legion {
       if (!new_states.empty())
         merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
     }
 
@@ -17863,7 +17785,7 @@ namespace Legion {
       // Clear out any written disjoint complete children too
       filter_disjoint_complete_accesses(state, closing_mask);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
     }
 
@@ -17881,7 +17803,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         REGION_NODE_SIPHON_LOGICAL_CHILDREN_CALL);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       LegionDeque<FieldState> new_states;
       // Before looking at any child states, first check to see if we need
@@ -18314,7 +18236,7 @@ namespace Legion {
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif 
     }
 
@@ -18330,7 +18252,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         REGION_NODE_SIPHON_LOGICAL_PROJECTION_CALL);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       LegionDeque<FieldState> new_states;
       // First let's see if we need to flush any reductions
@@ -18551,7 +18473,7 @@ namespace Legion {
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
     }
 
@@ -18932,7 +18854,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < new_states.size(); idx++)
         merge_new_field_state(state, new_states[idx]);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
     }
 
@@ -19075,88 +18997,6 @@ namespace Legion {
       free(field_string);
     }
 
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::sanity_check_logical_state(const LogicalState &state)
-    //--------------------------------------------------------------------------
-    {
-      // For every child and every field, it should only be open in one mode
-      FieldMaskSet<RegionTreeNode> previous_children;
-      for (std::list<FieldState>::const_iterator fit = 
-            state.field_states.begin(); fit != state.field_states.end(); fit++)
-      {
-        FieldMask actually_valid;
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              fit->open_children.begin(); it != 
-              fit->open_children.end(); it++)
-        {
-          actually_valid |= it->second;
-          FieldMaskSet<RegionTreeNode>::iterator finder = 
-            previous_children.find(it->first);
-          if (finder != previous_children.end())
-          {
-            assert(!(finder->second & it->second));
-            finder.merge(it->second);
-          }
-          else
-            previous_children.insert(it->first, it->second);
-        }
-        // Actually valid should be greater than or equal
-        assert(!(actually_valid - fit->valid_fields()));
-      }
-      // Also check that for each field it is either only open in one mode
-      // or two children in different modes are disjoint
-      for (std::list<FieldState>::const_iterator it1 = 
-            state.field_states.begin(); it1 != 
-            state.field_states.end(); it1++)
-      {
-        for (std::list<FieldState>::const_iterator it2 = 
-              state.field_states.begin(); it2 != 
-              state.field_states.end(); it2++)
-        {
-          // No need to do comparisons if they are the same field state
-          if (it1 == it2) 
-            continue;
-          const FieldState &f1 = *it1;
-          const FieldState &f2 = *it2;
-          for (FieldMaskSet<RegionTreeNode>::const_iterator cit1 = 
-                f1.open_children.begin(); cit1 != 
-                f1.open_children.end(); cit1++)
-          {
-            for (FieldMaskSet<RegionTreeNode>::const_iterator cit2 =
-                  f2.open_children.begin(); cit2 != 
-                  f2.open_children.end(); cit2++)
-            {
-              
-              // Disjointness check on fields
-              if (cit1->second * cit2->second)
-                continue;
-#ifndef NDEBUG
-              LegionColor c1 = cit1->first->get_color();
-              LegionColor c2 = cit2->first->get_color();
-#endif
-              // Some aliasing in the fields, so do the check 
-              // for child disjointness
-              assert(c1 != c2);
-              assert(are_children_disjoint(c1, c2));
-            }
-          }
-        }
-      }
-      if (!state.current_refinement_tree.empty() && is_region())
-      {
-        // Should always have exactly one current refinement for each field
-        // if we're a region, partitions can have several for sharding cases
-        FieldMask refinement_mask;
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              state.current_refinement_tree.begin(); it !=
-              state.current_refinement_tree.end(); it++)
-        {
-          assert(refinement_mask * it->second);
-          refinement_mask |= it->second;
-        }
-      }
-    }
-
 #if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::perform_tree_dominance_analysis(ContextID ctx, 
@@ -19279,7 +19119,7 @@ namespace Legion {
                         REGION_NODE_REGISTER_LOGICAL_USER_CALL);
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
@@ -19407,7 +19247,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(next_child != NULL);
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
       LegionDeque<FieldState> new_states;
       for (LegionList<FieldState>::iterator it = 
@@ -19544,7 +19384,7 @@ namespace Legion {
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
 #endif
     }
 #endif
@@ -20353,7 +20193,7 @@ namespace Legion {
     {
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
-      sanity_check_logical_state(state);
+      state.sanity_check();
       assert(state.disjoint_complete_children.empty());
 #endif
       state.disjoint_complete_tree |= mask;

@@ -3887,9 +3887,7 @@ namespace Legion {
                                  const ProjectionInfo &projection_info,
                                  const FieldMask &user_mask,
                                  FieldMask &unopened_field_mask,
-                                 const FieldMask &track_disjoint_complete,
-                                 FieldMaskSet<RefinementNode> &candidates,
-                                 FieldMaskSet<RefinementOp> &refinements,
+                                 FieldMask &disjoint_complete_mask,
                                  LogicalAnalysis &logical_analysis,
                                  const bool disjoint_complete_path,
                                  const bool check_unversioned);
@@ -3973,17 +3971,21 @@ namespace Legion {
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
-      void sanity_check_logical_state(const LogicalState &state);
+      void update_logical_refinement(ContextID ctx, 
+                                     const FieldMask &refinement_mask,
+                                     FieldMaskSet<RefinementNode> &refinements);
+      void invalidate_logical_refinement(ContextID ctx, 
+                              const FieldMask &invalidate_mask);
+#if 0
+      void record_refinement_tree(ContextID ctx, const FieldMask &mask,
+                                  const std::vector<RegionTreeNode*> &children);
+      void invalidate_refinement_tree(ContextID ctx, 
+                                      const FieldMask &invalidate_mask);
       void perform_tree_dominance_analysis(ContextID ctx,
                                            const LogicalUser &user,
                                            const FieldMask &field_mask,
                                            Operation *skip_op = NULL,
                                            GenerationID skip_gen = 0);
-      void record_refinement_tree(ContextID ctx, const FieldMask &mask,
-                                  const std::vector<RegionTreeNode*> &children);
-      void invalidate_refinement_tree(ContextID ctx, 
-                                      const FieldMask &invalidate_mask);
-#if 0
       void register_logical_deletion(ContextID ctx,
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
@@ -4033,6 +4035,11 @@ namespace Legion {
       inline RegionNode* as_region_node(void) const;
       inline PartitionNode* as_partition_node(void) const;
 #endif
+      virtual RefinementTracker* create_refinement_tracker(bool current) = 0;
+      virtual RefinementTracker* create_refinement_tracker(
+                                          RegionTreeNode *child) = 0;
+      virtual RefinementTracker* create_refinement_tracker(
+                                  ProjectionSummary *projection) = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
@@ -4162,6 +4169,7 @@ namespace Legion {
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
       void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
+#if 0
       void refine_disjoint_complete_tree(ContextID ctx, PartitionNode *child,
                                          RefinementOp *refinement, 
                                          const FieldMask &refinement_mask,
@@ -4169,6 +4177,7 @@ namespace Legion {
       bool filter_unversioned_fields(ContextID ctx, TaskContext *context,
                                      const FieldMask &filter_mask,
                                      RegionRequirement &req);
+#endif
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -4177,6 +4186,13 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
+      virtual RefinementTracker* create_refinement_tracker(bool current) 
+        { return new RegionRefinementTracker(this, current); }
+      virtual RefinementTracker* create_refinement_tracker(RegionTreeNode *next)
+        { return new RegionRefinementTracker(this, next); }
+      virtual RefinementTracker* create_refinement_tracker(
+                                                  ProjectionSummary *projection)
+        { return new RegionRefinementTracker(this, projection); }
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -4335,6 +4351,13 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
+      virtual RefinementTracker* create_refinement_tracker(bool current) 
+        { return new PartitionRefinementTracker(this, current); }
+      virtual RefinementTracker* create_refinement_tracker(RegionTreeNode *next)
+        { /*shoudl never be called*/ assert(false); return NULL; }
+      virtual RefinementTracker* create_refinement_tracker(
+                                                  ProjectionSummary* projection)
+        { return new PartitionRefinementTracker(this, projection); }
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
