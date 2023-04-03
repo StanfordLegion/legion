@@ -7398,7 +7398,9 @@ namespace Legion {
               if (space.empty() || space.dense())
                 continue;
               for (RectInDomainIterator<DIM,T> it(space); it(); it++)
-                dense_shard_rects->push_back(std::make_pair(*it, child->color));
+                if (!it->empty())
+                  dense_shard_rects->push_back(
+                      std::make_pair(*it, child->color));
             }
             KDNode<DIM,T,LegionColor> *root = new KDNode<DIM,T,LegionColor>(
                                     parent_space.bounds, *dense_shard_rects);
