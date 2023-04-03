@@ -24,10 +24,22 @@
 #include <set>
 #include <iostream>
 
+/**
+ * \file event.h
+ * This file provides a C++ interface to the Realm events.
+ */
+
 namespace Realm {
 
   typedef ::realm_reduction_op_id_t ReductionOpID;
 
+  /**
+   * \class Event
+   * Event is created by the runtime and is used to synchronize
+   * operations.  An event is triggered when the operation it
+   * represents is complet and can be used as pre and post conditions
+   * for other operations.
+   */
     class REALM_PUBLIC_API Event {
     public:
       typedef ::realm_id_t id_t;
@@ -96,10 +108,13 @@ namespace Realm {
 					Event happens_after, bool all_must_trigger = true);
     };
 
-    // A user level event has all the properties of event, except
-    // it can be triggered by the user.  This prevents users from
-    // triggering arbitrary events without doing something like
-    // an unsafe cast.
+    /**
+     * \class UserEvent
+     * A user level event has all the properties of event, except
+     * it can be triggered by the user.  This prevents users from
+     * triggering arbitrary events without doing something like
+     * an unsafe cast.
+     */
     class REALM_PUBLIC_API UserEvent : public Event {
     public:
       static UserEvent create_user_event(void);
@@ -113,9 +128,12 @@ namespace Realm {
       static const UserEvent NO_USER_EVENT;
     };
 
-    // a Barrier is similar to a UserEvent, except that it has a count of how
-    //  many threads (or whatever) need to "trigger" before the actual trigger
-    //  occurs
+    /**
+     * \class Barrier
+     * A barrier is similar to a user event, except that it has a count
+     * of how many threads (or whatever) need to "trigger" before the
+     * actual trigger occurs.
+     */
     class REALM_PUBLIC_API Barrier : public Event {
     public:
       typedef ::realm_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
@@ -143,8 +161,13 @@ namespace Realm {
       bool get_result(void *value, size_t value_size) const;
     };
 
-    // a CompletionQueue funnels the completion of unordered events into a
-    //  single stream that can be queried (and waited on) by a single servicer
+
+    /**
+     * \class CompletionQueue
+     * A completion queue funnels the completion of unordered events into a
+     * single stream that can be queried (and waited on) by a single servicer
+     * thread.
+     */
     class REALM_PUBLIC_API CompletionQueue {
     public:
       typedef ::realm_id_t id_t;
