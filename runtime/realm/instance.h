@@ -102,7 +102,6 @@ namespace Realm {
 						       uintptr_t& field_offset);
     ///@}
 
-    ///@{
     /**
      * Read data from an instance.
      * Users are encouraged to use the various accessors which make repeated
@@ -112,7 +111,6 @@ namespace Realm {
      * @param datalen The number of bytes to read.
      */
     void read_untyped(size_t offset, void* data, size_t datalen) const;
-    ///@}
 
     void write_untyped(size_t offset, const void *data, size_t datalen) const;
 
@@ -123,7 +121,6 @@ namespace Realm {
 			     const void *data, size_t datalen,
 			     bool exclusive = false) const;
 
-    ///@{
     /**
      * Return a pointer to the instance data.
      * Returns a null pointer if the instance storage cannot be directly
@@ -133,7 +130,6 @@ namespace Realm {
      * @return A pointer to the instance data.
      */
     void *pointer_untyped(size_t offset, size_t datalen) const;
-    ///@}
 
     // typed template helpers of the above
     template <typename T>
@@ -149,7 +145,6 @@ namespace Realm {
     template <typename T>
     T *pointer(size_t offset) const;
 
-    ///@{
     /**
      * Create a new region instance. Calls to create_instance return immediately
      * with a handle, but also return an event that must be used as a
@@ -166,9 +161,7 @@ namespace Realm {
 				 InstanceLayoutGeneric *ilg,
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
-    ///@}
 
-    ///@{
     /**
      * Create a new region instance backed by an external resource.
      * Realm performs no allocation, but allows access and copies as with
@@ -187,7 +180,6 @@ namespace Realm {
 					  const ExternalInstanceResource& resource,
 					  const ProfilingRequestSet& prs,
 					  Event wait_on = Event::NO_EVENT);
-    ///@}
 
     ///@{
     /**
@@ -287,7 +279,6 @@ namespace Realm {
 
     AddressSpace address_space(void) const;
 
-    ///@{
     /**
      * Fetch the metadata for an instance on a given processor. Before
      * you can get an instance's index space or construct an accessor for
@@ -300,7 +291,6 @@ namespace Realm {
      * @return The event to wait on before using the instance.
      */
     Event fetch_metadata(Processor target) const;
-    ///@}
 
     // apparently we can't use default template parameters on methods without C++11, but we
     //  can provide templates of two different arities...
@@ -324,6 +314,7 @@ namespace Realm {
     //  re-registration
     //
 
+    ///@{
     /**
      * Generate an ExternalInstanceResource object for this instance.
      *
