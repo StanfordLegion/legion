@@ -71,9 +71,7 @@ namespace Legion {
     struct LogicalUser : public Collectable {
     public:
       LogicalUser(Operation *o, unsigned id, const RegionUsage &u,
-                  ProjectionSummary *proj);
-      LogicalUser(Operation *o, GenerationID gen, unsigned id,
-                  const RegionUsage &u);
+                  ProjectionSummary *proj = NULL);
       LogicalUser(const LogicalUser &rhs) = delete;
       ~LogicalUser(void);
     public:
@@ -946,27 +944,27 @@ namespace Legion {
                        const FieldMask &capture_mask,
                        PartitionNode *node) const;
     public:
-      FieldMaskSet<RegionTreeNode> open_children;
+      typedef FieldMaskSet<RegionTreeNode,UNTRACKED_ALLOC,true/*ordered*/>
+        OrderedFieldMaskChildren;
+      OrderedFieldMaskChildren open_children;
       OpenState open_state;
       ReductionOpID redop;
     };
 
     /**
      * \class RefinementNode
-     * This data structure defines a (potential) node in the disjoint-complete
-     * refinement tree of a region tree. The sub-regions at the leaves of this
-     * tree are the current set of equivalence sets used for representing the
-     * meta-data for the physical analysis.
+     * This data captures an actualized refinement tree to pass to a
+     * refinement operation to update which regions are being used for
+     * equivalence sets. It lives from the time that it is created 
+     * up to the point that it is invalidated by the version manager.
      */
-    class RefinementNode : public Collectable {
+    class RefinementNode {
     public:
       RefinementNode(RegionTreeNode *node);
-      RefinementNode(const RefinementNode &rhs) = delete;
-      ~RefinementNode(void); 
-    public:
-      RefinementNode& operator=(const RefinementNode &rhs) = delete;
+      virtual ~RefinementNode(void) { }
     public:
       RegionTreeNode *const node;
+      std::set<RefinementNode*> children;
 #if 0
     public:
       FieldMask increment_touches(const FieldMask &mask);
@@ -989,9 +987,40 @@ namespace Legion {
       std::map<LegionColor,ShardID> shard_children; // only for partitions
       LegionMap<unsigned,FieldMask> touches;
 #endif
-    public:
-      std::set<RefinementNode*> children;
     };
+
+#if 0
+    /**
+     * \class RegionRefinementNode
+     * A region refinement node stores the meta-data required for 
+     * representing a logical region in a refinement tree
+     */
+    class RegionRefinementNode : public RefinementNode {
+    public:
+      RegionRefinementNode(RegionNode *owner, PartitionRefinementNode *child);
+      RegionRefinementNode(const RegionRefinementNode &rhs) = delete;
+      virtual ~RegionRefinementNode(void);
+    public:
+      RegionRefinementNode& operator=(const RegionRefinementNode &rhs) = delete;
+
+    };
+
+    /**
+     * \class RegionRefinementNode
+     * A region refinement node stores the meta-data required for 
+     * representing a logical region in a refinement tree
+     */
+    class PartitionRefinementNode : public RefinementNode {
+    public:
+      PartitionRefinementNode(PartitionNode *owner);
+      PartitionRefinementNode(const PartitionRefinementNode &rhs) = delete;
+      virtual ~RegionRefinementNode(void);
+    public:
+      PartitionRefinementNode& operator=(
+          const PartitionRefinementNode &rhs) = delete;
+
+    };
+#endif
 
     /**
      * \class ProjectionNode
@@ -1087,7 +1116,7 @@ namespace Legion {
       void add_child(ProjectionPartition *child);
     public:
       RegionNode *const region;
-      std::map<LegionColor,ProjectionPartition*> local_children;
+      std::unordered_map<LegionColor,ProjectionPartition*> local_children;
       std::vector<ShardID> shard_users;
     };
 
@@ -1114,7 +1143,7 @@ namespace Legion {
       void add_child(ProjectionRegion *child);
     public:
       PartitionNode *const partition;
-      std::map<LegionColor,ProjectionRegion*> local_children;
+      std::unordered_map<LegionColor,ProjectionRegion*> local_children;
     };
 
 #if 0
@@ -1354,16 +1383,18 @@ namespace Legion {
       void sanity_check(void) const;
 #endif
     public:
-      void initialized_unrefined_fields(const FieldMask &mask, 
-                                        FieldMask &unrefined);
-      void filter_unrefined_fields(FieldMask &unrefined);
+      void initialize_refined_fields(const FieldMask &mask);
+      void initialize_unrefined_fields(const FieldMask &mask, 
+                                       LogicalAnalysis &analysis);
       void update_refinement_child(FieldMask &disjoint_complete_mask,
           FieldMask traversal_mask, RegionTreeNode *child_node, 
           FieldMask child_disjoint_complete,
-          const ProjectionInfo &info, LogicalAnalysis &analysis, ContextID ctx);
+          const ProjectionInfo &info, LogicalAnalysis &analysis, ContextID ctx,
+          FieldMaskSet<RefinementOp> &refinement_operations);
       void update_refinement_projection(FieldMask &disjoint_complete_mask,
           FieldMask traversal_mask, ProjectionSummary *projection,
-          LogicalAnalysis &logical_analysis, ContextID ctx);
+          LogicalAnalysis &logical_analysis, ContextID ctx,
+          FieldMaskSet<RefinementOp> &refinement_operations);
       void change_refinements(ContextID ctx, FieldMask refinement_mask,
                               FieldMaskSet<RefinementNode> &refinements);
       void invalidate_refinements(ContextID ctx, FieldMask invalidation_mask);
@@ -1377,8 +1408,7 @@ namespace Legion {
     public:
       RegionTreeNode *const owner;
     public:
-      LegionList<FieldState,
-                 LOGICAL_FIELD_STATE_ALLOC> field_states;
+      LegionList<FieldState,LOGICAL_FIELD_STATE_ALLOC> field_states;
       // Note that even though these are field mask sets keyed on pointers
       // we mark them as determinsitic so that shards always iterate over
       // these elements in the same order
@@ -1564,19 +1594,6 @@ namespace Legion {
         RegionTreeNode *const node;
         const unsigned req_idx;
       };
-      struct PendingRefinement {
-      public:
-        PendingRefinement(void)
-          : refinement_op(NULL), partition(NULL), index(0) { }
-        PendingRefinement(RefinementOp *op, PartitionNode *p, 
-                          const FieldMask &m, unsigned idx)
-          : refinement_mask(m), refinement_op(op), partition(p), index(idx) { }
-      public:
-        FieldMask refinement_mask;
-        RefinementOp *refinement_op;
-        PartitionNode *partition;
-        unsigned index;
-      };
     public:
       LogicalAnalysis(Operation *op, std::set<RtEvent> &applied_events);
       LogicalAnalysis(const LogicalAnalysis &rhs) = delete;
@@ -1584,12 +1601,16 @@ namespace Legion {
     public:
       LogicalAnalysis& operator=(const LogicalAnalysis &rhs) = delete;
     public:
+#if 0
       RefinementOp* create_refinement(const LogicalUser &user,
           PartitionNode *partition, const FieldMask &refinement_mask,
           LogicalRegion privilege_root);
       bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
+#endif
+      void record_unrefined_fields(RegionNode *node,const FieldMask &unrefined);
       void record_pending_refinement(RefinementNode *refinement,
-                                     const FieldMask &refinement_mask);
+                                     const FieldMask &refinement_mask,
+                                     FieldMaskSet<RefinementOp> &refinements);
     public:
       // Record a prior operation that we need to depend on with a 
       // close operation to group together dependences
@@ -1603,8 +1624,8 @@ namespace Legion {
       InnerContext *const context;
     protected:
       std::set<RtEvent> &applied_events;
-      // Need these in order for control replication
-      LegionVector<PendingRefinement> pending_refinements;
+      FieldMaskSet<RegionNode> unrefined_nodes;
+      FieldMaskSet<RefinementOp> pending_refinements;
     protected:
       // Index first by the parent region where privileges come from
       std::map<LogicalRegion,

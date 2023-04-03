@@ -53,20 +53,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalUser::LogicalUser(Operation *o, GenerationID g, unsigned id, 
-                             const RegionUsage &u)
-      : Collectable(), usage(u), op(o), ctx_index(op->get_ctx_index()), idx(id),
-        gen(g), shard_proj(NULL), timeout(0)
-#ifdef LEGION_SPY
-        , uid(o->get_unique_op_id())
-#endif
-    //--------------------------------------------------------------------------
-    {
-      if (op != NULL)
-        op->add_mapping_reference(gen);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalUser::~LogicalUser(void)
     //--------------------------------------------------------------------------
     {
@@ -2615,8 +2601,8 @@ namespace Legion {
     ProjectionRegion::~ProjectionRegion(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
         if (it->second->remove_reference())
           delete it->second;
       if (region->remove_base_gc_ref(PROJECTION_REF))
@@ -2662,8 +2648,8 @@ namespace Legion {
 #endif
       RegionSummary &summary = region_summaries[region->handle];
       summary.users = shard_users;
-      for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
       {
         summary.children.add_child(it->first);
         it->second->extract_summaries(region_summaries, partition_summaries);
@@ -2683,8 +2669,8 @@ namespace Legion {
       shard_users.swap(summary.users);
       shard_children.swap(summary.children);
       // Remove all our local children from the shard children
-      for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
       {
         shard_children.remove_child(it->first);
         it->second->update_summaries(region_summaries, partition_summaries);
@@ -2711,11 +2697,11 @@ namespace Legion {
       // going ot be interfering on something
       if (local_children.size() != other->local_children.size())
         return true;
-      for (std::map<LegionColor,ProjectionPartition*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
       {
-        std::map<LegionColor,ProjectionPartition*>::const_iterator finder =
-          other->local_children.find(it->first);
+        std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+          finder = other->local_children.find(it->first);
         if (finder == other->local_children.end())
           return true;
         if (it->second->has_interference(finder->second, local_shard))
@@ -2762,8 +2748,8 @@ namespace Legion {
     ProjectionPartition::~ProjectionPartition(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
         if (it->second->remove_reference())
           delete it->second;
       if (partition->remove_base_gc_ref(PROJECTION_REF))
@@ -2778,8 +2764,8 @@ namespace Legion {
         return false;
       if (!partition->row_source->is_complete(false/*from app*/))
         return false;
-      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
         if (!it->second->is_disjoint_complete())
           return false;
       return true;
@@ -2812,8 +2798,8 @@ namespace Legion {
               partition_summaries.end());
 #endif
       PartitionSummary &summary = partition_summaries[partition->handle];
-      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
       {
         summary.children.add_child(it->first);
         it->second->extract_summaries(region_summaries, partition_summaries);
@@ -2833,8 +2819,8 @@ namespace Legion {
       PartitionSummary &summary = partition_summaries[partition->handle];
       shard_children.swap(summary.children);
       // Remove all our local children from the shard children
-      for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-            local_children.begin(); it != local_children.end(); it++)
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
       {
         shard_children.remove_child(it->first);
         it->second->update_summaries(region_summaries, partition_summaries);
@@ -2849,11 +2835,11 @@ namespace Legion {
       if (partition->row_source->is_disjoint(false/*from app*/))
       {
         // Disjoint partition, check all the children against each other
-        for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-              local_children.begin(); it != local_children.end(); it++)
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
         {
-          std::map<LegionColor,ProjectionRegion*>::const_iterator finder =
-            other->local_children.find(it->first);
+          std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            finder = other->local_children.find(it->first);
           if (finder == other->local_children.end())
           {
             // Check to see if there is a remote shard with that child
@@ -2864,12 +2850,12 @@ namespace Legion {
             return true;
         }
         // Check in the opposite direction too
-        for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-              other->local_children.begin(); it != 
-              other->local_children.end(); it++)
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = other->local_children.begin();
+              it != other->local_children.end(); it++)
         {
-          std::map<LegionColor,ProjectionRegion*>::const_iterator finder =
-            local_children.find(it->first);
+          std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            finder = local_children.find(it->first);
           if (finder == local_children.end())
           {
             if (shard_children.has_child(it->first))
@@ -2889,11 +2875,11 @@ namespace Legion {
         // going to be interfering on something
         if (local_children.size() != other->local_children.size())
           return true;
-        for (std::map<LegionColor,ProjectionRegion*>::const_iterator it =
-              local_children.begin(); it != local_children.end(); it++)
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
         {
-          std::map<LegionColor,ProjectionRegion*>::const_iterator finder =
-            other->local_children.find(it->first);
+          std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            finder = other->local_children.find(it->first);
           if (finder == other->local_children.end())
             return true;
           if (it->second->has_interference(finder->second, local_shard))
@@ -4002,7 +3988,7 @@ namespace Legion {
             field_states.begin(); fit != field_states.end(); fit++)
       {
         FieldMask actually_valid;
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+        for (FieldState::OrderedFieldMaskChildren::const_iterator it =
               fit->open_children.begin(); it != 
               fit->open_children.end(); it++)
         {
@@ -4033,11 +4019,11 @@ namespace Legion {
             continue;
           const FieldState &f1 = *it1;
           const FieldState &f2 = *it2;
-          for (FieldMaskSet<RegionTreeNode>::const_iterator cit1 = 
+          for (FieldState::OrderedFieldMaskChildren::const_iterator cit1 = 
                 f1.open_children.begin(); cit1 != 
                 f1.open_children.end(); cit1++)
           {
-            for (FieldMaskSet<RegionTreeNode>::const_iterator cit2 =
+            for (FieldState::OrderedFieldMaskChildren::const_iterator cit2 =
                   f2.open_children.begin(); cit2 != 
                   f2.open_children.end(); cit2++)
             {
@@ -4140,7 +4126,7 @@ namespace Legion {
       for (LegionList<FieldState>::iterator fit = 
             src.field_states.begin(); fit != src.field_states.end(); fit++)
       {
-        for (FieldMaskSet<RegionTreeNode>::iterator it = 
+        for (FieldState::OrderedFieldMaskChildren::iterator it = 
               fit->open_children.begin(); it != fit->open_children.end(); it++)
           to_traverse.insert(it->first);
         // See if we can add it to any of the existing field states
@@ -4210,7 +4196,7 @@ namespace Legion {
         it->first->find_child_refinements(to_traverse);
       for (LegionList<FieldState>::const_iterator fit = 
             field_states.begin(); fit != field_states.end(); fit++)
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+        for (FieldState::OrderedFieldMaskChildren::const_iterator it = 
               fit->open_children.begin(); it != fit->open_children.end(); it++)
           to_traverse.insert(it->first);
 #ifdef DEBUG_LEGION
@@ -4352,10 +4338,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalState::initialize_refined_fields(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner->is_region());
+      assert(mask * refinement_trackers.get_valid_mask());
+#endif
+      RefinementTracker *new_tracker = 
+        owner->create_refinement_tracker(true/*current refinement*/); 
+      refinement_trackers.insert(new_tracker, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::initialize_unrefined_fields(const FieldMask &mask,
+                                                   LogicalAnalysis &analysis)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask uninitialized = mask - refinement_trackers.get_valid_mask();
+      if (!uninitialized)
+        return;
+      initialize_refined_fields(uninitialized); 
+      // Record that the analysis is responsibile for issuing at least some
+      // kind of refinement operation for these fields to initialize them
+      analysis.record_unrefined_fields(owner->as_region_node(), uninitialized);
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalState::update_refinement_child(
            FieldMask &disjoint_complete_mask, FieldMask traversal_mask,
            RegionTreeNode *next_child, FieldMask child_disjoint_complete_mask,
-           const ProjectionInfo &info, LogicalAnalysis &analysis, ContextID ctx)
+           const ProjectionInfo &info, LogicalAnalysis &analysis,
+           ContextID ctx, FieldMaskSet<RefinementOp> &refinement_operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4476,7 +4490,8 @@ namespace Legion {
         // Record the refinement tree with the analysis  
         for (FieldMaskSet<RefinementNode>::const_iterator it =
               refinements.begin(); it != refinements.end(); it++)
-          analysis.record_pending_refinement(it->first, it->second);
+          analysis.record_pending_refinement(it->first, it->second,
+                                             refinement_operations);
       }
       if (!!fallback_refine)
       {
@@ -4488,7 +4503,8 @@ namespace Legion {
         refinement_trackers.insert(tracker, fallback_refine);
         // Create a refinement tree and record it with the analysis
         RefinementNode *refinement = fallback->create_refinement();
-        analysis.record_pending_refinement(refinement, fallback_refine);
+        analysis.record_pending_refinement(refinement, fallback_refine,
+                                           refinement_operations);
       }
     }
 
@@ -4496,7 +4512,8 @@ namespace Legion {
     void LogicalState::update_refinement_projection(
               FieldMask &disjoint_complete_mask, 
               FieldMask traversal_mask, ProjectionSummary *projection,
-              LogicalAnalysis &logical_analysis, ContextID ctx)
+              LogicalAnalysis &logical_analysis, ContextID ctx,
+              FieldMaskSet<RefinementOp> &refinement_operations)
     //--------------------------------------------------------------------------
     {
       if (projection->result->is_disjoint_complete())
@@ -4570,7 +4587,8 @@ namespace Legion {
           // Inform the subtree that it's now refined
           RefinementNode *refinement = projection->create_refinement();
           // Record the refinement tree with the analysis  
-          logical_analysis.record_pending_refinement(refinement, refine_now);
+          logical_analysis.record_pending_refinement(refinement, refine_now,
+                                                     refinement_operations);
         }
       }
       else
@@ -5145,7 +5163,7 @@ namespace Legion {
     FieldState::~FieldState(void)
     //--------------------------------------------------------------------------
     {
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+      for (OrderedFieldMaskChildren::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
         if (it->first->remove_base_gc_ref(FIELD_STATE_REF))
           delete it->first;
@@ -5203,7 +5221,7 @@ namespace Legion {
     {
       if (!rhs.open_children.empty())
       {
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+        for (OrderedFieldMaskChildren::const_iterator it = 
               rhs.open_children.begin(); it != rhs.open_children.end(); it++)
           // Remove duplicate references if we already had it
           if (!open_children.insert(it->first, it->second))
@@ -5243,7 +5261,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<RegionTreeNode*> to_delete;
-      for (FieldMaskSet<RegionTreeNode>::iterator it = 
+      for (OrderedFieldMaskChildren::iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         it.filter(mask);
@@ -5284,7 +5302,7 @@ namespace Legion {
     void FieldState::remove_child(RegionTreeNode *child)
     //--------------------------------------------------------------------------
     {
-      FieldMaskSet<RegionTreeNode>::iterator finder = 
+      OrderedFieldMaskChildren::iterator finder = 
         open_children.find(child);
 #ifdef DEBUG_LEGION
       assert(finder != open_children.end());
@@ -5337,7 +5355,7 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+      for (OrderedFieldMaskChildren::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         FieldMask overlap = it->second & capture_mask;
@@ -5392,7 +5410,7 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
+      for (OrderedFieldMaskChildren::const_iterator it = 
             open_children.begin(); it != open_children.end(); it++)
       {
         IndexSpaceNode *color_space = node->row_source->color_space;
@@ -5774,7 +5792,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     RefinementOp* LogicalAnalysis::create_refinement(const LogicalUser &user,
@@ -5832,6 +5849,29 @@ namespace Legion {
           return false;
       }
       return true;
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void LogicalAnalysis::record_unrefined_fields(RegionNode *node, 
+                                                  const FieldMask &unrefined)
+    //--------------------------------------------------------------------------
+    {
+      // No need for references here, this data structure isn't going to 
+      // live past the end of this meta-task for the enclosing operation 
+      // which ensures the liveness of the region tree nodes
+      unrefined_nodes.insert(node, unrefined);
+    }
+
+#if 0
+    //--------------------------------------------------------------------------
+    void LegionAnalysis::record_pending_refinement(RefinementNode *refinement,
+      const FieldMask &refinement_mask, FieldMaskSet<RefinementOp> &refinements)
+    //--------------------------------------------------------------------------
+    {
+      // Scan through all the existing refinement operations and see which
+      // ones subsume 
+
     }
 
     //--------------------------------------------------------------------------
@@ -5987,6 +6027,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void LogicalAnalysis::issue_close_operation(LogicalRegion parent,
@@ -6037,8 +6078,7 @@ namespace Legion {
       }
       // Record a user for this close operation in the region tree 
       LogicalUser *close_user = new LogicalUser(close_op,
-          close_op->get_generation(), 0/*region req index*/,
-          RegionUsage(req));
+          0/*region req index*/, RegionUsage(req));
       LogicalState &state = node->get_logical_state(context->get_context_id());
       // This will take ownership of the close user
       node->register_local_user(state, *close_user, mask);

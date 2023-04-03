@@ -3869,6 +3869,10 @@ namespace Legion {
       {
         return current_versions.lookup_entry(ctx, this, ctx);
       }
+      // For OrderedFieldMaskChildren
+      inline bool deterministic_pointer_less(const RegionTreeNode *rhs) const
+        { return (get_color() < rhs->get_color()); }
+      typedef FieldState::OrderedFieldMaskChildren OrderedFieldMaskChildren;
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
             const void *buffer, size_t size, bool is_mutable, bool local_only);
@@ -3889,6 +3893,7 @@ namespace Legion {
                                  FieldMask &unopened_field_mask,
                                  FieldMask &disjoint_complete_mask,
                                  LogicalAnalysis &logical_analysis,
+                                 FieldMaskSet<RefinementOp> &refinements,
                                  const bool disjoint_complete_path,
                                  const bool check_unversioned);
       void register_local_user(LogicalState &state,
@@ -3907,7 +3912,7 @@ namespace Legion {
                                        FieldMask &open_below);
       void perform_close_operations(const LogicalUser &user,
                                     const FieldMask &close_mask,
-                                    FieldMaskSet<RegionTreeNode> &children,
+                                    OrderedFieldMaskChildren &children,
                                     LogicalRegion privilege_root,
                                     RegionTreeNode *path_node,
                                     RegionTreeNode *next_child,
@@ -3965,8 +3970,6 @@ namespace Legion {
                                   LegionDeque<FieldState> &new_states);
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
-      void filter_disjoint_complete_accesses(LogicalState &state,
-                                             const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
@@ -4080,7 +4083,7 @@ namespace Legion {
         OrderedFieldMaskUsers;
       template<bool TRACK_DOM>
       FieldMask perform_dependence_checks(LogicalRegion privilege_root,
-          LogicalUser &user, OrderedFieldMaskUsers &users,
+          const LogicalUser &user, OrderedFieldMaskUsers &users,
           const FieldMask &check_mask, const FieldMask &open_below,
           const bool arrived, const ProjectionInfo &proj_info,
           LogicalState &state, LogicalAnalysis &logical_analysis);

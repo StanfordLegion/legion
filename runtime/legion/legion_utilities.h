@@ -3592,7 +3592,7 @@ namespace Legion {
       {
         if ((entries.single_entry == NULL) || (entries.single_entry != e))
           return end();
-        FieldMaskSet<T> *ptr = this;
+        FieldMaskSet<T,A,D> *ptr = this;
         std::pair<T*const,FieldMask> *result = NULL;
         static_assert(sizeof(result) == sizeof(ptr), "C++ is dumb");
         memcpy(&result, &ptr, sizeof(result));

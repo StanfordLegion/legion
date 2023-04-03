@@ -10731,6 +10731,7 @@ namespace Legion {
       initialize_operation(creator->get_context(), false/*track*/,
                           1/*regions*/, creator->get_provenance());
       parent_ctx->register_new_internal_operation(this);
+      context_index = creator->get_ctx_index();
 #ifdef DEBUG_LEGION
       assert(creator_req_idx == -1);
       assert(create_op == NULL);
