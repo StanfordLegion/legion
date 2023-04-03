@@ -53,44 +53,75 @@ namespace Realm {
 
       bool exists(void) const;
 
-      // test whether an event has triggered without waiting
+      /**
+       * Test whether an event has triggered without waiting.
+       * @return true if the event has triggered, false otherwise
+       */
       bool has_triggered(void) const;
 
-      // causes calling thread to block until event has occurred
+
+      /**
+       * Wait for an event to trigger.
+       */
       void wait(void) const;
 
-      // used by non-legion threads to wait on an event - always blocking
+      /**
+       * Used by non-legion threads to wait on an event - always blocking
+       */
       void external_wait(void) const;
 
-      // external wait with a timeout - returns true if event triggers, false
-      //  if the maximum delay occurs first
+      /**
+       * External wait with a timeout - returns true if event triggers, false
+       * if the maximum delay occurs first
+       * @param max_ns the maximum number of nanoseconds to wait
+       * @return true if the event has triggered, false if the timeout occurred
+       */
       bool external_timedwait(long long max_ns) const;
 
-      // fault-aware versions of the above (the above versions will cause the
-      //  caller to fault as well if a poisoned event is queried)
+      ///@{
+      /**
+       * Fault-aware versions of the above (the above versions will cause the
+       * caller to fault as well if a poisoned event is queried).
+       * @param poisoned set to true if the event is poisoned
+       * @return true if the event has triggered, false otherwise
+       */
       bool has_triggered_faultaware(bool& poisoned) const;
       void wait_faultaware(bool& poisoned) const;
       void external_wait_faultaware(bool& poisoned) const;
       bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
+      ///@}
 
-      // subscribes to an event, ensuring the triggeredness of it will be
-      //  available as soon as possible (and without having to call wait)
+      /**
+       * Subscribe to an event, ensuring that the triggeredness of it will be
+       * available as soon as possible (and without having to call wait).
+       */
       void subscribe(void) const;
 
-      // attempts to cancel the operation associated with this event
-      // "reason_data" will be provided to any profilers of the operation
+      /**
+       * Attempt to cancel the operation associated with this event.
+       * @param reason_data will be provided to any profilers of the operation
+       * @param reason_size the size of the reason data
+       */
       void cancel_operation(const void *reason_data, size_t reason_size) const;
 
-      // attempts to change the priority of the operation associated with
-      //  this event
+      /**
+       * Attempt to change the priority of the operation associated with this
+       * event.
+       * @param new_priority the new priority
+       */
       void set_operation_priority(int new_priority) const;
- 
-      // creates an event that won't trigger until all input events have
+
+      ///@{
+      /**
+       * Create an event that won't trigger until all input events
+       * have.
+       */
       static Event merge_events(const std::set<Event>& wait_for);
       static Event merge_events(const std::vector<Event>& wait_for);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
+      ///@}
 
       // normal merged events propagate poison - this version ignores poison on
       //  inputs - use carefully!
@@ -98,11 +129,14 @@ namespace Realm {
       static Event merge_events_ignorefaults(const std::vector<Event>& wait_for);
       static Event ignorefaults(Event wait_for);
 
-      // the following calls are used to give Realm bounds on when the UserEvent
-      //  will be triggered - in addition to being useful for diagnostic purposes
-      //  (e.g. detecting event cycles), having a "late bound" (i.e. an event that
-      //  is guaranteed to occur after the UserEvent is triggered) allows Realm to
-      //  judge that the UserEvent trigger is "in flight"
+      /**
+       * The following call is used to give Realm a bound on when the UserEvent
+       * will be triggered.  In addition to being useful for diagnostic purposes
+       * (e.g. detecting event cycles), having a "happens_before" allows Realm
+       * to judge that the UserEvent trigger is "in flight".
+       * @param happens_before the event that must occur before the UserEvent
+       * @param happens_after the event that must occur after the UserEvent
+       */
       static void advise_event_ordering(Event happens_before, Event happens_after);
       static void advise_event_ordering(const std::set<Event>& happens_before,
 					Event happens_after, bool all_must_trigger = true);
@@ -122,7 +156,9 @@ namespace Realm {
       void trigger(Event wait_on = Event::NO_EVENT,
 		   bool ignore_faults = false) const;
 
-      // cancels (poisons) the event
+      /*
+       * Attempt to cancel the operation associated with this event.
+       */
       void cancel(void) const;
 
       static const UserEvent NO_USER_EVENT;
@@ -148,9 +184,12 @@ namespace Realm {
 
       static const ::realm_event_gen_t MAX_PHASES;
 
-      // barriers can be reused up to MAX_PHASES times by using "advance_barrier"
-      //  to advance a Barrier handle to the next phase - attempts to advance
-      //  beyond the last phase return NO_BARRIER instead
+      /*
+       * Advance a barrier to the next phase, returning a new barrier
+       * handle. Attemps to advance beyond the last phase return NO_BARRIER
+       * instead.
+       * @return the new barrier handle.
+       */
       Barrier advance_barrier(void) const;
       Barrier alter_arrival_count(int delta) const;
       Barrier get_previous_phase(void) const;
@@ -181,43 +220,64 @@ namespace Realm {
 
       bool exists(void) const;
 
-      // creates a completion queue that can hold at least 'max_size'
-      //  triggered events (at the moment, overflow is a fatal error)
-      // a 'max_size' of 0 allows for arbitrary queue growth, at the cost
-      //  of additional overhead
+      /**
+       * Create a completion queue that can hold at least 'max_size'
+       * triggered events (at the moment, overflow is a fatal error).
+       * A 'max_size' of 0 allows for arbitrary queue growth, at the cost
+       * of additional overhead.
+       * @param max_size the maximum size of the queue
+       * @return the completion queue
+       */
       static CompletionQueue create_completion_queue(size_t max_size);
 
-      // destroy a completion queue
+      ///@{
+      /**
+       * Destroy a completion queue.
+       * @param wait_on an event to wait on before destroying the
+       * queue.
+       */
       void destroy(Event wait_on = Event::NO_EVENT);
 
-      // adds an event to the completion queue (once it triggers)
-      // non-faultaware version raises a fatal error if the specified 'event'
-      //  is poisoned
+      /**
+       * Add an event to the completion queue (once it triggers).
+       * non-faultaware version raises a fatal error if the specified 'event'
+       * is poisoned
+       * @param event the event to add
+       */
       void add_event(Event event);
       void add_event_faultaware(Event event);
+      ///@}
 
-      // requests up to 'max_events' triggered events to be popped from the
-      //  queue and stored in the provided 'events' array (if null, the
-      //  identities of the triggered events are discarded)
-      // this call returns the actual number of events popped, which may be
-      //  zero (this call is nonblocking)
-      // when 'add_event_faultaware' is used, any poisoning of the returned
-      //  events is not signalled explicitly - the caller is expected to
-      //  check via 'has_triggered_faultaware' itself
+      /**
+       * Requests up to 'max_events' triggered events to be popped from the
+       * queue and stored in the provided 'events' array (if null, the
+       * identities of the triggered events are discarded).
+       * This call returns the actual number of events popped, which may be
+       * zero (this call is nonblocking).
+       * When 'add_event_faultaware' is used, any poisoning of the returned
+       * events is not signalled explicitly - the caller is expected to
+       * check via 'has_triggered_faultaware' itself.
+       * @param events the array to store the events in
+       * @param max_events the maximum number of events to pop
+       * @return the number of events popped
+       */
       size_t pop_events(Event *events, size_t max_events);
 
-      // get an event that, once triggered, guarantees that (at least) one
-      //  call to pop_events made since the non-empty event was requested
-      //  will return a non-zero number of triggered events
-      // once a call to pop_events has been made (by the caller of
-      //  get_nonempty_event or anybody else), the guarantee is lost and
-      //  a new non-empty event must be requested
-      // note that 'get_nonempty_event().has_triggered()' is unlikely to
-      //  ever return 'true' if called from a node other than the one that
-      //  created the completion queue (i.e. the query at least has the
-      //  round-trip network communication latency to deal with) - if polling
-      //  on the completion queue is unavoidable, the loop should poll on
-      //  pop_events directly
+      /**
+       * Get an event that, once triggered, guarantees that (at least) one
+       * call to pop_events made since the non-empty event was requested
+       * will return a non-zero number of triggered events.
+       * Once a call to pop_events has been made (by the caller of
+       * get_nonempty_event or anybody else), the guarantee is lost and
+       * a new non-empty event must be requested.
+       * Note that 'get_nonempty_event().has_triggered()' is unlikely to
+       * ever return 'true' if called from a node other than the one that
+       * created the completion queue (i.e. the query at least has the
+       * round-trip network communication latency to deal with) - if polling
+       * on the completion queue is unavoidable, the loop should poll on
+       * pop_events directly.
+       * @return the non-empty event
+       */
       Event get_nonempty_event(void);
     };
     
