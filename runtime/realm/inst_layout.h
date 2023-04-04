@@ -49,8 +49,8 @@ enum { Kokkos_Unmanaged = 0x01 };
 
 /**
  * \file int_layout.h
- * This file contains the definition of the InstanceLayoutConstraints class,
- * which is used to describe the layout of a RegionInstance.
+ * This file contains definitions of various instance layouts and
+ * accessors to read/write the underlying data.
  */
 
 namespace Realm {
