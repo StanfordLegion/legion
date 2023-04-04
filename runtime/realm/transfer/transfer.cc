@@ -3975,9 +3975,11 @@ namespace Realm {
       // well, we still have to poke pending ops
       std::vector<TransferOperation *> to_alloc;
       {
-	AutoLock<> al(mutex);
-	to_alloc.swap(pending_ops);
-	analysis_complete.store(true);  // release done by mutex
+        AutoLock<> al(mutex);
+        to_alloc.swap(pending_ops);
+        // release before the mutex is released so to_alloc is visible before the
+        // analysis_complete flag is set
+        analysis_complete.store_release(true);
       }
 
       for(size_t i = 0; i < to_alloc.size(); i++)
@@ -4491,7 +4493,9 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
       to_alloc.swap(pending_ops);
-      analysis_complete.store(true);  // release done by mutex
+      // release before the mutex is released so to_alloc is visible before the
+      // analysis_complete flag is set
+      analysis_complete.store_release(true);
     }
 
     for(size_t i = 0; i < to_alloc.size(); i++)
@@ -5229,7 +5233,6 @@ namespace Realm {
                                                   finish_event,
                                                   ID(ev).event_generation(),
                                                   priority);
-    get_runtime()->optable.add_local_operation(ev, op);
     op->start_or_defer();
 
     // remove our reference to the description (op holds one)
