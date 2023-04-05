@@ -8051,6 +8051,62 @@ legion_logger_fatal(legion_logger_t handle_, const char *msg)
   handle->fatal() << msg;
 }
 
+bool
+legion_logger_want_spew(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_spew();
+}
+
+bool
+legion_logger_want_debug(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_debug();
+}
+
+bool
+legion_logger_want_info(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_info();
+}
+
+bool
+legion_logger_want_print(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_print();
+}
+
+bool
+legion_logger_want_warning(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_warning();
+}
+
+bool
+legion_logger_want_error(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_error();
+}
+
+bool
+legion_logger_want_fatal(legion_logger_t handle_)
+{
+  Realm::Logger *handle = CObjectWrapper::unwrap(handle_);
+
+  return handle->want_fatal();
+}
+
 // -----------------------------------------------------------------------
 // Machine Operations
 // -----------------------------------------------------------------------
