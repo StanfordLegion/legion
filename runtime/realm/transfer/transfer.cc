@@ -3897,6 +3897,7 @@ namespace Realm {
     if(!preconditions.empty()) {
       Event merged = Event::merge_events(preconditions);
       if(merged.exists()) {
+	deferred_analysis.precondition = merged;
         EventImpl::add_waiter(merged, &deferred_analysis);
         return;
       }
@@ -4493,6 +4494,7 @@ namespace Realm {
     {
       AutoLock<> al(mutex);
       to_alloc.swap(pending_ops);
+      analysis_successful = true;
       // release before the mutex is released so to_alloc is visible before the
       // analysis_complete flag is set
       analysis_complete.store_release(true);
@@ -4500,6 +4502,24 @@ namespace Realm {
 
     for(size_t i = 0; i < to_alloc.size(); i++)
       to_alloc[i]->allocate_ibs();
+  }
+
+  void TransferDesc::cancel_analysis(Event failed_precondition)
+  {
+    // mark that the analysis is failed and see if there are any pending
+    //  ops that need to also fail
+    std::vector<TransferOperation *> to_alloc;
+    {
+      AutoLock<> al(mutex);
+      to_alloc.swap(pending_ops);
+      analysis_successful = false;
+      // release before the mutex is released so to_alloc is visible before the
+      // analysis_complete flag is set
+      analysis_complete.store_release(true);
+    }
+
+    for(size_t i = 0; i < to_alloc.size(); i++)
+      to_alloc[i]->handle_poisoned_precondition(failed_precondition);
   }
 
 
@@ -4515,10 +4535,11 @@ namespace Realm {
   void TransferDesc::DeferredAnalysis::event_triggered(bool poisoned,
 						       TimeLimit work_until)
   {
-    assert(!poisoned);
     // TODO: respect time limit
-
-    desc->perform_analysis();
+    if(poisoned)
+      desc->cancel_analysis(precondition);
+    else
+      desc->perform_analysis();
   }
 
   void TransferDesc::DeferredAnalysis::print(std::ostream& os) const
@@ -4571,10 +4592,14 @@ namespace Realm {
 
     bool poisoned;
     if(!precondition.has_triggered_faultaware(poisoned)) {
+      deferred_start.precondition = precondition;
       EventImpl::add_waiter(precondition, &deferred_start);
       return;
     }
-    assert(!poisoned);
+    if(poisoned) {
+      handle_poisoned_precondition(precondition);
+      return;
+    }
 
     // see if we need to wait for the transfer description analysis
     if(desc.request_analysis(this)) {
@@ -4623,6 +4648,12 @@ namespace Realm {
     bool ok_to_run = mark_ready();
     if(!ok_to_run) {
       mark_finished(false /*!successful*/);
+      return;
+    }
+
+    // if the transfer analysis was not successful, we can't continue
+    if(!desc.analysis_successful) {
+      mark_terminated(0, ByteArray());
       return;
     }
 
@@ -5185,15 +5216,17 @@ namespace Realm {
   void TransferOperation::DeferredStart::event_triggered(bool poisoned,
 							 TimeLimit work_until)
   {
-    assert(!poisoned);
     // TODO: respect time limit
-
-    // see if we need to wait for the transfer description analysis
-    if(op->desc.request_analysis(op)) {
-      // it's ready - go ahead and do ib creation
-      op->allocate_ibs();
+    if(poisoned) {
+      op->handle_poisoned_precondition(precondition);
     } else {
-      // do nothing - the TransferDesc will call us when it's ready
+      // see if we need to wait for the transfer description analysis
+      if(op->desc.request_analysis(op)) {
+	// it's ready - go ahead and do ib creation
+	op->allocate_ibs();
+      } else {
+	// do nothing - the TransferDesc will call us when it's ready
+      }
     }
   }
 
