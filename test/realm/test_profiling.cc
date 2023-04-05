@@ -384,7 +384,37 @@ void top_level_task(const void *args, size_t arglen,
 					      std::vector<size_t>(1, 8),
 					      0, // SOA
 					      prs);
-    inst.destroy(e);
+
+    // while we've got an instance, let's try canceling some copies
+    {
+      // variant 1: canceling the copy before the preconditions are
+      //  satisfied
+      UserEvent u = UserEvent::create_user_event();
+      std::vector<CopySrcDstField> srcs(1), dsts(1);
+      srcs[0].set_field(inst, 0, 1);
+      dsts[0].set_field(inst, 0, 1);
+      Event e2 = is.copy(srcs, dsts, prs, u);
+      int info = 113;
+      e2.cancel_operation(&info, sizeof(info));
+      u.trigger(e);
+      bool poisoned = false;
+      e2.wait_faultaware(poisoned);
+      assert(poisoned);
+    }
+    {
+      // variant 2: propagate poison from a canceled precondition
+      UserEvent u = UserEvent::create_user_event();
+      std::vector<CopySrcDstField> srcs(1), dsts(1);
+      srcs[0].set_field(inst, 0, 1);
+      dsts[0].set_field(inst, 0, 1);
+      Event e2 = is.copy(srcs, dsts, prs, u);
+      u.cancel();
+      bool poisoned = false;
+      e2.wait_faultaware(poisoned);
+      assert(poisoned);
+    }
+
+    inst.destroy();
   }
 
   // instance profiling #2 - allocation failure
