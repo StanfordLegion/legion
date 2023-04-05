@@ -576,7 +576,8 @@ namespace Legion {
                                 const DistributedID src_inst_did,
                                 const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &recorded_events,
-                                std::set<RtEvent> &applied_events);
+                                std::set<RtEvent> &applied_events,
+                                CollectiveKind collective = COLLECTIVE_NONE);
       void perform_collective_broadcast(
                                 const std::vector<CopySrcDstField> &src_fields,
                                 ApEvent precondition,
@@ -1739,8 +1740,8 @@ namespace Legion {
                        IndexSpaceExpression *fill_expr,
                        const PhysicalTraceInfo &trace_info,
                        const std::vector<CopySrcDstField> &dst_fields,
-                       PhysicalManager *manager,
-                       ApEvent precondition, PredEvent pred_guard);
+                       PhysicalManager *manager, ApEvent precondition,
+                       PredEvent pred_guard, CollectiveKind collective);
       public:
         FillView *const view;
         Operation *const op;
@@ -1750,6 +1751,7 @@ namespace Legion {
         PhysicalManager *const manager;
         const ApEvent precondition;
         const PredEvent pred_guard;
+        const CollectiveKind collective;
         const ApUserEvent done;
       };
     public:
@@ -1793,7 +1795,8 @@ namespace Legion {
                          const std::vector<CopySrcDstField> &dst_fields,
                          std::set<RtEvent> &applied_events,
                          PhysicalManager *manager,
-                         ApEvent precondition, PredEvent pred_guard);
+                         ApEvent precondition, PredEvent pred_guard,
+                         CollectiveKind collective = COLLECTIVE_NONE);
       static void handle_defer_issue_fill(const void *args);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez);

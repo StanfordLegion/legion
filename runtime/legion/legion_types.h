@@ -314,6 +314,19 @@ namespace Legion {
       DEP_PART_WEIGHTS = 15, // create partition by weights
     };
 
+    // Collective copy kinds
+    enum CollectiveKind {
+      COLLECTIVE_NONE = 0,
+      COLLECTIVE_FILL = 1,
+      COLLECTIVE_BROADCAST = 2,
+      COLLECTIVE_REDUCTION = 3,
+      COLLECTIVE_BUTTERFLY_ALLREDUCE = 4,
+      COLLECTIVE_HOURGLASS_ALLREDUCE = 5,
+      COLLECTIVE_POINT_TO_POINT = 6,
+      COLLECTIVE_REDUCECAST = 7,
+      COLLECTIVE_HAMMER_REDUCTION = 8,
+    };
+
     // Enumeration of Legion runtime tasks
     enum LgTaskID {
       LG_SCHEDULER_ID,

@@ -274,6 +274,7 @@ namespace Legion {
         unsigned num_hops;
         unsigned request_type;
         LgEvent fevent;
+        CollectiveKind collective;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif
@@ -284,6 +285,7 @@ namespace Legion {
         FieldID fid;
         LgEvent dst_inst_uid;
         LgEvent fevent;
+        bool collective;
       };
       struct FillInfo {
       public:
@@ -291,6 +293,7 @@ namespace Legion {
         unsigned long long size;
         timestamp_t create, ready, start, stop;
         LgEvent fevent;
+        CollectiveKind collective;
 #ifdef LEGION_PROF_PROVENANCE
         LgEvent provenance;
 #endif
@@ -573,9 +576,10 @@ namespace Legion {
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            Operation *op, unsigned count = 1);
-      void add_fill_request(Realm::ProfilingRequestSet &requests,
-                            Operation *op);
+                            Operation *op, unsigned count = 1, 
+                            CollectiveKind collective = COLLECTIVE_NONE);
+      void add_fill_request(Realm::ProfilingRequestSet &requests, Operation *op,
+                            CollectiveKind collective = COLLECTIVE_NONE);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             Operation *op, LgEvent unique_event);
       void handle_failed_instance_allocation(void);
@@ -593,10 +597,11 @@ namespace Legion {
                             TaskID tid, VariantID vid, UniqueID uid);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
-      void add_copy_request(Realm::ProfilingRequestSet &requests, 
-                            UniqueID uid, unsigned count = 1);
-      void add_fill_request(Realm::ProfilingRequestSet &requests,
-                            UniqueID uid);
+      void add_copy_request(Realm::ProfilingRequestSet &requests,
+                            UniqueID uid, unsigned count = 1,
+                            CollectiveKind collective = COLLECTIVE_NONE);
+      void add_fill_request(Realm::ProfilingRequestSet &requests, UniqueID uid,
+                            CollectiveKind collective = COLLECTIVE_NONE);
       void add_inst_request(Realm::ProfilingRequestSet &requests,
                             UniqueID uid, LgEvent unique_event);
       void add_partition_request(Realm::ProfilingRequestSet &requests,
