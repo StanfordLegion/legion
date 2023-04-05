@@ -2569,6 +2569,7 @@ namespace Legion {
                   rez.serialize(to_trigger);
                 }
                 rez.serialize(origin);
+                rez.serialize(COLLECTIVE_REDUCTION);
               }
               runtime->send_collective_distribute_reduction(origin, rez);
               recorded_events.insert(recorded);
@@ -2583,8 +2584,8 @@ namespace Legion {
                   reservations, precondition, predicate_guard, copy_expression,
                   op, index, *src_mask, copy_mask, 
                   (src_point != NULL) ? src_point->did : 0, dst_inst,
-                  manager->get_unique_event(), trace_info, recorded_events,
-                  applied_events, to_trigger, origin);
+                  manager->get_unique_event(), trace_info, COLLECTIVE_REDUCTION,
+                  recorded_events, applied_events, to_trigger, origin);
             }
           }
           else
@@ -7159,10 +7160,13 @@ namespace Legion {
             }
             rez.serialize(origin);
           }
-          if (reduction_op_id > 0)
-            runtime->send_collective_distribute_reducecast(origin, rez);
-          else
+          if (reduction_op_id == 0)
+          {
+            rez.serialize(COLLECTIVE_BROADCAST);
             runtime->send_collective_distribute_broadcast(origin, rez);
+          }
+          else
+            runtime->send_collective_distribute_reducecast(origin, rez);
           recorded_events.insert(recorded);
           applied_events.insert(applied);
         }
@@ -7181,7 +7185,8 @@ namespace Legion {
                 collective_match_space, op->get_ctx_index(), copy_mask,
                 src_inst, source_manager->get_unique_event(), trace_info,
                 recorded_events, applied_events, copy_done, all_done,
-                all_bar, owner_shard, origin, copy_restricted); 
+                all_bar, owner_shard, origin, copy_restricted, 
+                COLLECTIVE_BROADCAST); 
         }
       }
       else
@@ -7460,7 +7465,7 @@ namespace Legion {
             fused_expression, op, index, collective_match_space, op_ctx_index,
             copy_mask, local_inst, local_unique, local_info, recorded_events,
             applied_events, all_done, all_bar, owner_shard, local_space,
-            copy_restricted);
+            copy_restricted, COLLECTIVE_BROADCAST);
         return all_done;
       }
     }
@@ -9510,7 +9515,8 @@ namespace Legion {
                                 ApUserEvent copy_done, ApUserEvent all_done,
                                 ApBarrier all_bar, ShardID owner_shard,
                                 AddressSpaceID origin, 
-                                const bool copy_restricted)
+                                const bool copy_restricted,
+                                const CollectiveKind collective_kind)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -9571,7 +9577,7 @@ namespace Legion {
           src_inst.tid, local_manager->tree_id,
 #endif
           local_pre, predicate_guard, src_unique_event,
-          local_manager->get_unique_event(), COLLECTIVE_BROADCAST);
+          local_manager->get_unique_event(), collective_kind);
       if (local_info.recording)
       {
         const UniqueInst dst_inst(local_view);
@@ -9597,7 +9603,8 @@ namespace Legion {
           first_local_analysis, precondition, predicate_guard, copy_expression,
           op, index, match_space, op_ctx_index, copy_mask, src_inst,
           src_unique_event, local_info, recorded_events, applied_events,
-          all_done, all_bar, owner_shard, origin, copy_restricted);
+          all_done, all_bar, owner_shard, origin, copy_restricted,
+          collective_kind);
     }
 
     //--------------------------------------------------------------------------
@@ -9618,7 +9625,8 @@ namespace Legion {
                                std::set<RtEvent> &applied_events,
                                ApUserEvent all_done, ApBarrier all_bar,
                                ShardID owner_shard, AddressSpaceID origin,
-                               const bool copy_restricted)
+                               const bool copy_restricted,
+                               const CollectiveKind collective_kind)
     //--------------------------------------------------------------------------
     {
       const UniqueID op_id = op->get_unique_op_id();
@@ -9686,6 +9694,7 @@ namespace Legion {
             rez.serialize(done);
           }
           rez.serialize(origin);
+          rez.serialize(collective_kind);
         }
         runtime->send_collective_distribute_broadcast(*it, rez);
         recorded_events.insert(recorded);
@@ -9722,7 +9731,7 @@ namespace Legion {
             local_manager->tree_id, dst_manager->tree_id,
 #endif
             dst_pre, predicate_guard, local_manager->get_unique_event(),
-            dst_manager->get_unique_event(), COLLECTIVE_BROADCAST);
+            dst_manager->get_unique_event(), collective_kind);
         if (local_copy.exists())
         {
           read_events.push_back(local_copy);
@@ -9838,6 +9847,8 @@ namespace Legion {
       }
       AddressSpaceID origin;
       derez.deserialize(origin); 
+      CollectiveKind collective_kind;
+      derez.deserialize(collective_kind);
 
       if (view_ready.exists() && !view_ready.has_triggered())
         ready_events.insert(view_ready);
@@ -9852,7 +9863,7 @@ namespace Legion {
           predicate_guard, copy_expression, op, index, match_space,
           op_ctx_index, copy_mask, src_inst, src_unique_event, trace_info,
           recorded_events, applied_events, ready, all_done, all_bar,
-          owner_shard, origin, copy_restricted);
+          owner_shard, origin, copy_restricted, collective_kind);
 
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));
@@ -10276,6 +10287,7 @@ namespace Legion {
             reduced = to_trigger;
           }
           rez.serialize(origin);
+          rez.serialize(COLLECTIVE_HOURGLASS_ALLREDUCE);
         }
         runtime->send_collective_distribute_reduction(origin, rez);
         recorded_events.insert(recorded);
@@ -10288,8 +10300,9 @@ namespace Legion {
         source->perform_collective_reduction(local_fields,
             reservations, reduce_pre, predicate_guard, copy_expression,
             op, index, copy_mask, copy_mask, src_inst_did, local_inst, 
-            local_manager->get_unique_event(), trace_info, recorded_events,
-            applied_events, to_trigger, origin);
+            local_manager->get_unique_event(), trace_info,
+            COLLECTIVE_HOURGLASS_ALLREDUCE, recorded_events, applied_events, 
+            to_trigger, origin);
         reduced = to_trigger;
       }
       // Record the write 
@@ -10382,6 +10395,7 @@ namespace Legion {
               rez.serialize(all);
             }
             rez.serialize(origin);
+            rez.serialize(COLLECTIVE_HOURGLASS_ALLREDUCE);
           }
           runtime->send_collective_distribute_broadcast(*it, rez);
           recorded_events.insert(recorded);
@@ -10642,6 +10656,7 @@ namespace Legion {
         recorded_events.insert(recorded);
         applied_events.insert(applied);
       }
+      CollectiveKind collective_kind = COLLECTIVE_POINT_TO_POINT;
       const UniqueID op_id = op->get_unique_op_id();
       // If the source is a reduction manager, this is where we need
       // to perform the all-reduce before issuing the pointwise copies
@@ -10657,6 +10672,7 @@ namespace Legion {
         allreduce->perform_collective_allreduce(precondition,
             predicate_guard, copy_expression, op, index, copy_mask, local_info,
             recorded_events, applied_events, allreduce_tag);
+        collective_kind = COLLECTIVE_BUTTERFLY_ALLREDUCE;
       }
       for (unsigned idx = 0; idx < local_views.size(); idx++)
       {
@@ -10751,7 +10767,7 @@ namespace Legion {
             rez.serialize(local_manager->get_unique_event());
             rez.serialize(local_src_inst_did);
             inst_info.pack_trace_info(rez, applied_events);
-            rez.serialize(COLLECTIVE_POINT_TO_POINT);
+            rez.serialize(collective_kind);
             rez.serialize(recorded);
             rez.serialize(applied);
             rez.serialize(done);
@@ -10767,7 +10783,7 @@ namespace Legion {
               copy_expression, op, index, copy_mask, copy_mask, location,
               dst_inst, local_manager->get_unique_event(),
               local_src_inst_did, inst_info, recorded_events,
-              applied_events, COLLECTIVE_POINT_TO_POINT);
+              applied_events, collective_kind);
         if (local_done.exists())
         {
           done_events.push_back(local_done);
@@ -11108,6 +11124,7 @@ namespace Legion {
                                 const UniqueInst &dst_inst,
                                 const LgEvent dst_unique_event,
                                 const PhysicalTraceInfo &trace_info,
+                                const CollectiveKind collective_kind,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent result, AddressSpaceID origin)
@@ -11214,6 +11231,7 @@ namespace Legion {
             reduce_events.push_back(reduced);
           }
           rez.serialize(origin);
+          rez.serialize(collective_kind);
         }
         runtime->send_collective_distribute_reduction(*it, rez);
         recorded_events.insert(recorded);
@@ -11246,7 +11264,7 @@ namespace Legion {
               local_manager->tree_id, src_manager->tree_id,
 #endif
               local_pre, predicate_guard, src_manager->get_unique_event(),
-              local_manager->get_unique_event(), COLLECTIVE_REDUCTION);
+              local_manager->get_unique_event(), collective_kind);
           if (local_reduce.exists())
           {
             reduce_events.push_back(local_reduce);
@@ -11293,7 +11311,7 @@ namespace Legion {
           local_manager->tree_id, dst_inst.tid,
 #endif
           precondition, predicate_guard, local_manager->get_unique_event(),
-          dst_unique_event, COLLECTIVE_REDUCTION);
+          dst_unique_event, collective_kind);
       // Trigger the output
       Runtime::trigger_event(&trace_info, result, reduce_post);
       // Save the result, note that this reading of this final reduction
@@ -11383,6 +11401,8 @@ namespace Legion {
         derez.deserialize(ready);
       AddressSpaceID origin;
       derez.deserialize(origin);
+      CollectiveKind collective_kind;
+      derez.deserialize(collective_kind);
 
       if (view_ready.exists() && !view_ready.has_triggered())
         ready_events.insert(view_ready);
@@ -11396,7 +11416,7 @@ namespace Legion {
       view->perform_collective_reduction(dst_fields, reservations,
           precondition, predicate_guard, copy_expression, op, index, copy_mask,
           dst_mask, src_inst_did, dst_inst, dst_unique_event, trace_info,
-          recorded_events, applied_events, ready, origin);
+          collective_kind, recorded_events, applied_events, ready, origin);
 
       if (!recorded_events.empty())
         Runtime::trigger_event(recorded,Runtime::merge_events(recorded_events));

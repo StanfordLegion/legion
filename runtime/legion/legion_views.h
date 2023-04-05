@@ -595,7 +595,8 @@ namespace Legion {
                                 ApUserEvent copy_done, ApUserEvent all_done,
                                 ApBarrier all_bar, ShardID owner_shard,
                                 AddressSpaceID origin,
-                                const bool copy_restricted);
+                                const bool copy_restricted,
+                                const CollectiveKind collective_kind);
       void perform_collective_reducecast(ReductionView *source,
                                 const std::vector<CopySrcDstField> &src_fields,
                                 ApEvent precondition,
@@ -740,7 +741,8 @@ namespace Legion {
                                 ApUserEvent all_done,
                                 ApBarrier all_bar, ShardID owner_shard,
                                 AddressSpaceID origin,
-                                const bool copy_restricted);
+                                const bool copy_restricted,
+                                const CollectiveKind collective_kind);
     protected:
       void make_valid(bool need_lock);
       bool make_invalid(bool need_lock);
@@ -1464,6 +1466,7 @@ namespace Legion {
                                 const UniqueInst &dst_inst,
                                 const LgEvent dst_unique_event,
                                 const PhysicalTraceInfo &trace_info,
+                                const CollectiveKind collective_kind,
                                 std::set<RtEvent> &recorded_events,
                                 std::set<RtEvent> &applied_events,
                                 ApUserEvent result, AddressSpaceID origin);
