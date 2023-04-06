@@ -38,7 +38,9 @@ namespace Realm {
    * Event is created by the runtime and is used to synchronize
    * operations.  An event is triggered when the operation it
    * represents is complet and can be used as pre and post conditions
-   * for other operations.
+   * for other operations. This class represents a handle to the event
++  * itsels and can be passed-by-value as well as
++  * serialized/deserialized anywhere in the program.
    */
     class REALM_PUBLIC_API Event {
     public:
@@ -205,7 +207,7 @@ namespace Realm {
      * \class CompletionQueue
      * A completion queue funnels the completion of unordered events into a
      * single stream that can be queried (and waited on) by a single servicer
-     * thread.
+     * task.
      */
     class REALM_PUBLIC_API CompletionQueue {
     public:
