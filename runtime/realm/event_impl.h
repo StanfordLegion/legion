@@ -224,7 +224,14 @@ namespace Realm {
 			  int new_poisoned_count,
 			  TimeLimit work_until);
 
-    public: //protected:
+      // Set the operation that will trigger this event's generation.
+      void set_trigger_op(gen_t gen, Operation *op);
+      // Get the operation that will trigger this event's generation.
+      // The returned operation's reference is incremented and must be removed by the
+      // caller.
+      Operation *get_trigger_op(gen_t gen);
+
+    public: // protected:
       // these state variables are monotonic, so can be checked without a lock for
       //  early-out conditions
       atomic<gen_t> generation;
@@ -242,6 +249,9 @@ namespace Realm {
 
       // everything below here protected by this mutex
       Mutex mutex;
+
+      // The operation that will trigger this generation
+      Operation *current_trigger_op;
 
       // local waiters are tracked by generation - an easily-accessed list is used
       //  for the "current" generation, whereas a map-by-generation-id is used for
