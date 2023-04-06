@@ -263,6 +263,7 @@ namespace Realm {
 
     void check_analysis_preconditions();
     void perform_analysis();
+    void cancel_analysis(Event failed_precondition);
 
     class DeferredAnalysis : public EventWaiter {
     public:
@@ -271,8 +272,8 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
-    protected:
       TransferDesc *desc;
+      Event precondition;
     };
     DeferredAnalysis deferred_analysis;
 
@@ -285,6 +286,7 @@ namespace Realm {
 
     Mutex mutex;
     atomic<bool> analysis_complete;
+    bool analysis_successful;
     std::vector<TransferOperation *> pending_ops;
     TransferGraph graph;
     std::vector<int> dim_order;
@@ -385,8 +387,8 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
 
-    protected:
       TransferOperation *op;
+      Event precondition;
     };
     DeferredStart deferred_start;
 

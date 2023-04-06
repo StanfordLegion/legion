@@ -911,7 +911,6 @@ namespace Realm {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
 			  start_event, finish_event, finish_gen, priority);
-    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen), task);
 
     enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
