@@ -15,17 +15,25 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(RealmExample_cuda_interop)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+if (NOT REALM_USE_CUDA AND NOT REALM_USE_HIP)
+  message(FATAL_ERROR "CUDA or HIP is not enabled in REALM")
+endif()
 
-add_subdirectory(hello_world)
-add_subdirectory(events)
-add_subdirectory(region_instances)
-if (REALM_USE_CUDA OR REALM_USE_HIP)
-  add_subdirectory(cuda_interop)
-endif ()
+if (REALM_USE_CUDA)
+  cuda_add_executable(realm_cuda_interop main.cc gpu_kernel.cu)
+elseif(REALM_USE_HIP)
+  hip_add_executable(realm_cuda_interop main.cc gpu_kernel.cu)
+endif()
+
+target_link_libraries(realm_cuda_interop Legion::Realm)
+
+if(Legion_ENABLE_TESTING)
+  add_test(NAME realm_cuda_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_cuda_interop> ${Legion_TEST_ARGS} -ll:gpu 1)
+endif()
