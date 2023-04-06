@@ -743,6 +743,22 @@ namespace Legion {
                                 AddressSpaceID origin,
                                 const bool copy_restricted,
                                 const CollectiveKind collective_kind);
+      void broadcast_local(const PhysicalManager *src_manager,
+                           const unsigned src_index, Operation *op,
+                           const unsigned index,IndexSpaceExpression *copy_expr,
+                           const FieldMask &copy_mask,
+                           ApEvent precondition, PredEvent predicate_guard,
+                           const std::vector<CopySrcDstField> &src_fields,
+                           const UniqueInst &src_inst,
+                           const PhysicalTraceInfo &trace_info,
+                           const CollectiveKind collective_kind,
+                           std::vector<ApEvent> &destination_events,
+                           std::set<RtEvent> &recorded_events,
+                           std::set<RtEvent> &applied_events,
+                           const bool has_instance_events = false,
+                           const bool first_local_analysis = false,
+                           const size_t op_ctx_index = 0,
+                           const IndexSpaceID match_space = 0) const; 
     protected:
       void make_valid(bool need_lock);
       bool make_invalid(bool need_lock);
@@ -1619,6 +1635,22 @@ namespace Legion {
                                 ApBarrier src_barrier, ShardID bar_shard,
                                 const UniqueInst &src_inst,
                                 const LgEvent src_unique_event);
+      void reduce_local(const PhysicalManager *dst_manager,
+                        const unsigned dst_index, Operation *op,
+                        const unsigned index, IndexSpaceExpression *copy_expr,
+                        const FieldMask &copy_mask, ApEvent precondition,
+                        PredEvent predicate_guard,
+                        const std::vector<CopySrcDstField> &dst_fields,
+                        const std::vector<Reservation> &dst_reservations,
+                        const UniqueInst &dst_inst,
+                        const PhysicalTraceInfo &trace_info,
+                        const CollectiveKind collective_kind,
+                        std::vector<ApEvent> &reduced_events,
+                        std::set<RtEvent> &applied_events,
+                        std::set<RtEvent> *recorded_events = NULL,
+                        const bool prepare_allreduce = false,
+                        std::vector<std::vector<
+                              CopySrcDstField> > *src_fields = NULL) const;
     public:
       static void handle_send_allreduce_view(Runtime *runtime,
                                              Deserializer &derez);
