@@ -296,6 +296,7 @@ namespace Realm {
       std::string prefix;
 #endif
 
+      atomic<size_t> num_untriggered_events;
       Node *nodes;
       DynamicTable<LocalEventTableAllocator> local_events;
       LocalEventTableAllocator::FreeList *local_event_free_list;

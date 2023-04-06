@@ -15202,15 +15202,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We check equalities only on the members of LayoutConstraintSet
-      return field_constraint == rhs.field_constraint
-             && specialized_constraint == rhs.specialized_constraint
-             && memory_constraint == rhs.memory_constraint
-             && ordering_constraint == rhs.ordering_constraint
-             && alignment_constraints == rhs.alignment_constraints
-             && dimension_constraints == rhs.dimension_constraints
-             && tiling_constraints == rhs.tiling_constraints
-             && offset_constraints == rhs.offset_constraints
-             && pointer_constraint == rhs.pointer_constraint;
+      return equals(rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -15218,15 +15210,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We check equalities only on the members of LayoutConstraintSet
-      return field_constraint == rhs.field_constraint
-             && specialized_constraint == rhs.specialized_constraint
-             && memory_constraint == rhs.memory_constraint
-             && ordering_constraint == rhs.ordering_constraint
-             && alignment_constraints == rhs.alignment_constraints
-             && dimension_constraints == rhs.dimension_constraints
-             && tiling_constraints == rhs.tiling_constraints
-             && offset_constraints == rhs.offset_constraints
-             && pointer_constraint == rhs.pointer_constraint;
+      return equals(rhs);
     }
 
     //--------------------------------------------------------------------------

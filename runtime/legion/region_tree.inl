@@ -7484,7 +7484,7 @@ namespace Legion {
             sparse_shard_rects->push_back(
                 std::make_pair(child_space.bounds, local_space));
         }
-        else
+        else if (!child_space.bounds.empty())
           dense_shard_rects->push_back(
               std::make_pair(child_space.bounds, it->first));
       }

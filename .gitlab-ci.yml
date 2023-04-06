@@ -217,12 +217,10 @@ cache: &global_cache
 .kokkos: &kokkos
   USE_KOKKOS: "1"
   KOKKOS_REPO: "https://github.com/kokkos/kokkos.git"
-  KOKKOS_BRANCH: "release-candidate-4.0.0"
-  KOKKOS_COMMIT: "14deae4036aa7165c55fc53bf8634f654ac6e257"
+  KOKKOS_BRANCH: "4.0.00"
   KOKKOS_CUDA_ARCH: "PASCAL60"
   KKERNELS_REPO: "https://github.com/kokkos/kokkos-kernels.git"
-  KKERNELS_BRANCH: "develop"
-  KKERNELS_COMMIT: "bce06df1aa1fc0634aecfb579eb41341db9c9bcf"
+  KKERNELS_BRANCH: "4.0.00"
 
 .prof: &prof
   USE_PROF: "1"
@@ -364,19 +362,19 @@ before_script:
       export CUDA_PATH="${CUDA}/lib64:${CUDA}/lib64/stubs:/usr/local/nvidia/lib64"
     fi
   - |
+    # if kokkos is already existed, pull the branch and remove the build
     if [[ "$USE_KOKKOS" -eq 1 ]]; then
-      # git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
-      # FIXME (Wei): since we are using the dev branch, pick a stable hash for now
-      #   remove it once the dev branch has been merged into master
-      # git -C kokkos checkout 14deae4036aa7165c55fc53bf8634f654ac6e257
-      # git -C kokkos log -n 1
-      mkdir kokkos
-      cd kokkos
-      git init
-      git remote add origin $KOKKOS_REPO
-      git fetch --depth 1 origin $KOKKOS_COMMIT
-      git checkout FETCH_HEAD
-      cd ..
+      if [ -d "kokkos" ]; then
+        pushd $PWD
+        cd kokkos
+        git checkout $KOKKOS_BRANCH
+        git pull origin $KOKKOS_BRANCH
+        rm -rf build
+        popd
+      else
+        git clone -b $KOKKOS_BRANCH -- $KOKKOS_REPO kokkos
+        git -C kokkos log -n 1
+      fi
       mkdir kokkos/build
       cd kokkos/build
       KOKKOS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
@@ -422,24 +420,24 @@ before_script:
       # tell cmake where to find the Kokkos install
       export Kokkos_DIR=`pwd`/kokkos/install
 
+      # if kokkos-kernel is already existed, pull the branch and remove the build
+      if [ -d "kokkos-kernels" ]; then
+        pushd $PWD
+        cd kokkos-kernels
+        git checkout $KKERNELS_BRANCH
+        git pull origin $KKERNELS_BRANCH
+        rm -rf build
+        popd
+      else
+        git clone -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
+        git -C kokkos-kernels log -n 1
+      fi
       # now build kokkos-kernels
-      # git clone -b $KKERNELS_BRANCH -- $KKERNELS_REPO kokkos-kernels
-      # FIXME (Wei): since we are using the dev branch, pick a stable hash for now
-      #   remove it once the dev branch has been merged into master
-      # git -C kokkos-kernels checkout bce06df1aa1fc0634aecfb579eb41341db9c9bcf
-      # git -C kokkos-kernels log -n 1
-      mkdir kokkos-kernels
-      cd kokkos-kernels
-      git init
-      git remote add origin $KKERNELS_REPO
-      git fetch --depth 1 origin $KKERNELS_COMMIT
-      git checkout FETCH_HEAD
-      cd ..
       mkdir kokkos-kernels/build
       cd kokkos-kernels/build
       KKERNELS_CMAKE_OPTS="-DCMAKE_INSTALL_PREFIX=../install -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
       # FIXME (Wei): disable sparse for now because it does not compile
-      KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER} -DKokkosKernels_ENABLE_ALL_COMPONENTS=OFF -DKokkosKernels_ENABLE_BLAS=ON -DKokkosKernels_ENABLE_SPARSE=OFF"
+      KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DCMAKE_CXX_COMPILER=${KOKKOS_CXX_COMPILER} -DKokkosKernels_ENABLE_ALL_COMPONENTS=OFF -DKokkosKernels_ENABLE_COMPONENT_BLAS=ON -DKokkosKernels_ENABLE_COMPONENT_SPARSE=OFF"
       if [[ "$SHARED_OBJECTS" -eq 1 ]]; then
         KKERNELS_CMAKE_OPTS="$KKERNELS_CMAKE_OPTS -DBUILD_SHARED_LIBS=ON"
       fi

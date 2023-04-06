@@ -790,8 +790,6 @@ namespace Realm {
 
   void PartitioningOperation::launch(Event wait_for)
   {
-    get_runtime()->optable.add_local_operation(get_finish_event(), this);
-
     if(wait_for.has_triggered())
       deppart_op_queue->enqueue_partitioning_operation(this);
     else
