@@ -4723,15 +4723,14 @@ namespace Legion {
         if (true_guard.exists())
         {
           task_launch_event = Runtime::ignorefaults(task_launch_event);
-          // Also merge in the original precondition so that is reflected 
+          // Also merge in the original preconditions so that is reflected 
           // downstream in the event chain still for things like postconditions
-          if (start_condition.exists())
+          // Make sure to prune out the true guard that we added here
+          wait_on_events.erase(ApEvent(true_guard));
+          if (!wait_on_events.empty())
           {
-            if (task_launch_event.exists())
-              task_launch_event =
-                Runtime::merge_events(NULL, task_launch_event, start_condition);
-            else
-              task_launch_event = start_condition;
+            wait_on_events.insert(task_launch_event);
+            task_launch_event = Runtime::merge_events(NULL, wait_on_events);
           }
         }
       }
