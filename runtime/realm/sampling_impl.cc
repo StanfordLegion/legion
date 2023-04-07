@@ -564,7 +564,7 @@ namespace Realm {
       } else {
 	// replace % with node number
 	char filename[256];
-	sprintf(filename, "%.*s%d%s",
+	snprintf(filename, sizeof filename, "%.*s%d%s",
 		(int)pct, logfile.c_str(), Network::my_node_id, logfile.c_str() + pct + 1);
 	logfile = filename;
       }

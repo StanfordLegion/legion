@@ -138,7 +138,7 @@ int start_call() {
         temp_posix_memalign = dlsym(RTLD_NEXT, "posix_memalign");
 
         char filename[128];
-        sprintf(filename, LOGFILE_FORMAT, getpid());
+        snprintf(filename, sizeof filename,LOGFILE_FORMAT, getpid());
         outfile = fopen(filename, "w");
 
         if (!temp_malloc || !temp_calloc || !temp_realloc || !temp_memalign ||
