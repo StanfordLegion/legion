@@ -743,6 +743,7 @@ namespace Legion {
                                 AddressSpaceID origin,
                                 const bool copy_restricted,
                                 const CollectiveKind collective_kind);
+    protected:
       void broadcast_local(const PhysicalManager *src_manager,
                            const unsigned src_index, Operation *op,
                            const unsigned index,IndexSpaceExpression *copy_expr,
@@ -758,7 +759,20 @@ namespace Legion {
                            const bool has_instance_events = false,
                            const bool first_local_analysis = false,
                            const size_t op_ctx_index = 0,
-                           const IndexSpaceID match_space = 0) const; 
+                           const IndexSpaceID match_space = 0); 
+      const std::vector<std::pair<unsigned,unsigned> >&
+                  find_spanning_broadcast_copies(unsigned root_index);
+      bool construct_spanning_adjacency_matrix(unsigned root_index,
+                  const std::map<Memory,unsigned> &first_in_memory,
+                  std::vector<float> &adjacency_matrix) const;
+      void compute_spanning_tree_same_bandwidth(unsigned root_index,
+                  const std::vector<float> &adjacency_matrix,
+                  std::vector<std::pair<unsigned,unsigned> > &spanning,
+                  std::map<Memory,unsigned> &first_in_memory) const;
+      void compute_spanning_tree_diff_bandwidth(unsigned root_index,
+                  const std::vector<float> &adjacency_matrix,
+                  std::vector<std::pair<unsigned,unsigned> > &spanning,
+                  std::map<Memory,unsigned> &first_in_memory) const;
     protected:
       void make_valid(bool need_lock);
       bool make_invalid(bool need_lock);
@@ -808,6 +822,8 @@ namespace Legion {
                                               Deserializer &derez);
       static void handle_remove_remote_reference(Runtime *runtime,
                                                  Deserializer &derez);
+      static bool has_multiple_local_memories(
+                    const std::vector<IndividualView*> &local_views);
     public:
       const DistributedID context_did;
       const std::vector<DistributedID> instances;
@@ -864,6 +880,11 @@ namespace Legion {
     private:
       // Use this flag to deduplicate deletion notifications from our instances
       std::atomic<bool> deletion_notified;
+    protected:
+      // Whether our local views are contained in multiple local memories
+      const bool multiple_local_memories;
+      std::map<unsigned,
+        std::vector<std::pair<unsigned,unsigned> > > spanning_copies;
     };
 
     /**
@@ -1650,7 +1671,7 @@ namespace Legion {
                         std::set<RtEvent> *recorded_events = NULL,
                         const bool prepare_allreduce = false,
                         std::vector<std::vector<
-                              CopySrcDstField> > *src_fields = NULL) const;
+                              CopySrcDstField> > *src_fields = NULL);
     public:
       static void handle_send_allreduce_view(Runtime *runtime,
                                              Deserializer &derez);
