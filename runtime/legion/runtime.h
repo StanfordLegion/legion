@@ -2143,7 +2143,7 @@ namespace Legion {
       bool is_no_access_region(unsigned idx) const;
     public:
       ApEvent dispatch_task(Processor target, SingleTask *task, 
-          TaskContext *ctx, ApEvent precondition, PredEvent pred,
+          TaskContext *ctx, ApEvent precondition,
           int priority, Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, TaskContext *ctx);
     public:

@@ -4569,6 +4569,9 @@ namespace Legion {
                 execution_events.begin(); it != execution_events.end(); it++)
             wait_on_events.insert(ApEvent(*it));
       }
+      // If we have a predicate event then merge that in here as well
+      if (true_guard.exists())
+        wait_on_events.insert(ApEvent(true_guard));
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
       // Take all the locks in order in the proper way
@@ -4576,14 +4579,8 @@ namespace Legion {
       {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
-        {
           start_condition = Runtime::acquire_ap_reservation(it->first, 
                                           it->second, start_condition);
-          // We can also issue the release now dependent on this
-          // task being complete, this way we do it before we launch
-          // the task and the atomic_locks might be cleaned up
-          Runtime::release_reservation(it->first, single_task_termination);
-        }
       }
       // STEP 3: Finally we get to launch the task
       // Mark that we have an outstanding task in this context 
@@ -4684,13 +4681,60 @@ namespace Legion {
             !start_condition.has_triggered_faultaware(poisoned))
           start_condition.wait_faultaware(poisoned);
         if (poisoned)
-          execution_context->raise_poison_exception();
-        variant->dispatch_inline(launch_processor, execution_context);
+        {
+          // Check to see if we were poisoned because of prediation
+          // or because of an actual fault
+          bool mispredicated = false;
+          true_guard.has_triggered_faultaware(mispredicated);
+          if (!mispredicated)
+            execution_context->raise_poison_exception();
+          // No need to release the reservations because they were
+          // poisoned out from being executed
+        }
+        else
+        {
+          variant->dispatch_inline(launch_processor, execution_context);
+          // Release any reservations that we took on behalf of this task
+          if (!atomic_locks.empty())
+          {
+            for (std::map<Reservation,bool>::const_iterator it = 
+                  atomic_locks.begin(); it != atomic_locks.end(); it++)
+              Runtime::release_reservation(it->first);
+          }
+        }
       }
       else
+      {
         task_launch_event = variant->dispatch_task(launch_processor, this,
-                            execution_context, start_condition, true_guard,
+                            execution_context, start_condition,
                             task_priority, profiling_requests);
+        // Release any reservations that we took on behalf of this task
+        // Note this happens before protection of the event for predication
+        // because the acquires were also subject to poisoning so we either
+        // want all the releases to be done or poisoned the same as the acquires
+        if (!atomic_locks.empty())
+        {
+          for (std::map<Reservation,bool>::const_iterator it = 
+                atomic_locks.begin(); it != atomic_locks.end(); it++)
+            Runtime::release_reservation(it->first, task_launch_event);
+        }
+        // If this task was predicated then we need to protect everything that
+        // comes after this from the predication poison
+        if (true_guard.exists())
+        {
+          task_launch_event = Runtime::ignorefaults(task_launch_event);
+          // Also merge in the original precondition so that is reflected 
+          // downstream in the event chain still for things like postconditions
+          if (start_condition.exists())
+          {
+            if (task_launch_event.exists())
+              task_launch_event =
+                Runtime::merge_events(NULL, task_launch_event, start_condition);
+            else
+              task_launch_event = start_condition;
+          }
+        }
+      }
       if (chain_task_termination.exists())
       {
         if (chain_precondition.exists())

@@ -14763,7 +14763,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent VariantImpl::dispatch_task(Processor target, SingleTask *task,
                                        TaskContext *ctx, ApEvent precondition,
-                                       PredEvent predicate_guard, int priority, 
+                                       int priority, 
                                        Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
@@ -14783,25 +14783,11 @@ namespace Legion {
       runtime->increment_total_outstanding_tasks();
 #endif
       DETAILED_PROFILER(runtime, REALM_SPAWN_TASK_CALL);
-      // If our ready event hasn't triggered, include it in the precondition
-      if (predicate_guard.exists())
-      {
-        // Merge in the predicate guard
-        ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
-                                            ApEvent(predicate_guard));
-        // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(ApEvent(target.spawn(descriptor_id, 
-                    &ctx, sizeof(ctx), requests, pre, priority)));
-      }
-      else
-      {
-        // No predicate guard
-        if (ready_event.exists())
-          return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
-             Runtime::merge_events(NULL, precondition, ready_event), priority));
-        return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
-                                    precondition, priority));
-      }
+      if (ready_event.exists())
+        return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
+           Runtime::merge_events(NULL, precondition, ready_event), priority));
+      return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests,
+                                  precondition, priority));
     }
 
     //--------------------------------------------------------------------------
