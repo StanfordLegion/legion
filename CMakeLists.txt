@@ -405,25 +405,53 @@ endif()
 #------------------------------------------------------------------------------#
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
 if(Legion_USE_CUDA)
+  include(cmake/cuda_arch.cmake)
   set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
   option(Legion_CUDA_DYNAMIC_LOAD "Load cuda libraries at runtime" OFF)
+
+  set(CUDA_AS_LANGUAGE ON)
 
   if(NOT BUILD_SHARED_LIBS)
     set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
   else()
     set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
   endif()
-  find_package(CUDA REQUIRED)
-  install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-  )
-  install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
-  )
 
-  # before cmake 3.13, the CUDAHOSTCXX env variable wasn't propagated to CUDA_HOST_COMPILER automatically
-  if(CMAKE_VERSION VERSION_LESS "3.13" AND DEFINED ENV{CUDAHOSTCXX})
-    set(CUDA_HOST_COMPILER $ENV{CUDAHOSTCXX} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
+  if(CUDA_AS_LANGUAGE)
+    if(Legion_CUDA_ARCH)
+      message(WARNING "Legion_CUDA_ARCH has been deprecated in favor of the standard CMAKE_CUDA_ARCHITECTURES")
+    endif()
+    # if not defined as a cache variable
+    if(DEFINED CMAKE_CUDA_ARCHITECTURES)
+      if(Legion_CUDA_ARCH)
+        message(WARNING "Both CMAKE_CUDA_ARCHITECTURES and Legion_CUDA_ARCH are specified. Ignoring Legion_CUDA_ARCH")
+      endif()
+    else()
+      if(Legion_CUDA_ARCH)
+	      # If the old variable is set, transfer the new value here
+	      set(CMAKE_CUDA_ARCHITECTURES ${Legion_CUDA_ARCH})
+      elseif(CMAKE_VERSION GREATER_EQUAL 3.23)
+        set(CMAKE_CUDA_ARCHITECTURES all)
+      else()
+        find_package(CUDA REQUIRED)
+	      get_cuda_arch(CMAKE_CUDA_ARCHITECTURES)
+      endif()
+    endif()
+    enable_language(CUDA)
+    set(CUDA_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+  else()
+    find_package(CUDA REQUIRED)
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+    )
+    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
+    )
+
+    # before cmake 3.13, the CUDAHOSTCXX env variable wasn't propagated to CUDA_HOST_COMPILER automatically
+    if(CMAKE_VERSION VERSION_LESS "3.13" AND DEFINED ENV{CUDAHOSTCXX})
+      set(CUDA_HOST_COMPILER $ENV{CUDAHOSTCXX} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
+    endif()
   endif()
 
   # define variable for legion_defines.h
@@ -463,7 +491,7 @@ set(Legion_HIP_TARGETS ROCM CUDA)
 set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
 set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
 if(Legion_USE_HIP)
-  if (Legion_HIP_TARGET STREQUAL "CUDA")
+  if(Legion_HIP_TARGET STREQUAL "CUDA")
     set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
 
     if(NOT BUILD_SHARED_LIBS)
@@ -481,7 +509,7 @@ if(Legion_USE_HIP)
   set(HIPCC_FLAGS "${HIPCC_FLAGS} -D__HIP_PLATFORM_NVCC__")
   endif()
 
-  if (Legion_HIP_TARGET STREQUAL "ROCM")
+  if(Legion_HIP_TARGET STREQUAL "ROCM")
     set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
 
     if(BUILD_SHARED_LIBS)

@@ -606,7 +606,7 @@ if(Legion_USE_Kokkos)
   endif()
 
   if(Legion_USE_OpenMP AND (Kokkos_VERSION_MAJOR GREATER_EQUAL 4))
-    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer 
+    # hack the kokkos_compile_options because -Xcompiler and -fopenmp are no longer
     #   added by INTERFACE_COMPILE_OPTIONS, so we will added them ourselved
     if(Legion_USE_CUDA)
       list(APPEND kokkos_compile_options "-Xcompiler")
@@ -801,38 +801,26 @@ if(Legion_BUILD_REALM_ONLY)
   set(EXCLUDE_LEGION EXCLUDE_FROM_ALL)
 endif()
 
+# CUDA has been enabled as a language so we can just add the source files
+# to the library list of source files.
+if (LEGION_CUDA_SRC AND CUDA_AS_LANGUAGE)
+  list(APPEND LEGION_SRC ${LEGION_CUDA_SRC})
+endif()
+
 add_library(LegionRuntime ${EXCLUDE_LEGION} ${MAPPER_SRC} ${LEGION_SRC} ${LEGION_FORTRAN_SRC})
 add_library(Legion::LegionRuntime ALIAS LegionRuntime)
-# do we have any cuda source files in Legion itself?
-if(LEGION_CUDA_SRC)
+
+# CUDA is not available as a language, only as a package, so we need
+# to manually cuda_compile the CUDA source files
+if(LEGION_CUDA_SRC AND NOT CUDA_AS_LANGUAGE)
   # Fill in the most compatible set of architectures we support
   if("${Legion_CUDA_ARCH}" STREQUAL "")
     if (${CUDA_VERSION_STRING} VERSION_LESS "11.5")
-      # Prior to 11.5, we don't have -arch=all and have to list the architectures out manually
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "3.2" AND ${CUDA_VERSION_STRING} VERSION_LESS "9.0")
-        list(APPEND Legion_CUDA_ARCH 20)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "11.0")
-        list(APPEND Legion_CUDA_ARCH 30)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "5.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 35)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "6.0" AND ${CUDA_VERSION_STRING} VERSION_LESS "12.0")
-        list(APPEND Legion_CUDA_ARCH 50)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "8.0")
-        list(APPEND Legion_CUDA_ARCH 60)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "9.0")
-        list(APPEND Legion_CUDA_ARCH 70)
-      endif ()
-      if (${CUDA_VERSION_STRING} VERSION_GREATER_EQUAL "11.0")
-        list(APPEND Legion_CUDA_ARCH 80)
-      endif ()
+       #include(cmake/cuda_arch.cmake)
+      get_cuda_arch(Legion_CUDA_ARCH)
     else ()
-        # New with 11.5, nvcc supports 'all-major' which does all this for us
-        set(CUDA_GENCODE "-arch all-major")
+      # New with 11.5, nvcc supports 'all-major' which does all this for us
+      set(CUDA_GENCODE "-arch all-major")
     endif ()
   else ()
       # If the user specified a specific gencode to use, use that
