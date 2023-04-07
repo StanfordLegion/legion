@@ -9957,12 +9957,13 @@
     {
       if (is_sparse())
       {
-        char *result = (char*)malloc(1024*sizeof(char));
-        sprintf(result,"Compound Sparse %d:", sparse_size);
+        size_t count = 1024;
+        char *result = (char*)malloc(count*sizeof(char));
+        snprintf(result, count, "Compound Sparse %d:", sparse_size);
         for (unsigned idx = 0; idx < sparse_size; idx++)
         {
           char temp[64];
-          sprintf(temp, " %d", mask.sparse[idx]);
+          snprintf(temp, sizeof temp, " %d", mask.sparse[idx]);
           strcat(result,temp);
         }
         return result;

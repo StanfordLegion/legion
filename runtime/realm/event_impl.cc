@@ -2230,7 +2230,7 @@ static void *bytedup(const void *data, size_t datalen)
       if(reduce_value_size) {
         char buffer[129];
 	for(size_t i = 0; (i < reduce_value_size) && (i < 64); i++)
-	  sprintf(buffer+2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
+	  snprintf(buffer+2*i, sizeof buffer - 2*i, "%02x", ((const unsigned char *)reduce_value)[i]);
 	log_barrier.info("barrier reduction: event=" IDFMT "/%d size=%zd data=%s",
 	                 me.id(), barrier_gen, reduce_value_size, buffer);
       }

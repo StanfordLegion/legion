@@ -140,7 +140,7 @@ void top_level_task(const Task *task,
         IndexSpace disjoint_space = runtime->get_index_subspace(ctx, disjoint_ip, color);
         LogicalRegion disjoint_lr = 
             runtime->create_logical_region(ctx, disjoint_space, fs);  
-        sprintf(buf, "disjoint_lr_%d", color);
+        snprintf(buf, sizeof buf, "disjoint_lr_%d", color);
         runtime->attach_name(disjoint_lr, buf);
 
         disjoint_subregions[color] = disjoint_lr;
@@ -331,14 +331,14 @@ void spmd_task(const Task *task,
             ghost_ip = runtime->create_partition_by_restriction(ctx, neighbor_is,
                 ghost_color_left_is, transform, extent, DISJOINT_KIND);
         }
-        sprintf(buf, "%s_neighbor_ghost_ip_of_%d", parts[neighbor], color);
+        snprintf(buf, sizeof buf, "%s_neighbor_ghost_ip_of_%d", parts[neighbor], color);
         runtime->attach_name(ghost_ip, buf);
         
         // create the logical region
         IndexSpace ghost_is = runtime->get_index_subspace(ctx, ghost_ip, 
             (neighbor == NEIGHBOR_LEFT) ? GHOST_RIGHT : GHOST_LEFT);
         ghost_lrs[neighbor] = runtime->create_logical_region(ctx, ghost_is, ghost_fs);
-        sprintf(buf, "%s_neighbor_ghost_lr_of_%d", parts[neighbor], color);
+        snprintf(buf, sizeof buf, "%s_neighbor_ghost_lr_of_%d", parts[neighbor], color);
         runtime->attach_name(ghost_lrs[neighbor], buf);
     }
 

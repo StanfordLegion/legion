@@ -1636,7 +1636,7 @@ namespace Realm {
       DiskMemory *diskmem;
       if(disk_mem_size > 0) {
         char file_name[30];
-        sprintf(file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
                                  disk_mem_size,
