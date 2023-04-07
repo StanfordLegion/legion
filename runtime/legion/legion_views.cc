@@ -9977,13 +9977,87 @@ namespace Legion {
       // same bandwidth in which case we can do this with BFS.
       // The case of all having the same bandwidth happens with switched 
       // systems like the front-side bus and NVLink with NVSwitch. 
-      std::vector<std::pair<unsigned,unsigned> > spanning;
+      // We represent the spanning tree using a vector that maps each node
+      // to it's "parent" node (e.g. the one that produces it) in the 
+      // spanning tree (the root has no parent)
+      std::vector<unsigned> previous(total_memories, UINT_MAX);
       if (same_bandwidth)
         compute_spanning_tree_same_bandwidth(root_index,
-            adjacency_matrix, spanning, first_in_memory);
+            adjacency_matrix, previous, first_in_memory);
       else
         compute_spanning_tree_diff_bandwidth(root_index,
-            adjacency_matrix, spanning, first_in_memory);
+            adjacency_matrix, previous, first_in_memory);
+      // Next we compute the actual order of spanning copies, we do this
+      // by first computing a depth-first search to determine which 
+      // children have the deepest sub-trees so that we can use that to
+      // say what order children should be traversed in from each node
+      std::vector<std::pair<unsigned,bool> > dfs_stack; 
+      dfs_stack.emplace_back(std::pair<unsigned,bool>(root_index,true));
+      std::vector<unsigned> max_subtree_depth(total_memories, UINT_MAX);
+      while (!dfs_stack.empty())
+      {
+        std::pair<unsigned,bool> &next = dfs_stack.back();
+        if (next.second)
+        {
+          // Pre-traversal
+          // Push all of our children onto the stack
+          for (unsigned child = 0; child < total_memories; child++)
+            if (previous[child] == next.first)
+              dfs_stack.emplace_back(std::pair<unsigned,bool>(child,true));
+          next.second = false;
+        }
+        else
+        {
+          // Post-traversal
+          // Compute our max sub-tree
+          unsigned max_depth = 0;
+          for (unsigned child = 0; child < total_memories; child++)
+          {
+            if (previous[child] != next.first)
+              continue;
+#ifdef DEBUG_LEGION
+            assert(max_subtree_depth[child] != UINT_MAX);
+#endif
+            unsigned depth = max_subtree_depth[child] + 1;
+            if (max_depth < depth)
+              max_depth = depth;
+          }
+          max_subtree_depth[next.first] = max_depth;
+          dfs_stack.pop_back();
+        }
+      }
+      // Now we've got the max depth of each sub-tree, so we can compute
+      // the order of the spanning copies from each node to maximize getting
+      // the ones with the maximum depth out first, need to do this with bfs
+      std::deque<unsigned> bfs_queue;
+      bfs_queue.push_back(root_index);
+      std::vector<std::pair<unsigned,unsigned> > spanning;
+      while (!bfs_queue.empty())
+      {
+        unsigned next = bfs_queue.front();
+        bfs_queue.pop_front();
+        // Track the <depth,child> pairs so we can sort them 
+        // and then traverse them in order
+        std::vector<std::pair<unsigned,unsigned> > child_depths;
+        for (unsigned child = 0; child < total_memories; child++)
+          if (previous[child] == next)
+            child_depths.emplace_back(
+                std::pair<unsigned,unsigned>(max_subtree_depth[child], child));
+        if (!child_depths.empty())
+        {
+          std::sort(child_depths.begin(), child_depths.end());
+          // Reverse order traverse so we do the max depth ones first
+          for (std::vector<std::pair<unsigned,unsigned> >::reverse_iterator it =
+                child_depths.rbegin(); it != child_depths.rend(); it++)
+          {
+            // Add it to the spanning
+            spanning.emplace_back(
+                std::pair<unsigned,unsigned>(next, it->second));
+            // Add it to the queue to traverse next
+            bfs_queue.push_back(it->second);
+          }
+        }
+      }
 #ifdef DEBUG_LEGION
       // Should have a copy into every memory except the root one
       assert(spanning.size() == (total_memories - 1));
@@ -10134,7 +10208,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CollectiveView::compute_spanning_tree_same_bandwidth(
                 unsigned root_index, const std::vector<float> &adjacency_matrix,
-                std::vector<std::pair<unsigned,unsigned> > &spanning,
+                std::vector<unsigned> &previous,
                 std::map<Memory,unsigned> &first_in_memory) const
     //--------------------------------------------------------------------------
     {
@@ -10188,9 +10262,9 @@ namespace Legion {
           std::advance(current, next.first);
 #ifdef DEBUG_LEGION
           assert(current->second != UINT_MAX);
+          assert(previous[finder->second] == UINT_MAX);
 #endif
-          spanning.emplace_back(
-              std::pair<unsigned,unsigned>(current->second, finder->second));
+          previous[finder->second] = current->second;
           // Add it the child to list to search
           bfs_queue.emplace_back(std::pair<unsigned,unsigned>(child,0));
           // Add ourself back on the list if there are more children to search
@@ -10206,7 +10280,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CollectiveView::compute_spanning_tree_diff_bandwidth(
                 unsigned root_index, const std::vector<float> &adjacency_matrix,
-                std::vector<std::pair<unsigned,unsigned> > &spanning,
+                std::vector<unsigned> &previous,
                 std::map<Memory,unsigned> &first_in_memory) const
     //--------------------------------------------------------------------------
     {
@@ -10278,9 +10352,9 @@ namespace Legion {
           std::advance(current, next);
 #ifdef DEBUG_LEGION
           assert(current->second != UINT_MAX);
+          assert(previous[finder->second] == UINT_MAX);
 #endif
-          spanning.emplace_back(
-              std::pair<unsigned,unsigned>(current->second, finder->second));
+          previous[finder->second] = current->second;
           // Add the child to list to search
           bfs_queue.push_back(lowest_child);
           // If we still have more children we could copy to then 

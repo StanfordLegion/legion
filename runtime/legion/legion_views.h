@@ -767,11 +767,11 @@ namespace Legion {
                   std::vector<float> &adjacency_matrix) const;
       void compute_spanning_tree_same_bandwidth(unsigned root_index,
                   const std::vector<float> &adjacency_matrix,
-                  std::vector<std::pair<unsigned,unsigned> > &spanning,
+                  std::vector<unsigned> &previous,
                   std::map<Memory,unsigned> &first_in_memory) const;
       void compute_spanning_tree_diff_bandwidth(unsigned root_index,
                   const std::vector<float> &adjacency_matrix,
-                  std::vector<std::pair<unsigned,unsigned> > &spanning,
+                  std::vector<unsigned> &previous,
                   std::map<Memory,unsigned> &first_in_memory) const;
     protected:
       void make_valid(bool need_lock);
