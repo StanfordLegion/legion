@@ -28,6 +28,30 @@ namespace Realm {
   // class Operation
   //
 
+  Operation::Operation(GenEventImpl *_finish_event, EventImpl::gen_t _finish_gen,
+                       const ProfilingRequestSet &_requests)
+    : finish_event(_finish_event)
+    , finish_gen(_finish_gen)
+    , refcount(1)
+    , state(ProfilingMeasurements::OperationStatus::WAITING)
+    , requests(_requests)
+    , all_work_items(0)
+    , pending_work_items(1 /* i.e. the main work item */)
+    , failed_work_items(0 /* hopefully it stays that way*/)
+  {
+    status.error_code = 0;
+    measurements.import_requests(requests);
+    wants_timeline =
+        measurements.wants_measurement<ProfilingMeasurements::OperationTimeline>();
+    wants_gpu_timeline =
+        measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>();
+    wants_event_waits =
+        measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>();
+    if(wants_timeline)
+      timeline.record_create_time();
+    _finish_event->set_trigger_op(_finish_gen, this);
+  }
+
   Operation::~Operation(void)
   {
     // delete all of the async work items we were given to track
@@ -758,8 +782,7 @@ namespace Realm {
 							 const void *data,
 							 size_t datalen)
   {
-    get_runtime()->optable.request_cancellation(args.finish_event,
-						data, datalen);
+    args.finish_event.cancel_operation(data, datalen);
   }
 
   ActiveMessageHandlerReg<CancelOperationMessage> cancel_operation_message_handler;

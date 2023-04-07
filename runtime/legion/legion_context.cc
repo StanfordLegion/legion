@@ -3753,18 +3753,7 @@ namespace Legion {
           dependences.insert(*it);
           previous_events.insert(it->first->get_completion_event());
         }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              complete_children.begin(); it != complete_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's younger than our deletion we don't care
-          if (op_index >= return_index)
-            continue;
-          dependences.insert(*it);
-          previous_events.insert(it->first->get_completion_event());
-        }
+        // We know that any complete children are done
       }
       // Do not check the current execution fence as it may have come after us
       if (!previous_events.empty())

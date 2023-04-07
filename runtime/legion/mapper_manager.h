@@ -449,7 +449,7 @@ namespace Legion {
                                     InstanceManager *manager, bool created);
       void release_acquired_instance(MappingCallInfo *info,
                                      InstanceManager *manager);
-      bool check_region_consistency(MappingCallInfo *info, const char *call,
+      void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
       bool perform_acquires(MappingCallInfo *info,
                             const std::vector<MappingInstance> &instances,

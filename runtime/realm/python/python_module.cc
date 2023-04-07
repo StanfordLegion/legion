@@ -807,7 +807,7 @@ namespace Realm {
     //   https://github.com/nv-legate/cunumeric/issues/187
     (interpreter->api->PyRun_SimpleString)(
       "[main_thread._tstate_lock.release() "
-      "if v.major >= 3 and (v.minor > 9 or (v.minor == 9 and v.micro > 7)) "
+      "if (v.major > 3 or v.major == 3 and (v.minor > 10 or (v.minor == 10 and v.micro > 0) or (v.minor == 9 and v.micro > 7))) "
       "and main_thread != curr_thread "
       "else None "
       "for main_thread in (__import__('threading').main_thread(),) "
@@ -911,7 +911,6 @@ namespace Realm {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
 			  start_event, finish_event, finish_gen, priority);
-    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen), task);
 
     enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }
