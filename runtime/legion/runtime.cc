@@ -29961,7 +29961,7 @@ namespace Legion {
               if (can_fail)
                 return NULL;
               REPORT_LEGION_ERROR(ERROR_INVALID_CONSTRAINT_ID,
-                  "Unable to find layout constraint %d", layout_id);
+                  "Unable to find layout constraint %ld", layout_id);
             }
             RtUserEvent to_trigger = Runtime::create_rt_user_event();
             Serializer rez;
