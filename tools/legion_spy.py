@@ -5366,7 +5366,7 @@ class DataflowTraverser(object):
         # This should be empty by the time that we get here
         if self.dataflow_reductions:
             # Superfluous reductions were applied
-            printf("ERROR: Superfluous reductions were applied for reduction "+
+            print("ERROR: Superfluous reductions were applied for reduction "+
                     str(self.reduction_epochs[0])+" by region requirement "+
                     str(self.dst_req.index)+" of "+str(self.op))
             if self.op.state.eq_graph_on_error:
@@ -5917,16 +5917,20 @@ class CollectiveRendezvous(object):
                 # Check to make sure the user didn't ask for any collective behavior
                 if requested:
                     if provenance is not None and len(provenance) > 0:
-                        printf('WARNING: A collective rendezvous was requested for '+
+                        print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
                                 ' (from '+provenance+') but no point operations shared '+
                                 'the same logical region. This could lead to unnecessary '+
                                 'runtime overhead.')
+                        if self.op.state.assert_on_warning:
+                            assert False
                     else:
-                        printf('WARNING: A collective rendezvous was requested for '+
+                        print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
                                 ' but no point operations shared the same logical region.'+
                                 ' This could lead to unnecessary runtime overhead.')
+                        if self.op.state.assert_on_warning:
+                            assert False
             elif requested:
                 matched_reqs.append(idx)
             else:
@@ -5973,11 +5977,15 @@ class CollectiveRendezvous(object):
                             'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
                             ') which had '+str(total_points)+' out of '+str(total_points)+
                             ' ('+efficiency+'%) use the same logical region as another point.')
+                    if self.op.state.assert_on_warning:
+                        assert False
                 else:
                     print('WARNING: Missed collective rendezvous optimization for region '+
                             'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
                             str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
                             'use the same logical region as another point.')
+                    if self.op.state.assert_on_warning:
+                        assert False
                 for region,ops in iteritems(self.matches[idx]):
                     pointstr = ''
                     first = True
