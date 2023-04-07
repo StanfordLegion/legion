@@ -29750,6 +29750,13 @@ namespace Legion {
             // Ask for the constraints
             AddressSpaceID target = 
               LayoutConstraints::get_owner_space(layout_id, this); 
+            if (target == address_space)
+            {
+              if (can_fail)
+                return NULL;
+              REPORT_LEGION_ERROR(ERROR_INVALID_CONSTRAINT_ID,
+                  "Unable to find layout constraint %d", layout_id);
+            }
             RtUserEvent to_trigger = Runtime::create_rt_user_event();
             Serializer rez;
             {
