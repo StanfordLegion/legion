@@ -185,6 +185,65 @@ namespace Legion {
     };
 
     /**
+     * \class PredicateImpl
+     * This class provides the base support for a predicate and
+     * any state needed to manage the mapping of things that 
+     * depend on a predicate value
+     */
+    class PredicateImpl : public Collectable {
+    public:
+      PredicateImpl(Operation *creator);
+      PredicateImpl(const PredicateImpl &rhs) = delete;
+      virtual ~PredicateImpl(void);
+    public:
+      PredicateImpl& operator=(const PredicateImpl &rhs) = delete;
+    public:
+      // This returns the predicate value if it is set or returns the
+      // names of the guards to use if has not been set
+      virtual bool get_predicate(size_t context_index,
+          PredEvent &true_guard, PredEvent &false_guard);
+      bool get_predicate(RtEvent &ready);
+      virtual void set_predicate(bool value);
+    public:
+      InnerContext *const context;
+      Operation *const creator;
+      const GenerationID creator_gen;
+      const UniqueID creator_uid;
+      const size_t creator_ctx_index;
+    protected:
+      mutable LocalLock predicate_lock;
+      PredUserEvent true_guard, false_guard;
+      RtUserEvent ready_event;
+      int value; // <0 is unset, 0 is false, >0 is true
+    };
+
+    /**
+     * \class ReplPredicateImpl
+     * This is a predicate implementation for control replication
+     * contexts. It provides the same functionality as the normal
+     * version, but it also has one extra invariant, which is that
+     * it guarantees that it will not return a false predicate
+     * result until it guarantees that all the shards will return
+     * the same false result for all equivalent operations.
+     */
+    class ReplPredicateImpl : public PredicateImpl {
+    public:
+      ReplPredicateImpl(Operation *creator, CollectiveID id);
+      ReplPredicateImpl(const ReplPredicateImpl &rhs) = delete;
+      virtual ~ReplPredicateImpl(void);
+    public:
+      ReplPredicateImpl& operator=(const ReplPredicateImpl &rhs) = delete;
+    public:
+      virtual bool get_predicate(size_t context_index,
+          PredEvent &true_guard, PredEvent &false_guard);
+      virtual void set_predicate(bool value);
+    protected:
+      const CollectiveID collective_id;
+      size_t max_observed_index;
+      AllReduceCollective<MaxReduction<uint64_t> > *collective;
+    };
+
+    /**
      * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to
@@ -2084,7 +2143,7 @@ namespace Legion {
       bool is_no_access_region(unsigned idx) const;
     public:
       ApEvent dispatch_task(Processor target, SingleTask *task, 
-          TaskContext *ctx, ApEvent precondition, PredEvent pred,
+          TaskContext *ctx, ApEvent precondition,
           int priority, Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, TaskContext *ctx);
     public:

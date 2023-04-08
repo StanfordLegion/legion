@@ -518,16 +518,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext            ctx,
-                               const Task&                    task,
-                                     SpeculativeOutput&       output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: turn on random speculation
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::map_inline(const MapperContext        ctx,
                                 const InlineMapping&       inline_op,
                                 const MapInlineInput&      input,
@@ -605,16 +595,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext      ctx,
-                               const Copy&              copy,
-                                     SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: speculate sometimes
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::map_close(const MapperContext       ctx,
                                const Close&              close,
                                const MapCloseInput&      input,
@@ -644,16 +624,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext         ctx,
-                               const Acquire&              acquire,
-                                     SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: enable speculation
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void TestMapper::select_release_sources(const MapperContext       ctx,
                                        const Release&                 release,
                                        const SelectReleaseSrcInput&   input,
@@ -662,16 +632,6 @@ namespace Legion {
     {
       select_random_source_order(input.source_instances,
                                  output.chosen_ranking);
-    }
-
-    //--------------------------------------------------------------------------
-    void TestMapper::speculate(const MapperContext         ctx,
-                               const Release&              release,
-                                     SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: enable speculation
-      output.speculate = false;
     }
 
     //--------------------------------------------------------------------------

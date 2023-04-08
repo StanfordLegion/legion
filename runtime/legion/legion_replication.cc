@@ -491,7 +491,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<typename OP>
     void ReplCollectiveViewCreator<OP>::
-                                  resolve_false_collective_view_rendezvous(void)
+                                predicate_false_collective_view_rendezvous(void)
     //--------------------------------------------------------------------------
     {
       for (typename std::map<RendezvousKey,
@@ -730,11 +730,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::resolve_false(bool speculated, bool launched)
+    void ReplIndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (launched)
-        return;
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -747,7 +745,7 @@ namespace Legion {
       if (repl_ctx->owner_shard->shard_id > 0)
         shard_off(RtEvent::NO_RT_EVENT);
       else
-        IndividualTask::resolve_false(speculated, launched);
+        IndividualTask::predicate_false();
     }
 
     //--------------------------------------------------------------------------
@@ -1296,7 +1294,7 @@ namespace Legion {
       assert(redop != 0);
 #endif
       // Set the future if we actually ran the task or we speculated
-      if (predication_state == RESOLVE_FALSE_STATE)
+      if (predication_state == PREDICATED_FALSE_STATE)
         return;
       if (serdez_redop_fns != NULL)
       {
@@ -1373,7 +1371,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((output_size_collective != NULL) &&
-          (predication_state != RESOLVE_FALSE_STATE))
+          (predication_state != PREDICATED_FALSE_STATE))
       {
         // Make a copy of the output sizes before we perform all-gather
         local_output_sizes = all_output_sizes;
@@ -1385,12 +1383,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::resolve_false(bool speculated, bool launched)
+    void ReplIndexTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      // If we already launched then we can just return
-      if (launched)
-        return;
       // Otherwise, we need to update the internal space so we only set
       // our local points with the predicate false result
       if (redop == 0)
@@ -1432,9 +1427,9 @@ namespace Legion {
       }
       if (output_size_collective != NULL)
         output_size_collective->elide_collective();
-      resolve_false_collective_view_rendezvous();
+      predicate_false_collective_view_rendezvous();
       // Now continue through and do the base case
-      IndexTask::resolve_false(speculated, launched);
+      IndexTask::predicate_false();
     }
 
     //--------------------------------------------------------------------------
@@ -2631,18 +2626,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFillOp::resolve_false(bool speculated, bool launched)
+    void ReplFillOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       // Trigger the first generation of the collective_map_barrier
-      if (!launched)
-      {
-        // Advance the first generation of the barrier for trigger_ready
-        Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
-        Runtime::advance_barrier(collective_map_barrier);
-      }
+      Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
+      // Advance the first generation of the barrier for trigger_ready
+      Runtime::advance_barrier(collective_map_barrier);
       // Second generation triggered by callback to finalize_complete_mapping
-      FillOp::resolve_false(speculated, launched);
+      FillOp::predicate_false();
     }
 
     /////////////////////////////////////////////////////////////
@@ -8186,18 +8178,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplAcquireOp::resolve_false(bool speculated, bool launched)
+    void ReplAcquireOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (launched)
-        return;
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      resolve_false_collective_view_rendezvous();
-      AcquireOp::resolve_false(speculated, launched);
+      predicate_false_collective_view_rendezvous();
+      AcquireOp::predicate_false();
     }
 
     /////////////////////////////////////////////////////////////
@@ -8375,18 +8365,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplReleaseOp::resolve_false(bool speculated, bool launched)
+    void ReplReleaseOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (launched)
-        return;
 #ifdef DEBUG_LEGION
       assert(collective_map_barrier.exists());
 #endif
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/);
       Runtime::advance_barrier(collective_map_barrier);
-      resolve_false_collective_view_rendezvous();
-      ReleaseOp::resolve_false(speculated, launched);
+      predicate_false_collective_view_rendezvous();
+      ReleaseOp::predicate_false();
     }
 
     //--------------------------------------------------------------------------
@@ -12956,6 +12944,7 @@ namespace Legion {
 
     // Instantiate this for a common use case
     template class AllReduceCollective<ProdReduction<bool> >;
+    template class AllReduceCollective<MaxReduction<uint64_t> >;
 
     /////////////////////////////////////////////////////////////
     // Buffer Broadcast
