@@ -623,6 +623,212 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Predicate Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PredicateImpl::PredicateImpl(Operation *op)
+      : context(op->get_context()), creator(op),
+        creator_gen(op->get_generation()), creator_uid(op->get_unique_op_id()),
+        creator_ctx_index(op->get_ctx_index()), value(-1)
+    //--------------------------------------------------------------------------
+    {
+      context->add_base_resource_ref(APPLICATION_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    PredicateImpl::~PredicateImpl(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(0 <= value);
+#endif 
+      if (context->remove_base_resource_ref(APPLICATION_REF))
+        delete context;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PredicateImpl::get_predicate(size_t context_index,
+                                      PredEvent &true_g, PredEvent &false_g)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+      if (0 <= value)
+        return (0 < value);
+      // Not ready yet, make guards if they don't exist yet
+      if (!true_guard.exists())
+      {
+        true_guard = Runtime::create_pred_event();
+        false_guard = Runtime::create_pred_event(); 
+      }
+      true_g = true_guard;
+      false_g = false_guard;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PredicateImpl::get_predicate(RtEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+      if (0 <= value)
+        return (0 < value);
+      if (!ready_event.exists())
+        ready_event = Runtime::create_rt_user_event();
+      ready = ready_event;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void PredicateImpl::set_predicate(bool result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+#ifdef DEBUG_LEGION
+      assert(value < 0);
+#endif
+      if (result)
+        value = 1;
+      else
+        value = 0;
+      if (ready_event.exists())
+        Runtime::trigger_event(ready_event);
+      if (true_guard.exists())
+      {
+        if (result)
+        {
+          Runtime::trigger_event(true_guard);
+          Runtime::poison_event(false_guard);
+        }
+        else
+        {
+          Runtime::poison_event(true_guard);
+          Runtime::trigger_event(false_guard);
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Predicate Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplPredicateImpl::ReplPredicateImpl(Operation *op, CollectiveID id)
+      : PredicateImpl(op), collective_id(id), max_observed_index(0),
+        collective(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplPredicateImpl::~ReplPredicateImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      if (collective != NULL)
+      {
+        collective->wait_all_reduce();
+        delete collective;
+      } 
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplPredicateImpl::get_predicate(size_t context_index,
+                                          PredEvent &true_g, PredEvent &false_g)
+    //--------------------------------------------------------------------------
+    {
+      bool trigger_guards = false;
+      AutoLock p_lock(predicate_lock);
+      // If the result is true then we can just return that
+      if (0 < value)
+        return true;
+      if (value == 0)
+      {
+        // For the false case, check to see if we already got the
+        // maximum observed false case
+        if (collective != NULL)
+        {
+          max_observed_index = collective->get_result(); 
+          delete collective;
+          collective = NULL;
+        }
+        // Can safely return false here since it's later than the 
+        // maximum observed index across all the shards so all shards
+        // will return the same false decision
+        if (max_observed_index < context_index)
+          return false;
+        // Othewise we fall through and pretend like we don't know that
+        // it is false yet so that we align the predication decision
+        // across all the shards
+        trigger_guards = true;
+      }
+      // Not ready yet, make guards if they don't exist yet
+      if (!true_guard.exists())
+      {
+        true_guard = Runtime::create_pred_event();
+        false_guard = Runtime::create_pred_event(); 
+        if (trigger_guards)
+        {
+          // We're doing the fall-through case where we know its false
+          // but we have to make sure that all the shards do the same
+          // thing so we're pretending like we don't know the result yet
+#ifdef DEBUG_LEGION
+          assert(value == 0);
+#endif
+          Runtime::poison_event(true_guard);
+          Runtime::trigger_event(false_guard);
+        }
+      }
+      true_g = true_guard;
+      false_g = false_guard;
+      if (context_index > max_observed_index)
+        max_observed_index = context_index;
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplPredicateImpl::set_predicate(bool result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(predicate_lock);
+#ifdef DEBUG_LEGION
+      assert(value < 0);
+#endif
+      if (!result) // False
+      {
+        value = 0;
+        if (collective_id > 0)
+        {
+#ifdef DEBUG_LEGION
+          ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(context);
+          assert(repl_ctx != NULL);
+#else
+          ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context);
+#endif
+          collective = new AllReduceCollective<MaxReduction<uint64_t> >(
+              repl_ctx, collective_id);
+          collective->async_all_reduce(max_observed_index);
+        }
+      }
+      else // True
+        value = 1;
+      if (ready_event.exists())
+        Runtime::trigger_event(ready_event);
+      if (true_guard.exists())
+      {
+        if (result)
+        {
+          Runtime::trigger_event(true_guard);
+          Runtime::poison_event(false_guard);
+        }
+        else
+        {
+          Runtime::poison_event(true_guard);
+          Runtime::trigger_event(false_guard);
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Impl 
     /////////////////////////////////////////////////////////////
 
@@ -2257,18 +2463,15 @@ namespace Legion {
         }
         return;
       }
-      Serializer rez;
-      bool packed = false;
       for (std::set<AddressSpaceID>::const_iterator it = 
             subscribers.begin(); it != subscribers.end(); it++)
       {
         if (((*it) == local_space) || ((*it) == result_set_space))
           continue;
-        if (!packed)
-        {
-          pack_future_result(rez);
-          packed = true;
-        }
+        // Need to pack each of these separately in case we need to make
+        // events for each future instance being packed
+        Serializer rez;
+        pack_future_result(rez);
         pack_global_ref();
         runtime->send_future_result(*it, rez);
       }
@@ -14648,7 +14851,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent VariantImpl::dispatch_task(Processor target, SingleTask *task,
                                        TaskContext *ctx, ApEvent precondition,
-                                       PredEvent predicate_guard, int priority, 
+                                       int priority, 
                                        Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
@@ -14668,25 +14871,11 @@ namespace Legion {
       runtime->increment_total_outstanding_tasks();
 #endif
       DETAILED_PROFILER(runtime, REALM_SPAWN_TASK_CALL);
-      // If our ready event hasn't triggered, include it in the precondition
-      if (predicate_guard.exists())
-      {
-        // Merge in the predicate guard
-        ApEvent pre = Runtime::merge_events(NULL, precondition, ready_event, 
-                                            ApEvent(predicate_guard));
-        // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(ApEvent(target.spawn(descriptor_id, 
-                    &ctx, sizeof(ctx), requests, pre, priority)));
-      }
-      else
-      {
-        // No predicate guard
-        if (ready_event.exists())
-          return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
-             Runtime::merge_events(NULL, precondition, ready_event), priority));
-        return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
-                                    precondition, priority));
-      }
+      if (ready_event.exists())
+        return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
+           Runtime::merge_events(NULL, precondition, ready_event), priority));
+      return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests,
+                                  precondition, priority));
     }
 
     //--------------------------------------------------------------------------
@@ -15087,15 +15276,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We check equalities only on the members of LayoutConstraintSet
-      return field_constraint == rhs.field_constraint
-             && specialized_constraint == rhs.specialized_constraint
-             && memory_constraint == rhs.memory_constraint
-             && ordering_constraint == rhs.ordering_constraint
-             && alignment_constraints == rhs.alignment_constraints
-             && dimension_constraints == rhs.dimension_constraints
-             && tiling_constraints == rhs.tiling_constraints
-             && offset_constraints == rhs.offset_constraints
-             && pointer_constraint == rhs.pointer_constraint;
+      return equals(rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -15103,15 +15284,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We check equalities only on the members of LayoutConstraintSet
-      return field_constraint == rhs.field_constraint
-             && specialized_constraint == rhs.specialized_constraint
-             && memory_constraint == rhs.memory_constraint
-             && ordering_constraint == rhs.ordering_constraint
-             && alignment_constraints == rhs.alignment_constraints
-             && dimension_constraints == rhs.dimension_constraints
-             && tiling_constraints == rhs.tiling_constraints
-             && offset_constraints == rhs.offset_constraints
-             && pointer_constraint == rhs.pointer_constraint;
+      return equals(rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -29868,6 +30041,13 @@ namespace Legion {
             // Ask for the constraints
             AddressSpaceID target = 
               LayoutConstraints::get_owner_space(layout_id, this); 
+            if (target == address_space)
+            {
+              if (can_fail)
+                return NULL;
+              REPORT_LEGION_ERROR(ERROR_INVALID_CONSTRAINT_ID,
+                  "Unable to find layout constraint %ld", layout_id);
+            }
             RtUserEvent to_trigger = Runtime::create_rt_user_event();
             Serializer rez;
             {

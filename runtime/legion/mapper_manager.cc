@@ -310,30 +310,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_task_speculate(TaskOp *task,
-                                              Mapper::SpeculativeOutput *output,
-                                              MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(TASK_SPECULATE_CALL,
-                                 NULL, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<TaskOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_task_speculate>
-                                continuation(this, task, output, info);
-          continuation.defer(runtime, continuation_precondition, task);
-          return;
-        }
-      }
-      mapper->speculate(info, *task, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_task_report_profiling(TaskOp *task, 
                                               Mapper::TaskProfilingInfo *input,
                                               MappingCallInfo *info)
@@ -563,30 +539,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_copy_speculate(CopyOp *op, 
-                                              Mapper::SpeculativeOutput *output,
-                                              MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(COPY_SPECULATE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<CopyOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_copy_speculate>
-                                continuation(this, op, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->speculate(info, *op, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_copy_report_profiling(CopyOp *op,
                                              Mapper::CopyProfilingInfo *input,
                                              MappingCallInfo *info)
@@ -764,30 +716,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_acquire_speculate(AcquireOp *op,
-                                             Mapper::SpeculativeOutput *output,
-                                             MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(ACQUIRE_SPECULATE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<AcquireOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_acquire_speculate>
-                                continuation(this, op, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->speculate(info, *op, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_acquire_report_profiling(AcquireOp *op,
                                          Mapper::AcquireProfilingInfo *input,
                                          MappingCallInfo *info)
@@ -911,30 +839,6 @@ namespace Legion {
         }
       }
       mapper->select_release_sources(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapperManager::invoke_release_speculate(ReleaseOp *op,
-                                             Mapper::SpeculativeOutput *output,
-                                             MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(RELEASE_SPECULATE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation2<ReleaseOp, Mapper::SpeculativeOutput,
-                              &MapperManager::invoke_release_speculate>
-                                continuation(this, op, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->speculate(info, *op, *output);
       finish_mapper_call(info);
     }
 
@@ -2094,8 +1998,7 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "create_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2130,8 +2033,7 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "create_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2168,9 +2070,8 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "find_or_create_physical_instance", 
-                                    regions))
-        return false;
+      check_region_consistency(ctx, "find_or_create_physical_instance",
+                               regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2206,9 +2107,8 @@ namespace Legion {
         return false;
       if (regions.empty())
         return false;
-      if (!check_region_consistency(ctx, "find_or_create_physical_instance", 
-                                    regions))
-        return false;
+      check_region_consistency(ctx, "find_or_create_physical_instance",
+                               regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2241,8 +2141,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return false;
-      if (!check_region_consistency(ctx, "find_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2271,8 +2170,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return false;
-      if (!check_region_consistency(ctx, "find_physical_instance", regions))
-        return false;
+      check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2302,8 +2200,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return;
-      if (!check_region_consistency(ctx, "find_physical_instances", regions))
-        return;
+      check_region_consistency(ctx, "find_physical_instances", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2335,8 +2232,7 @@ namespace Legion {
     {
       if (!target_memory.exists())
         return;
-      if (!check_region_consistency(ctx, "find_physical_instances", regions))
-        return;
+      check_region_consistency(ctx, "find_physical_instances", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
@@ -2816,7 +2712,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MapperManager::check_region_consistency(MappingCallInfo *info,
+    void MapperManager::check_region_consistency(MappingCallInfo *info,
                                                  const char *call_name,
                                       const std::vector<LogicalRegion> &regions)
     //--------------------------------------------------------------------------
@@ -2840,7 +2736,6 @@ namespace Legion {
         else
           tree_id = regions[idx].get_tree_id();
       }
-      return (tree_id > 0);
     }
 
     //--------------------------------------------------------------------------

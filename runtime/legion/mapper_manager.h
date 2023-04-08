@@ -106,9 +106,6 @@ namespace Legion {
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_task_speculate(TaskOp *task, 
-                                 Mapper::SpeculativeOutput *output,
-                                 MappingCallInfo *info = NULL);
       void invoke_task_report_profiling(TaskOp *task, 
                                         Mapper::TaskProfilingInfo *input,
                                         MappingCallInfo *info = NULL);
@@ -144,8 +141,6 @@ namespace Legion {
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
                                       MappingCallInfo *info = NULL);
-      void invoke_copy_speculate(CopyOp *op, Mapper::SpeculativeOutput *output,
-                                 MappingCallInfo *info = NULL);
       void invoke_copy_report_profiling(CopyOp *op,
                                         Mapper::CopyProfilingInfo *input,
                                         MappingCallInfo *info = NULL);
@@ -174,9 +169,6 @@ namespace Legion {
                               Mapper::MapAcquireInput *input,
                               Mapper::MapAcquireOutput *output,
                               MappingCallInfo *info = NULL);
-      void invoke_acquire_speculate(AcquireOp *op,
-                                    Mapper::SpeculativeOutput *output,
-                                    MappingCallInfo *info = NULL);
       void invoke_acquire_report_profiling(AcquireOp *op,
                                            Mapper::AcquireProfilingInfo *input,
                                            MappingCallInfo *info = NULL);
@@ -197,9 +189,6 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
                                          MappingCallInfo *info = NULL);
-      void invoke_release_speculate(ReleaseOp *op,
-                                    Mapper::SpeculativeOutput *output,
-                                    MappingCallInfo *info = NULL);
       void invoke_release_report_profiling(ReleaseOp *op,
                                            Mapper::ReleaseProfilingInfo *input,
                                            MappingCallInfo *info = NULL);
@@ -463,7 +452,7 @@ namespace Legion {
                                     InstanceManager *manager, bool created);
       void release_acquired_instance(MappingCallInfo *info,
                                      InstanceManager *manager);
-      bool check_region_consistency(MappingCallInfo *info, const char *call,
+      void check_region_consistency(MappingCallInfo *info, const char *call,
                                     const std::vector<LogicalRegion> &regions);
       bool perform_acquires(MappingCallInfo *info,
                             const std::vector<MappingInstance> &instances,

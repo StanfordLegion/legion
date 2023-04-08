@@ -1403,7 +1403,7 @@ namespace Legion {
       void create_collective_view_rendezvous(RegionTreeID tid,
           unsigned requirement_index, unsigned analysis_index = 0);
       void shard_off_collective_view_rendezvous(std::set<RtEvent> &done_events);
-      void resolve_false_collective_view_rendezvous(void);
+      void predicate_false_collective_view_rendezvous(void);
     protected:
       std::map<RendezvousKey,
                CollectiveViewRendezvous*> collective_view_rendezvous;
@@ -1429,7 +1429,7 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_replay(void);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual void shard_off(RtEvent mapped_precondition);
       virtual void prepare_map_must_epoch(void);
     public:
@@ -1479,7 +1479,7 @@ namespace Legion {
     public:
       // Have to override this too for doing output in the
       // case that we misspeculate
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual void prepare_map_must_epoch(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
@@ -1628,7 +1628,7 @@ namespace Legion {
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
       virtual RtEvent initialize_fill_view(void);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
     public:
       RtBarrier collective_map_barrier;
       CreateCollectiveFillView *collective;
@@ -2434,7 +2434,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual RtEvent finalize_complete_mapping(RtEvent precondition);
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
                                                bool &first_local);
@@ -2461,7 +2461,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual RtEvent finalize_complete_mapping(RtEvent event);
       virtual void invoke_mapper(std::vector<PhysicalManager*> &src_instances); 
       virtual bool perform_collective_analysis(CollectiveMapping *&mapping,

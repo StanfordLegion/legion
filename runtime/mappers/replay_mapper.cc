@@ -343,15 +343,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext      ctx,
-                                 const Task&              task,
-                                       SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext       ctx,
                                         const Task&               task,
                                         const TaskProfilingInfo&  input)
@@ -433,15 +424,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext      ctx,
-                                 const Copy&              copy,
-                                       SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext      ctx,
                                         const Copy&              copy,
                                         const CopyProfilingInfo& input)
@@ -514,15 +496,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext         ctx,
-                                 const Acquire&              acquire,
-                                       SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void ReplayMapper::report_profiling(const MapperContext         ctx,
                                         const Acquire&              acquire,
                                         const AcquireProfilingInfo& input)
@@ -560,15 +533,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // TODO: update this once we record the output of select release sources
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplayMapper::speculate(const MapperContext         ctx,
-                                 const Release&              release,
-                                       SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      output.speculate = false;
     }
 
     //--------------------------------------------------------------------------

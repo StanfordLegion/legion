@@ -150,7 +150,6 @@ namespace Realm {
 						   finish_event_impl,
 						   ID(finish_event).event_generation(),
 						   prs);
-      get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
 #ifndef NDEBUG
@@ -263,7 +262,6 @@ namespace Realm {
 						   finish_event_impl,
 						   ID(finish_event).event_generation(),
 						   prs);
-      get_runtime()->optable.add_local_operation(finish_event, tro);
       // we haven't told anybody about this operation yet, so cancellation really shouldn't
       //  be possible
 #ifndef NDEBUG
@@ -784,8 +782,6 @@ namespace Realm {
       // create a task object and insert it into the queue
       Task *task = new Task(me, func_id, args, arglen, reqs,
                             start_event, finish_event, finish_gen, priority);
-      get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
-						 task);
 
       enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
     }
@@ -1052,8 +1048,6 @@ namespace Realm {
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
 			  start_event, finish_event, finish_gen, priority);
-    get_runtime()->optable.add_local_operation(finish_event->make_event(finish_gen),
-					       task);
 
     enqueue_or_defer_task(task, start_event, &deferred_spawn_cache);
   }

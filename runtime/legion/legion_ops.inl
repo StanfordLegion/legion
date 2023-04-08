@@ -152,27 +152,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
-    void Predicated<OP>::trigger_prepipeline_stage(void)
-    //--------------------------------------------------------------------------
-    {
-      // Register ourselves as a waiter on the predicate if we have one
-      if (this->predicate != NULL)
-      {
-        bool value;
-        if (this->predicate->register_waiter(this,this->get_generation(),value))
-        {
-          AutoLock o_lock(this->op_lock);
-          if (value)
-            this->predication_state = OP::RESOLVE_TRUE_STATE;
-          else
-            this->predication_state = OP::RESOLVE_FALSE_STATE;
-        }
-      }
-      Memoizable<OP>::trigger_prepipeline_stage();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename OP>
     void Predicated<OP>::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
@@ -184,16 +163,12 @@ namespace Legion {
           if (this->is_recording())
             REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
                 "Recording of predicated operations is not yet supported")
-          this->register_dependence(this->predicate, 
-                                    this->predicate->get_generation());
-          this->predicate->get_predicate_guards(this->true_guard,
-                                                this->false_guard);
+          this->register_dependence(this->predicate->creator, 
+                                    this->predicate->creator_gen);
         }
         // Then we can do the base initialization
         OP::trigger_dependence_analysis();
       }
-      if (this->predicate != NULL)
-        this->predicate->remove_predicate_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -201,77 +176,42 @@ namespace Legion {
     void Predicated<OP>::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      bool speculate = false;
-      // We don't support speculation for legion spy validation runs
-      // as it doesn't really understand the event graphs that get
-      // generated because of the predication events
-#ifndef LEGION_SPY
-      bool perform_query = false;
-      if (this->predicate != NULL)
-      {
-        AutoLock o_lock(this->op_lock);
-        perform_query = 
-          (this->predication_state != OP::PENDING_ANALYSIS_STATE);
-      }
-      if (perform_query && this->query_speculate())
-        speculate = true;
+#ifdef DEBUG_LEGION
+      assert(!this->true_guard.exists() && !this->false_guard.exists());
 #endif
-      bool trigger = false;
-      bool continue_true = false;
-      bool continue_false = false;
+      if (this->predication_state == OP::PENDING_PREDICATE_STATE)
       {
-        AutoLock o_lock(this->op_lock);
-        switch (this->predication_state)
+#ifdef DEBUG_LEGION
+        assert(this->predicate != NULL);
+#endif
+        bool value = this->predicate->get_predicate(
+            this->context_index, this->true_guard, this->false_guard);
+        bool ready = !this->false_guard.exists();
+#ifdef LEGION_SPY
+        // We don't support speculation for legion spy validation runs
+        // as it doesn't really understand the event graphs that get
+        // generated because of the predication events
+        if (!ready)
         {
-          case OP::PENDING_ANALYSIS_STATE:
-            {
-              if (speculate)
-              {
-                trigger = true;
-                this->predication_state = OP::SPECULATIVE_MAPPING_STATE;
-              }
-              else
-              {
-                this->predication_state = OP::WAITING_MAPPING_STATE;
-                // Clear the predicates since they won't matter
-                this->true_guard = PredEvent::NO_PRED_EVENT;
-                this->false_guard = PredEvent::NO_PRED_EVENT;
-              }
-              break;
-            }
-          case OP::RESOLVE_TRUE_STATE:
-            {
-              trigger = true;
-              continue_true = true;
-              // Clear the predicates since they won't matter
-              this->true_guard = PredEvent::NO_PRED_EVENT;
-              this->false_guard = PredEvent::NO_PRED_EVENT;
-              break;
-            }
-          case OP::RESOLVE_FALSE_STATE:
-            {
-              // If we're recording we still need to map this like normal
-              // so that the recording can capture it even with the false
-              // predicate resolution in case the replay is not false
-              if (this->is_recording())
-                trigger = true;
-              continue_false = true;
-              break;
-            }
-          default:
-            assert(false); // should never make it here
+          // If false was poisoned then predicate resolve true
+          this->false_guard.wait_faultaware(value);
+          ready = true;
         }
+#endif
+        // We do the mapping if we resolve true or if the predicate isn't ready
+        // If it's already resolved false then we can take the easy way out
+        if (ready && !value)
+          this->predication_state = OP::PREDICATED_FALSE_STATE;
+        else
+          this->predication_state = OP::PREDICATED_TRUE_STATE;
       }
-      if (continue_true)
-        this->resolve_true(false/*speculated*/, false/*launched*/);
-      else if (continue_false)
+      if (this->predication_state == OP::PREDICATED_FALSE_STATE)
       {
         if (this->runtime->legion_spy_enabled)
           LegionSpy::log_predicated_false_op(this->unique_op_id);
-        this->resolve_false(false/*specualted*/,
-                            this->is_recording()/*launched*/);
+        this->predicate_false();
       }
-      if (trigger)
+      else
         Memoizable<OP>::trigger_ready();
     }
 

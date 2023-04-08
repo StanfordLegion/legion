@@ -178,9 +178,7 @@ namespace Legion {
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
-      virtual bool query_speculate(void);
-      virtual void resolve_true(bool speculated, bool launched);
-      virtual void resolve_false(bool speculated, bool launched) = 0;
+      virtual void predicate_false(void) = 0;
     public:
       virtual void select_sources(const unsigned index, PhysicalManager *target,
                                   const std::vector<InstanceView*> &sources,
@@ -453,7 +451,7 @@ namespace Legion {
       virtual bool is_shard_task(void) const { return false; }
       virtual SingleTask* get_origin_task(void) const = 0;
     public:
-      virtual void resolve_false(bool speculated, bool launched) = 0;
+      virtual void predicate_false(void) = 0;
       virtual void launch_task(bool inline_task = false);
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
@@ -622,7 +620,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void) = 0;
     public:
-      virtual void resolve_false(bool speculated, bool launched) = 0;
+      virtual void predicate_false(void) = 0;
       virtual void premap_task(void) = 0;
       virtual bool distribute_task(void) = 0;
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
@@ -762,7 +760,7 @@ namespace Legion {
       // we can overload for control replication
       virtual Future create_future(void);
     public:
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
@@ -875,7 +873,7 @@ namespace Legion {
       virtual void trigger_replay(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
     public:
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       const DeferMappingArgs *args = NULL);
@@ -985,7 +983,7 @@ namespace Legion {
       virtual void trigger_replay(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
@@ -1146,7 +1144,7 @@ namespace Legion {
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void trigger_ready(void);
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual void premap_task(void);
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
@@ -1306,7 +1304,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
     public:
-      virtual void resolve_false(bool speculated, bool launched);
+      virtual void predicate_false(void);
       virtual void premap_task(void);
       virtual bool distribute_task(void);
       virtual VersionInfo& get_version_info(unsigned idx);

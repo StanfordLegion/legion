@@ -763,31 +763,12 @@ namespace Legion {
         PhysicalInstance                        temporary_instance; 
       };
 
-      /**
-       * ----------------------------------------------------------------------
-       *  Speculate
-       * ----------------------------------------------------------------------
-       * The speculate mapper call asks the mapper to make a 
-       * decision about whether to speculatively execute a task
-       * or not. The mapper can say whether to speculate or not
-       * using the 'speculate' field. If it does choose to speculate
-       * then the mapper can control the guessed value for the
-       * predicate by setting the 'speculative_value' field.
-       * Finally the mapper can control whether the speculation
-       * is solely for the mapping of the operation or whether it
-       * should extend to the execution of the operation with 
-       * the 'speculate_mapping_only' field.
-       */
+      // Keep this struct around for backwards compatibility 
       struct SpeculativeOutput {
         bool                                    speculate;
         bool                                    speculative_value;
         bool                                    speculate_mapping_only;
       };
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext      ctx,
-                             const Task&              task,
-                                   SpeculativeOutput& output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------
@@ -1077,23 +1058,6 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Speculate 
-       * ----------------------------------------------------------------------
-       * The speculate mapper call gives the mapper the opportunity
-       * to optionally speculate on the predicate value for an explicit
-       * copy operation. The mapper sets the 'speculative' field to 
-       * indicate whether to speculate or not. If it does chose to 
-       * speculate, it can provide a speculative value in the
-       * 'speculative_value' field.
-       */
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext      ctx,
-                             const Copy&              copy,
-                                   SpeculativeOutput& output) = 0;
-      //------------------------------------------------------------------------
-
-      /**
-       * ----------------------------------------------------------------------
        *  Report Profiling 
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information for an explicit
@@ -1263,21 +1227,6 @@ namespace Legion {
 
       /**
        * ----------------------------------------------------------------------
-       *  Speculate
-       * ----------------------------------------------------------------------
-       * Speculation for acquire operations works just like any other
-       * operation. The mapper can choose whether to speculate with
-       * the 'speculate' field. If it does choose to speculate, then 
-       * it can predict the value with the 'speculative_value'.
-       */
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext         ctx,
-                             const Acquire&              acquire,
-                                   SpeculativeOutput&    output) = 0;
-      //------------------------------------------------------------------------
-
-      /**
-       * ----------------------------------------------------------------------
        *  Report Profiling
        * ----------------------------------------------------------------------
        * If the mapper requested profiling information on this acquire
@@ -1383,23 +1332,6 @@ namespace Legion {
       struct CreateReleaseTemporaryOutput {
         PhysicalInstance                        temporary_instance;
       };
-
-      /**
-       * ----------------------------------------------------------------------
-       *  Speculate 
-       * ----------------------------------------------------------------------
-       * The speculate call will be invoked for any release operations with
-       * a predicate that has not yet been satisfied. The mapper can choose
-       * whether to speculate on the result with the 'speculate' field. If
-       * the mapper does choose to speculate, it can choose the set the
-       * 'speculative_value' field as a guess for the value the predicate
-       * will take.
-       */
-      //------------------------------------------------------------------------
-      virtual void speculate(const MapperContext         ctx,
-                             const Release&              release,
-                                   SpeculativeOutput&    output) = 0;
-      //------------------------------------------------------------------------
 
       /**
        * ----------------------------------------------------------------------

@@ -127,24 +127,35 @@ namespace Legion {
           op->add_copy_profiling_request(trace_info, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_fill_request(requests, op);
-      ApEvent result; LgEvent fevent;
+      ApEvent fill_pre;
+      if (pred_guard.exists())
+        // No need for tracing to know about the precondition
+        fill_pre = Runtime::merge_events(NULL,precondition,ApEvent(pred_guard));
+      else
+        fill_pre = precondition;
+      ApEvent result = ApEvent(space.fill(dst_fields, requests,
+              fill_value, fill_size, fill_pre, priority));
+      LgEvent fevent = result;
       if (pred_guard.exists())
       {
-        ApEvent pred_pre = 
-          Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
-        if (trace_info.recording)
-          trace_info.record_merge_events(pred_pre, precondition,
-                                          ApEvent(pred_guard));
-        result = ApEvent(space.fill(dst_fields, requests,
-              fill_value, fill_size, pred_pre, priority));
-        fevent = result;
         result = Runtime::ignorefaults(result);
-      }
-      else
-      {
-        result = ApEvent(space.fill(dst_fields, requests,
-              fill_value, fill_size, precondition, priority));
-        fevent = result;
+        // Need to merge back in the precondition so it is still reflected
+        // in the completion event for this operation
+        if (precondition.exists())
+        {
+          if (result.exists())
+            result = Runtime::merge_events(NULL, result, precondition);
+          else
+            result = precondition;
+          // Little catch here for tracing, make sure the result is unique
+          if (trace_info.recording && result.exists() &&
+              (result == precondition))
+          {
+            ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+            Runtime::trigger_event(NULL, new_result, precondition);
+            result = new_result;
+          }
+        }
       }
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
@@ -214,50 +225,43 @@ namespace Legion {
           op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
         forest->runtime->profiler->add_copy_request(requests, op);
-      ApEvent result; LgEvent fevent;
+      ApEvent copy_pre;
       if (pred_guard.exists())
-      {
-        // No need for tracing to know about the precondition or reservations
-        ApEvent pred_pre = 
-          Runtime::merge_events(&trace_info, precondition, ApEvent(pred_guard));
-        if (!reservations.empty())
-        {
-          // Need a protected version here to guarantee we always acquire
-          // or release the lock regardless of poison
-          pred_pre = Runtime::ignorefaults(precondition);
-          for (std::vector<Reservation>::const_iterator it =
-                reservations.begin(); it != reservations.end(); it++)
-            pred_pre = 
-              Runtime::acquire_ap_reservation(*it, true/*exclusive*/, pred_pre);
-          // Tricky: now merge the predicate and precondition back in to get the 
-          // effects of any poison since we protected against it above
-          // Note you can't wait to acquire events until you know the full
-          // precondition has triggered or poisoned including the predicate
-          // or you risk deadlock which is why we need the double merge
-          pred_pre =
-            Runtime::merge_events(&trace_info, pred_pre, ApEvent(pred_guard));
-        }
-        result = ApEvent(space.copy(src_fields, dst_fields, 
-                                    requests, pred_pre, priority));
-        fevent = result;
-        result = Runtime::ignorefaults(result);
-      }
+        copy_pre = Runtime::merge_events(NULL,precondition,ApEvent(pred_guard));
       else
-      {
-        // No need for tracing to know about the reservations
-        ApEvent copy_pre = precondition;
-        for (std::vector<Reservation>::const_iterator it =
-              reservations.begin(); it != reservations.end(); it++)
-          copy_pre = Runtime::acquire_ap_reservation(*it, 
-                                          true/*exclusive*/, copy_pre);
-        result = ApEvent(space.copy(src_fields, dst_fields, requests, 
-                          copy_pre, priority));
-        fevent = result;
-      }
-      // Release any reservations
+        copy_pre = precondition;
+      for (std::vector<Reservation>::const_iterator it =
+            reservations.begin(); it != reservations.end(); it++)
+        copy_pre = Runtime::acquire_ap_reservation(*it, 
+                                        true/*exclusive*/, copy_pre);
+      ApEvent result = ApEvent(space.copy(src_fields, dst_fields, requests,
+                                          copy_pre, priority));
+      LgEvent fevent = result;
+      // Release any reservations after the copy is done
       for (std::vector<Reservation>::const_iterator it =
             reservations.begin(); it != reservations.end(); it++)
         Runtime::release_reservation(*it, result);
+      if (pred_guard.exists())
+      {
+        result = Runtime::ignorefaults(result);
+        // Make sure to fold in the precondition back into the result
+        // event in case this is poisoned to support transitive analysis
+        if (precondition.exists())
+        {
+          if (result.exists())
+            result = Runtime::merge_events(NULL, result, precondition);
+          else
+            result = precondition;
+          // Little catch here for tracing, make sure the result is unique
+          if (trace_info.recording && result.exists() &&
+              (result == precondition))
+          {
+            ApUserEvent new_result = Runtime::create_ap_user_event(NULL);
+            Runtime::trigger_event(NULL, new_result, precondition);
+            result = new_result;
+          }
+        }
+      }
       if (trace_info.recording)
         trace_info.record_issue_copy(result, this, src_fields,
                                      dst_fields, reservations,
@@ -6715,85 +6719,55 @@ namespace Legion {
       // The code right now is only correct for straight copy across
       if (runtime->profiler != NULL)
         runtime->profiler->add_copy_request(requests, op, total_copies);
+      ApEvent copy_pre;
       if (pred_guard.exists())
-      {
-        // No need for tracing to know about the precondition or reservations
-        ApEvent pred_pre = 
+        copy_pre =
           Runtime::merge_events(NULL, copy_precondition, ApEvent(pred_guard));
-        if (!reservations.empty())
+      else
+        copy_pre = copy_precondition;
+      // No need for tracing to know about the reservations
+      for (std::map<Reservation,bool>::const_iterator it =
+            reservations.begin(); it != reservations.end(); it++)
+        copy_pre = Runtime::acquire_ap_reservation(it->first, 
+                                        it->second, copy_pre);
+      if (!indirections.empty())
+      {
+        if (individual_field_indexes.empty())
         {
-          // Need a protected version here to guarantee we always acquire
-          // or release the lock regardless of poison
-          pred_pre = Runtime::ignorefaults(copy_precondition);
-          for (std::map<Reservation,bool>::const_iterator it =
-                reservations.begin(); it != reservations.end(); it++)
-            pred_pre = 
-              Runtime::acquire_ap_reservation(it->first, it->second, pred_pre);
-          // Tricky: now merge the predicate and precondition back in to get the 
-          // effects of any poison since we protected against it above
-          // Note you can't wait to acquire events until you know the full
-          // precondition has triggered or poisoned including the predicate
-          // or you risk deadlock which is why we need the double merge
-          pred_pre =
-            Runtime::merge_events(NULL, pred_pre, ApEvent(pred_guard));
-        }
-        if (!indirections.empty())
-        {
-          if (individual_field_indexes.empty())
-          {
-            last_copy = ApEvent(copy_domain.copy(src_fields,
-                  dst_fields, indirections, requests, pred_pre, priority));
-            if (runtime->profiler != NULL)
-              log_across_profiling(last_copy);
-            last_copy = Runtime::ignorefaults(last_copy);
-          }
-          else
-            last_copy = Runtime::ignorefaults(
-                issue_individual_copies(pred_pre, requests));
-        }
-        else
-        {
-          last_copy = ApEvent(copy_domain.copy(src_fields,
-                              dst_fields, requests, pred_pre, priority));
+          last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
+                indirections, requests, copy_pre, priority));
           if (runtime->profiler != NULL)
             log_across_profiling(last_copy);
-          last_copy = Runtime::ignorefaults(last_copy);
         }
+        else
+          last_copy = issue_individual_copies(copy_pre, requests);
+          
       }
       else
       {
-        // No need for tracing to know about the reservations
-        for (std::map<Reservation,bool>::const_iterator it =
-              reservations.begin(); it != reservations.end(); it++)
-          copy_precondition = Runtime::acquire_ap_reservation(it->first, 
-                                          it->second, copy_precondition);
-        if (!indirections.empty())
-        {
-          if (individual_field_indexes.empty())
-          {
-            last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
-                  indirections, requests, copy_precondition, priority));
-            if (runtime->profiler != NULL)
-              log_across_profiling(last_copy);
-          }
-          else
-            last_copy = issue_individual_copies(copy_precondition, requests);
-            
-        }
-        else
-        {
-          last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
-                requests, copy_precondition, priority));
-          if (runtime->profiler != NULL)
-            log_across_profiling(last_copy);
-        }
+        last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
+              requests, copy_pre, priority));
+        if (runtime->profiler != NULL)
+          log_across_profiling(last_copy);
       }
       // Release any reservations
-      if (!reservations.empty())
+      for (std::map<Reservation,bool>::const_iterator it =
+            reservations.begin(); it != reservations.end(); it++)
+        Runtime::release_reservation(it->first, last_copy);
+      if (pred_guard.exists())
       {
-        for (std::map<Reservation,bool>::const_iterator it =
-              reservations.begin(); it != reservations.end(); it++)
-          Runtime::release_reservation(it->first, last_copy);
+        // Protect against the poison from predication
+        last_copy = Runtime::ignorefaults(last_copy);
+        // Merge the preconditions into this result so they are still reflected
+        // in the completion for this operation even if the operation ends up
+        // being predicated out
+        if (copy_precondition.exists())
+        {
+          if (last_copy.exists())
+            last_copy = Runtime::merge_events(NULL,last_copy,copy_precondition);
+          else
+            last_copy = copy_precondition;
+        }
       }
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!last_copy.exists())
@@ -7484,7 +7458,7 @@ namespace Legion {
             sparse_shard_rects->push_back(
                 std::make_pair(child_space.bounds, local_space));
         }
-        else
+        else if (!child_space.bounds.empty())
           dense_shard_rects->push_back(
               std::make_pair(child_space.bounds, it->first));
       }

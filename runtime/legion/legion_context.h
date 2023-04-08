@@ -1536,6 +1536,7 @@ namespace Legion {
       virtual Predicate create_predicate(const PredicateLauncher &launcher);
       virtual Future get_predicate_future(const Predicate &p,
                                           Provenance *provenance);
+      virtual PredicateImpl* create_predicate_impl(Operation *op);
     public:
       // The following set of operations correspond directly
       // to the complete_mapping, complete_operation, and
@@ -2838,6 +2839,7 @@ namespace Legion {
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false,
                                            bool outermost = true);
+      virtual PredicateImpl* create_predicate_impl(Operation *op);
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);

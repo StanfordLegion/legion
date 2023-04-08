@@ -83,9 +83,6 @@ namespace Legion {
                                     const Task&                      task,
                                     const CreateTaskTemporaryInput&  input,
                                           CreateTaskTemporaryOutput& output);
-      virtual void speculate(const MapperContext      ctx,
-                             const Task&              task,
-                                   SpeculativeOutput& output);
       virtual void report_profiling(const MapperContext      ctx,
                                     const Task&              task,
                                     const TaskProfilingInfo& input);
@@ -125,9 +122,6 @@ namespace Legion {
                                   const Copy&                      copy,
                                   const CreateCopyTemporaryInput&  input,
                                         CreateCopyTemporaryOutput& output);
-      virtual void speculate(const MapperContext      ctx,
-                             const Copy& copy,
-                                   SpeculativeOutput& output);
       virtual void report_profiling(const MapperContext      ctx,
                                     const Copy&              copy,
                                     const CopyProfilingInfo& input);
@@ -163,9 +157,6 @@ namespace Legion {
                                const Acquire&              acquire,
                                const MapAcquireInput&      input,
                                      MapAcquireOutput&     output);
-      virtual void speculate(const MapperContext         ctx,
-                             const Acquire&              acquire,
-                                   SpeculativeOutput&    output);
       virtual void report_profiling(const MapperContext         ctx,
                                     const Acquire&              acquire,
                                     const AcquireProfilingInfo& input);
@@ -188,9 +179,6 @@ namespace Legion {
                                    const Release&                      release,
                                    const CreateReleaseTemporaryInput&  input,
                                          CreateReleaseTemporaryOutput& output);
-      virtual void speculate(const MapperContext         ctx,
-                             const Release&              release,
-                                   SpeculativeOutput&    output);
       virtual void report_profiling(const MapperContext         ctx,
                                     const Release&              release,
                                     const ReleaseProfilingInfo& input);

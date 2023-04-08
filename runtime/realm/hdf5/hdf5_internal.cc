@@ -206,7 +206,7 @@ namespace Realm {
         } else {
           // which hdf5 dim are we doing next?
           int hd = info->dim_order[order[d]];
-          if((hd < 0) && (hd >= first_nontrivial_hdf5_dim)) {
+          if((hd < 0) || (hd >= first_nontrivial_hdf5_dim)) {
             // have to stop here
             break;
           }
