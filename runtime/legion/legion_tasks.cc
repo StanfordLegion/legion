@@ -897,40 +897,6 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    bool TaskOp::query_speculate(void)
-    //--------------------------------------------------------------------------
-    {
-      if (mapper == NULL)  
-        mapper = runtime->find_mapper(current_proc, map_id);
-      Mapper::SpeculativeOutput output;
-      output.speculate = false;
-      output.speculate_mapping_only = true;
-      mapper->invoke_task_speculate(this, &output);
-      if (output.speculate && output.speculate_mapping_only)
-      {
-        // Switch any write-discard privileges back to read-write
-        // so we can make sure we get the right data if we end up
-        // predicating false
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          RegionRequirement &req = regions[idx];
-          if (HAS_WRITE_DISCARD(req))
-            req.privilege &= ~LEGION_DISCARD_MASK;
-        }
-        return true;
-      }
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::resolve_true(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
     void TaskOp::select_sources(const unsigned index, PhysicalManager *target,
                                 const std::vector<InstanceView*> &sources,
                                 std::vector<unsigned> &ranking,
@@ -4579,6 +4545,9 @@ namespace Legion {
                 execution_events.begin(); it != execution_events.end(); it++)
             wait_on_events.insert(ApEvent(*it));
       }
+      // If we have a predicate event then merge that in here as well
+      if (true_guard.exists())
+        wait_on_events.insert(ApEvent(true_guard));
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
       // Take all the locks in order in the proper way
@@ -4586,14 +4555,8 @@ namespace Legion {
       {
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
-        {
           start_condition = Runtime::acquire_ap_reservation(it->first, 
                                           it->second, start_condition);
-          // We can also issue the release now dependent on this
-          // task being complete, this way we do it before we launch
-          // the task and the atomic_locks might be cleaned up
-          Runtime::release_reservation(it->first, single_task_termination);
-        }
       }
       // STEP 3: Finally we get to launch the task
       // Mark that we have an outstanding task in this context 
@@ -4694,13 +4657,59 @@ namespace Legion {
             !start_condition.has_triggered_faultaware(poisoned))
           start_condition.wait_faultaware(poisoned);
         if (poisoned)
-          execution_context->raise_poison_exception();
-        variant->dispatch_inline(launch_processor, execution_context);
+        {
+          // Check to see if we were poisoned because of prediation
+          // or because of an actual fault
+          bool mispredicated = false;
+          true_guard.has_triggered_faultaware(mispredicated);
+          if (!mispredicated)
+            execution_context->raise_poison_exception();
+          // No need to release the reservations because they were
+          // poisoned out from being executed
+        }
+        else
+        {
+          variant->dispatch_inline(launch_processor, execution_context);
+          // Release any reservations that we took on behalf of this task
+          if (!atomic_locks.empty())
+          {
+            for (std::map<Reservation,bool>::const_iterator it = 
+                  atomic_locks.begin(); it != atomic_locks.end(); it++)
+              Runtime::release_reservation(it->first);
+          }
+        }
       }
       else
+      {
         task_launch_event = variant->dispatch_task(launch_processor, this,
-                            execution_context, start_condition, true_guard,
+                            execution_context, start_condition,
                             task_priority, profiling_requests);
+        // Release any reservations that we took on behalf of this task
+        // Note this happens before protection of the event for predication
+        // because the acquires were also subject to poisoning so we either
+        // want all the releases to be done or poisoned the same as the acquires
+        if (!atomic_locks.empty())
+        {
+          for (std::map<Reservation,bool>::const_iterator it = 
+                atomic_locks.begin(); it != atomic_locks.end(); it++)
+            Runtime::release_reservation(it->first, task_launch_event);
+        }
+        // If this task was predicated then we need to protect everything that
+        // comes after this from the predication poison
+        if (true_guard.exists())
+        {
+          task_launch_event = Runtime::ignorefaults(task_launch_event);
+          // Also merge in the original preconditions so that is reflected 
+          // downstream in the event chain still for things like postconditions
+          // Make sure to prune out the true guard that we added here
+          wait_on_events.erase(ApEvent(true_guard));
+          if (!wait_on_events.empty())
+          {
+            wait_on_events.insert(task_launch_event);
+            task_launch_event = Runtime::merge_events(NULL, wait_on_events);
+          }
+        }
+      }
       if (chain_task_termination.exists())
       {
         if (chain_precondition.exists())
@@ -6044,12 +6053,10 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void IndividualTask::resolve_false(bool speculated, bool launched)
+    void IndividualTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      // If we already launched, then return, otherwise continue
-      // through and do the work to clean up the task 
-      if (launched || elide_future_return)
+      if (elide_future_return)
         return;
       // Set the future to the false result
       if (predicate_false_future.impl != NULL)
@@ -7072,7 +7079,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::resolve_false(bool speculated, bool launched)
+    void PointTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7727,7 +7734,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::resolve_false(bool speculated, bool launched)
+    void ShardTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9287,13 +9294,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::resolve_false(bool speculated, bool launched)
+    void IndexTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      // If we already launched, then we can just return
-      // otherwise continue through to do the cleanup work
-      if (launched)
-        return;
       RtEvent execution_condition;
       // Fill in the index task map with the default future value
       if (redop == 0)
@@ -9586,7 +9589,7 @@ namespace Legion {
       if (redop != 0)
       {
         // Set the future if we actually ran the task or we speculated
-        if (predication_state != RESOLVE_FALSE_STATE)
+        if (predication_state != PREDICATED_FALSE_STATE)
         {
 #ifdef DEBUG_LEGION
           assert(!reduction_instances.empty());
@@ -10839,7 +10842,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::resolve_false(bool speculated, bool launched)
+    void SliceTask::predicate_false(void)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11496,7 +11499,17 @@ namespace Legion {
       assert(!elide_future_return);
 #endif
       FutureInstance *result = NULL;
-      if (predicate_false_future.impl != NULL)
+      if (reduction_op != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_op->identity != NULL);
+        assert(predicate_false_future.impl == NULL);
+        assert(predicate_false_size == 0);
+#endif
+        result = FutureInstance::create_local(reduction_op->identity,
+            reduction_op->sizeof_rhs, false/*own*/, runtime);
+      }
+      else if (predicate_false_future.impl != NULL)
       {
         FutureInstance *canonical =
           predicate_false_future.impl->get_canonical_instance();

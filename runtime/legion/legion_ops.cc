@@ -3721,282 +3721,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Predicate Operation 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    PredicateImpl::PredicateImpl(Runtime *rt)
-      : Operation(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      Operation::activate();
-      predicate_resolved = false;
-      collect_predicate = RtUserEvent::NO_RT_USER_EVENT;
-      predicate_references = 0;
-      true_guard = PredUserEvent::NO_PRED_USER_EVENT;
-      false_guard = PredUserEvent::NO_PRED_USER_EVENT;
-      can_result_future_complete = false;
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::deactivate(bool freeop)
-    //--------------------------------------------------------------------------
-    {
-      Operation::deactivate(freeop);
-#ifdef DEBUG_LEGION
-      assert(predicate_references == 0);
-#endif
-      waiters.clear();
-      result_future = Future();
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::add_predicate_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      bool add_map_reference;
-      {
-        AutoLock o_lock(op_lock);
-        add_map_reference = (predicate_references == 0);
-        predicate_references++;
-      }
-      if (add_map_reference)
-        add_mapping_reference(get_generation());
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::remove_predicate_reference(void)
-    //--------------------------------------------------------------------------
-    {
-      bool remove_reference;
-      GenerationID task_gen = 0;  // initialization to make gcc happy
-      RtUserEvent to_trigger;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(predicate_references > 0);
-#endif
-        predicate_references--;
-        remove_reference = (predicate_references == 0);
-        if (remove_reference)
-        {
-          // Get the task generation before things can be cleaned up
-          task_gen = get_generation();
-          to_trigger = collect_predicate;
-        }
-      }
-      if (remove_reference)
-        remove_mapping_reference(task_gen);
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::trigger_complete(void)
-    //--------------------------------------------------------------------------
-    {
-      // Also check to see if we need to complete our future
-      bool set_future = false;
-      {
-        AutoLock o_lock(op_lock);
-        if (result_future.impl != NULL)
-          set_future = true;
-        else
-          can_result_future_complete = true;
-      }
-      if (set_future)
-        result_future.impl->set_local(&predicate_value,
-            sizeof(predicate_value));
-      complete_operation();
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::trigger_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent precondition;
-      {
-        AutoLock o_lock(op_lock);
-        // See if we have any outstanding references, if so make a precondition
-        if (predicate_references > 0)
-        {
-          collect_predicate = Runtime::create_rt_user_event();
-          precondition = collect_predicate;
-        }
-      } 
-      commit_operation(true/*deactivate*/, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    bool PredicateImpl::register_waiter(PredicateWaiter *waiter,
-                                          GenerationID waiter_gen, bool &value)
-    //--------------------------------------------------------------------------
-    {
-      bool valid;
-      AutoLock o_lock(op_lock);
-      if (predicate_resolved)
-      {
-        value = predicate_value;
-        valid = true;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(waiters.find(waiter) == waiters.end());
-#endif
-        waiters[waiter] = waiter_gen;
-        valid = false;
-      }
-      return valid;
-    }
-
-    //--------------------------------------------------------------------------
-    PredEvent PredicateImpl::get_true_guard(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!true_guard.exists())
-      {
-        true_guard = Runtime::create_pred_event();
-        if (predicate_resolved)
-        {
-          if (predicate_value)
-            Runtime::trigger_event(true_guard);
-          else
-            Runtime::poison_event(true_guard);
-        }
-      }
-      return true_guard;
-    }
-
-    //--------------------------------------------------------------------------
-    PredEvent PredicateImpl::get_false_guard(void)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!false_guard.exists())
-      {
-        false_guard = Runtime::create_pred_event();
-        if (predicate_resolved)
-        {
-          if (predicate_value)
-            Runtime::poison_event(false_guard);
-          else
-            Runtime::trigger_event(false_guard);
-        }
-      }
-      return false_guard;
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::get_predicate_guards(PredEvent &true_result,
-                                             PredEvent &false_result)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      if (!true_guard.exists())
-      {
-        true_guard = Runtime::create_pred_event();
-        if (predicate_resolved)
-        {
-          if (predicate_value)
-            Runtime::trigger_event(true_guard);
-          else
-            Runtime::poison_event(true_guard);
-        }
-      }
-      true_result = true_guard;
-      if (!false_guard.exists())
-      {
-        false_guard = Runtime::create_pred_event();
-        if (predicate_resolved)
-        {
-          if (predicate_value)
-            Runtime::poison_event(false_guard);
-          else
-            Runtime::trigger_event(false_guard);
-        }
-      }
-      false_result = false_guard;
-    }
-
-    //--------------------------------------------------------------------------
-    Future PredicateImpl::get_future_result(void)
-    //--------------------------------------------------------------------------
-    {
-      bool set_future = false;
-      if (result_future.impl == NULL)
-      {
-        Future temp = Future(
-              new FutureImpl(parent_ctx, runtime, true/*register*/,
-                runtime->get_available_distributed_id(),
-                get_provenance(), this));
-        AutoLock o_lock(op_lock);
-        // See if we lost the race
-        if (result_future.impl == NULL)
-        {
-          result_future = temp; 
-          // if the predicate is complete we can complete the future
-          set_future = can_result_future_complete; 
-        }
-      }
-      if (set_future)
-        result_future.impl->set_local(&predicate_value,sizeof(predicate_value));
-      return result_future;
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicateImpl::set_resolved_value(GenerationID pred_gen, bool value)
-    //--------------------------------------------------------------------------
-    {
-      bool need_trigger = true;
-      // Make a copy of the waiters since we could get cleaned up in parallel
-      std::map<PredicateWaiter*,GenerationID> copy_waiters;
-      PredUserEvent to_trigger, to_poison;
-      {
-        AutoLock o_lock(op_lock);
-        if ((pred_gen == get_generation()) && !predicate_resolved)
-        {
-          predicate_resolved = true;
-          predicate_value = value;
-          copy_waiters = waiters;
-          if (predicate_value)
-          {
-            to_trigger = true_guard;
-            to_poison = false_guard;
-          }
-          else
-          {
-            to_poison = true_guard;
-            to_trigger = false_guard;
-          }
-        }
-        else
-          need_trigger = false;
-      }
-      // Notify any waiters, no need to hold the lock since waiters can't
-      // be added after we set the state to resolved
-      for (std::map<PredicateWaiter*,GenerationID>::const_iterator it = 
-            copy_waiters.begin(); it != copy_waiters.end(); it++)
-      {
-        it->first->notify_predicate_value(it->second, value);
-      }
-      // Now see if we need to indicate we are done executing
-      if (need_trigger)
-        complete_execution();
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
-      if (to_poison.exists())
-        Runtime::poison_event(to_poison);
-    }
-
-    /////////////////////////////////////////////////////////////
     // Memoizable Operation 
     /////////////////////////////////////////////////////////////
 
@@ -4125,17 +3849,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MemoizableOp::activate();
-      predication_state = PENDING_ANALYSIS_STATE;
+      predication_state = PENDING_PREDICATE_STATE;
       predicate = NULL;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
-      predicate_waiter = RtUserEvent::NO_RT_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
     void PredicatedOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
+      if ((predicate != NULL) && predicate->remove_reference())
+        delete predicate;
       MemoizableOp::deactivate(freeop);
     }
 
@@ -4148,22 +3873,21 @@ namespace Legion {
       initialize_operation(ctx, track, regions, provenance, dependences);
       if (p == Predicate::TRUE_PRED)
       {
-        predication_state = RESOLVE_TRUE_STATE;
+        predication_state = PREDICATED_TRUE_STATE;
         predicate = NULL;
       }
       else if (p == Predicate::FALSE_PRED)
       {
-        predication_state = RESOLVE_FALSE_STATE;
+        predication_state = PREDICATED_FALSE_STATE;
         predicate = NULL;
       }
       else
       {
-        predication_state = PENDING_ANALYSIS_STATE;
+        predication_state = PENDING_PREDICATE_STATE;
         predicate = p.impl;
-        predicate->add_predicate_reference();
+        predicate->add_reference();
         if (runtime->legion_spy_enabled)
-          LegionSpy::log_predicate_use(unique_op_id, 
-                                       predicate->get_unique_op_id());
+          LegionSpy::log_predicate_use(unique_op_id, predicate->creator_uid);
       }
     }
 
@@ -4178,95 +3902,25 @@ namespace Legion {
     bool PredicatedOp::get_predicate_value(void)
     //--------------------------------------------------------------------------
     {
-      RtEvent wait_event = RtEvent::NO_RT_EVENT;
-      // this is actually set on all paths, but the compiler can't see it
-      bool result = false; 
-      {
-        AutoLock o_lock(op_lock);
-        if (predication_state == RESOLVE_TRUE_STATE)
-          result = true;
-        else if (predication_state == RESOLVE_FALSE_STATE)
-          result = false;
-        else
-        {
+      // This should only be called for inlining operations
 #ifdef DEBUG_LEGION
-          assert(predicate != NULL);
+      assert(!true_guard.exists() && !false_guard.exists());
 #endif
-          predicate_waiter = Runtime::create_rt_user_event();
-          wait_event = predicate_waiter;
-        }
-      }
-      if (wait_event.exists())
+      if (predication_state == PENDING_PREDICATE_STATE)
       {
-        wait_event.wait();
-        // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_LEGION
-        assert((predication_state == RESOLVE_TRUE_STATE) ||
-               (predication_state == RESOLVE_FALSE_STATE));
+        assert(predicate != NULL);
 #endif
-        if (predication_state == RESOLVE_TRUE_STATE)
-          result = true;
-        else
-          result = false;
+        bool value =
+          predicate->get_predicate(context_index, true_guard, false_guard);
+        if (false_guard.exists())
+          // Wait for the predicate to resolve
+          // If false was poisoned then the predicate resolved true
+          false_guard.wait_faultaware(value);
+        return value;
       }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void PredicatedOp::notify_predicate_value(GenerationID pred_gen, bool value)
-    //--------------------------------------------------------------------------
-    {
-      bool continue_true = false;
-      bool continue_false = false;
-      bool trigger_waiter = false;
-      bool retrigger = false;
-      {
-        AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-        assert(pred_gen == get_generation());
-#endif
-        trigger_waiter = predicate_waiter.exists();
-        switch (predication_state)
-        {
-          case PENDING_ANALYSIS_STATE:
-            {
-              // Nothing to do but record the new state
-              break;
-            }
-          case WAITING_MAPPING_STATE:
-            {
-              // Send this back through the normal path
-              retrigger = true;
-              break;
-            }
-          case SPECULATIVE_MAPPING_STATE:
-            {
-              if (value)
-                continue_true = true;
-              else
-                continue_false = true;
-              break;
-            }
-          default:
-            assert(false); // should not be in any resolved states
-        }
-        if (value)
-          predication_state = RESOLVE_TRUE_STATE;
-        else
-          predication_state = RESOLVE_FALSE_STATE;
-      }
-      if (trigger_waiter)
-        Runtime::trigger_event(predicate_waiter);
-      if (continue_true)
-        resolve_true(true/*speculated*/, true/*launched*/);
-      else if (continue_false)
-      {
-        if (runtime->legion_spy_enabled)
-          LegionSpy::log_predicated_false_op(unique_op_id);
-        resolve_false(true/*speculated*/, true/*launched*/);
-      }
-      if (retrigger)
-        trigger_ready();
+      else
+        return (predication_state == PREDICATED_TRUE_STATE);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6342,47 +5996,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool CopyOp::query_speculate(void)
+    void CopyOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::SpeculativeOutput output;
-      output.speculate = false;
-      output.speculate_mapping_only = true;
-      mapper->invoke_copy_speculate(this, &output);
-      if (!output.speculate || !output.speculate_mapping_only)
-        return false;
-      // If we're speculating then we make all the destination
-      // privileges that are write-discard read-write instead so
-      // that we get the earlier version of the data in case we
-      // actually are predicated false
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        RegionRequirement &req = dst_requirements[idx];
-        if (HAS_WRITE_DISCARD(req))
-          req.privilege &= ~LEGION_DISCARD_MASK;
-      }
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::resolve_true(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // If we already launched then we are done
-      if (launched)
-        return;
       // Otherwise we need to do the things to clean up this operation
       // Mark that this operation has completed both
       // execution and mapping indicating that we are done
@@ -12881,38 +12497,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool AcquireOp::query_speculate(void)
+    void AcquireOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::SpeculativeOutput output;
-      output.speculate = false;
-      output.speculate_mapping_only = true;
-      mapper->invoke_acquire_speculate(this, &output);
-      if (output.speculate && output.speculate_mapping_only)
-        return true;
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::resolve_true(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // nothing for speculation currently
-    }
-
-    //--------------------------------------------------------------------------
-    void AcquireOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // If we launched there is nothing to do
-      if (launched)
-        return;
       // Otherwise do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
@@ -13745,38 +13332,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ReleaseOp::query_speculate(void)
+    void ReleaseOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      if (mapper == NULL)
-      {
-        Processor exec_proc = parent_ctx->get_executing_processor();
-        mapper = runtime->find_mapper(exec_proc, map_id);
-      }
-      Mapper::SpeculativeOutput output;
-      output.speculate = false;
-      output.speculate_mapping_only = true;
-      mapper->invoke_release_speculate(this, &output);
-      if (output.speculate && output.speculate_mapping_only)
-        return true;
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::resolve_true(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // nothing for speculation right now
-    }
-
-    //--------------------------------------------------------------------------
-    void ReleaseOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // If we launched then there is nothing to do
-      if (launched)
-        return;
       // Do the things needed to clean up this operation
       complete_execution();
       if (!map_applied_conditions.empty())
@@ -14493,14 +14051,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FuturePredOp::FuturePredOp(Runtime *rt)
-      : PredicateOp(rt)
+      : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     FuturePredOp::FuturePredOp(const FuturePredOp &rhs)
-      : PredicateOp(NULL)
+      : Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never happen
@@ -14526,15 +14084,16 @@ namespace Legion {
     void FuturePredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::activate();
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
     void FuturePredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::deactivate(false/*free*/);
+      Operation::deactivate(false/*free*/);
       future = Future();
+      predicate = Predicate();
       if (freeop)
         runtime->free_future_predicate_op(this);
     }
@@ -14554,19 +14113,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::initialize(InnerContext *ctx, Future f,
-                                  Provenance *provenance)
+    Predicate FuturePredOp::initialize(InnerContext *ctx, const Future &f,
+                                       Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
       assert(f.impl != NULL);
 #endif
-      // Don't track this as it can lead to deadlock because
-      // predicates can't complete until all their references from
-      // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
       future = f;
+      predicate = Predicate(ctx->create_predicate_impl(this));
+      to_predicate = true;
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
@@ -14574,18 +14132,53 @@ namespace Legion {
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
       }
+      return predicate;
+    }
+
+    //--------------------------------------------------------------------------
+    Future FuturePredOp::initialize(InnerContext *ctx, const Predicate &p,
+                                    Provenance *provenance)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ctx != NULL);
+      assert(p.impl != NULL);
+#endif
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      predicate = p;
+      future = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
+                runtime->get_available_distributed_id(),
+                get_provenance(), this));
+      to_predicate = false;
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_predicate_use(unique_op_id, p.impl->creator_uid);
+      }
+      return future;
     }
 
     //--------------------------------------------------------------------------
     void FuturePredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (to_predicate)
+      {
 #ifdef DEBUG_LEGION
-      assert(future.impl != NULL);
+        assert(future.impl != NULL);
 #endif
-      // Register this operation as dependent on task that
-      // generated the future
-      future.impl->register_dependence(this);
+        // Register this operation as dependent on task that
+        // generated the future
+        future.impl->register_dependence(this);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(predicate.impl != NULL);
+#endif
+        register_dependence(predicate.impl->creator,
+                            predicate.impl->creator_gen);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14593,22 +14186,47 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Mark that we completed mapping this operation
-      complete_mapping(
-          future.impl->request_internal_buffer(this, false/*eager*/));
-      const RtEvent ready = future.impl->subscribe();
-      if (ready.exists() && !ready.has_triggered())
-        parent_ctx->add_to_trigger_execution_queue(this, ready);
+      if (to_predicate)
+      {
+        complete_mapping(
+            future.impl->request_internal_buffer(this, false/*eager*/));
+        const RtEvent ready = future.impl->subscribe();
+        if (ready.exists() && !ready.has_triggered())
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+        else
+          trigger_execution();
+      }
       else
-        trigger_execution();
+      {
+        complete_mapping();
+        RtEvent ready;
+        predicate.impl->get_predicate(ready);
+        if (ready.exists())
+          parent_ctx->add_to_trigger_execution_queue(this, ready);
+        else
+          trigger_execution();
+      }
     }
 
     //--------------------------------------------------------------------------
     void FuturePredOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      // See if we have a value
-      bool value = future.impl->get_boolean_value(parent_ctx);
-      set_resolved_value(get_generation(), value);
+      if (!to_predicate)
+      {
+        RtEvent ready;
+        bool value = predicate.impl->get_predicate(ready);
+#ifdef DEBUG_LEGION
+        assert(!ready.exists());
+#endif
+        FutureInstance *result = FutureInstance::create_local(&value,
+                                  sizeof(value), false/*own*/, runtime);
+        future.impl->set_result(ApEvent::NO_AP_EVENT, result);
+      }
+      else
+        predicate.impl->set_predicate(
+            future.impl->get_boolean_value(parent_ctx));
+      complete_execution();
     } 
 
     /////////////////////////////////////////////////////////////
@@ -14617,14 +14235,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     NotPredOp::NotPredOp(Runtime *rt)
-      : PredicateOp(rt)
+      : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     NotPredOp::NotPredOp(const NotPredOp &rhs)
-      : PredicateOp(NULL)
+      : Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never happen
@@ -14647,52 +14265,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::initialize(InnerContext *ctx, 
-                               const Predicate &p, Provenance *provenance)
+    Predicate NotPredOp::initialize(InnerContext *ctx, 
+                                    const Predicate &p, Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      // Don't track this as it can lead to deadlock because
-      // predicates can't complete until all their references from
-      // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
-      // Don't forget to reverse the values
-      if (p == Predicate::TRUE_PRED)
-        set_resolved_value(get_generation(), false);
-      else if (p == Predicate::FALSE_PRED)
-        set_resolved_value(get_generation(), true);
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(p.impl != NULL);
-#endif
-        pred_op = p.impl;
-        pred_op->add_predicate_reference();
-      }
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      to_set = Predicate(ctx->create_predicate_impl(this));
+      previous = p;
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
-        if ((p != Predicate::TRUE_PRED) && (p != Predicate::FALSE_PRED))
-          LegionSpy::log_predicate_use(unique_op_id, 
-                                       pred_op->get_unique_op_id());
+        LegionSpy::log_predicate_use(unique_op_id, p.impl->creator_uid);
       }
+      return to_set;
     }
 
     //--------------------------------------------------------------------------
     void NotPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::activate();
-      pred_op = NULL;
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
     void NotPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::deactivate(false/*free*/);
+      Operation::deactivate(false/*free*/);
+      previous = Predicate();
+      to_set = Predicate();
       if (freeop)
         runtime->free_not_predicate_op(this);
     }
@@ -14715,8 +14319,7 @@ namespace Legion {
     void NotPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      if (pred_op != NULL)
-        register_dependence(pred_op, pred_op->get_generation());
+      register_dependence(previous.impl->creator, previous.impl->creator_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -14724,31 +14327,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      if (pred_op != NULL)
+      RtEvent ready;
+      bool value = previous.impl->get_predicate(ready);
+      if (!ready.exists())
       {
-        bool prev_value;
-        bool valid = pred_op->register_waiter(this, get_generation(),
-                                              prev_value);
-        // Now we can remove the reference we added
-        pred_op->remove_predicate_reference();
-        // Don't forget to negate 
-        if (valid)
-          set_resolved_value(get_generation(), !prev_value);
+        to_set.impl->set_predicate(!value);
+        complete_execution();
       }
+      else
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::notify_predicate_value(GenerationID prev_gen, bool value)
+    void NotPredOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      // No short circuit in this one
-      // We can test this without the lock because 
-      // it is monotonically increasing
+      RtEvent ready;
+      bool value = previous.impl->get_predicate(ready);
 #ifdef DEBUG_LEGION
-      assert(prev_gen == get_generation());
+      assert(!ready.exists());
 #endif
-      // Don't forget to negate the value
-      set_resolved_value(prev_gen, !value);
+      to_set.impl->set_predicate(!value);
+      complete_execution();
     }
 
     /////////////////////////////////////////////////////////////
@@ -14757,14 +14357,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AndPredOp::AndPredOp(Runtime *rt)
-      : PredicateOp(rt)
+      : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AndPredOp::AndPredOp(const AndPredOp &rhs)
-      : PredicateOp(NULL)
+      : Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never happen
@@ -14787,53 +14387,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::initialize(InnerContext *ctx, 
-                               const std::vector<Predicate> &predicates,
-                               Provenance *provenance)
+    Predicate AndPredOp::initialize(InnerContext *ctx, 
+                                    std::vector<Predicate> &predicates,
+                                    Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      // Don't track this as it can lead to deadlock because
-      // predicates can't complete until all their references from
-      // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/,0/*regions*/, provenance);
-      // Now do the registration
-      for (std::vector<Predicate>::const_iterator it = predicates.begin();
-            it != predicates.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->impl != NULL);
-#endif
-        previous.push_back(it->impl);
-        it->impl->add_predicate_reference();
-      }
+      initialize_operation(ctx, true/*track*/,0/*regions*/, provenance);
+      to_set = Predicate(ctx->create_predicate_impl(this));
+      previous.swap(predicates);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
-        for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+        for (std::vector<Predicate>::const_iterator it = previous.begin();
               it != previous.end(); it++)
-          LegionSpy::log_predicate_use(unique_op_id, 
-                                       (*it)->get_unique_op_id());
+          LegionSpy::log_predicate_use(unique_op_id, it->impl->creator_uid); 
       }
+      return to_set;
     }
 
     //--------------------------------------------------------------------------
     void AndPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::activate();
-      true_count = 0;
-      false_short = false;
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
     void AndPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::deactivate(false/*free*/);
+      Operation::deactivate(false/*free*/);
       previous.clear();
+      to_set = Predicate();
       if (freeop)
         runtime->free_and_predicate_op(this);
     }
@@ -14856,9 +14444,9 @@ namespace Legion {
     void AndPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+      for (std::vector<Predicate>::const_iterator it = previous.begin();
             it != previous.end(); it++)
-        register_dependence(*it, (*it)->get_generation()); 
+        register_dependence(it->impl->creator, it->impl->creator_gen); 
     }
 
     //--------------------------------------------------------------------------
@@ -14866,66 +14454,44 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      // Hold the lock when doing this to prevent 
-      // any triggers from interfering with the analysis
-      bool need_resolve = false;
-      GenerationID local_gen = get_generation();
+      std::vector<RtEvent> ready_events;
+      for (std::vector<Predicate>::const_iterator it =
+            previous.begin(); it != previous.end(); it++)
       {
-        AutoLock o_lock(op_lock);
-        if (!predicate_resolved)
-        {
-          for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
-                it != previous.end(); it++)
-          {
-            bool value = false;
-            bool valid = (*it)->register_waiter(this, get_generation(), value);
-            if (valid)
-            {
-              if (!value)
-              {
-                false_short = true;
-                break;
-              }
-              else
-                true_count++;
-            }
-          }
-          need_resolve = false_short || (true_count == previous.size());
-        }
+        RtEvent ready;
+        it->impl->get_predicate(ready);
+        if (ready.exists())
+          ready_events.push_back(ready);
       }
-      // Clean up any references that we have
-      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
-            it != previous.end(); it++)
-        (*it)->remove_predicate_reference();
-      if (need_resolve)
-        set_resolved_value(local_gen, !false_short);
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
+      }
+      else
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
+    void AndPredOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      bool need_resolve = false;
-      if (pred_gen == get_generation())
+      bool result = true;
+      for (std::vector<Predicate>::const_iterator it =
+            previous.begin(); it != previous.end(); it++)
       {
-        AutoLock o_lock(op_lock);
-        // Check again to make sure we didn't lose the race
-        if ((pred_gen == get_generation()) && !predicate_resolved)
-        {
-          if (!value)
-          {
-            false_short = true;
-            need_resolve = true;
-          }
-          else
-          {
-            true_count++;
-            need_resolve = !false_short && (true_count == previous.size());
-          }
-        }
+        RtEvent ready;
+        bool value = it->impl->get_predicate(ready);
+#ifdef DEBUG_LEGION
+        assert(!ready.exists());
+#endif
+        if (value)
+          continue;
+        result = false;
+        break;
       }
-      if (need_resolve)
-        set_resolved_value(pred_gen, !false_short);
+      to_set.impl->set_predicate(result);
+      complete_execution();
     }
 
     /////////////////////////////////////////////////////////////
@@ -14934,14 +14500,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OrPredOp::OrPredOp(Runtime *rt)
-      : PredicateOp(rt)
+      : Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     OrPredOp::OrPredOp(const OrPredOp &rhs)
-      : PredicateOp(NULL)
+      : Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never happen
@@ -14964,53 +14530,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::initialize(InnerContext *ctx, 
-                              const std::vector<Predicate> &predicates,
-                              Provenance *provenance)
+    Predicate OrPredOp::initialize(InnerContext *ctx, 
+                                   std::vector<Predicate> &predicates,
+                                   Provenance *provenance)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(ctx != NULL);
 #endif
-      // Don't track this as it can lead to deadlock because
-      // predicates can't complete until all their references from
-      // the parent task have been removed.
-      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
-      // Now do the registration
-      for (std::vector<Predicate>::const_iterator it = predicates.begin();
-            it != predicates.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->impl != NULL);
-#endif
-        previous.push_back(it->impl);
-        it->impl->add_predicate_reference();
-      }
+      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
+      previous.swap(predicates);
+      to_set = Predicate(ctx->create_predicate_impl(this));
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
-        for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+        for (std::vector<Predicate>::const_iterator it = previous.begin();
               it != previous.end(); it++)
-          LegionSpy::log_predicate_use(unique_op_id, 
-                                       (*it)->get_unique_op_id());
+          LegionSpy::log_predicate_use(unique_op_id, it->impl->creator_uid);
       }
+      return to_set;
     }
 
     //--------------------------------------------------------------------------
     void OrPredOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::activate();
-      false_count = 0;
-      true_short = false;
+      Operation::activate();
     }
 
     //--------------------------------------------------------------------------
     void OrPredOp::deactivate(bool freeop)
     //--------------------------------------------------------------------------
     {
-      PredicateOp::deactivate(false/*free*/);
+      Operation::deactivate(false/*free*/);
       previous.clear();
+      to_set = Predicate();
       if (freeop)
         runtime->free_or_predicate_op(this);
     }
@@ -15033,9 +14587,9 @@ namespace Legion {
     void OrPredOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
+      for (std::vector<Predicate>::const_iterator it = previous.begin();
             it != previous.end(); it++)
-        register_dependence(*it, (*it)->get_generation());
+        register_dependence(it->impl->creator, it->impl->creator_gen);
     }
 
     //--------------------------------------------------------------------------
@@ -15043,68 +14597,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       complete_mapping();
-      // Hold the lock when doing this to prevent 
-      // any triggers from interfering with the analysis
-      bool need_resolve = false;
-      GenerationID local_gen = get_generation();
+      std::vector<RtEvent> ready_events;
+      for (std::vector<Predicate>::const_iterator it =
+            previous.begin(); it != previous.end(); it++)
       {
-        AutoLock o_lock(op_lock);
-        if (!predicate_resolved)
-        {
-          for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
-                it != previous.end(); it++)
-          {
-            bool value = false;
-            bool valid = (*it)->register_waiter(this, get_generation(), value);
-            if (valid)
-            {
-              if (value)
-              {
-                true_short = true;
-                break;
-              }
-              else
-                false_count++;
-            }
-          }
-          need_resolve = true_short || (false_count == previous.size());
-        }
+        RtEvent ready;
+        it->impl->get_predicate(ready);
+        if (ready.exists())
+          ready_events.push_back(ready);
       }
-      // Clean up any references that we have
-      for (std::vector<PredicateOp*>::const_iterator it = previous.begin();
-            it != previous.end(); it++)
-        (*it)->remove_predicate_reference();
-      if (need_resolve)
-        set_resolved_value(local_gen, true_short);
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        parent_ctx->add_to_trigger_execution_queue(this, ready);
+      }
+      else
+        trigger_execution();
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::notify_predicate_value(GenerationID pred_gen, bool value)
+    void OrPredOp::trigger_execution(void)
     //--------------------------------------------------------------------------
     {
-      bool need_resolve = false;
-      if (pred_gen == get_generation())
+      bool result = false;
+      for (std::vector<Predicate>::const_iterator it =
+            previous.begin(); it != previous.end(); it++)
       {
-        AutoLock o_lock(op_lock);
-        // Check again to make sure we didn't lose the race
-        if ((pred_gen == get_generation()) && !predicate_resolved)
-        {
-          if (value)
-          {
-            true_short = true;
-            need_resolve = true;
-          }
-          else
-          {
-            false_count++;
-            need_resolve = !true_short && (false_count == previous.size());
-          }
-        }
+        RtEvent ready;
+        bool value = it->impl->get_predicate(ready);
+#ifdef DEBUG_LEGION
+        assert(!ready.exists());
+#endif
+        if (!value)
+          continue;
+        result = true;
+        break;
       }
-      if (need_resolve)
-        set_resolved_value(pred_gen, true_short);
+      to_set.impl->set_predicate(result);
+      complete_execution();
     }
-
 
     /////////////////////////////////////////////////////////////
     // Must Epoch Operation 
@@ -19163,28 +18694,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FillOp::query_speculate(void)
+    void FillOp::predicate_false(void)
     //--------------------------------------------------------------------------
     {
-      // Always speculate on fill ops, but mapping only since
-      // we know that there is an easy way to defer them
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::resolve_true(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
-    void FillOp::resolve_false(bool speculated, bool launched)
-    //--------------------------------------------------------------------------
-    {
-      // If we already launched then there is nothing to do
-      if (launched)
-        return;
       // Otherwise do the work to clean up this operation
       // Mark that this operation has completed both
       // execution and mapping indicating that we are done
@@ -23144,10 +22656,6 @@ namespace Legion {
           if (it->impl != NULL)
             preconditions.insert(*it);
       }
-#if 0
-      const size_t future_size = (measurement == LEGION_MEASURE_SECONDS) ?
-        sizeof(double) : sizeof(long long);
-#endif
       result = Future(new FutureImpl(parent_ctx, runtime, true/*register*/,
                 runtime->get_available_distributed_id(),
                 get_provenance(), this));
