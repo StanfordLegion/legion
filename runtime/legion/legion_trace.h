@@ -72,17 +72,18 @@ namespace Legion {
       };
       struct CloseInfo {
       public:
-        CloseInfo(const RegionRequirement &r, unsigned idx,
+        CloseInfo(MergeCloseOp *op, unsigned idx,
 #ifdef DEBUG_LEGION_COLLECTIVES
                   RegionTreeNode *n,
 #endif
-                  const FieldMask &m)
-          : requirement(r), close_mask(m), creator_idx(idx)
+                  const RegionRequirement &r)
+          : close_op(op), requirement(r), creator_idx(idx)
 #ifdef DEBUG_LEGION_COLLECTIVES
             , node(n)
 #endif
         { }
       public:
+        MergeCloseOp *close_op; // only valid during capture
         RegionRequirement requirement;
         LegionVector<DependenceRecord> dependences;
         FieldMask close_mask;
@@ -145,11 +146,10 @@ namespace Legion {
       bool skip_analysis(RegionTreeID tid) const;
       size_t register_operation(Operation *op, GenerationID gen);
       void register_close(MergeCloseOp *op, unsigned creator_idx,
-                          const RegionRequirement &req,
 #ifdef DEBUG_LEGION_COLLECTIVES
                           RegionTreeNode *node,
 #endif
-                          const FieldMask &close_mask);
+                          const RegionRequirement &req);
       bool record_dependence(Operation *target, GenerationID target_gen,
                                 Operation *source, GenerationID source_gen);
       bool record_region_dependence(Operation *target, GenerationID target_gen,

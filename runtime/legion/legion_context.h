@@ -511,8 +511,6 @@ namespace Legion {
       virtual size_t register_new_child_operation(Operation *op,
                                                   RtUserEvent &resolved, 
                       const std::vector<StaticDependence> *dependences) = 0;
-      virtual void register_new_internal_operation(InternalOp *op) = 0;
-      virtual size_t register_new_close_operation(CloseOp *op) = 0;
       virtual size_t register_new_summary_operation(TraceSummaryOp *op) = 0;
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false,
@@ -1535,11 +1533,9 @@ namespace Legion {
       virtual size_t register_new_child_operation(Operation *op,
                                                   RtUserEvent &resolved,
                 const std::vector<StaticDependence> *dependences);
-      virtual void register_new_internal_operation(InternalOp *op);
       // Must be called while holding the dependence lock
       virtual void insert_unordered_ops(AutoLock &d_lock, const bool end_task,
                                         const bool progress);
-      virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
     public:
       void add_to_prepipeline_queue(Operation *op);
@@ -1847,7 +1843,6 @@ namespace Legion {
       mutable LocalLock                     child_op_lock;
       // Track whether this task has finished executing
       size_t total_children_count; // total number of sub-operations
-      size_t total_close_count; 
       size_t total_summary_count;
       std::atomic<size_t> outstanding_children_count;
       LegionMap<Operation*,GenerationID,
@@ -3794,8 +3789,6 @@ namespace Legion {
       virtual size_t register_new_child_operation(Operation *op,
                                                   RtUserEvent &resolved,
                 const std::vector<StaticDependence> *dependences);
-      virtual void register_new_internal_operation(InternalOp *op);
-      virtual size_t register_new_close_operation(CloseOp *op);
       virtual size_t register_new_summary_operation(TraceSummaryOp *op);
       virtual bool add_to_dependence_queue(Operation *op, 
                                            bool unordered = false,

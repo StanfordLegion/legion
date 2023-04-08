@@ -214,8 +214,8 @@ namespace Legion {
 #else
           MergeCloseOp *close_op = context->get_merge_close_op();
 #endif
-          close_op->initialize(context, cit->requirement, cit->creator_idx,
-                               cit->close_mask, op);
+          close_op->initialize(context, cit->requirement, cit->creator_idx, op);
+          close_op->update_close_mask(cit->close_mask);
           const std::pair<Operation*,GenerationID> close_key(close_op, 
                                             close_op->get_generation());
           close_op->add_mapping_reference(gen);
@@ -236,11 +236,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalTrace::register_close(MergeCloseOp *op, unsigned creator_idx,
-                                      const RegionRequirement &req,
 #ifdef DEBUG_LEGION_COLLECTIVES
                                       RegionTreeNode *node,
 #endif
-                                      const FieldMask &close_mask)
+                                      const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -252,11 +251,11 @@ namespace Legion {
       operations.push_back(key);
       op_map[key] = index;
       OperationInfo &info = replay_info.back();
-      info.closes.emplace_back(CloseInfo(req, creator_idx,
+      info.closes.emplace_back(CloseInfo(op, creator_idx,
 #ifdef DEBUG_LEGION_COLLECTIVES
                                          node,
 #endif
-                                         close_mask));
+                                         req));
     }
 
     //--------------------------------------------------------------------------
@@ -332,14 +331,28 @@ namespace Legion {
       if (source->is_internal_op())
       {
 #ifdef DEBUG_LEGION
+        bool found = false;
         assert(!info.closes.empty());
 #endif
-        CloseInfo &close = info.closes.back();
-        for (LegionVector<DependenceRecord>::iterator it =
-              close.dependences.begin(); it != close.dependences.end(); it++)
-          if (it->merge(record))
-            return true;
-        close.dependences.emplace_back(std::move(record));
+        // Find the right close info and record the dependence 
+        for (unsigned idx = 0; idx < info.closes.size(); idx++)
+        {
+          CloseInfo &close = info.closes[idx];
+          if (close.close_op != source)
+            continue;
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          for (LegionVector<DependenceRecord>::iterator it =
+                close.dependences.begin(); it != close.dependences.end(); it++)
+            if (it->merge(record))
+              return true;
+          close.dependences.emplace_back(std::move(record));
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
       }
       else
       {
@@ -383,14 +396,29 @@ namespace Legion {
       if (source->is_internal_op())
       {
 #ifdef DEBUG_LEGION
+        bool found = false;
         assert(!info.closes.empty());
 #endif
-        CloseInfo &close = info.closes.back();
-        for (LegionVector<DependenceRecord>::iterator it =
-              close.dependences.begin(); it != close.dependences.end(); it++)
-          if (it->merge(record))
-            return true;
-        close.dependences.emplace_back(std::move(record));
+        // Find the right close info and record the dependence 
+        for (unsigned idx = 0; idx < info.closes.size(); idx++)
+        {
+          CloseInfo &close = info.closes[idx];
+          if (close.close_op != source)
+            continue;
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          close.close_mask |= dep_mask;
+          for (LegionVector<DependenceRecord>::iterator it =
+                close.dependences.begin(); it != close.dependences.end(); it++)
+            if (it->merge(record))
+              return true;
+          close.dependences.emplace_back(std::move(record));
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
       }
       else
       {
@@ -624,12 +652,13 @@ namespace Legion {
 #else
           MergeCloseOp *close_op = context->get_merge_close_op();
 #endif
-          close_op->initialize(context, req, it->current_req_index, mask, op);
-          register_close(close_op, it->current_req_index, req,
+          close_op->initialize(context, req, it->current_req_index, op);
+          close_op->update_close_mask(mask);
+          register_close(close_op, it->current_req_index,
 #ifdef DEBUG_LEGION_COLLECTIVES
                          forest->get_node(root_region),
 #endif
-                         mask);
+                         req);
           // Mark that we are starting our dependence analysis
           close_op->begin_dependence_analysis();
           // Do any other work for the dependence analysis

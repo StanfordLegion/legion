@@ -2798,8 +2798,7 @@ namespace Legion {
         full_inner_context(finner),
         concurrent_context(concurrent), finished_execution(false),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
-        total_children_count(0),
-        total_close_count(0), total_summary_count(0),
+        total_children_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
@@ -8597,13 +8596,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::register_new_internal_operation(InternalOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::insert_unordered_ops(AutoLock &d_lock, 
                                        const bool end_task, const bool progress)
     //--------------------------------------------------------------------------
@@ -8632,18 +8624,6 @@ namespace Legion {
       }
       outstanding_children_count.fetch_add(unordered_ops.size());
       unordered_ops.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t InnerContext::register_new_close_operation(CloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // For now we just bump our counter
-      size_t result = total_close_count++;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_close_operation_index(get_unique_id(), result, 
-                                             op->get_unique_op_id());
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -24060,21 +24040,6 @@ namespace Legion {
       assert(op->get_operation_kind() == Operation::TASK_OP_KIND);
 #endif
       return ++inlined_tasks;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_new_internal_operation(InternalOp *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    size_t LeafContext::register_new_close_operation(CloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return 0;
     }
 
     //--------------------------------------------------------------------------

@@ -8798,7 +8798,7 @@ class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'used_instances', 'virtual_indexes', 'processor', 
                  'priority', 'premappings', 'postmappings', 'tunables', 
-                 'operation_indexes', 'close_indexes', 'variant', 'replicants', 'shard']
+                 'operation_indexes', 'variant', 'replicants', 'shard']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -8817,7 +8817,6 @@ class Task(object):
         self.postmappings = None
         self.tunables = None
         self.operation_indexes = None
-        self.close_indexes = None
         self.variant = None
         self.replicants = None
         self.shard = None
@@ -8920,11 +8919,6 @@ class Task(object):
             self.operation_indexes = dict()
         self.operation_indexes[index] = uid
 
-    def add_close_index(self, index, uid):
-        if not self.close_indexes:
-            self.close_indexes = dict()
-        self.close_indexes[index] = uid
-
     def get_parent_context(self):
         assert self.op.context is not None
         return self.op.context
@@ -8974,10 +8968,6 @@ class Task(object):
             self.operation_indexes = other.operation_indexes
         else:
             assert not other.operation_indexes
-        if not self.close_indexes:
-            self.close_indexes = other.close_indexes
-        else:
-            assert not other.close_indexes
         if not self.variant:
             self.variant = other.variant
         else:
@@ -9639,14 +9629,6 @@ class Task(object):
             for idx in xrange(len(self.operation_indexes)):
                 assert idx in self.operation_indexes
                 replay_file.write(struct.pack('Q',self.operation_indexes[idx]))
-        else:
-            replay_file.write(struct.pack('I',0))
-        # Pack the close indexes
-        if self.close_indexes:
-            replay_file.write(struct.pack('I',len(self.close_indexes)))
-            for idx in xrange(len(self.close_indexes)):
-                assert idx in self.close_indexes
-                replay_file.write(struct.pack('Q',self.close_indexes[idx]))
         else:
             replay_file.write(struct.pack('I',0))
 
@@ -11819,8 +11801,6 @@ op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 op_provenance_pat        = re.compile(
     prefix+"Operation Provenance (?P<uid>[0-9]+) (?P<provenance>.*)")
-close_index_pat          = re.compile(
-    prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 predicate_false_pat      = re.compile(
     prefix+"Predicate False (?P<uid>[0-9]+)")
 # Patterns for logical analysis and region requirements
@@ -12681,12 +12661,6 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.provenance = m.group('provenance')
-        return True
-    m = close_index_pat.match(line)
-    if m is not None:
-        task = state.get_task(int(m.group('parent')))
-        task.add_close_index(int(m.group('index')),
-                             int(m.group('child')))
         return True
     m = predicate_false_pat.match(line)
     if m is not None:

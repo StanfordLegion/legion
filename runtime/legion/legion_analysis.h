@@ -963,6 +963,9 @@ namespace Legion {
       RefinementNode(RegionTreeNode *node);
       virtual ~RefinementNode(void) { }
     public:
+      RefinementNode *clone(void) const;
+      void incorporate(RefinementNode *to_incorporate);
+    public:
       RegionTreeNode *const node;
       std::set<RefinementNode*> children;
 #if 0
@@ -1385,15 +1388,17 @@ namespace Legion {
     public:
       void initialize_refined_fields(const FieldMask &mask);
       void initialize_unrefined_fields(const FieldMask &mask, 
-                                       LogicalAnalysis &analysis);
+          const unsigned index, LogicalAnalysis &analysis);
       void update_refinement_child(FieldMask &disjoint_complete_mask,
           FieldMask traversal_mask, RegionTreeNode *child_node, 
           FieldMask child_disjoint_complete,
-          const ProjectionInfo &info, LogicalAnalysis &analysis, ContextID ctx,
+          const ProjectionInfo &info, LogicalAnalysis &analysis,
+          ContextID ctx, LogicalRegion privilege, unsigned req_index,
           FieldMaskSet<RefinementOp> &refinement_operations);
       void update_refinement_projection(FieldMask &disjoint_complete_mask,
           FieldMask traversal_mask, ProjectionSummary *projection,
           LogicalAnalysis &logical_analysis, ContextID ctx,
+          LogicalRegion privilege, unsigned req_index,
           FieldMaskSet<RefinementOp> &refinement_operations);
       void change_refinements(ContextID ctx, FieldMask refinement_mask,
                               FieldMaskSet<RefinementNode> &refinements);
@@ -1595,7 +1600,7 @@ namespace Legion {
         const unsigned req_idx;
       };
     public:
-      LogicalAnalysis(Operation *op, std::set<RtEvent> &applied_events);
+      LogicalAnalysis(Operation *op);
       LogicalAnalysis(const LogicalAnalysis &rhs) = delete;
       ~LogicalAnalysis(void);
     public:
@@ -1607,29 +1612,42 @@ namespace Legion {
           LogicalRegion privilege_root);
       bool deduplicate(PartitionNode *child, FieldMask &refinement_mask);
 #endif
-      void record_unrefined_fields(RegionNode *node,const FieldMask &unrefined);
-      void record_pending_refinement(RefinementNode *refinement,
-                                     const FieldMask &refinement_mask,
+      void record_unrefined_fields(RegionNode *node, unsigned index,
+                                   const FieldMask &unrefined);
+      void record_pending_refinement(LogicalRegion privilege,
+                                     unsigned req_index,
+                                     RefinementNode *refinement,
+                                     FieldMask refinement_mask,
                                      FieldMaskSet<RefinementOp> &refinements);
+      RefinementOp* create_refinement(LogicalRegion privilege,
+                                      unsigned req_index,
+                                      RefinementNode *refinement);
     public:
       // Record a prior operation that we need to depend on with a 
       // close operation to group together dependences
       void record_close_dependence(LogicalRegion privilege,
+                                   unsigned req_index,
                                    RegionTreeNode *path_node,
-                                   LogicalUser *user, FieldMask mask);
+                                   const LogicalUser *user,
+                                   const FieldMask &mask);
     protected:
-      void issue_close_operation(LogicalRegion parent, PendingClose *pending);
+      void issue_internal_operation(RegionTreeNode *node,
+          InternalOp *close_op, const FieldMask &internal_mask) const;
     public:
       Operation *const op;
       InnerContext *const context;
     protected:
-      std::set<RtEvent> &applied_events;
       FieldMaskSet<RegionNode> unrefined_nodes;
-      FieldMaskSet<RefinementOp> pending_refinements;
-    protected:
-      // Index first by the parent region where privileges come from
-      std::map<LogicalRegion,
-              std::map<RegionTreeNode*,PendingClose*> > pending_closes;
+      std::map<RegionNode*,unsigned> unrefined_indexes;
+      // Keep these ordered by the order in which we make them so that
+      // all shards will iterate over them in the same order for 
+      // control replication cases, we do this by sorting them based
+      // on their unique IDs which are monotonically increasing so we
+      // know that they will be in order across shards too
+      typedef FieldMaskSet<RefinementOp,UNTRACKED_ALLOC,true/*ordered*/>
+        OrderedRefinements;
+      OrderedRefinements pending_refinements;
+      std::map<RegionTreeNode*,MergeCloseOp*> pending_closes;
     };
 
     /**

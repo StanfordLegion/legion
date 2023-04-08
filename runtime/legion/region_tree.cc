@@ -15818,7 +15818,7 @@ namespace Legion {
       const bool arrived = !path.has_child(depth);
       FieldMask open_below;
       if (check_unversioned)
-        state.initialize_unrefined_fields(user_mask, logical_analysis);
+        state.initialize_unrefined_fields(user_mask,user.idx,logical_analysis);
       RegionTreeNode *next_child = NULL;
       if (!arrived)
         next_child = get_tree_child(path.get_child(depth));
@@ -15872,11 +15872,13 @@ namespace Legion {
                 state.find_or_create_projection_summary(user.op, user.idx,
                               trace_info.req, logical_analysis, proj_info);
               state.update_refinement_projection(disjoint_complete_mask,
-                    user_mask, summary, logical_analysis, ctx, refinements);
+                    user_mask, summary, logical_analysis, ctx, 
+                    privilege_root, user.idx, refinements);
             }
             else
               state.update_refinement_projection(disjoint_complete_mask,
-                user_mask, user.shard_proj, logical_analysis, ctx, refinements);
+                user_mask, user.shard_proj, logical_analysis, ctx, 
+                privilege_root, user.idx, refinements);
           }
           else
           {
@@ -15953,7 +15955,8 @@ namespace Legion {
         if (disjoint_complete_path)
           state.update_refinement_child(disjoint_complete_mask, user_mask,
                                  next_child, child_disjoint_complete_mask,
-                                 proj_info, logical_analysis, ctx, refinements);
+                                 proj_info, logical_analysis, ctx, 
+                                 privilege_root, user.idx, refinements);
 #if 0
 
         if (!!deviating_mask)
@@ -19825,7 +19828,7 @@ namespace Legion {
                     // Not able to do the symbolic elision so we need a fence
                     // across the shards to be safe
                     logical_analysis.record_close_dependence(root,
-                                              this, &prev, overlap);
+                                  user.idx, this, &prev, overlap);
                     it.filter(overlap);
                     if (!it->second)
                       to_delete.push_back(it->first);
@@ -20013,7 +20016,7 @@ namespace Legion {
         // Skip any users from the same operation for different requiremnts
         if (prev.ctx_index == user.ctx_index)
           continue;
-        logical_analysis.record_close_dependence(root, path_node,
+        logical_analysis.record_close_dependence(root, user.idx, path_node,
                                                  it->first, overlap);
         it.filter(overlap);
         if (!it->second)

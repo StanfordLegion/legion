@@ -4352,7 +4352,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalState::initialize_unrefined_fields(const FieldMask &mask,
-                                                   LogicalAnalysis &analysis)
+                                const unsigned index, LogicalAnalysis &analysis)
     //--------------------------------------------------------------------------
     {
       FieldMask uninitialized = mask - refinement_trackers.get_valid_mask();
@@ -4361,7 +4361,8 @@ namespace Legion {
       initialize_refined_fields(uninitialized); 
       // Record that the analysis is responsibile for issuing at least some
       // kind of refinement operation for these fields to initialize them
-      analysis.record_unrefined_fields(owner->as_region_node(), uninitialized);
+      analysis.record_unrefined_fields(owner->as_region_node(),
+                                       index, uninitialized);
     }
 
     //--------------------------------------------------------------------------
@@ -4369,7 +4370,8 @@ namespace Legion {
            FieldMask &disjoint_complete_mask, FieldMask traversal_mask,
            RegionTreeNode *next_child, FieldMask child_disjoint_complete_mask,
            const ProjectionInfo &info, LogicalAnalysis &analysis,
-           ContextID ctx, FieldMaskSet<RefinementOp> &refinement_operations)
+           ContextID ctx, LogicalRegion privilege, unsigned req_index,
+           FieldMaskSet<RefinementOp> &refinement_operations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4490,8 +4492,8 @@ namespace Legion {
         // Record the refinement tree with the analysis  
         for (FieldMaskSet<RefinementNode>::const_iterator it =
               refinements.begin(); it != refinements.end(); it++)
-          analysis.record_pending_refinement(it->first, it->second,
-                                             refinement_operations);
+          analysis.record_pending_refinement(privilege, req_index,
+                    it->first, it->second, refinement_operations);
       }
       if (!!fallback_refine)
       {
@@ -4503,8 +4505,8 @@ namespace Legion {
         refinement_trackers.insert(tracker, fallback_refine);
         // Create a refinement tree and record it with the analysis
         RefinementNode *refinement = fallback->create_refinement();
-        analysis.record_pending_refinement(refinement, fallback_refine,
-                                           refinement_operations);
+        analysis.record_pending_refinement(privilege, req_index,
+            refinement, fallback_refine, refinement_operations);
       }
     }
 
@@ -4513,6 +4515,7 @@ namespace Legion {
               FieldMask &disjoint_complete_mask, 
               FieldMask traversal_mask, ProjectionSummary *projection,
               LogicalAnalysis &logical_analysis, ContextID ctx,
+              LogicalRegion privilege, unsigned req_index,
               FieldMaskSet<RefinementOp> &refinement_operations)
     //--------------------------------------------------------------------------
     {
@@ -4587,8 +4590,8 @@ namespace Legion {
           // Inform the subtree that it's now refined
           RefinementNode *refinement = projection->create_refinement();
           // Record the refinement tree with the analysis  
-          logical_analysis.record_pending_refinement(refinement, refine_now,
-                                                     refinement_operations);
+          logical_analysis.record_pending_refinement(privilege, req_index,
+                            refinement, refine_now, refinement_operations);
         }
       }
       else
@@ -5692,21 +5695,116 @@ namespace Legion {
 #endif
 
     /////////////////////////////////////////////////////////////
-    // KDNode
+    // Logical Analysis
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LogicalAnalysis::LogicalAnalysis(Operation *o,std::set<RtEvent> &events)
-      : op(o), context(op->get_context()), applied_events(events)
+    LogicalAnalysis::LogicalAnalysis(Operation *o)
+      : op(o), context(op->get_context())
     //--------------------------------------------------------------------------
     {
     }
 
-#if 0
     //--------------------------------------------------------------------------
     LogicalAnalysis::~LogicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
+      // If we have any pending refinements, have them record dependences
+      // on any pending closes that were done along their path and then
+      // issue the refinements 
+      for (OrderedRefinements::const_iterator it =
+            pending_refinements.begin(); it != pending_refinements.end(); it++)
+      {
+        RegionTreeNode *node = it->first->get_refinement_node();
+        RegionTreeNode *path_node = node;
+        while (path_node != NULL)
+        {
+          std::map<RegionTreeNode*,MergeCloseOp*>::const_iterator finder =
+            pending_closes.find(path_node);
+          if (finder != pending_closes.end())
+          {
+            FieldMask overlap = it->second & finder->second->get_close_mask();
+            if (!!overlap)
+              it->first->register_region_dependence(0/*index*/, finder->second,
+                  finder->second->get_generation(), 0/*index*/,
+                  LEGION_TRUE_DEPENDENCE, false/*validates*/, overlap);
+          }
+          path_node = path_node->get_parent();
+        }
+        it->first->record_refinement_mask(it->second);
+        issue_internal_operation(node, it->first, it->second);
+      }
+      // Issue the pending closes
+      if (!pending_closes.empty())
+      {
+        // Need to issue these close operations in order in case we are
+        // control replicated and therefore all the shards need to see 
+        // the closes in the same order for things to work correctly
+        std::map<LogicalRegion,RegionTreeNode*> ordered_region_closes;
+        std::map<LogicalPartition,RegionTreeNode*> ordered_partition_closes;
+        for (std::map<RegionTreeNode*,MergeCloseOp*>::const_iterator it =
+              pending_closes.begin(); it != pending_closes.end(); it++)
+        {
+          if (it->first->is_region())
+          {
+            RegionNode *region = it->first->as_region_node();
+            ordered_region_closes[region->handle] = it->first;
+          }
+          else
+          {
+            PartitionNode *partition = it->first->as_partition_node();
+            ordered_partition_closes[partition->handle] = it->first;
+          }
+        }
+        for (std::map<LogicalRegion,RegionTreeNode*>::const_iterator it =
+              ordered_region_closes.begin(); it !=
+              ordered_region_closes.end(); it++)
+        {
+          MergeCloseOp *close = pending_closes[it->second];
+          issue_internal_operation(it->second, close, close->get_close_mask());
+        }
+        for (std::map<LogicalPartition,RegionTreeNode*>::const_iterator it =
+              ordered_partition_closes.begin(); it !=
+              ordered_partition_closes.end(); it++)
+        {
+          MergeCloseOp *close = pending_closes[it->second];
+          issue_internal_operation(it->second, close, close->get_close_mask());
+        }
+      }
+      // If we have any unrefined nodes we can issue close operations
+      // to create a refinement for them at the root now
+      if (!unrefined_nodes.empty())
+      {
+        // Sort these by region names so that they are done in the same
+        // order across all the shards for control replication
+        std::map<LogicalRegion,RegionNode*> ordered_regions;
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              unrefined_nodes.begin(); it != unrefined_nodes.end(); it++)
+          ordered_regions[it->first->handle] = it->first;
+        for (std::map<LogicalRegion,RegionNode*>::const_iterator it =
+              ordered_regions.begin(); it != ordered_regions.end(); it++)
+        {
+          const FieldMask &refinement_mask = unrefined_nodes[it->second];
+#ifdef DEBUG_LEGION_COLLECTIVES
+          MergeCloseOp *initializer = 
+            context->get_merge_close_op(op, it->second);
+#else
+          MergeCloseOp *initializer = context->get_merge_close_op();
+#endif
+          RegionRequirement req(it->first, LEGION_WRITE_DISCARD,
+              LEGION_EXCLUSIVE, it->first);
+          it->second->column_source->get_field_set(refinement_mask,
+                                      context, req.privilege_fields);
+          initializer->initialize(context, req, 
+                                  unrefined_indexes[it->second], op);
+          initializer->record_refinements(refinement_mask, true/*overwrite*/);
+          initializer->begin_dependence_analysis();
+          // These fields are unversioned so there is nothing for 
+          // this close operation to depend on
+          issue_internal_operation(it->second, initializer, refinement_mask);
+        }
+      }
+#if 0
       if (!pending_closes.empty())
       {
         // Need to issue these close operations in order in case we are
@@ -5791,8 +5889,10 @@ namespace Legion {
 #endif
         }
       }
+#endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RefinementOp* LogicalAnalysis::create_refinement(const LogicalUser &user,
                      PartitionNode *partition, const FieldMask &refinement_mask,
@@ -5854,13 +5954,154 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LogicalAnalysis::record_unrefined_fields(RegionNode *node, 
-                                                  const FieldMask &unrefined)
+                                     unsigned index, const FieldMask &unrefined)
     //--------------------------------------------------------------------------
     {
       // No need for references here, this data structure isn't going to 
       // live past the end of this meta-task for the enclosing operation 
       // which ensures the liveness of the region tree nodes
-      unrefined_nodes.insert(node, unrefined);
+      if (unrefined_nodes.insert(node, unrefined))
+        unrefined_indexes[node] = index;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalAnalysis::record_pending_refinement(LogicalRegion privilege,
+                                            unsigned req_index,
+                                            RefinementNode *refinement,
+                                            FieldMask refinement_mask,
+                                            FieldMaskSet<RefinementOp> &pending)
+    //--------------------------------------------------------------------------
+    {
+      // If we overlap with any unrefined nodes then we can remove them
+      if (!unrefined_nodes.empty() && refinement->node->is_region())
+      {
+        FieldMaskSet<RegionNode>::iterator finder = 
+          unrefined_nodes.find(refinement->node->as_region_node());
+        if (finder != unrefined_nodes.end())
+        {
+          finder.filter(refinement_mask);
+          if (!finder->second)
+          {
+            unrefined_indexes.erase(finder->first);
+            unrefined_nodes.erase(finder);
+          }
+        }
+      }
+      // Search through all the existing refinements and see if we have any
+      // that interfere and whether they are dominating or conflicting
+      for (OrderedRefinements::iterator it =
+            pending_refinements.begin(); it != pending_refinements.end(); it++)
+      {
+        // Note this mask comparison is pretty strange in that we might
+        // accidentally be comparing fields from different regions/field spaces
+        // but we'll detect those cases later when we ask the refinements
+        // to check for domination
+        const FieldMask overlap = refinement_mask & it->second;
+        if (!overlap)
+          continue;
+        bool dominates = false;
+        if (it->first->interferes(refinement, dominates))
+        {
+          if (dominates)
+          {
+            // It dominates need to handle all the partial overlapping cases
+            if (it->second != overlap)
+            {
+              RefinementNode *dominator = it->first->clone_refinement();
+              if (overlap != refinement_mask)
+              {
+                dominator->incorporate(refinement->clone());
+                RefinementOp *op =
+                  create_refinement(privilege, req_index, dominator); 
+                pending_refinements.insert(op, overlap);
+                pending.insert(op, overlap);
+                refinement_mask -= overlap;
+                if (!refinement_mask)
+                  break;
+              }
+              else
+              {
+                dominator->incorporate(refinement);
+                refinement = dominator;
+              }
+            } 
+            else // they're equal so we can just subsume it
+            {
+              it->first->incorporate_refinement(refinement);
+              pending.insert(it->first, overlap);
+              refinement_mask -= overlap;
+              if (!refinement_mask)
+                break;
+            }
+          }
+          else 
+            // The only way they interefere without dominating is by
+            // the new refinement conflicting with the earlier one as a
+            // change higher up in the tree, so we can just remove these
+            // fields and not issue the refinement for them
+            it.filter(overlap);
+        }
+      }
+      if (!!refinement_mask)
+      {
+        RefinementOp *op = create_refinement(privilege, req_index, refinement);
+        pending_refinements.insert(op, refinement_mask);
+        pending.insert(op, refinement_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementOp* LogicalAnalysis::create_refinement(LogicalRegion privilege,
+                                 unsigned req_index, RefinementNode *refinement)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION_COLLECTIVES
+      RefinementOp *refinement_op = context->get_refinement_op(op, 
+                                                refinement->node);
+#else
+      RefinementOp *refinement_op = context->get_refinement_op();
+#endif
+      refinement_op->initialize(op, req_index, privilege, refinement);
+      // Start the dependence analysis for this refinement now
+      // We'll finish the dependence analysis in the destructor
+      refinement_op->begin_dependence_analysis();
+      return refinement_op;
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalAnalysis::record_close_dependence(LogicalRegion parent,
+                                 unsigned req_index, RegionTreeNode *path_node,
+                                 const LogicalUser *user, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeNode*,MergeCloseOp*>::const_iterator finder =
+        pending_closes.find(path_node);
+      if (finder == pending_closes.end())
+      {
+        // Start a new close operation for this node in the region tree
+        // Construct a reigon requirement for this operation
+        // All privileges are based on the parent logical region
+        RegionRequirement req;
+        if (path_node->is_region())
+          req = RegionRequirement(path_node->as_region_node()->handle,
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+        else
+          req = RegionRequirement(path_node->as_partition_node()->handle, 0,
+              LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
+#ifdef DEBUG_LEGION_COLLECTIVES
+        MergeCloseOp *close_op = context->get_merge_close_op(op, path_node);
+#else
+        MergeCloseOp *close_op = context->get_merge_close_op();
+#endif
+        close_op->initialize(context, req, req_index, op);
+        // Mark that we are starting our dependence analysis
+        close_op->begin_dependence_analysis();
+        finder = pending_closes.insert(
+            std::make_pair(path_node, close_op)).first;
+      }
+      finder->second->register_region_dependence(0/*index*/, user->op,
+        user->gen, user->idx, LEGION_TRUE_DEPENDENCE, false/*validates*/, mask);
+      finder->second->update_close_mask(mask);
     }
 
 #if 0
@@ -6030,64 +6271,29 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void LogicalAnalysis::issue_close_operation(LogicalRegion parent,
-                                                PendingClose *pending)
+    void LogicalAnalysis::issue_internal_operation(RegionTreeNode *node,
+                  InternalOp *internal_op, const FieldMask &internal_mask) const
     //--------------------------------------------------------------------------
     {
-      RegionTreeNode *node = pending->node;
-      // Construct a reigon requirement for this operation
-      // All privileges are based on the parent logical region
-      RegionRequirement req;
-      if (node->is_region())
-        req = RegionRequirement(node->as_region_node()->handle,
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
-      else
-        req = RegionRequirement(node->as_partition_node()->handle, 0,
-            LEGION_READ_WRITE, LEGION_EXCLUSIVE, parent);
-#ifdef DEBUG_LEGION_COLLECTIVES
-      MergeCloseOp *close_op = context->get_merge_close_op(op, node);
-#else
-      MergeCloseOp *close_op = context->get_merge_close_op();
-#endif
-      const FieldMask &mask = pending->preconditions.get_valid_mask();
-      node->column_source->get_field_set(mask, context,
-                                         req.privilege_fields);
-      close_op->initialize(context, req, pending->req_idx, mask, op);
-      LogicalTrace *trace = op->get_trace();
-      if (trace != NULL)
-        trace->register_close(close_op, pending->req_idx, req, 
-#ifdef DEBUG_LEGION_COLLECTIVES
-                              node,
-#endif
-                              mask);
-      // Mark that we are starting our dependence analysis
-      close_op->begin_dependence_analysis();
       // Do any other work for the dependence analysis
-      close_op->trigger_dependence_analysis();
-      // Record all the dependences on the previous users
-      for (FieldMaskSet<LogicalUser>::const_iterator it =
-            pending->preconditions.begin(); it != 
-            pending->preconditions.end(); it++)
-      {
-        const LogicalUser &prev = *it->first;
-        close_op->register_region_dependence(0/*index*/, prev.op,
-            prev.gen, prev.idx, LEGION_TRUE_DEPENDENCE, 
-            false/*validates*/, it->second);
-        if (it->first->remove_reference())
-          delete it->first;
-      }
-      // Record a user for this close operation in the region tree 
-      LogicalUser *close_user = new LogicalUser(close_op,
-          0/*region req index*/, RegionUsage(req));
+      internal_op->trigger_dependence_analysis();
+      // Record a user for this internal operation in the region tree 
+      LogicalUser *user = new LogicalUser(internal_op, 0/*region index*/,
+          RegionUsage(LEGION_READ_WRITE, LEGION_EXCLUSIVE, 0/*redop*/));
       LogicalState &state = node->get_logical_state(context->get_context_id());
-      // This will take ownership of the close user
-      node->register_local_user(state, *close_user, mask);
-      // Mark that we are done, this puts the close op in the pipeline!
-      close_op->end_dependence_analysis();
-      // Record a dependence on the close operation for ourself
-      op->register_region_dependence(pending->req_idx, close_op, 
-          close_user->gen, 0/*close idx*/, LEGION_TRUE_DEPENDENCE,
-          false/*validates*/, mask);
+      // This will take ownership of the user
+      node->register_local_user(state, *user, internal_mask);
+      // Record a dependence on the internal operation for ourself
+      op->register_region_dependence(internal_op->get_internal_index(),
+          internal_op, internal_op->get_generation(), 0/*internal idx*/,
+          LEGION_TRUE_DEPENDENCE, false/*validates*/, internal_mask);
+#ifdef LEGION_SPY
+      LegionSpy::log_mapping_dependence(context->get_unique_id(),
+          internal_op->get_unique_id(), 0/*index*/, op->get_unique_op_id(),
+          internal_op->get_internal_index(), LEGION_TRUE_DEPENDENCE);
+#endif
+      // Mark that we are done, this puts the op in the pipeline!
+      internal_op->end_dependence_analysis();
     }
 
     /////////////////////////////////////////////////////////////

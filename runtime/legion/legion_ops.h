@@ -2040,7 +2040,7 @@ namespace Legion {
       void initialize_close(Operation *creator, unsigned idx,
                             unsigned parent_req_index,
                             const RegionRequirement &req);
-      void perform_logging(void);
+      void perform_logging(Operation *creator, unsigned index, bool merge);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2070,7 +2070,11 @@ namespace Legion {
       MergeCloseOp& operator=(const MergeCloseOp &rhs);
     public:
       void initialize(InnerContext *ctx, const RegionRequirement &req,
-          int close_idx, const FieldMask &close_mask, Operation *create_op);
+                      int close_idx, Operation *create_op);
+      inline void update_close_mask(const FieldMask &mask) 
+        { close_mask |= mask; }
+      inline const FieldMask& get_close_mask(void) const
+        { return close_mask; }
       // Make this virtual so we can override for ReplMergeCloseOp
       virtual void record_refinements(const FieldMask &refinement_mask, 
                                       const bool overwrite);
@@ -2082,6 +2086,7 @@ namespace Legion {
       virtual const FieldMask& get_internal_mask(void) const;
     public:
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
@@ -2211,9 +2216,18 @@ namespace Legion {
     public:
       RefinementOp& operator=(const RefinementOp &rhs);
     public:
-      void initialize(Operation *creator, unsigned idx, 
-                      RegionNode *to_refine, const FieldMask &mask,
-                      LogicalRegion privilege_root);
+      // For ordering refinement operations in the logical analysis
+      // based on their monotonically increasing unique ID
+      inline bool deterministic_pointer_less(const RefinementOp *rhs) const
+        { return (unique_op_id < rhs->get_unique_op_id()); }
+    public:
+      void initialize(Operation *creator, unsigned idx,
+                      LogicalRegion parent, RefinementNode *refinement);
+      void record_refinement_mask(const FieldMask &refinement_mask);
+      bool interferes(RefinementNode *refinement, bool &dominates) const;
+      RefinementNode* clone_refinement(void) const;
+      void incorporate_refinement(RefinementNode *refinement);
+      RegionTreeNode* get_refinement_node(void) const;
 #if 0
       void record_refinement(RegionTreeNode *node, const FieldMask &mask,
                              RefProjectionSummary *summary = NULL);

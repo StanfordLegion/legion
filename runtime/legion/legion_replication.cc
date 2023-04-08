@@ -615,7 +615,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this);
       ShardingFunction *analysis_sharding_function = sharding_function;
       if (must_epoch_task)
       {
@@ -1217,7 +1217,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis logical_analysis(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this);
       ShardingFunction *analysis_sharding_function = sharding_function;
       if (must_epoch_task)
       {
@@ -1852,6 +1852,8 @@ namespace Legion {
           did_collective->broadcast(did);
         }
       }
+      // The do the base call
+      MergeCloseOp::trigger_dependence_analysis();
     }
 
     //--------------------------------------------------------------------------
@@ -2607,7 +2609,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       ProjectionInfo projection_info(runtime, requirement, launch_space, 
                                      sharding_function, sharding_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
@@ -3007,7 +3009,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis(false/*permit projection*/);
-      LogicalAnalysis logical_analysis(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this);
       // Make these requirements look like projection requirmeents since we
       // need the logical analysis to look at sharding to determine if any
       // kind of close operations are required
@@ -3273,7 +3275,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis(true/*permit projection*/);
-      LogicalAnalysis logical_analysis(this, map_applied_conditions);
+      LogicalAnalysis logical_analysis(this);
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         ProjectionInfo projection_info (runtime, src_requirements[idx], 
@@ -4745,7 +4747,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         log_requirement();
       ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       if (is_index_space)
       {
         projection_info = ProjectionInfo(runtime, requirement, 
@@ -6614,7 +6616,7 @@ namespace Legion {
       assert(requirement.handle_type == LEGION_SINGULAR_PROJECTION);
 #endif
       ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
@@ -6897,7 +6899,7 @@ namespace Legion {
       if (runtime->check_privileges)
         check_privilege();
       ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
@@ -7346,7 +7348,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ProjectionInfo projection_info;
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
@@ -7604,7 +7606,7 @@ namespace Legion {
       }
       if (runtime->legion_spy_enabled)
         log_requirement();
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       ProjectionInfo projection_info(runtime, requirement, 
                                      launch_space, sharding_function);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
@@ -7800,7 +7802,7 @@ namespace Legion {
       requirement.projection = resources.impl->get_projection();
       if (runtime->legion_spy_enabled)
         log_requirement();
-      LogicalAnalysis analysis(this, map_applied_conditions);
+      LogicalAnalysis analysis(this);
       ProjectionInfo projection_info(runtime, requirement,
                                      launch_space, sharding_function);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
