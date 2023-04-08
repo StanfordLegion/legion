@@ -2518,17 +2518,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DefaultMapper::speculate(const MapperContext      ctx,
-                                  const Task&              task,
-                                        SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      log_mapper.spew("Default speculate for Task in %s", get_mapper_name());
-      // Default mapper doesn't speculate
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void DefaultMapper::report_profiling(const MapperContext      ctx,
                                          const Task&              task,
                                          const TaskProfilingInfo& input)
@@ -2796,17 +2785,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DefaultMapper::speculate(const MapperContext      ctx,
-                                  const Copy& copy,
-                                        SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      log_mapper.spew("Default speculate for Copy in %s", get_mapper_name());
-      // Default mapper doesn't speculate
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void DefaultMapper::report_profiling(const MapperContext      ctx,
                                          const Copy&              copy,
                                          const CopyProfilingInfo& input)
@@ -2946,17 +2924,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DefaultMapper::speculate(const MapperContext         ctx,
-                                  const Acquire&              acquire,
-                                        SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      log_mapper.spew("Default speculate for Acquire in %s", get_mapper_name());
-      // Default mapper doesn't speculate
-      output.speculate = false;
-    }
-
-    //--------------------------------------------------------------------------
     void DefaultMapper::report_profiling(const MapperContext         ctx,
                                          const Acquire&              acquire,
                                          const AcquireProfilingInfo& input)
@@ -3002,17 +2969,6 @@ namespace Legion {
       log_mapper.spew("Default select_release_sources in %s",get_mapper_name());
       default_policy_select_sources(ctx, input.target, input.source_instances,
                                     output.chosen_ranking);
-    }
-
-    //--------------------------------------------------------------------------
-    void DefaultMapper::speculate(const MapperContext         ctx,
-                                  const Release&              release,
-                                        SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      log_mapper.spew("Default speculate for Release in %s", get_mapper_name());
-      // Default mapper doesn't speculate
-      output.speculate = false;
     }
 
     //--------------------------------------------------------------------------

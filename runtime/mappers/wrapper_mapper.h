@@ -143,9 +143,6 @@ namespace Legion {
 	    const Task&                task,
 	    const SelectTaskSrcInput&  input,
 	    SelectTaskSrcOutput& output);
-	void speculate(const MapperContext      ctx,
-	    const Task&              task,
-	    SpeculativeOutput& output);
 	void report_profiling(const MapperContext      ctx,
 	    const Task&              task,
 	    const TaskProfilingInfo& input);
@@ -170,9 +167,6 @@ namespace Legion {
 	    const Copy&                  copy,
 	    const SelectCopySrcInput&    input,
 	    SelectCopySrcOutput&   output);
-	void speculate(const MapperContext      ctx,
-	    const Copy& copy,
-	    SpeculativeOutput& output);
 	void report_profiling(const MapperContext      ctx,
 	    const Copy&              copy,
 	    const CopyProfilingInfo& input);
@@ -193,9 +187,6 @@ namespace Legion {
 	    const Acquire&              acquire,
 	    const MapAcquireInput&      input,
 	    MapAcquireOutput&     output);
-	void speculate(const MapperContext         ctx,
-	    const Acquire&              acquire,
-	    SpeculativeOutput&    output);
 	void report_profiling(const MapperContext         ctx,
 	    const Acquire&              acquire,
 	    const AcquireProfilingInfo& input);
@@ -208,9 +199,6 @@ namespace Legion {
 	    const Release&                 release,
 	    const SelectReleaseSrcInput&   input,
 	    SelectReleaseSrcOutput&  output);
-	void speculate(const MapperContext         ctx,
-	    const Release&              release,
-	    SpeculativeOutput&    output);
 	void report_profiling(const MapperContext         ctx,
 	    const Release&              release,
 	    const ReleaseProfilingInfo& input);

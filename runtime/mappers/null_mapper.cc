@@ -171,15 +171,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext      ctx,
-                               const Task&              task,
-                                     SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::report_profiling(const MapperContext       ctx,
                                       const Task&               task,
                                       const TaskProfilingInfo&  input)
@@ -271,15 +262,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext      ctx,
-                               const Copy&              copy,
-                                     SpeculativeOutput& output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::report_profiling(const MapperContext      ctx,
                                       const Copy&              copy,
                                       const CopyProfilingInfo& input)
@@ -361,15 +343,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext         ctx,
-                               const Acquire&              acquire,
-                                     SpeculativeOutput&    output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
     void NullMapper::report_profiling(const MapperContext         ctx,
                                       const Acquire&              acquire,
                                       const AcquireProfilingInfo& input)
@@ -404,15 +377,6 @@ namespace Legion {
                                         const Release&                 release,
                                         const SelectReleaseSrcInput&   input,
                                               SelectReleaseSrcOutput&  output)
-    //--------------------------------------------------------------------------
-    {
-      report_unimplemented(__func__, __LINE__);
-    }
-
-    //--------------------------------------------------------------------------
-    void NullMapper::speculate(const MapperContext         ctx,
-                               const Release&              release,
-                                     SpeculativeOutput&    output)
     //--------------------------------------------------------------------------
     {
       report_unimplemented(__func__, __LINE__);

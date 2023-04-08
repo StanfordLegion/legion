@@ -470,7 +470,7 @@ namespace Legion {
       const_value = p.const_value;
       impl = p.impl;
       if (impl != NULL)
-        impl->add_predicate_reference();
+        impl->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -495,30 +495,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_predicate_reference();
+        impl->add_reference();
     }
 
     //--------------------------------------------------------------------------
     Predicate::~Predicate(void)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-      {
-        impl->remove_predicate_reference();
-        impl = NULL;
-      }
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
     }
 
     //--------------------------------------------------------------------------
     Predicate& Predicate::operator=(const Predicate &rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        impl->remove_predicate_reference();
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
       const_value = rhs.const_value;
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_predicate_reference();
+        impl->add_reference();
       return *this;
     }
 
@@ -526,8 +523,8 @@ namespace Legion {
     Predicate& Predicate::operator=(Predicate &&rhs)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
-        impl->remove_predicate_reference();
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
       const_value = rhs.const_value;
       impl = rhs.impl;
       rhs.impl = NULL;

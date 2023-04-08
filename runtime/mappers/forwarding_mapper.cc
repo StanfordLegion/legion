@@ -93,13 +93,6 @@ void ForwardingMapper::select_task_sources(
   mapper->select_task_sources(ctx, task, input, output);
 }
 
-void ForwardingMapper::speculate(
-    const MapperContext ctx,
-    const Task& task,
-    SpeculativeOutput& output) {
-  mapper->speculate(ctx, task, output);
-}
-
 void ForwardingMapper::report_profiling(
     const MapperContext ctx,
     const Task& task,
@@ -146,13 +139,6 @@ void ForwardingMapper::select_copy_sources(
   mapper->select_copy_sources(ctx, copy, input, output);
 }
 
-void ForwardingMapper::speculate(
-    const MapperContext ctx,
-    const Copy& copy,
-    SpeculativeOutput& output) {
-  mapper->speculate(ctx, copy, output);
-}
-
 void ForwardingMapper::report_profiling(
     const MapperContext ctx,
     const Copy& copy,
@@ -183,13 +169,6 @@ void ForwardingMapper::map_acquire(
   mapper->map_acquire(ctx, acquire, input, output);
 }
 
-void ForwardingMapper::speculate(
-    const MapperContext ctx,
-    const Acquire& acquire,
-    SpeculativeOutput& output) {
-  mapper->speculate(ctx, acquire, output);
-}
-
 void ForwardingMapper::report_profiling(
     const MapperContext ctx,
     const Acquire& acquire,
@@ -211,13 +190,6 @@ void ForwardingMapper::select_release_sources(
     const SelectReleaseSrcInput& input,
     SelectReleaseSrcOutput& output) {
   mapper->select_release_sources(ctx, release, input, output);
-}
-
-void ForwardingMapper::speculate(
-    const MapperContext ctx,
-    const Release& release,
-    SpeculativeOutput& output) {
-  mapper->speculate(ctx, release, output);
 }
 
 void ForwardingMapper::report_profiling(
