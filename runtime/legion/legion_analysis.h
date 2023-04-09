@@ -1226,12 +1226,12 @@ namespace Legion {
       // This is the number of return children or projections we need
       // to observe in total before we consider a change to a refinement
       static constexpr uint64_t CHANGE_REFINEMENT_RETURN_COUNT = 256;
-      // The change refinement hysteresis factor says how many more
-      // returns we need to see to change a refinement compared to the
-      // current refinement. A factor of 2 means we need to see twice
-      // as many returns, a factor of 3 means we need to see three 
-      // times as many returns.
-      static constexpr uint64_t CHANGE_REFINEMENT_HYSTERESIS_FACTOR = 2;
+      // Check that this is a power of 2 for fast integer division
+      static_assert((CHANGE_REFINEMENT_RETURN_COUNT & 
+            (CHANGE_REFINEMENT_RETURN_COUNT - 1)) == 0, "must be power of two");
+      // This is the weight for how degrading scores over time in our
+      // exponentially weighted moving average computation
+      static constexpr double CHANGE_REFINEMENT_RETURN_WEIGHT = 0.99;
       // This is the timeout for refinements where we will clear out all
       // candidate refinements and reset the state to look again
       static constexpr uint64_t CHANGE_REFINEMENT_TIMEOUT = 4096;
@@ -1268,8 +1268,8 @@ namespace Legion {
       virtual void find_child_refinements(
           std::set<RegionTreeNode*> &children) const;
     protected:
-      bool is_dominant_candidate(uint64_t returns, bool is_current) const;
-      void invalidate_candidates(void);
+      bool is_dominant_candidate(double score, bool is_current);
+      void invalidate_unused_candidates(void);
     public:
       RegionNode *const region;
       // At most one of these will be non-NULL
@@ -1281,13 +1281,17 @@ namespace Legion {
     protected:  
       // Track the candidate children and projections and how often
       // we have observed a return back to them
-      std::unordered_map<PartitionNode*,uint64_t> candidate_partitions;
-      std::unordered_map<ProjectionSummary*,uint64_t> candidate_projections;
-      uint64_t total_returns;
+      // <current score,timestamp of last observed return>
+      std::unordered_map<PartitionNode*,
+        std::pair<double,uint64_t> > candidate_partitions;
+      std::unordered_map<ProjectionSummary*,
+        std::pair<double,uint64_t> > candidate_projections;
+      // Monotonically increasing clock counting total number of traversals
+      uint64_t total_traversals;
       // The timeout tracks how long we've gone without seeing a return
       // If we go for too long without seeing a return, we timeout and
       // clear out all the candidates so we can try again
-      uint64_t timeout_returns;
+      uint64_t return_timeout;
     };
 
     /**
@@ -1321,8 +1325,8 @@ namespace Legion {
       virtual void find_child_refinements(
           std::set<RegionTreeNode*> &children) const;
     protected:
-      bool is_dominant_candidate(uint64_t returns, bool is_current) const;
-      void invalidate_candidates(void);
+      bool is_dominant_candidate(double score, bool is_current);
+      void invalidate_unused_candidates(void);
     public:
       PartitionNode *const partition;
       ProjectionSummary *const refined_projection;
@@ -1334,14 +1338,17 @@ namespace Legion {
       // Note we don't need to hold references on them as they are kept alive
       // by the reference we are holding on their partition
       std::unordered_set<RegionNode*> candidate_children;
-      std::unordered_map<ProjectionSummary*,uint64_t> candidate_projections;
-      // children_returns counts how many times we've seen enough of the 
-      // children to classify this partition as disjoint and complete
-      uint64_t children_returns, total_returns;
+      std::unordered_map<ProjectionSummary*,
+        std::pair<double,uint64_t> > candidate_projections;
+      // The individual score and last traversals of all the children
+      double children_score;
+      uint64_t children_last;
+      // Monotonically increasing clock counting total number of traversals
+      uint64_t total_traversals;
       // The timeout tracks how long we've gone without seeing a return
       // If we go for too long without seeing a return, we timeout and
       // clear out all the candidates so we can try again
-      uint64_t timeout_returns;
+      uint64_t return_timeout;
       // What fraction of children need to observed before we condider
       // this partition as being disjoint and complete, 1 means all the
       // children need to be observed to be considered complete, 2 means 

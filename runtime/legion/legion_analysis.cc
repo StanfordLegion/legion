@@ -3302,7 +3302,7 @@ namespace Legion {
     RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
                                                      bool current)
       : region(node), refined_child(NULL), refined_projection(NULL),
-        current_refinement(current), total_returns(0), timeout_returns(0)
+        current_refinement(current), total_traversals(0), return_timeout(0)
     //--------------------------------------------------------------------------
     {
       region->add_base_gc_ref(REFINEMENT_REF);
@@ -3312,8 +3312,8 @@ namespace Legion {
     RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
                                                      RegionTreeNode *child)
       : region(node), refined_child(child->as_partition_node()),
-        refined_projection(NULL), current_refinement(true), total_returns(0),
-        timeout_returns(0)
+        refined_projection(NULL), current_refinement(true), total_traversals(0),
+        return_timeout(0)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3327,7 +3327,7 @@ namespace Legion {
     RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
                                                      ProjectionSummary *proj)
       : region(node), refined_child(NULL), refined_projection(proj),
-        current_refinement(true), total_returns(0), timeout_returns(0)
+        current_refinement(true), total_traversals(0), return_timeout(0)
     //--------------------------------------------------------------------------
     {
       region->add_base_gc_ref(REFINEMENT_REF);
@@ -3338,12 +3338,14 @@ namespace Legion {
     RegionRefinementTracker::~RegionRefinementTracker(void)
     //--------------------------------------------------------------------------
     {
-      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+      for (std::unordered_map<PartitionNode*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_partitions.begin(); it != 
             candidate_partitions.end(); it++)
         if (it->first->remove_base_gc_ref(REFINEMENT_REF))
           delete it->first;
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
         if (it->first->remove_reference())
@@ -3367,22 +3369,24 @@ namespace Legion {
         (refined_projection != NULL) ? 
         new RegionRefinementTracker(region, refined_projection) :
         new RegionRefinementTracker(region, current_refinement);
-      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+      for (std::unordered_map<PartitionNode*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_partitions.begin(); it != 
             candidate_partitions.end(); it++)
       {
         it->first->add_base_gc_ref(REFINEMENT_REF);
         result->candidate_partitions.insert(*it);
       }
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
       {
         it->first->add_reference();
         result->candidate_projections.insert(*it);
       }
-      result->total_returns = total_returns;
-      result->timeout_returns = timeout_returns;
+      result->total_traversals = total_traversals;
+      result->return_timeout = return_timeout;
       return result;
     }
 
@@ -3418,25 +3422,36 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!child->is_region());
 #endif
+      // Step the clock for a new traversal
+      total_traversals++;
       PartitionNode *child_node = child->as_partition_node();
       // Check to see if we've observed this refinement before
-      std::unordered_map<PartitionNode*,uint64_t>::iterator finder =
-        candidate_partitions.find(child_node);
+      std::unordered_map<PartitionNode*,std::pair<double,uint64_t> >::iterator
+        finder = candidate_partitions.find(child_node);
       if (finder != candidate_partitions.end())
       {
-        finder->second++;
+        // Update the score using exponentially weighted moving average
+        finder->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+         (total_traversals - finder->second.second))*finder->second.first + 1.0;
+        // Since CHANGE_REFINEMENT_RETURN_COUNT is a power of 2 the compiler
+        // should be able to optimize integer division to a basic bit shift
+        const uint64_t previous_epoch = 
+          finder->second.second / CHANGE_REFINEMENT_RETURN_COUNT;
+        const uint64_t current_epoch = 
+          total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+        finder->second.second = total_traversals;
         // Reset the timeout since we saw a return
-        timeout_returns = 0;
-        // We've seen enough returns to perform the check to see if we're
-        // the dominant candidate and therefore we want to switch
-        if (current_refinement && 
-            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
-            is_dominant_candidate(finder->second,(child_node == refined_child)))
+        return_timeout = 0;
+        // If the last time we saw this child was in a previous epoch 
+        // then we can check to see if this is now the dominant child
+        if (current_refinement && (previous_epoch != current_epoch) &&
+            is_dominant_candidate(finder->second.first,
+                                  (child_node == refined_child)))
         {
           // If we're current refinement we don't switch but just end
           // invalidating all the other candidates so they can start again
           if (child_node == refined_child)
-            invalidate_candidates();
+            invalidate_unused_candidates();
           else
             return true;
         }
@@ -3447,11 +3462,11 @@ namespace Legion {
         assert(current_refinement);
 #endif
         // This counts as a return too since we're refined this way
-        total_returns++;
-        candidate_partitions[child_node] = 1;
+        candidate_partitions[child_node] = 
+          std::pair<double,uint64_t>(1.0, total_traversals);
         child_node->add_base_gc_ref(REFINEMENT_REF);
         // Reset the timeout since we saw a return
-        timeout_returns = 0;
+        return_timeout = 0;
         // No need to switch, we're already the refinement
       }
       else
@@ -3463,9 +3478,13 @@ namespace Legion {
             (refined_projection == NULL) && candidate_partitions.empty() &&
             candidate_projections.empty())
           return true;
-        if (++timeout_returns == CHANGE_REFINEMENT_TIMEOUT)
-          invalidate_candidates();
-        candidate_partitions[child_node] = 0;
+        if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+        {
+          invalidate_unused_candidates();
+          return_timeout = 0;
+        }
+        candidate_partitions[child_node] = 
+          std::pair<double,uint64_t>(0.0, total_traversals);
         child_node->add_base_gc_ref(REFINEMENT_REF);
       }
       return false;
@@ -3476,25 +3495,34 @@ namespace Legion {
                                                      ProjectionSummary *summary)
     //--------------------------------------------------------------------------
     {
+      // Step the clock for a new traversal
+      total_traversals++;
       // Check to see if we observed this refinement before
-      std::unordered_map<ProjectionSummary*,uint64_t>::iterator finder =
-        candidate_projections.find(summary);
+      std::unordered_map<ProjectionSummary*,
+        std::pair<double,uint64_t> >::iterator finder =
+          candidate_projections.find(summary);
       if (finder != candidate_projections.end())
       {
-        finder->second++;
+        // Update the score using exponentially weighted moving average
+        finder->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+         (total_traversals - finder->second.second))*finder->second.first + 1.0;
+        const uint64_t previous_epoch = 
+          finder->second.second / CHANGE_REFINEMENT_RETURN_COUNT;
+        const uint64_t current_epoch = 
+          total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+        finder->second.second = total_traversals;
         // Reset the timeout since we saw a return
-        timeout_returns = 0;
-        // We've seen enough returns to perform the check to see if we're
-        // the dominant candidate and therefore we want to switch
-        if (current_refinement && 
-            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
-            is_dominant_candidate(finder->second, 
+        return_timeout = 0;
+        // If the last time we saw this projection was in a previous epoch 
+        // then we can check to see if this is now the dominant child
+        if (current_refinement && (previous_epoch != current_epoch) &&
+            is_dominant_candidate(finder->second.first, 
                                   (summary == refined_projection)))
         {
           // If we're current refinement we don't switch but just end
           // invalidating all the other candidates so they can start again
           if (summary == refined_projection)
-            invalidate_candidates();
+            invalidate_unused_candidates();
           else
             return true;
         }
@@ -3505,11 +3533,11 @@ namespace Legion {
         assert(current_refinement);
 #endif
         // This counts as a return too since we're refined this way
-        total_returns++;
-        candidate_projections[summary] = 1;
+        candidate_projections[summary] =
+          std::pair<double,uint64_t>(1.0, total_traversals);
         summary->add_reference();
         // Reset the timeout since we saw a return
-        timeout_returns = 0;
+        return_timeout = 0;
         // No need to switch, we're already using the refinement
       }
       else
@@ -3521,85 +3549,143 @@ namespace Legion {
             (refined_projection == NULL) && candidate_partitions.empty() &&
             candidate_projections.empty())
           return true;
-        if (++timeout_returns == CHANGE_REFINEMENT_TIMEOUT)
-          invalidate_candidates();
-        candidate_projections[summary] = 0;
+        if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+        {
+          invalidate_unused_candidates();
+          return_timeout = 0;
+        }
+        candidate_projections[summary] = 
+          std::pair<double,uint64_t>(0.0, total_traversals);
         summary->add_reference();
       }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    bool RegionRefinementTracker::is_dominant_candidate(uint64_t returns, 
-                                                        bool is_current) const
+    bool RegionRefinementTracker::is_dominant_candidate(double score, 
+                                                        bool is_current)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(current_refinement);
 #endif
       // Has to have the most returns
-      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
-            candidate_partitions.begin(); it != 
+      for (std::unordered_map<PartitionNode*,
+                              std::pair<double,uint64_t> >::iterator it =
+            candidate_partitions.begin(); it !=
             candidate_partitions.end(); it++)
-        if (returns < it->second)
+      {
+        // Skip ourselves
+        if (it->second.second == total_traversals)
+          continue;
+        // Recompute the score before comparing
+        it->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - it->second.second)) * it->second.first;
+        it->second.second = total_traversals;
+        if (score < it->second.first)
           return false;
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
-            candidate_projections.begin(); it != 
+      }
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::iterator it =
+            candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
-        if (returns < it->second)
+      {
+        // Skip ourselves
+        if (it->second.second == total_traversals)
+          continue;
+        // Recompute the score before comparing
+        it->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - it->second.second)) * it->second.first;
+        it->second.second = total_traversals;
+        if (score < it->second.first)
           return false;
+      }
       // If we're the current refinement then just being the largest is enough
       // to indicate that we're the dominant candidate
       if (!is_current)
       {
         // If we're not the current refinement, then we want to make sure its
         // obvious that we should switch and not just ping-pong so we need to
-        // have at least twice as many returns as the current refinement
+        // have a score that is at least sqrt(total_candidates) more than the
+        // current refinement's score
         if (refined_child != NULL)
         {
-          std::unordered_map<PartitionNode*,uint64_t>::const_iterator finder =
-            candidate_partitions.find(refined_child);
-          return ((finder == candidate_partitions.end()) ||
-            ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * finder->second) < returns));
+          std::unordered_map<PartitionNode*,
+            std::pair<double,uint64_t> >::const_iterator finder =
+              candidate_partitions.find(refined_child);
+          // Current refinement is never observed
+          if (finder == candidate_partitions.end())
+            return true;
+          double total_candidates =
+            candidate_partitions.size() + candidate_projections.size();
+          double hysteresis = std::sqrt(total_candidates);
+          return ((finder->second.first * hysteresis) < score);
         }
         else
         {
 #ifdef DEBUG_LEGION
           assert(refined_projection != NULL);
 #endif
-          std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator 
-            finder = candidate_projections.find(refined_projection);
-          return ((finder == candidate_projections.end()) ||
-            ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * finder->second) < returns));
+          std::unordered_map<ProjectionSummary*,
+            std::pair<double,uint64_t> >::const_iterator
+              finder = candidate_projections.find(refined_projection);
+          // Current refinement is never observed
+          if (finder == candidate_projections.end())
+            return true;
+          double total_candidates =
+            candidate_partitions.size() + candidate_projections.size();
+          double hysteresis = std::sqrt(total_candidates);
+          return ((finder->second.first * hysteresis) < score);
         }
       }
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void RegionRefinementTracker::invalidate_candidates(void)
+    void RegionRefinementTracker::invalidate_unused_candidates(void)
     //--------------------------------------------------------------------------
     {
+      // Remove any candidates that have gone too long without being observed
       if (!candidate_partitions.empty())
       {
-        for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
-              candidate_partitions.begin(); it != 
-              candidate_partitions.end(); it++)
-          if (it->first->remove_base_gc_ref(REFINEMENT_REF))
-            delete it->first;
-        candidate_partitions.clear();
+        for (std::unordered_map<PartitionNode*,
+                            std::pair<double,uint64_t> >::iterator it =
+              candidate_partitions.begin(); it !=
+              candidate_partitions.end(); /*nothing*/)
+        {
+          uint64_t last_observation = total_traversals - it->second.second;
+          if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          {
+            if (it->first->remove_base_gc_ref(REFINEMENT_REF))
+              delete it->first;
+            std::unordered_map<PartitionNode*,
+              std::pair<double,uint64_t> >::iterator to_delete = it++;
+            candidate_partitions.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
       if (!candidate_projections.empty())
       {
-        for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator
-              it = candidate_projections.begin(); 
-              it != candidate_projections.end(); it++)
-          if (it->first->remove_reference())
-            delete it->first;
-        candidate_projections.clear();
+        for (std::unordered_map<ProjectionSummary*,
+                            std::pair<double,uint64_t> >::iterator it =
+              candidate_projections.begin(); it !=
+              candidate_projections.end(); /*nothing*/)
+        {
+          uint64_t last_observation = total_traversals - it->second.second;
+          if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          {
+            if (it->first->remove_reference())
+              delete it->first;
+            std::unordered_map<ProjectionSummary*,
+              std::pair<double,uint64_t> >::iterator to_delete = it++;
+            candidate_projections.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
-      total_returns = 0;
-      timeout_returns = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -3613,26 +3699,28 @@ namespace Legion {
       if (refined_child != NULL)
         refined_child->invalidate_logical_refinement(ctx, refinement_mask);
       // Now pick the best refinement option between the candidates
-      uint64_t max_returns = 0;
+      double max_score = 0;
       PartitionNode *best_child = NULL;
-      for (std::unordered_map<PartitionNode*,uint64_t>::const_iterator it =
+      for (std::unordered_map<PartitionNode*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_partitions.begin(); it != 
             candidate_partitions.end(); it++)
       {
-        if (max_returns < it->second)
+        if (max_score < it->second.first)
         {
-          max_returns = it->second;
+          max_score = it->second.first;
           best_child = it->first;
         }
       }
       ProjectionSummary *best_summary = NULL;
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
       {
-        if (max_returns < it->second)
+        if (max_score < it->second.first)
         {
-          max_returns = it->second;
+          max_score = it->second.first;
           best_summary = it->first;
           best_child = NULL;
         }
@@ -3675,7 +3763,8 @@ namespace Legion {
     PartitionRefinementTracker::PartitionRefinementTracker(PartitionNode *node,
                                                            bool current)
       : partition(node), refined_projection(NULL), current_refinement(current),
-        children_returns(0), total_returns(0), timeout_returns(0)
+        children_score(0.0), children_last(0), total_traversals(0),
+        return_timeout(0)
     //--------------------------------------------------------------------------
     {
       partition->add_base_gc_ref(REFINEMENT_REF);
@@ -3685,7 +3774,8 @@ namespace Legion {
     PartitionRefinementTracker::PartitionRefinementTracker(PartitionNode *node,
                                                         ProjectionSummary *proj) 
       : partition(node), refined_projection(proj), current_refinement(true),
-        children_returns(0), total_returns(0), timeout_returns(0)
+        children_score(-1.0), children_last(0), total_traversals(0),
+        return_timeout(0)
     //--------------------------------------------------------------------------
     {
       partition->add_base_gc_ref(REFINEMENT_REF);
@@ -3696,7 +3786,8 @@ namespace Legion {
     PartitionRefinementTracker::~PartitionRefinementTracker(void)
     //--------------------------------------------------------------------------
     {
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
         if (it->first->remove_reference())
@@ -3715,7 +3806,8 @@ namespace Legion {
       PartitionRefinementTracker *result = (refined_projection == NULL) ?
         new PartitionRefinementTracker(partition, current_refinement) :
         new PartitionRefinementTracker(partition, refined_projection);
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
       {
@@ -3723,9 +3815,10 @@ namespace Legion {
         result->candidate_projections.insert(*it);
       }
       result->candidate_children = candidate_children;
-      result->children_returns = children_returns;
-      result->total_returns = total_returns;
-      result->timeout_returns = timeout_returns;
+      result->children_score = children_score;
+      result->children_last = children_last;
+      result->total_traversals = total_traversals;
+      result->return_timeout = return_timeout;
       return result;
     }
 
@@ -3766,17 +3859,45 @@ namespace Legion {
       {
         // Reset the children and bump their return count
         candidate_children.clear();
-        children_returns++;
-        if (current_refinement && 
-            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
-            is_dominant_candidate(children_returns, (refined_projection==NULL)))
+        // This counts as a tick of the traversal clock
+        total_traversals++;
+        // Update the children score and the children last 
+        if (children_score >= 0.0)
         {
-          // See if we're sticking with refined children or whether we're 
-          // switching to them from a refined projection
-          if (refined_projection == NULL)
-            invalidate_candidates();
-          else
-            return true;
+          // Recompute the score for the children and see if we want to update
+          children_score = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+              (total_traversals - children_last)) * children_score + 1.0;
+          const uint64_t previous_epoch = 
+            children_last / CHANGE_REFINEMENT_RETURN_COUNT;
+          const uint64_t current_epoch = 
+            total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+          children_last = total_traversals;
+          // Reset the timeout since we saw a return
+          return_timeout = 0;
+          // If the last time we saw this child was in a previous epoch 
+          // then we can check to see if this is now the dominant child
+          if (current_refinement && (previous_epoch != current_epoch) &&
+              is_dominant_candidate(children_score,
+                                    (refined_projection == NULL)))
+          {
+            // See if we're sticking with refined children or whether we're 
+            // switching to them from a refined projection
+            if (refined_projection == NULL)
+              invalidate_unused_candidates();
+            else
+              return true;
+          }
+        }
+        else
+        {
+          // first time we've considered all the children so initialize them
+          if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+          {
+            invalidate_unused_candidates();
+            return_timeout = 0;
+          }
+          children_score = 0.0;
+          children_last = total_traversals;
         }
       }
       return false;
@@ -3787,24 +3908,35 @@ namespace Legion {
                                                   ProjectionSummary *projection)
     //--------------------------------------------------------------------------
     {
-      std::unordered_map<ProjectionSummary*,uint64_t>::iterator finder =
-        candidate_projections.find(projection);
+      // Step the clock for a new traversal
+      total_traversals++;
+      std::unordered_map<ProjectionSummary*,
+        std::pair<double,uint64_t> >::iterator finder =
+          candidate_projections.find(projection);
       if (finder != candidate_projections.end())
       {
-        finder->second++;
+        // Update the score using exponentially weighted moving average
+        finder->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+         (total_traversals - finder->second.second))*finder->second.first + 1.0;
+        // Since CHANGE_REFINEMENT_RETURN_COUNT is a power of 2 the compiler
+        // should be able to optimize integer division to a basic bit shift
+        const uint64_t previous_epoch = 
+          finder->second.second / CHANGE_REFINEMENT_RETURN_COUNT;
+        const uint64_t current_epoch = 
+          total_traversals / CHANGE_REFINEMENT_RETURN_COUNT;
+        finder->second.second = total_traversals;
         // Reset the timeout since we saw a return
-        timeout_returns = 0;
-        // We've seen enough returns to perform the check to see if we're
-        // the dominant candidate and therefore we want to switch
-        if (current_refinement && 
-            (++total_returns >= CHANGE_REFINEMENT_RETURN_COUNT) &&
-            is_dominant_candidate(finder->second, 
+        return_timeout = 0;
+        // If the last time we saw this projection was in a previous epoch 
+        // then we can check to see if this is now the dominant child
+        if (current_refinement && (previous_epoch != current_epoch) &&
+            is_dominant_candidate(finder->second.first, 
                                   (projection == refined_projection)))
         {
           // If we're current refinement we don't switch but just end
           // invalidating all the other candidates so they can start again
           if (projection == refined_projection)
-            invalidate_candidates();
+            invalidate_unused_candidates();
           else
             return true;
         }
@@ -3815,68 +3947,121 @@ namespace Legion {
         assert(current_refinement);
 #endif
         // This counts as a return too since we're refined this way
-        total_returns++;
-        candidate_projections[projection] = 1;
+        candidate_projections[projection] = 
+          std::pair<double,uint64_t>(1.0, total_traversals);
         projection->add_reference();
         // Reset the timeout since we saw a return
-        timeout_returns = 0;
+        return_timeout = 0;
         // No need to switch, we're already using the refinement
       }
       else
       {
-        if (++timeout_returns == CHANGE_REFINEMENT_TIMEOUT)
-          invalidate_candidates();
-        candidate_projections[projection] = 0;
+        if (++return_timeout == CHANGE_REFINEMENT_TIMEOUT)
+        {
+          invalidate_unused_candidates();
+          return_timeout = 0;
+        }
+        candidate_projections[projection] = 
+          std::pair<double,uint64_t>(0.0, total_traversals);
         projection->add_reference();
       }
       return false;
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionRefinementTracker::is_dominant_candidate(uint64_t returns,
-                                                          bool is_current) const
+    bool PartitionRefinementTracker::is_dominant_candidate(double score,
+                                                          bool is_current)
     //--------------------------------------------------------------------------
     {
-      if (returns < children_returns)
-        return false;
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (children_last != total_traversals)
+      {
+        // Recompute the children score and compare it
+        children_score = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - children_last)) * children_score;
+        children_last = total_traversals;
+        if (score < children_score)
+          return false;
+      }
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++) 
-        if (returns < it->second)
+      {
+        // Skip ourselves
+        if (it->second.second == total_traversals)
+          continue;
+        // Recompute the score before comparing
+        it->second.first = std::pow(CHANGE_REFINEMENT_RETURN_WEIGHT,
+            (total_traversals - it->second.second)) * it->second.first;
+        it->second.second = total_traversals;
+        if (score < it->second.first)
           return false;
+      }
       if (!is_current)
       {
         if (refined_projection != NULL)
         {
-          std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator 
-            finder = candidate_projections.find(refined_projection);
-          return ((finder == candidate_projections.end()) ||
-            ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * finder->second) < returns));
+          // If we're not the current refinement, then we want to make sure its
+          // obvious that we should switch and not just ping-pong so we need to
+          // have a score that is at least sqrt(total_candidates) more than the
+          // current refinement's score
+          std::unordered_map<ProjectionSummary*,
+              std::pair<double,uint64_t> >::const_iterator 
+                finder = candidate_projections.find(refined_projection);
+          // Current refinement is never observed
+          if (finder == candidate_projections.end())
+            return true;
+          double total_candidates =
+            (children_score >= 0.0) ? 1 : 0 + candidate_projections.size();
+          double hysteresis = std::sqrt(total_candidates);
+          return ((finder->second.first * hysteresis) < score);
         }
         else
-          return ((CHANGE_REFINEMENT_HYSTERESIS_FACTOR * 
-                    children_returns) < returns);
+        {
+          // The children are refined so compute the total candidates
+          if (children_score < 0.0)
+            return true;
+          double total_candidates = candidate_projections.size() + 1;
+          double hysteresis = std::sqrt(total_candidates);
+          return ((children_score * hysteresis) < score);
+        }
       }
       return true;
     }
 
     //--------------------------------------------------------------------------
-    void PartitionRefinementTracker::invalidate_candidates(void)
+    void PartitionRefinementTracker::invalidate_unused_candidates(void)
     //--------------------------------------------------------------------------
     {
-      candidate_children.clear();
+      if (children_score >= 0.0)
+      {
+        uint64_t last_observation = total_traversals - children_last;
+        if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          children_score = -1.0;
+      }
       if (!candidate_projections.empty())
       {
-        for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator
-              it = candidate_projections.begin(); 
-              it != candidate_projections.end(); it++)
-          if (it->first->remove_reference())
-            delete it->first;
-        candidate_projections.clear();
+        for (std::unordered_map<ProjectionSummary*,
+                            std::pair<double,uint64_t> >::iterator it =
+              candidate_projections.begin(); it !=
+              candidate_projections.end(); /*nothing*/)
+        {
+          uint64_t last_observation = total_traversals - it->second.second;
+          if (CHANGE_REFINEMENT_TIMEOUT < last_observation)
+          {
+            if (it->first->remove_reference())
+              delete it->first;
+            std::unordered_map<ProjectionSummary*,
+              std::pair<double,uint64_t> >::iterator to_delete = it++;
+            candidate_projections.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
-      total_returns = 0;
-      timeout_returns = 0;
-      children_returns = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -3891,18 +4076,22 @@ namespace Legion {
       // unless it was a projection based one
       assert(!current_refinement || (refined_projection != NULL));
 #endif
-      uint64_t max_returns = children_returns;
+      double max_score = children_score;
       ProjectionSummary *best_projection = NULL;
-      for (std::unordered_map<ProjectionSummary*,uint64_t>::const_iterator it =
+      for (std::unordered_map<ProjectionSummary*,
+                              std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
       {
-        if (max_returns < it->second)
+        if (max_score < it->second.first)
         {
-          max_returns = it->second;
+          max_score = it->second.first;
           best_projection = it->first;
         }
       }
+#ifdef DEBUG_LEGION
+      assert(max_score > 0.0);
+#endif
       if (best_projection == NULL)
       {
         // Refining the children is the best option
