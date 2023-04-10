@@ -16349,7 +16349,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Extract our local summaries
-      node->extract_summaries(region_summaries, partition_summaries);
+      node->extract_shard_summaries(disjoint_complete, local_shard,
+                              region_summaries, partition_summaries);
     }
 
     //--------------------------------------------------------------------------
@@ -16357,7 +16358,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Update our local summaries
-      node->update_summaries(region_summaries, partition_summaries);
+      node->update_shard_summaries(disjoint_complete, local_shard,
+          context->total_shards, region_summaries, partition_summaries);
     }
 
     //--------------------------------------------------------------------------
@@ -16365,6 +16367,7 @@ namespace Legion {
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
+      rez.serialize<bool>(disjoint_complete);
       rez.serialize<size_t>(region_summaries.size());
       for (std::map<LogicalRegion,RegionSummary>::const_iterator it =
             region_summaries.begin(); it != region_summaries.end(); it++)
@@ -16381,8 +16384,19 @@ namespace Legion {
       {
         rez.serialize(it->first);
         it->second.children.serialize(rez);
+        if (disjoint_complete)
+        {
+          rez.serialize<size_t>(
+              it->second.disjoint_complete_child_shards.size());
+          for (std::multimap<LegionColor,ShardID>::const_iterator cit =
+                it->second.disjoint_complete_child_shards.begin(); cit !=
+                it->second.disjoint_complete_child_shards.end(); cit++)
+          {
+            rez.serialize(cit->first);
+            rez.serialize(cit->second);
+          }
+        }
       }
-      rez.serialize<bool>(disjoint_complete);
     }
 
     //--------------------------------------------------------------------------
@@ -16390,6 +16404,10 @@ namespace Legion {
                                                          int stage)
     //--------------------------------------------------------------------------
     {
+      bool dis_comp;
+      derez.deserialize<bool>(dis_comp);
+      if (!dis_comp)
+        disjoint_complete = false;
       size_t num_regions;
       derez.deserialize(num_regions);
       for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
@@ -16428,11 +16446,20 @@ namespace Legion {
         derez.deserialize(partition);
         PartitionSummary &summary = partition_summaries[partition];
         summary.children.deserialize(derez);
+        if (dis_comp)
+        {
+          size_t num_child_shards;
+          derez.deserialize(num_child_shards);
+          for (unsigned child = 0; child < num_child_shards; child++)
+          {
+            std::pair<LegionColor,ShardID> color_shard;
+            derez.deserialize(color_shard.first);
+            derez.deserialize(color_shard.second);
+            if (disjoint_complete)
+              summary.disjoint_complete_child_shards.insert(color_shard);
+          }
+        }
       }
-      bool dis_comp;
-      derez.deserialize<bool>(dis_comp);
-      if (!dis_comp)
-        disjoint_complete = false;
     }
 
     /////////////////////////////////////////////////////////////

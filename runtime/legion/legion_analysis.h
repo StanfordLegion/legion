@@ -952,6 +952,33 @@ namespace Legion {
     };
 
     /**
+     * \class ShardedColorMap
+     * This data structure is a look-up table for mapping colors in a
+     * disjoint and complete partition to the nearest shard that knows
+     * about them. It is the only data structure that we create anywhere
+     * which might be on the order of the number of nodes/shards and 
+     * stored on every node so we deduplicate it across all its uses.
+     */
+    class ShardedColorMap : public Collectable {
+    public:
+      ShardedColorMap(std::unordered_map<LegionColor,ShardID> &&map)
+        : color_shards(map) { }
+    public:
+      inline size_t size(void) const { return color_shards.size(); }
+      inline ShardID at(LegionColor color) const 
+        {
+          std::unordered_map<LegionColor,ShardID>::const_iterator finder =
+            color_shards.find(color);
+#ifdef DEBUG_LEGION
+          assert(finder != color_shards.end());
+#endif
+          return finder->second;
+        }
+    public:
+      const std::unordered_map<LegionColor,ShardID> color_shards;
+    };
+
+    /**
      * \class RefinementNode
      * This data captures an actualized refinement tree to pass to a
      * refinement operation to update which regions are being used for
@@ -960,14 +987,14 @@ namespace Legion {
      */
     class RefinementNode {
     public:
-      RefinementNode(RegionTreeNode *node);
       virtual ~RefinementNode(void) { }
     public:
-      RefinementNode *clone(void) const;
-      void incorporate(RefinementNode *to_incorporate);
-    public:
-      RegionTreeNode *const node;
-      std::set<RefinementNode*> children;
+      virtual RegionRefinementNode* as_region_refinement(void) { return NULL; }
+      virtual PartitionRefinementNode* as_partition_refinement(void)
+        { return NULL; };
+      virtual RegionTreeNode* get_region_tree_node(void) const = 0;
+      virtual RefinementNode* clone(void) const = 0;
+      virtual bool incorporate(RefinementNode *to_incorporate) = 0;
 #if 0
     public:
       FieldMask increment_touches(const FieldMask &mask);
@@ -992,7 +1019,6 @@ namespace Legion {
 #endif
     };
 
-#if 0
     /**
      * \class RegionRefinementNode
      * A region refinement node stores the meta-data required for 
@@ -1000,12 +1026,20 @@ namespace Legion {
      */
     class RegionRefinementNode : public RefinementNode {
     public:
-      RegionRefinementNode(RegionNode *owner, PartitionRefinementNode *child);
+      RegionRefinementNode(RegionNode *owner,
+                           PartitionRefinementNode *child = NULL);
       RegionRefinementNode(const RegionRefinementNode &rhs) = delete;
       virtual ~RegionRefinementNode(void);
     public:
       RegionRefinementNode& operator=(const RegionRefinementNode &rhs) = delete;
-
+    public:
+      virtual RegionRefinementNode* as_region_refinement(void) { return this; }
+      virtual RegionTreeNode* get_region_tree_node(void) const;
+      virtual RefinementNode* clone(void) const;
+      virtual bool incorporate(RefinementNode *to_incorporate);
+    public:
+      RegionNode *const node;
+      PartitionRefinementNode *child;
     };
 
     /**
@@ -1015,15 +1049,23 @@ namespace Legion {
      */
     class PartitionRefinementNode : public RefinementNode {
     public:
-      PartitionRefinementNode(PartitionNode *owner);
+      PartitionRefinementNode(PartitionNode *owner,ShardedColorMap *map = NULL);
       PartitionRefinementNode(const PartitionRefinementNode &rhs) = delete;
-      virtual ~RegionRefinementNode(void);
+      virtual ~PartitionRefinementNode(void);
     public:
       PartitionRefinementNode& operator=(
           const PartitionRefinementNode &rhs) = delete;
-
+    public:
+      virtual PartitionRefinementNode* as_partition_refinement(void)
+        { return this; }
+      virtual RegionTreeNode* get_region_tree_node(void) const;
+      virtual RefinementNode* clone(void) const;
+      virtual bool incorporate(RefinementNode *to_incorporate);
+    public:
+      PartitionNode *const node;
+      ShardedColorMap *const children_shards;
+      std::unordered_map<LegionColor,RegionRefinementNode*> children;
     };
-#endif
 
     /**
      * \class ProjectionNode
@@ -1077,6 +1119,10 @@ namespace Legion {
       };
       struct PartitionSummary {
         ProjectionNode::IntervalTree children;
+        // If we're disjoint and complete we also track the sets
+        // of shards that know about each of the children as well
+        // so we can record the one nearest for each shard
+        std::multimap<LegionColor,ShardID> disjoint_complete_child_shards;
       };
     public:
       virtual ~ProjectionNode(void) { };
@@ -1085,10 +1131,11 @@ namespace Legion {
         { return NULL; }
       virtual bool is_disjoint_complete(void) const = 0;
       virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
-      virtual void extract_summaries(
-          std::map<LogicalRegion,RegionSummary> &regions,
+      virtual void extract_shard_summaries(bool disjoint_complete,
+          ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const = 0;
-      virtual void update_summaries(
+      virtual void update_shard_summaries(bool disjoint_complete,
+          ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) = 0;
       virtual RefinementNode* create_refinement(void) const = 0;
@@ -1107,10 +1154,11 @@ namespace Legion {
       virtual ProjectionRegion* as_region_projection(void) { return this; }
       virtual bool is_disjoint_complete(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
-      virtual void extract_summaries(
-          std::map<LogicalRegion,RegionSummary> &regions,
+      virtual void extract_shard_summaries(bool disjoint_complete,
+          ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const;
-      virtual void update_summaries(
+      virtual void update_shard_summaries(bool disjoint_complete,
+          ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
       virtual RefinementNode* create_refinement(void) const;
@@ -1121,7 +1169,7 @@ namespace Legion {
       RegionNode *const region;
       std::unordered_map<LegionColor,ProjectionPartition*> local_children;
       std::vector<ShardID> shard_users;
-    };
+    }; 
 
     class ProjectionPartition : public ProjectionNode {
     public:
@@ -1135,10 +1183,11 @@ namespace Legion {
         { return this; }
       virtual bool is_disjoint_complete(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
-      virtual void extract_summaries(
-          std::map<LogicalRegion,RegionSummary> &regions,
+      virtual void extract_shard_summaries(bool disjoint_complete,
+          ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions) const;
-      virtual void update_summaries(
+      virtual void update_shard_summaries(bool disjoint_complete,
+          ShardID local_shard, size_t total_shards,
           std::map<LogicalRegion,RegionSummary> &regions,
           std::map<LogicalPartition,PartitionSummary> &partitions);
       virtual RefinementNode* create_refinement(void) const;
@@ -1147,6 +1196,7 @@ namespace Legion {
     public:
       PartitionNode *const partition;
       std::unordered_map<LegionColor,ProjectionRegion*> local_children;
+      ShardedColorMap *disjoint_complete_children_shards;
     };
 
 #if 0

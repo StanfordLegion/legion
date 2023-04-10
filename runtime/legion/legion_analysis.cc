@@ -2638,8 +2638,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionRegion::extract_summaries(
-        std::map<LogicalRegion,RegionSummary> &region_summaries,
+    void ProjectionRegion::extract_shard_summaries(bool disjoint_complete,
+        ShardID local, std::map<LogicalRegion,RegionSummary> &region_summaries,
         std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
     //--------------------------------------------------------------------------
     {
@@ -2652,12 +2652,14 @@ namespace Legion {
             it = local_children.begin(); it != local_children.end(); it++)
       {
         summary.children.add_child(it->first);
-        it->second->extract_summaries(region_summaries, partition_summaries);
+        it->second->extract_shard_summaries(disjoint_complete, local,
+                                      region_summaries, partition_summaries);
       }
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionRegion::update_summaries(
+    void ProjectionRegion::update_shard_summaries(bool disjoint_complete, 
+        ShardID local_shard, size_t total_shards,
         std::map<LogicalRegion,RegionSummary> &region_summaries,
         std::map<LogicalPartition,PartitionSummary> &partition_summaries)
     //--------------------------------------------------------------------------
@@ -2668,12 +2670,37 @@ namespace Legion {
       RegionSummary &summary = region_summaries[region->handle];
       shard_users.swap(summary.users);
       shard_children.swap(summary.children);
+      if (disjoint_complete && !shard_children.empty())
+      {
+        // Check to see if we have a child but haven't recorded a local
+        // one in which case we need to make a child for the partition
+        // locally and unpack it so we can have the knowledge of which
+        // shards know about the subregions of the partition
+#ifdef DEBUG_LEGION
+        assert(shard_children.ranges.size() == 1);
+#endif
+        std::map<LegionColor,LegionColor>::const_iterator it =
+          shard_children.ranges.begin();
+#ifdef DEBUG_LEGION
+        // Should only be one color
+        assert((it->first + 1) == it->second);
+#endif
+        if (local_children.empty())
+          local_children[it->first] =
+            new ProjectionPartition(region->get_child(it->first));
+#ifdef DEBUG_LEGION
+        else
+          assert(local_children.find(it->first) != local_children.end());
+        assert(local_children.size() == 1);
+#endif
+      }
       // Remove all our local children from the shard children
       for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
             it = local_children.begin(); it != local_children.end(); it++)
       {
         shard_children.remove_child(it->first);
-        it->second->update_summaries(region_summaries, partition_summaries);
+        it->second->update_shard_summaries(disjoint_complete, local_shard,
+            total_shards, region_summaries, partition_summaries);
       }
     }
 
@@ -2732,13 +2759,32 @@ namespace Legion {
       child->add_reference();
     }
 
+    //--------------------------------------------------------------------------
+    RefinementNode* ProjectionRegion::create_refinement(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (!local_children.empty())
+      {
+#ifdef DEBUG_LEGION
+        // Should only have one child right now
+        assert(local_children.size() == 1);
+#endif
+        std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+          child = local_children.begin();
+        return new RegionRefinementNode(region,
+            child->second->create_refinement()->as_partition_refinement());
+      }
+      else
+        return new RegionRefinementNode(region);
+    }
+
     /////////////////////////////////////////////////////////////
     // ProjectionPartition
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     ProjectionPartition::ProjectionPartition(PartitionNode *node)
-      : partition(node)
+      : partition(node), disjoint_complete_children_shards(NULL)
     //--------------------------------------------------------------------------
     {
       partition->add_base_gc_ref(PROJECTION_REF);
@@ -2754,6 +2800,9 @@ namespace Legion {
           delete it->second;
       if (partition->remove_base_gc_ref(PROJECTION_REF))
         delete partition;
+      if ((disjoint_complete_children_shards != NULL) &&
+          disjoint_complete_children_shards->remove_reference())
+        delete disjoint_complete_children_shards;
     }
 
     //--------------------------------------------------------------------------
@@ -2788,8 +2837,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionPartition::extract_summaries(
-        std::map<LogicalRegion,RegionSummary> &region_summaries,
+    void ProjectionPartition::extract_shard_summaries(bool disjoint_complete,
+        ShardID local, std::map<LogicalRegion,RegionSummary> &region_summaries,
         std::map<LogicalPartition,PartitionSummary> &partition_summaries) const
     //--------------------------------------------------------------------------
     {
@@ -2802,12 +2851,22 @@ namespace Legion {
             it = local_children.begin(); it != local_children.end(); it++)
       {
         summary.children.add_child(it->first);
-        it->second->extract_summaries(region_summaries, partition_summaries);
+        it->second->extract_shard_summaries(disjoint_complete, local,
+                                      region_summaries, partition_summaries);
+      }
+      if (disjoint_complete)
+      {
+        // Record that we know about all of our local children
+        for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
+          summary.disjoint_complete_child_shards.insert(
+              std::pair<LegionColor,ShardID>(it->first, local));
       }
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionPartition::update_summaries(
+    void ProjectionPartition::update_shard_summaries(bool disjoint_complete,
+        ShardID local_shard, size_t total_shards,
         std::map<LogicalRegion,RegionSummary> &region_summaries,
         std::map<LogicalPartition,PartitionSummary> &partition_summaries)
     //--------------------------------------------------------------------------
@@ -2823,7 +2882,62 @@ namespace Legion {
             it = local_children.begin(); it != local_children.end(); it++)
       {
         shard_children.remove_child(it->first);
-        it->second->update_summaries(region_summaries, partition_summaries);
+        it->second->update_shard_summaries(disjoint_complete, local_shard,
+            total_shards, region_summaries, partition_summaries);
+      }
+      if (disjoint_complete &&
+          (local_children.size() < partition->get_num_children()))
+      {
+        // If necessary create a sharded color map for any children
+        // which we don't know about locally so we know the nearest
+        // shard which does have some information about it
+        std::unordered_map<LegionColor,ShardID> nearest_shards;  
+        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+        {
+          if (local_children.find(*itr) != local_children.end())
+            continue;
+          std::multimap<LegionColor,ShardID>::const_iterator lower =
+            summary.disjoint_complete_child_shards.lower_bound(*itr);
+#ifdef DEBUG_LEGION
+          assert(lower != summary.disjoint_complete_child_shards.end());
+#endif
+          std::multimap<LegionColor,ShardID>::const_iterator upper =
+            summary.disjoint_complete_child_shards.upper_bound(*itr);
+#ifdef DEBUG_LEGION
+          assert(lower != upper);
+#endif
+          // Find the shard closest to our local shard including wrap around
+          ShardID closest_shard = 0;
+          size_t closest_distance = total_shards;
+          for (std::multimap<LegionColor,ShardID>::const_iterator it =
+                lower; it != upper; it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(it->second != local_shard);
+#endif
+            size_t diff = (local_shard < it->second) ? 
+              (it->second - local_shard) : (local_shard - it->second);
+            // closest distance by shard ID with wrap around
+            size_t distance = 
+              (diff < (total_shards/2)) ? diff : total_shards - diff;
+            if (distance < closest_distance)
+            {
+              closest_shard = it->second;
+              closest_distance = distance;
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(closest_distance != total_shards);
+#endif
+          nearest_shards[*itr] = closest_shard;
+        }
+        // Now we can make our ShardedColorMap and save it
+#ifdef DEBUG_LEGION
+        assert(disjoint_complete_children_shards == NULL);
+#endif
+        disjoint_complete_children_shards =
+          new ShardedColorMap(std::move(nearest_shards));
+        disjoint_complete_children_shards->add_reference();
       }
     }
 
@@ -2899,6 +3013,25 @@ namespace Legion {
 #endif
       local_children[color] = child;
       child->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementNode* ProjectionPartition::create_refinement(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(partition->row_source->is_disjoint(false/*from app*/));
+      assert(partition->row_source->is_complete(false/*from app*/));
+      assert((local_children.size() + disjoint_complete_children_shards->size())
+          == partition->get_num_children());
+#endif
+      PartitionRefinementNode *refinement = 
+       new PartitionRefinementNode(partition,disjoint_complete_children_shards);
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        refinement->children[it->first] =
+          it->second->create_refinement()->as_region_refinement();
+      return refinement;
     }
 
 #if 0
@@ -3043,6 +3176,7 @@ namespace Legion {
     // RefinementNode
     /////////////////////////////////////////////////////////////
 
+#if 0
     //--------------------------------------------------------------------------
     RefinementNode::RefinementNode(RegionTreeNode *n)
       : node(n)
@@ -3051,7 +3185,6 @@ namespace Legion {
       node->add_base_gc_ref(DISJOINT_COMPLETE_REF);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     RefinementNode::~RefinementNode(void)
     //--------------------------------------------------------------------------
@@ -3229,6 +3362,141 @@ namespace Legion {
       return copy;
     }
 #endif
+
+    /////////////////////////////////////////////////////////////
+    // RegionRefinementNode
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RegionRefinementNode::RegionRefinementNode(RegionNode *n,
+                                               PartitionRefinementNode *ch)
+      : node(n), child(ch)
+    //--------------------------------------------------------------------------
+    {
+      node->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    RegionRefinementNode::~RegionRefinementNode(void)
+    //--------------------------------------------------------------------------
+    {
+      if (child != NULL)
+        delete child;
+      if (node->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+        delete node;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* RegionRefinementNode::get_region_tree_node(void) const
+    //--------------------------------------------------------------------------
+    {
+      return node;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementNode* RegionRefinementNode::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      return new RegionRefinementNode(node, 
+          child->clone()->as_partition_refinement());
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionRefinementNode::incorporate(RefinementNode *refinement)
+    //--------------------------------------------------------------------------
+    {
+      if (child == NULL)
+      {
+        RegionTreeNode *child_node = refinement->get_region_tree_node();
+        if (child_node->get_parent() == node)
+        {
+          child = refinement->as_partition_refinement();
+#ifdef DEBUG_LEGION
+          assert(child != NULL);
+#endif
+          return true;
+        }
+        else
+          return false;
+      }
+      else
+        return child->incorporate(refinement);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PartitionRefinementNode
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementNode::PartitionRefinementNode(PartitionNode *n,
+                                                     ShardedColorMap *map)
+      : node(n), children_shards(map)
+    //--------------------------------------------------------------------------
+    {
+      node->add_base_gc_ref(DISJOINT_COMPLETE_REF);
+      if (children_shards != NULL)
+        children_shards->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    PartitionRefinementNode::~PartitionRefinementNode(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,RegionRefinementNode*>::const_iterator
+            it = children.begin(); it != children.end(); it++)
+        delete it->second;
+      if (node->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+        delete node;
+      if ((children_shards != NULL) && children_shards->remove_reference())
+        delete children_shards;
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* PartitionRefinementNode::get_region_tree_node(void) const
+    //--------------------------------------------------------------------------
+    {
+      return node;
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementNode* PartitionRefinementNode::clone(void) const
+    //--------------------------------------------------------------------------
+    {
+      PartitionRefinementNode *result = 
+        new PartitionRefinementNode(node, children_shards);
+      for (std::unordered_map<LegionColor,RegionRefinementNode*>::const_iterator
+            it = children.begin(); it != children.end(); it++)
+        result->children[it->first] =
+          it->second->clone()->as_region_refinement();
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    bool PartitionRefinementNode::incorporate(RefinementNode *refinement)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *child = refinement->get_region_tree_node();
+      if (child->get_parent() == node)
+      {
+        LegionColor child_color = child->get_color();
+        RegionRefinementNode *child = refinement->as_region_refinement();
+#ifdef DEBUG_LEGION
+        assert(child != NULL);
+        assert(children.find(child_color) == children.end());
+#endif
+        children[child_color] = child;
+        return true;
+      }
+      else
+      {
+        for (std::unordered_map<LegionColor,
+                                RegionRefinementNode*>::const_iterator
+              it = children.begin(); it != children.end(); it++)
+          if (it->second->incorporate(refinement))
+            return true;
+        return false;
+      }
+    }
 
     /////////////////////////////////////////////////////////////
     // ProjectionSummary
@@ -4848,7 +5116,8 @@ namespace Legion {
         assert(owner->is_region());
 #endif
         // Record a new empty refinement at this level
-        RefinementNode *new_refinement = new RefinementNode(owner);
+        RegionRefinementNode *new_refinement = 
+          new RegionRefinementNode(owner->as_region_node());
         refinements.insert(new_refinement, refinement_mask);
         // Create a new empty tracker at this level
         RefinementTracker *new_tracker = 
@@ -4884,8 +5153,9 @@ namespace Legion {
           for (FieldMaskSet<RefinementNode>::const_iterator it =
                 child_refinements.begin(); it != child_refinements.end(); it++)
           {
-            RefinementNode *new_refinement = new RefinementNode(owner);
-            new_refinement->children.insert(it->first);
+            RegionRefinementNode *new_refinement =
+              new RegionRefinementNode(owner->as_region_node(),
+                                       it->first->as_partition_refinement());
             refinements.insert(new_refinement, it->second); 
           }
           // Create a new tracker for this child and record it
@@ -4915,8 +5185,17 @@ namespace Legion {
         for (LegionList<FieldSet<RefinementNode*> >::iterator it =
               field_groups.begin(); it != field_groups.end(); it++)
         {
-          RefinementNode *new_refinement = new RefinementNode(owner);
-          new_refinement->children.swap(it->elements);
+          PartitionRefinementNode *new_refinement = 
+            new PartitionRefinementNode(owner->as_partition_node());
+          for (std::set<RefinementNode*>::const_iterator cit =
+                it->elements.begin(); cit != it->elements.end(); it++)
+          {
+            RegionRefinementNode *child = (*cit)->as_region_refinement();
+#ifdef DEBUG_LEGION
+            assert(child != NULL);
+#endif
+            new_refinement->children[child->node->get_color()] = child;
+          }
           refinements.insert(new_refinement, it->set_mask);
         }
         // Create a new tracker recording that all the children are refined
@@ -6162,17 +6441,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If we overlap with any unrefined nodes then we can remove them
-      if (!unrefined_nodes.empty() && refinement->node->is_region())
+      if (!unrefined_nodes.empty())
       {
-        FieldMaskSet<RegionNode>::iterator finder = 
-          unrefined_nodes.find(refinement->node->as_region_node());
-        if (finder != unrefined_nodes.end())
+        RegionTreeNode *node = refinement->get_region_tree_node();
+        if (node->is_region())
         {
-          finder.filter(refinement_mask);
-          if (!finder->second)
+          FieldMaskSet<RegionNode>::iterator finder = 
+            unrefined_nodes.find(node->as_region_node());
+          if (finder != unrefined_nodes.end())
           {
-            unrefined_indexes.erase(finder->first);
-            unrefined_nodes.erase(finder);
+            finder.filter(refinement_mask);
+            if (!finder->second)
+            {
+              unrefined_indexes.erase(finder->first);
+              unrefined_nodes.erase(finder);
+            }
           }
         }
       }
@@ -6199,7 +6482,15 @@ namespace Legion {
               RefinementNode *dominator = it->first->clone_refinement();
               if (overlap != refinement_mask)
               {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+                bool incorporated = 
+#endif
+#endif
                 dominator->incorporate(refinement->clone());
+#ifdef DEBUG_LEGION
+                assert(incorporated);
+#endif
                 RefinementOp *op =
                   create_refinement(privilege, req_index, dominator); 
                 pending_refinements.insert(op, overlap);
@@ -6210,7 +6501,15 @@ namespace Legion {
               }
               else
               {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+                bool incorporated = 
+#endif
+#endif
                 dominator->incorporate(refinement);
+#ifdef DEBUG_LEGION
+                assert(incorporated);
+#endif
                 refinement = dominator;
               }
             } 

@@ -1893,6 +1893,9 @@ namespace Legion {
     class ProjectionNode;
     class ProjectionRegion;
     class ProjectionPartition;
+    class RefinementNode;
+    class RegionRefinementNode;
+    class PartitionRefinementNode;
 
     class Collectable;
     class Notifiable;
