@@ -870,7 +870,7 @@ endif()
 # the version of the CUDA toolchain
 # Create a separate variable so this directory can be selectively added to math targets.
 if(NOT EXISTS "${CUDAToolkit_INCLUDE_DIR}/cublas_v2.h")
-  file(REAL_PATH "${CUDAToolkit_TARGET_DIR}" CUDAToolkit_MATH_INCLUDE_DIR)
+  get_filename_component(CUDAToolkit_MATH_INCLUDE_DIR "${CUDAToolkit_TARGET_DIR}" ABSOLUTE)
   cmake_path(APPEND CUDAToolkit_MATH_INCLUDE_DIR "../../math_libs/")
   if(EXISTS "${CUDAToolkit_MATH_INCLUDE_DIR}/${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}/")
     cmake_path(APPEND CUDAToolkit_MATH_INCLUDE_DIR "${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}/")
@@ -907,7 +907,7 @@ endif()
 
 #-----------------------------------------------------------------------------
 # Perform version comparison and validate all required variables are set.
-include(${CMAKE_CURRENT_LIST_DIR}/FindPackageHandleStandardArgs.cmake)
+include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(CUDAToolkit
   REQUIRED_VARS
     CUDAToolkit_INCLUDE_DIR
@@ -931,18 +931,18 @@ if(CUDAToolkit_FOUND)
   get_filename_component(CUDAToolkit_LIBRARY_DIR ${CUDA_CUDART} DIRECTORY ABSOLUTE)
 
   # Build search paths without any symlinks
-  file(REAL_PATH "${CUDAToolkit_LIBRARY_DIR}" _cmake_search_dir)
+  get_filename_component(_cmake_search_dir "${CUDAToolkit_LIBRARY_DIR}" ABSOLUTE)
   set(CUDAToolkit_LIBRARY_SEARCH_DIRS "${_cmake_search_dir}")
 
   # Detect we are in a splayed nvhpc toolkit layout and add extra
   # search paths without symlinks
   if(CUDAToolkit_LIBRARY_DIR  MATCHES ".*/cuda/${CUDAToolkit_VERSION_MAJOR}.${CUDAToolkit_VERSION_MINOR}/lib64$")
     # Search location for math_libs/
-    file(REAL_PATH "${CUDAToolkit_LIBRARY_DIR}/../../../" _cmake_search_dir)
+    get_filename_component(_cmake_search_dir "${CUDAToolkit_LIBRARY_DIR}/../../../" ABSOLUTE)
     list(APPEND CUDAToolkit_LIBRARY_SEARCH_DIRS "${_cmake_search_dir}")
 
     # Search location for extras like cupti
-    file(REAL_PATH "${CUDAToolkit_LIBRARY_DIR}/../" _cmake_search_dir)
+    get_filename_component(_cmake_search_dir "${CUDAToolkit_LIBRARY_DIR}/../" ABSOLUTE)
     list(APPEND CUDAToolkit_LIBRARY_SEARCH_DIRS "${_cmake_search_dir}")
   endif()
 endif()
