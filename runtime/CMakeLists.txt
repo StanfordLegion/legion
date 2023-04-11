@@ -487,12 +487,16 @@ if(Legion_USE_CUDA)
       target_sources(RealmRuntime PRIVATE realm/cuda/cudart_hijack.cc)
     endif()
   else()
-    if(NOT REALM_CUDA_DYNAMIC_LOAD)
-      target_link_libraries(RealmRuntime PRIVATE CUDA::cudart_static)
+    if(REALM_CUDA_DYNAMIC_LOAD)
+      target_link_libraries(RealmRuntime INTERFACE CUDA::cudart)
+    else()
+      target_link_libraries(RealmRuntime INTERFACE CUDA::cudart_static)
     endif()
   endif()
 
-  target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit CUDA::cuda_driver)
+  target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
+  # Advertise our driver link to Realm consumers while ensuring libcuda.so isn't in Realm's RPATH
+  target_link_libraries(RealmRuntime INTERFACE CUDA::cuda_driver)
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 endif()
@@ -505,9 +509,6 @@ if(Legion_USE_HIP)
 
     target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
     target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include)
-    if(NOT REALM_CUDA_DYNAMIC_LOAD)
-      target_link_libraries(RealmRuntime PRIVATE CUDA::cuda_driver)
-    endif()
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
 
@@ -797,16 +798,13 @@ add_library(Legion::LegionRuntime ALIAS LegionRuntime)
 
 # Add CUDA-specific properties
 if(Legion_USE_CUDA)
-  set(legion_cuda_options -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant)
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                         -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
 
   # starting with nvcc 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-    list(APPEND legion_cuda_options -Werror=all-warnings)
+    target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Werror=all-warnings>)
   endif()
-
-  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${legion_cuda_options}>)
-
-  unset(legion_cuda_options)
 
   # complex reduction ops bring in a public dependency on cuda headers
   if(Legion_REDOP_COMPLEX)

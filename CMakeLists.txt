@@ -449,13 +449,13 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     # CMAKE_CUDA_RUNTIME_LIBRARY determines whether CUDA objs link to the static
     # or shared CUDA runtime library. Must be set before `enable_language(CUDA)`
     # https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_RUNTIME_LIBRARY.html
-    # if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
-    #   if(NOT BUILD_SHARED_LIBS)
-    #     set(CMAKE_CUDA_RUNTIME_LIBRARY STATIC)
-    #   else()
-    #     set(CMAKE_CUDA_RUNTIME_LIBRARY SHARED)
-    #   endif()
-    # endif()
+    if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
+      if(BUILD_SHARED_LIBS)
+        set(CMAKE_CUDA_RUNTIME_LIBRARY SHARED)
+      else()
+        set(CMAKE_CUDA_RUNTIME_LIBRARY STATIC)
+      endif()
+    endif()
 
     set(Legion_CUDA_ARCH "" CACHE STRING
       "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)")
@@ -515,7 +515,7 @@ if(Legion_USE_CUDA)
   cmake_dependent_option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime"
     # The default is to hijack unless Kokkos interop is enabled, or network is UCX.
     # `cmake_dependent_option` uses python ternary notation, i.e `X if <condition> else Y`.
-    OFF "Legion_USE_Kokkos OR \"ucx\" IN_LIST Legion_NETWORKS" ON
+    OFF "Legion_USE_Kokkos OR \"ucx\" IN_LIST Legion_NETWORKS AND NOT Legion_CUDA_DYNAMIC_LOAD" ON
   )
 
   if(Legion_CUDA_DYNAMIC_LOAD AND Legion_HIJACK_CUDART)
