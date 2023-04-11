@@ -54,7 +54,6 @@ list(APPEND REALM_TESTS
   )
 
 if(Legion_USE_CUDA)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
 
   # some tests have CUDA source files too
   set(CUDASRC_memspeed memspeed_gpu.cu)
@@ -66,10 +65,6 @@ if(Legion_USE_CUDA)
 endif()
 
 if(Legion_USE_HIP)
-  if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
-  endif()
-
   # some tests have HIP source files too
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
@@ -81,7 +76,7 @@ endif()
 
 foreach(test IN LISTS REALM_TESTS)
   if(CUDASRC_${test})
-    cuda_add_executable(${test} ${test}.cc ${CUDASRC_${test}})
+    add_executable(${test} ${test}.cc ${CUDASRC_${test}})
   elseif(HIPSRC_${test})
     hip_add_executable(${test} ${test}.cc ${HIPSRC_${test}})
   else()
@@ -97,6 +92,8 @@ foreach(test IN LISTS REALM_TESTS)
       target_compile_definitions(${test} PRIVATE __HIP_PLATFORM_AMD__)
     endif()
   endif()
+
+  target_compile_options(${test} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
 endforeach()
 
 # scatter uses C++11 lambdas

@@ -22,3 +22,7 @@ core
 
 legion_defines.h
 realm_defines.h
+
+.cache
+tmp-build
+compile_commands.json

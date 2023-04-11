@@ -21,7 +21,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 # enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+list(JOIN "${CMAKE_CXX_FLAGS};${CXX_BUILD_WARNING_FLAGS}" " " CMAKE_CXX_FLAGS)
 
 add_subdirectory(00_hello_world)
 add_subdirectory(01_tasks_and_futures)
