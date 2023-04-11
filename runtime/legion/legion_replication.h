@@ -1655,6 +1655,7 @@ namespace Legion {
     protected:
       RtBarrier mapped_barrier;
       RtBarrier refinement_barrier;
+#if 0
       // Fields for regions that are shared to this node
       FieldMaskSet<RegionNode> sharded_regions;
       // Version information objects for each of our local regions
@@ -1662,6 +1663,7 @@ namespace Legion {
       LegionMap<RegionNode*,VersionInfo> sharded_region_version_infos;
       // Fields for all the partitions that we encounter
       FieldMaskSet<PartitionNode> refinement_partitions;
+#endif
     };
 
     /**
@@ -2899,8 +2901,8 @@ namespace Legion {
       void send_collective_message(ShardID target, Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
-      void send_disjoint_complete_request(ShardID target, Serializer &rez);
-      void handle_disjoint_complete_request(Deserializer &derez);
+      void send_equivalence_set_notification(ShardID target, Serializer &rez);
+      void handle_equivalence_set_notification(Deserializer &derez);
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
       void handle_intra_space_dependence(Deserializer &derez);
@@ -2948,8 +2950,8 @@ namespace Legion {
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
-      static void handle_disjoint_complete_request(Deserializer &derez, 
-                                                   Runtime *rt);
+      static void handle_equivalence_set_notification(Deserializer &derez, 
+                                                      Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
       static void handle_broadcast_update(Deserializer &derez, Runtime *rt);

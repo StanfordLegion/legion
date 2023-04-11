@@ -12850,15 +12850,9 @@ namespace Legion {
               runtime->handle_future_map_future_response(derez);
               break;
             }
-          case SEND_REPL_DISJOINT_COMPLETE_REQUEST:
+          case SEND_REPL_EQUIVALENCE_SET_NOTIFICATION:
             {
-              runtime->handle_control_replicate_disjoint_complete_request(
-                                                                    derez);
-              break;
-            }
-          case SEND_REPL_DISJOINT_COMPLETE_RESPONSE:
-            {
-              runtime->handle_control_replicate_disjoint_complete_response(
+              runtime->handle_control_replicate_equivalence_set_notification(
                                                                       derez);
               break;
             }
@@ -22763,22 +22757,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_disjoint_complete_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message<SEND_REPL_DISJOINT_COMPLETE_REQUEST>(
-                                                            rez, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_replicate_disjoint_complete_response(
+    void Runtime::send_control_replicate_equivalence_set_notification(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-          SEND_REPL_DISJOINT_COMPLETE_RESPONSE>(
-          rez, true/*flush*/, true/*response*/);
+        SEND_REPL_EQUIVALENCE_SET_NOTIFICATION>(rez, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -25015,19 +24999,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_disjoint_complete_request(
+    void Runtime::handle_control_replicate_equivalence_set_notification(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_disjoint_complete_request(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_control_replicate_disjoint_complete_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      ReplicateContext::handle_disjoint_complete_response(derez, this);
+      ShardManager::handle_equivalence_set_notification(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -32658,17 +32634,6 @@ namespace Legion {
         case LG_DEFER_COPY_ACROSS_TASK_ID:
           {
             CopyAcrossExecutor::handle_deferred_copy_across(args);
-            break;
-          }
-        case LG_DEFER_DISJOINT_COMPLETE_TASK_ID:
-          {
-            ReplicateContext::handle_defer_disjoint_complete_response(runtime,
-                                                                      args);
-            break;
-          }
-        case LG_DEFER_FINALIZE_PENDING_SET_TASK_ID:
-          {
-            PendingEquivalenceSet::handle_defer_finalize(args);
             break;
           }
         case LG_FREE_EAGER_INSTANCE_TASK_ID:

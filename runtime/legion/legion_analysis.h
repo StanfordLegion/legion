@@ -995,6 +995,15 @@ namespace Legion {
       virtual RegionTreeNode* get_region_tree_node(void) const = 0;
       virtual RefinementNode* clone(void) const = 0;
       virtual bool incorporate(RefinementNode *to_incorporate) = 0;
+      virtual void perform_versioning_analysis(ContextID ctx,
+          InnerContext *context, const FieldMask &mask, 
+          LegionMap<RegionNode*,VersionInfo> &version_infos,
+          UniqueID op_id, AddressSpaceID local_space,
+          std::set<RtEvent> &ready_events) const = 0;
+      virtual void register_refinement(ContextID ctx, const FieldMask &mask,
+          InnerContext *context, size_t op_ctx_index,
+          std::set<RtEvent> &applied_events,
+          const LegionMap<RegionNode*,VersionInfo> &version_infos) const = 0;
 #if 0
     public:
       FieldMask increment_touches(const FieldMask &mask);
@@ -1037,9 +1046,21 @@ namespace Legion {
       virtual RegionTreeNode* get_region_tree_node(void) const;
       virtual RefinementNode* clone(void) const;
       virtual bool incorporate(RefinementNode *to_incorporate);
+      virtual void perform_versioning_analysis(ContextID ctx,
+          InnerContext *context, const FieldMask &mask, 
+          LegionMap<RegionNode*,VersionInfo> &version_infos,
+          UniqueID op_id, AddressSpaceID local_space,
+          std::set<RtEvent> &ready_events) const;
+      virtual void register_refinement(ContextID ctx, const FieldMask &mask,
+          InnerContext *context, size_t op_ctx_index,
+          std::set<RtEvent> &applied_events,
+          const LegionMap<RegionNode*,VersionInfo> &version_infos) const;
     public:
       RegionNode *const node;
       PartitionRefinementNode *child;
+      // Should only have refining shards at the leaves of the refinement
+      // tree and only in control replicated contexts
+      std::vector<ShardID> refining_shards; // this vector is sorted
     };
 
     /**
@@ -1061,6 +1082,15 @@ namespace Legion {
       virtual RegionTreeNode* get_region_tree_node(void) const;
       virtual RefinementNode* clone(void) const;
       virtual bool incorporate(RefinementNode *to_incorporate);
+      virtual void perform_versioning_analysis(ContextID ctx,
+          InnerContext *context, const FieldMask &mask, 
+          LegionMap<RegionNode*,VersionInfo> &version_infos,
+          UniqueID op_id, AddressSpaceID local_space,
+          std::set<RtEvent> &ready_events) const;
+      virtual void register_refinement(ContextID ctx, const FieldMask &mask,
+          InnerContext *context, size_t op_ctx_index,
+          std::set<RtEvent> &applied_events,
+          const LegionMap<RegionNode*,VersionInfo> &version_infos) const;
     public:
       PartitionNode *const node;
       ShardedColorMap *const children_shards;
@@ -1168,7 +1198,7 @@ namespace Legion {
     public:
       RegionNode *const region;
       std::unordered_map<LegionColor,ProjectionPartition*> local_children;
-      std::vector<ShardID> shard_users;
+      std::vector<ShardID> shard_users; // this vector is sorted
     }; 
 
     class ProjectionPartition : public ProjectionNode {
@@ -1457,8 +1487,8 @@ namespace Legion {
           LogicalAnalysis &logical_analysis, ContextID ctx,
           LogicalRegion privilege, unsigned req_index,
           FieldMaskSet<RefinementOp> &refinement_operations);
-      void change_refinements(ContextID ctx, FieldMask refinement_mask,
-                              FieldMaskSet<RefinementNode> &refinements);
+      void change_refinements(ContextID ctx, size_t total_shards,
+          FieldMask mask, FieldMaskSet<RefinementNode> &refinements);
       void invalidate_refinements(ContextID ctx, FieldMask invalidation_mask);
 #if 0
     public:
@@ -3927,6 +3957,7 @@ namespace Legion {
       unsigned sample_count;
     };
 
+#if 0
     /**
      * \class PendingEquivalenceSet
      * This is a helper class to store the equivalence sets for
@@ -3968,6 +3999,7 @@ namespace Legion {
       RtEvent clone_event;
       FieldMaskSet<EquivalenceSet> previous_sets;
     };
+#endif
 
     /**
      * \class VersionManager

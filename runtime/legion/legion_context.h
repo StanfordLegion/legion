@@ -1064,6 +1064,7 @@ namespace Legion {
       void record_physical_trace_replay(RtEvent ready, bool replay);
       bool is_replaying_physical_trace(void);
       virtual DistributedID get_replication_id(void) const { return 0; }
+      virtual size_t get_total_shards(void) const { return 1; }
       inline bool is_concurrent_context(void) const
         { return concurrent_context; }
     public: // Garbage collection methods
@@ -1162,6 +1163,11 @@ namespace Legion {
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask, const UniqueID opid, 
                       const AddressSpaceID original_source);
+      virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
+          size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
+          const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
+          std::set<RtEvent> &applied_events);
+#if 0
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
                                                 const FieldMask &mask);
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
@@ -1169,6 +1175,7 @@ namespace Legion {
           const AddressSpaceID source, RtUserEvent ready_event);
       void invalidate_disjoint_complete_sets(RegionNode *region,
                                              const FieldMask &mask);
+#endif
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       bool inline_child_task(TaskOp *child);
@@ -1973,10 +1980,12 @@ namespace Legion {
       mutable LocalLock                          instance_view_lock;
       std::map<PhysicalManager*,IndividualView*> instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>     pending_top_views;
+#if 0
     protected:
       mutable LocalLock                         pending_set_lock;
       LegionMap<RegionNode*,
         FieldMaskSet<PendingEquivalenceSet> >   pending_equivalence_sets;
+#endif
     protected:
       // Dependence tracking information for phase barriers
       mutable LocalLock                                   phase_barrier_lock;
@@ -2143,6 +2152,7 @@ namespace Legion {
         std::map<ShardID,RtEvent> ready_deps;
         std::map<ShardID,RtUserEvent> pending_deps;
       };
+#if 0
     public:
       struct DeferDisjointCompleteResponseArgs :
         public LgTaskArgs<DeferDisjointCompleteResponseArgs> {
@@ -2159,6 +2169,7 @@ namespace Legion {
         const RtUserEvent done_event;
         const AddressSpaceID target_space;
       };
+#endif
     public:
       template<typename T, bool LOGICAL, bool SINGLE=false>
       class ReplBarrier {
@@ -2353,6 +2364,7 @@ namespace Legion {
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; } 
       virtual DistributedID get_replication_id(void) const;
+      virtual size_t get_total_shards(void) const { return total_shards; }
     public: // Privilege tracker methods
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
@@ -2887,15 +2899,20 @@ namespace Legion {
                                        bool replicate = false);
     public:
       void handle_collective_message(Deserializer &derez);
+#if 0
       void handle_disjoint_complete_request(Deserializer &derez);
       static void handle_disjoint_complete_response(Deserializer &derez, 
                                                     Runtime *runtime);
       static void handle_defer_disjoint_complete_response(Runtime *runtime,
                                                           const void *args);
+#endif
+      static void handle_equivalence_set_notification(Deserializer &derez);
       static void handle_defer_collective_message(const void *args);
+#if 0
       static void finalize_disjoint_complete_response(Runtime *runtime,
             UniqueID opid, VersionManager *target, AddressSpaceID target_space,
             VersionInfo *version_info, RtUserEvent done_event);
+#endif
       void handle_resource_update(Deserializer &derez,
                                   std::set<RtEvent> &applied);
       void handle_trace_update(Deserializer &derez, AddressSpaceID source);
@@ -2936,9 +2953,15 @@ namespace Legion {
     public:
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);
+      virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
+          size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
+          const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
+          std::set<RtEvent> &applied_events);
+#if 0
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
           const AddressSpaceID source, RtUserEvent ready_event);
+#endif
     public:
       // Fence barrier methods
       inline RtBarrier get_next_mapping_fence_barrier(void)

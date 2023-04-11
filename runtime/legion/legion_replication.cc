@@ -2007,9 +2007,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RefinementOp::deactivate(false/*free*/);
+#if 0
       sharded_regions.clear();
       sharded_region_version_infos.clear();
       refinement_partitions.clear();
+#endif
       if (freeop)
         runtime->free_repl_refinement_op(this);
     }
@@ -2025,6 +2027,31 @@ namespace Legion {
 #endif
       mapped_barrier = mapped_bar;
       refinement_barrier = refinement_bar;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> ready_events;
+      if (!!refinement_mask)
+      {
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        refinement->perform_versioning_analysis(ctx, parent_ctx,
+            refinement_mask, version_infos, unique_op_id,
+            runtime->address_space, ready_events);
+      }
+#ifdef DEBUG_LEGION
+      assert(refinement_barrier.exists());
+#endif
+      // Make sure that everyone is done computing their equivalence sets
+      // from the previous set before we allow anyone to do any invalidations
+      if (!ready_events.empty())
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/,
+            Runtime::merge_events(ready_events));
+      else
+        Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
+      enqueue_ready_operation(refinement_barrier);
     }
 
 #if 0
@@ -2230,7 +2257,6 @@ namespace Legion {
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
       enqueue_ready_operation(refinement_barrier);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void ReplRefinementOp::trigger_mapping(void)
@@ -2291,6 +2317,28 @@ namespace Legion {
         // the one to make the equivalence sets
         it->first->propagate_refinement(ctx, children, it->second); 
       }
+      if (!map_applied_conditions.empty())
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
+            Runtime::merge_events(map_applied_conditions));
+      else
+        Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      complete_mapping(mapped_barrier);
+      complete_execution();
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void ReplRefinementOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> map_applied_conditions;
+      // Check to make sure we have refinement fields
+      // We might not if we were completely filtered out of them
+      if (!!refinement_mask)
+        update_refinement(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+#endif
       if (!map_applied_conditions.empty())
         Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/,
             Runtime::merge_events(map_applied_conditions));
@@ -10520,8 +10568,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::send_disjoint_complete_request(ShardID target, 
-                                                      Serializer &rez)
+    void ShardManager::send_equivalence_set_notification(ShardID target, 
+                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10535,15 +10583,15 @@ namespace Legion {
         // Have to unpack the preample we already know
         DistributedID local_repl;
         derez.deserialize(local_repl);
-        handle_disjoint_complete_request(derez);
+        handle_equivalence_set_notification(derez);
       }
       else
-        runtime->send_control_replicate_disjoint_complete_request(target_space,
-                                                                  rez);
+        runtime->send_control_replicate_equivalence_set_notification(
+                                                    target_space, rez);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_disjoint_complete_request(Deserializer &derez)
+    void ShardManager::handle_equivalence_set_notification(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -10554,7 +10602,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->handle_disjoint_complete_request(derez);
+          (*it)->handle_equivalence_set_notification(derez);
           return;
         }
       }
@@ -11356,14 +11404,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_disjoint_complete_request(
+    /*static*/ void ShardManager::handle_equivalence_set_notification(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DistributedID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_disjoint_complete_request(derez);
+      manager->handle_equivalence_set_notification(derez);
     }
 
     //--------------------------------------------------------------------------

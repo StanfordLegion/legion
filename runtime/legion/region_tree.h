@@ -3974,7 +3974,7 @@ namespace Legion {
                                       const RegionUsage usage,
                                       const FieldMask &uninitialized,
                                       RtUserEvent reported);
-      void update_logical_refinement(ContextID ctx, 
+      void update_logical_refinement(ContextID ctx, size_t total_shards, 
                                      const FieldMask &refinement_mask,
                                      FieldMaskSet<RefinementNode> &refinements);
       void invalidate_logical_refinement(ContextID ctx, 
@@ -4067,6 +4067,11 @@ namespace Legion {
                                           const FieldMask &mask,
                                   std::deque<RegionTreeNode*> &to_traverse) = 0;
       virtual void print_context_header(TreeStateLogger *logger) = 0;
+      virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+                                 bool self, InnerContext &source_context,
+                                 std::set<RtEvent> &applied_events,
+                                 std::vector<EquivalenceSet*> &to_release,
+                                 bool nonexclusive_virtual_root = false) = 0;
 #ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
@@ -4288,7 +4293,7 @@ namespace Legion {
                                     const bool downward_only,
                                     const bool expr_covers);
       static void handle_deferred_compute_equivalence_sets(const void *args);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+      virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  bool self, InnerContext &source_context,
                                  std::set<RtEvent> &applied_events, 
                                  std::vector<EquivalenceSet*> &to_release,
@@ -4408,14 +4413,14 @@ namespace Legion {
                                     std::set<RtEvent> &ready_events,
                                     const bool downward_only,
                                     const bool expr_covers);
-      void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+      virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
+                                 bool self, InnerContext &source_context,
                                  std::set<RtEvent> &applied_events,
                                  std::vector<EquivalenceSet*> &to_release,
-                                 InnerContext &source_context);
+                                 bool nonexclusive_virtual_root = false);
+      void record_refinement(ContextID ctx, ShardedColorMap *children_shards,
+                             const FieldMask &mask);
       void propagate_refinement(ContextID ctx, RegionNode *child,
-                                const FieldMask &mask);
-      void propagate_refinement(ContextID ctx, 
-                                const std::vector<RegionNode*> &children,
                                 const FieldMask &mask);
     public:
       // Logging calls

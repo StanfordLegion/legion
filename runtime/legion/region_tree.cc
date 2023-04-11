@@ -16339,12 +16339,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::update_logical_refinement(ContextID ctx,
-    const FieldMask &refinement_mask, FieldMaskSet<RefinementNode> &refinements)
+    void RegionTreeNode::update_logical_refinement(ContextID ctx, 
+                                      size_t total_shards,
+                                      const FieldMask &refinement_mask,
+                                      FieldMaskSet<RefinementNode> &refinements)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
-      state.change_refinements(ctx, refinement_mask, refinements);
+      state.change_refinements(ctx, total_shards, refinement_mask, refinements);
     }
 
     //--------------------------------------------------------------------------
@@ -20872,7 +20874,7 @@ namespace Legion {
         assert(!it->first->is_region());
 #endif
         it->first->as_partition_node()->invalidate_refinement(ctx, it->second, 
-                                  applied_events, to_release, source_context);
+                    true/*self*/, source_context, applied_events, to_release);
         if (it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           delete it->first;
       }
@@ -22353,16 +22355,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PartitionNode::invalidate_refinement(ContextID ctx, 
-                                       const FieldMask &mask, 
+                                       const FieldMask &mask, bool self,
+                                       InnerContext &source_context,
                                        std::set<RtEvent> &applied_events,
                                        std::vector<EquivalenceSet*> &to_release,
-                                       InnerContext &source_context)
+                                       bool nonexclusive_virtual_root)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMaskSet<RegionTreeNode> to_traverse;
       LegionMap<AddressSpaceID,SubscriberInvalidations> subscribers;
-      manager.invalidate_refinement(source_context, mask, true/*delete self*/,
+      manager.invalidate_refinement(source_context, mask, self,
                                     to_traverse, subscribers, to_release);
 #ifdef DEBUG_LEGION
       assert(subscribers.empty());
@@ -22392,6 +22395,7 @@ namespace Legion {
         parent->propagate_refinement(ctx, this, parent_mask);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx,
                 const std::vector<RegionNode*> &children, const FieldMask &mask)
@@ -22403,6 +22407,7 @@ namespace Legion {
       if (!!parent_mask)
         parent->propagate_refinement(ctx, this, parent_mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PartitionNode::print_logical_context(ContextID ctx,

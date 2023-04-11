@@ -11419,7 +11419,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InternalOp::activate();
-      to_refine = NULL;
+      refinement = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -11427,9 +11427,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InternalOp::deactivate(false/*free*/);
-      version_info.clear();
-      make_from.clear();
+      if (refinement != NULL)
+        delete refinement;
+      refinement_mask.clear();
+      version_infos.clear();
+      to_release.clear();
 #if 0
+      make_from.clear();
       if (!projections.empty())
       {
         for (LegionMap<RegionTreeNode*,FieldMaskSet<RefProjectionSummary> >::
@@ -11443,9 +11447,8 @@ namespace Legion {
         }
         projections.clear();
       }
-#endif
-      to_release.clear();
       uninitialized_fields.clear();
+#endif
       if (freeop)
         runtime->free_refinement_op(this);
     }
@@ -11468,10 +11471,137 @@ namespace Legion {
     const FieldMask& RefinementOp::get_internal_mask(void) const
     //--------------------------------------------------------------------------
     {
+      return refinement_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::initialize(Operation *creator, unsigned index,
+                                  LogicalRegion parent, RefinementNode *refine)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      assert(!!make_from.get_valid_mask());
+      assert(refinement == NULL);
 #endif
-      return make_from.get_valid_mask();
+      initialize_internal(creator, index);
+      refinement = refine;
+      MustEpochOp *must = creator->get_must_epoch_op();
+      if (must != NULL)
+        set_must_epoch(must, false/*do registration*/);
+      if (runtime->legion_spy_enabled)
+      {
+        LegionSpy::log_refinement_operation(parent_ctx->get_unique_id(), 
+                                            unique_op_id);
+        RegionTreeNode *node = refinement->get_region_tree_node();
+        if (node->is_region())
+        {
+          RegionNode *root = node->as_region_node();
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+                                        true/*region*/,
+                                        root->handle.index_space.id,
+                                        root->handle.field_space.id,
+                                        root->handle.tree_id, LEGION_READ_WRITE, 
+                                        LEGION_EXCLUSIVE, 0/*redop*/, 
+                                        parent.index_space.id);
+        }
+        else
+        {
+          PartitionNode *root = node->as_partition_node();
+          LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/, 
+                                        false/*region*/,
+                                        root->handle.index_partition.id,
+                                        root->handle.field_space.id,
+                                        root->handle.tree_id, LEGION_READ_WRITE, 
+                                        LEGION_EXCLUSIVE, 0/*redop*/, 
+                                        parent.index_space.id);
+        }
+        LegionSpy::log_internal_op_creator(unique_op_id, 
+                    creator->get_unique_op_id(), index);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::record_refinement_mask(const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!refinement_mask);
+      assert(refinement != NULL);
+#endif
+      refinement_mask = mask;
+      if (runtime->legion_spy_enabled && !!mask)
+      {
+        std::set<FieldID> fields;
+        RegionTreeNode *node = refinement->get_region_tree_node();
+        node->column_source->get_field_set(mask, parent_ctx, fields);
+        LegionSpy::log_requirement_fields(unique_op_id, 0/*idx*/, fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RefinementNode* RefinementOp::clone_refinement(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#endif
+      return refinement->clone();
+    }
+
+    //--------------------------------------------------------------------------
+    bool RefinementOp::interferes(RefinementNode *refine, bool &dominates) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#endif
+      RegionTreeNode *other = refine->get_region_tree_node();
+      RegionTreeNode *local = refinement->get_region_tree_node();
+      // If they are from different region trees then there is no interference
+      if (other->get_tree_id() != other->get_tree_id())
+        return false;
+      // Find the common ancestor
+      IndexTreeNode *common_ancestor = NULL;
+      IndexTreeNode *local_index_node = local->get_row_source();
+      IndexTreeNode *other_index_node = other->get_row_source();
+      if (runtime->forest->are_disjoint_tree_only(local_index_node,
+            other_index_node, common_ancestor))
+        return false;
+      // If they are not disjoint based on their tree-only relationship
+      // then they are going to interfere so check to see which one dominates
+      // Note there are no aliased partitions in these trees so the only way
+      // they interfer is if one dominates the other
+#ifdef DEBUG_LEGION
+      assert((common_ancestor == local_index_node) || 
+              (common_ancestor == other_index_node));
+#endif
+      dominates = (common_ancestor == local_index_node);
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::incorporate_refinement(RefinementNode *refine)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#ifndef NDEBUG_
+      bool incorporated =
+#endif
+#endif
+        refinement->incorporate(refine);
+#ifdef DEBUG_LEGION
+      assert(incorporated);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    RegionTreeNode* RefinementOp::get_refinement_node(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#endif
+      return refinement->get_region_tree_node();
     }
 
 #if 0
@@ -11532,7 +11662,6 @@ namespace Legion {
           summary->add_reference();
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::record_refinements(FieldMaskSet<RegionTreeNode> &nodes)
@@ -11563,6 +11692,7 @@ namespace Legion {
       assert(get_internal_mask() == refinement_mask);
     }
 #endif
+#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_dependence_analysis(void)
@@ -11579,24 +11709,51 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<RtEvent> ready_events;
-      const ContextID ctx = parent_ctx->get_context().get_id();
-      if (!!uninitialized_fields)
+      if (!!refinement_mask)
       {
-        const FieldMask version_mask = 
-          get_internal_mask() - uninitialized_fields;
-        if (!!version_mask)
-          to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                                          version_mask, unique_op_id,
-                                          runtime->address_space, ready_events);
+        const ContextID ctx = parent_ctx->get_context().get_id();
+        refinement->perform_versioning_analysis(ctx, parent_ctx,
+            refinement_mask, version_infos, unique_op_id,
+            runtime->address_space, ready_events);
       }
-      else
-        to_refine->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-                                          get_internal_mask(), unique_op_id,
-                                          runtime->address_space, ready_events);
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
         enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> map_applied_conditions;
+      // Check to make sure we have refinement fields
+      // We might not if we were completely filtered out of them
+      if (!!refinement_mask)
+        update_refinement(map_applied_conditions);
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void RefinementOp::update_refinement(
+                                      std::set<RtEvent> &map_applied_conditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#endif
+      // First go through and invalidate the current refinement
+      const ContextID ctx = parent_ctx->get_context().get_id();
+      RegionTreeNode *node = refinement->get_region_tree_node();
+      node->invalidate_refinement(ctx, refinement_mask,
+          false/*self*/, *parent_ctx, map_applied_conditions, to_release);
+      // Now we can traverse the new refinement tree and install our updates
+      refinement->register_refinement(ctx, refinement_mask,
+          parent_ctx, context_index, map_applied_conditions, version_infos);
     }
 
 #if 0
@@ -11679,7 +11836,6 @@ namespace Legion {
         complete_mapping();
       complete_execution();
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::initialize_region(RegionNode *node,
@@ -11792,6 +11948,7 @@ namespace Legion {
       else
         pending->record_all(info);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RefinementOp::trigger_complete(void)

@@ -2918,6 +2918,7 @@ namespace Legion {
       // No need for the lock here since we're being cleaned up
       if (!local_field_infos.empty())
         local_field_infos.clear(); 
+#if 0
       while (!pending_equivalence_sets.empty())
       {
         LegionMap<RegionNode*,FieldMaskSet<PendingEquivalenceSet> >::iterator
@@ -2928,6 +2929,7 @@ namespace Legion {
             delete it->first;
         pending_equivalence_sets.erase(next);
       }
+#endif
       if (!attach_functions.empty())
       {
         for (std::map<IndexTreeNode*,
@@ -3802,6 +3804,7 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
     } 
 
+#if 0
     //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
                               PendingEquivalenceSet *set, const FieldMask &mask)
@@ -3946,6 +3949,7 @@ namespace Legion {
         pending_equivalence_sets.erase(finder);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool InnerContext::nonexclusive_virtual_mapping(unsigned index)
@@ -20115,6 +20119,7 @@ namespace Legion {
         collective->handle_collective_message(derez);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_disjoint_complete_request(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -20292,6 +20297,7 @@ namespace Legion {
       // always delete the version info
       delete info;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_resource_update(Deserializer &derez,
@@ -21409,6 +21415,7 @@ namespace Legion {
       return result;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     bool ReplicateContext::finalize_disjoint_complete_sets(RegionNode *region, 
             VersionManager *target, FieldMask request_mask, const UniqueID opid,
@@ -21446,6 +21453,7 @@ namespace Legion {
         return InnerContext::finalize_disjoint_complete_sets(region, target,
                                     request_mask, opid, source, ready_event);
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool ReplicateContext::create_new_replicate_barrier(RtBarrier &bar, 

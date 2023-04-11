@@ -2149,20 +2149,22 @@ namespace Legion {
       void initialize(Operation *creator, unsigned idx,
                       LogicalRegion parent, RefinementNode *refinement);
       void record_refinement_mask(const FieldMask &refinement_mask);
-      bool interferes(RefinementNode *refinement, bool &dominates) const;
       RefinementNode* clone_refinement(void) const;
+      bool interferes(RefinementNode *refinement, bool &dominates) const;
       void incorporate_refinement(RefinementNode *refinement);
       RegionTreeNode* get_refinement_node(void) const;
 #if 0
       void record_refinement(RegionTreeNode *node, const FieldMask &mask,
                              RefProjectionSummary *summary = NULL);
-#endif
       void record_refinements(FieldMaskSet<RegionTreeNode> &nodes);
       void record_uninitialized(const FieldMask &mask);
 #ifdef DEBUG_LEGION
       void verify_refinement_mask(const FieldMask &refinement_mask);
 #endif
+#endif
     protected:
+      void update_refinement(std::set<RtEvent> &map_applied_conditions);
+#if 0
       void initialize_region(RegionNode *node, const FieldMask &mask,
                              InnerContext *context,
          std::map<PartitionNode*,std::vector<RegionNode*> > &refinement_regions,
@@ -2175,6 +2177,7 @@ namespace Legion {
                             VersionInfo &info, bool record_all = false);
       void initialize_pending(PendingEquivalenceSet *set, const FieldMask &mask,
                               VersionInfo &info, bool record_all);
+#endif
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2187,21 +2190,24 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     protected:
+      RefinementNode *refinement;
+      FieldMask refinement_mask;
+      // The current equivalence sets for the node to be refined
+      LegionMap<RegionNode*,VersionInfo> version_infos;
+      // Equivalence sets that need to be released at completion
+      std::vector<EquivalenceSet*> to_release;
+#if 0
       // Upper bound node where this refinement is occuring
       RegionNode *to_refine;
-      // The current equivalence sets for the node to be refined
-      VersionInfo version_info;
       // Region tree nodes from which to make refinements
       FieldMaskSet<RegionTreeNode> make_from;
-#if 0
       // Projection summaries for non-trivial projections from nodes
       LegionMap<RegionTreeNode*,
                 FieldMaskSet<RefProjectionSummary> > projections;
-#endif
-      // Equivalence sets that need to be released at completion
-      std::vector<EquivalenceSet*> to_release;
+      
       // Fields which do not have initialized equivalence sets
       FieldMask uninitialized_fields;
+#endif
     };
 
     /**

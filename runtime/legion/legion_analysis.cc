@@ -2775,7 +2775,11 @@ namespace Legion {
             child->second->create_refinement()->as_partition_refinement());
       }
       else
-        return new RegionRefinementNode(region);
+      {
+        RegionRefinementNode *result = new RegionRefinementNode(region);
+        result->refining_shards = shard_users;
+        return result;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3397,7 +3401,15 @@ namespace Legion {
     RefinementNode* RegionRefinementNode::clone(void) const
     //--------------------------------------------------------------------------
     {
-      return new RegionRefinementNode(node, 
+      if (child == NULL)
+      {
+        RegionRefinementNode *result = new RegionRefinementNode(node);
+        if (!refining_shards.empty())
+          result->refining_shards = refining_shards;
+        return result;
+      }
+      else
+        return new RegionRefinementNode(node, 
           child->clone()->as_partition_refinement());
     }
 
@@ -3421,6 +3433,74 @@ namespace Legion {
       }
       else
         return child->incorporate(refinement);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementNode::perform_versioning_analysis(ContextID ctx,
+        InnerContext *context, const FieldMask &refinement_mask,
+        LegionMap<RegionNode*,VersionInfo> &version_infos,
+        UniqueID op_id, AddressSpaceID local_space,
+        std::set<RtEvent> &ready_events) const
+    //--------------------------------------------------------------------------
+    {
+      if (child == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(version_infos.find(node) == version_infos.end());
+#endif
+        VersionInfo &version_info = version_infos[node];
+        node->perform_versioning_analysis(ctx, context, &version_info,
+            refinement_mask, op_id, local_space, ready_events);
+      }
+      else
+        child->perform_versioning_analysis(ctx, context, refinement_mask,
+            version_infos, op_id, local_space, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementNode::register_refinement(ContextID ctx, 
+        const FieldMask &refinement_mask, InnerContext *context,
+        size_t op_ctx_index, std::set<RtEvent> &applied_events,
+        const LegionMap<RegionNode*,VersionInfo> &version_infos) const
+    //--------------------------------------------------------------------------
+    {
+      if (child == NULL)
+      {
+        // A small optimization here, check to see if any of the existing
+        // equivalence sets can be reused because they're already for the
+        // region for this node so we don't need to make a new one
+        LegionMap<RegionNode*,VersionInfo>::const_iterator finder =
+          version_infos.find(node);
+#ifdef DEBUG_LEGION
+        assert(finder != version_infos.end());
+#endif
+        const FieldMaskSet<EquivalenceSet> &old_sets = 
+          finder->second.get_equivalence_sets();
+#ifdef DEBUG_LEGION
+        assert(old_sets.get_valid_mask() == refinement_mask);
+#endif
+        FieldMask create_mask = refinement_mask;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              old_sets.begin(); it != old_sets.end(); it++) 
+        {
+          if (it->first->region_node != node)
+            continue;
+          node->record_refinement(ctx, it->first, it->second);
+          create_mask -= it->second;
+          if (!create_mask)
+            break;
+        }
+        if (!!create_mask)
+        {
+          EquivalenceSet *new_set = 
+            context->create_equivalence_set(node, op_ctx_index,
+                refining_shards, create_mask, old_sets, applied_events);
+          node->record_refinement(ctx, new_set, create_mask);
+        }
+      }
+      else
+        child->register_refinement(ctx, refinement_mask, context,
+                                   op_ctx_index, applied_events, version_infos);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3496,6 +3576,35 @@ namespace Legion {
             return true;
         return false;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementNode::perform_versioning_analysis(ContextID ctx,
+        InnerContext *context, const FieldMask &refinement_mask,
+        LegionMap<RegionNode*,VersionInfo> &version_infos,
+        UniqueID op_id, AddressSpaceID local_space,
+        std::set<RtEvent> &ready_events) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,RegionRefinementNode*>::const_iterator
+            it = children.begin(); it != children.end(); it++)
+        it->second->perform_versioning_analysis(ctx, context, refinement_mask,
+            version_infos, op_id, local_space, ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementNode::register_refinement(ContextID ctx, 
+        const FieldMask &refinement_mask, InnerContext *context,
+        size_t op_ctx_index, std::set<RtEvent> &ready_events,
+        const LegionMap<RegionNode*,VersionInfo> &version_infos) const
+    //--------------------------------------------------------------------------
+    {
+      if (children_shards != NULL)
+        node->record_refinement(ctx, children_shards, refinement_mask);
+      for (std::unordered_map<LegionColor,RegionRefinementNode*>::const_iterator
+            it = children.begin(); it != children.end(); it++)
+        it->second->register_refinement(ctx, refinement_mask, context,
+            op_ctx_index, ready_events, version_infos);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4942,7 +5051,8 @@ namespace Legion {
         // Starting at this node update the new subtrees to tell them
         // that they are refined and then produce refinement trees
         FieldMaskSet<RefinementNode> refinements;
-        owner->update_logical_refinement(ctx, child_refine, refinements);
+        owner->update_logical_refinement(ctx, 
+            analysis.context->get_total_shards(), child_refine, refinements);
 #ifdef DEBUG_LEGION
         assert(refinements.get_valid_mask() == child_refine);
 #endif
@@ -5084,7 +5194,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::change_refinements(ContextID ctx, 
+    void LogicalState::change_refinements(ContextID ctx, size_t total_shards, 
            FieldMask refinement_mask, FieldMaskSet<RefinementNode> &refinements)
     //--------------------------------------------------------------------------
     {
@@ -5118,6 +5228,14 @@ namespace Legion {
         // Record a new empty refinement at this level
         RegionRefinementNode *new_refinement = 
           new RegionRefinementNode(owner->as_region_node());
+        // If we have multiple shards then record them all here
+        // since all the shards will be refining this node in the tree
+        if (total_shards > 1)
+        {
+          new_refinement->refining_shards.resize(total_shards);
+          for (ShardID shard = 0; shard < total_shards; shard++)
+            new_refinement->refining_shards[shard] = shard;
+        }
         refinements.insert(new_refinement, refinement_mask);
         // Create a new empty tracker at this level
         RefinementTracker *new_tracker = 
@@ -5144,7 +5262,7 @@ namespace Legion {
           disjoint_children |= cit->second;
 #endif
           FieldMaskSet<RefinementNode> child_refinements; 
-          cit->first->update_logical_refinement(ctx, cit->second,
+          cit->first->update_logical_refinement(ctx, total_shards, cit->second,
                                                 child_refinements);
 #ifdef DEBUG_LEGION
           assert(child_refinements.get_valid_mask() == cit->second);
@@ -5176,7 +5294,7 @@ namespace Legion {
           // All the children should have the same set of fields here
           assert(it->second == new_children.get_valid_mask());
 #endif
-          it->first->update_logical_refinement(ctx, it->second,
+          it->first->update_logical_refinement(ctx, total_shards, it->second,
                                                child_refinements);
         }
         // Now sort them into field groups and make refinement nodes
@@ -21742,6 +21860,7 @@ namespace Legion {
         Runtime::trigger_event(done_event);
     }
 
+#if 0
     /////////////////////////////////////////////////////////////
     // Pending Equivalence Set 
     /////////////////////////////////////////////////////////////
@@ -21865,6 +21984,7 @@ namespace Legion {
         (const DeferFinalizePendingSetArgs*)args;
       delete dargs->pending;
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Equivalence Set Tracker
@@ -22559,6 +22679,7 @@ namespace Legion {
         }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::compute_equivalence_sets(const ContextID ctx,
                                           IndexSpaceExpression *expr,
@@ -22815,6 +22936,7 @@ namespace Legion {
           target->record_equivalence_set(it->first, it->second);
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::handle_compute_equivalence_sets_response(
@@ -23001,6 +23123,7 @@ namespace Legion {
       disjoint_complete |= mask;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_refinement(InnerContext &context,
                                       const FieldMask &mask, bool self,
@@ -23155,6 +23278,7 @@ namespace Legion {
         disjoint_complete_children.tighten_valid_mask();
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::filter_refinement_subscriptions(const FieldMask &mask,

@@ -401,9 +401,7 @@ namespace Legion {
       LG_DEFER_VERIFY_PARTITION_TASK_ID,
       LG_DEFER_RELEASE_ACQUIRED_TASK_ID,
       LG_DEFER_COPY_ACROSS_TASK_ID,
-      LG_DEFER_DISJOINT_COMPLETE_TASK_ID,
       LG_DEFER_COLLECTIVE_MESSAGE_TASK_ID,
-      LG_DEFER_FINALIZE_PENDING_SET_TASK_ID,
       LG_FREE_EAGER_INSTANCE_TASK_ID,
       LG_MALLOC_INSTANCE_TASK_ID,
       LG_FREE_INSTANCE_TASK_ID,
@@ -520,9 +518,7 @@ namespace Legion {
         "Defer Verify Partition",                                 \
         "Defer Release Acquired Instances",                       \
         "Defer Copy-Across Execution for Preimages",              \
-        "Defer Disjoint Complete Response",                       \
         "Defer Collective Instance Message",                      \
-        "Defer Finalize Pending Equivalence Set",                 \
         "Free Eager Instance",                                    \
         "Malloc Instance",                                        \
         "Free Instance",                                          \
@@ -855,8 +851,7 @@ namespace Legion {
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
-      SEND_REPL_DISJOINT_COMPLETE_REQUEST,
-      SEND_REPL_DISJOINT_COMPLETE_RESPONSE,
+      SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
       SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_BROADCAST_UPDATE,
       SEND_REPL_TRACE_EVENT_REQUEST,
@@ -1118,8 +1113,7 @@ namespace Legion {
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
-        "Send Replicate Disjoint Complete Request",                   \
-        "Send Replicate Disjoint Complete Response",                  \
+        "Send Replicate Equivalence Set Notification",                \
         "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Broadcast Update",                            \
         "Send Replicate Trace Event Request",                         \
@@ -1886,7 +1880,7 @@ namespace Legion {
     class LogicalAnalysis;
     class PhysicalAnalysis;
     class EquivalenceSet;
-    class PendingEquivalenceSet;
+    //class PendingEquivalenceSet;
     class EqSetTracker;
     class VersionManager;
     class VersionInfo;
