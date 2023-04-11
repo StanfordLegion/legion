@@ -512,19 +512,19 @@ before_script:
 .p100_cuda102: &p100_cuda102
   <<: *p100_base
   CUDA: "/usr/local/cuda-10.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-10.2"
+  CUDAToolkit_ROOT: "/usr/local/cuda-10.2"
   USE_NVTX: "1"
 
 .p100_cuda110: &p100_cuda110
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.0"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.0"
+  CUDAToolkit_ROOT: "/usr/local/cuda-11.0"
   USE_NVTX: "1"
 
 .p100_cuda112: &p100_cuda112
   <<: *p100_base
   CUDA: "/usr/local/cuda-11.2"
-  CUDA_TOOLKIT_ROOT: "/usr/local/cuda-11.2"
+  CUDAToolkit_ROOT: "/usr/local/cuda-11.2"
   USE_NVTX: "1"
 
 ###
@@ -595,11 +595,11 @@ before_script:
       fi
     - |
       if [[ "$USE_CCACHE" -eq 1 ]]; then
-          export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache"
       fi
     - |
       if [[ -n "$CXX_STANDARD" ]]; then
-        export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_STANDARD=${CXX_STANDARD}"
+        export EXTRA_CMAKE_ARGS="${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_STANDARD=${CXX_STANDARD} -DCMAKE_CUDA_STANDARD=${CXX_STANDARD}"
       fi
     - $TEST_PYTHON_EXE ./test.py --tmp-dir ${CI_PROJECT_DIR}/tmp-build
     - |
