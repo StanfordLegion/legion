@@ -52,9 +52,7 @@ list(APPEND REGENT_SRC
   murmur_hash3.h  murmur_hash3.cc
 )
 
-if(Legion_USE_CUDA)
-  cuda_add_library(Regent SHARED ${REGENT_SRC})
-elseif(Legion_USE_HIP)
+if(Legion_USE_HIP)
   hip_add_library(Regent SHARED ${REGENT_SRC})
 else()
   add_library(Regent SHARED ${REGENT_SRC})
@@ -63,7 +61,7 @@ add_library(Legion::Regent ALIAS Regent)
 target_link_libraries(Regent Legion::Legion)
 
 if(Legion_USE_CUDA)
-  target_include_directories(Regent PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(Regent PRIVATE CUDA::toolkit)
 elseif(Legion_USE_HIP)
   target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
   if (Legion_HIP_TARGET STREQUAL "CUDA")

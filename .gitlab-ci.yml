@@ -1300,9 +1300,9 @@ p100_cuda112_gcc9_cxx14_release_gasnetex_mpi_cuda_regent:
 
 # CUDA+UCX tests:
 p100_cuda112_gcc9_cxx14_debug_ucx_cmake_cuda_legion:
- <<: [*p100, *tests]
- variables:
-   <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *ucx, *legion, *ctest, *short]
+  <<: [*p100, *tests]
+  variables:
+    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *cmake, *ucx, *legion, *ctest, *short]
 p100_cuda112_gcc9_cxx14_release_ucx_cuda_regent:
   <<: [*p100, *tests]
   variables:

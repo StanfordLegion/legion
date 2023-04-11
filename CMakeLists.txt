@@ -401,125 +401,133 @@ if("${Legion_NETWORKS}" MATCHES .*ucx.*)
 endif()
 
 #------------------------------------------------------------------------------#
-# CUDA configuration
+# GPU configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
-if(Legion_USE_CUDA)
-  include(cmake/cuda_arch.cmake)
-  set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
-  option(Legion_CUDA_DYNAMIC_LOAD "Load cuda libraries at runtime" OFF)
+option(Legion_USE_HIP "Enable support for the HIP runtime on AMD/NVIDIA GPU" OFF)
 
-  set(CUDA_AS_LANGUAGE ON)
+set(Legion_HIP_TARGETS "ROCM" "CUDA")
+mark_as_advanced(Legion_HIP_TARGETS)
+set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
+set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
 
-  if(NOT BUILD_SHARED_LIBS)
-    set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
-  else()
-    set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
+if(Legion_USE_CUDA OR Legion_USE_HIP)
+
+  if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
+    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
   endif()
 
-  if(CUDA_AS_LANGUAGE)
-    if(Legion_CUDA_ARCH)
-      message(WARNING "Legion_CUDA_ARCH has been deprecated in favor of the standard CMAKE_CUDA_ARCHITECTURES")
-    endif()
-    # if not defined as a cache variable
-    if(DEFINED CMAKE_CUDA_ARCHITECTURES)
-      if(Legion_CUDA_ARCH)
-        message(WARNING "Both CMAKE_CUDA_ARCHITECTURES and Legion_CUDA_ARCH are specified. Ignoring Legion_CUDA_ARCH")
-      endif()
-    else()
-      if(Legion_CUDA_ARCH)
-	      # If the old variable is set, transfer the new value here
-	      set(CMAKE_CUDA_ARCHITECTURES ${Legion_CUDA_ARCH})
-      elseif(CMAKE_VERSION GREATER_EQUAL 3.23)
-        set(CMAKE_CUDA_ARCHITECTURES all)
-      else()
-        find_package(CUDA REQUIRED)
-	      get_cuda_arch(CMAKE_CUDA_ARCHITECTURES)
-      endif()
-    endif()
-    enable_language(CUDA)
-    set(CUDA_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-  else()
-    find_package(CUDA REQUIRED)
-    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
+  option(Legion_GPU_REDUCTIONS "Use tasks to perform reductions on GPU" OFF)
+  # define variable for legion_defines.h
+  set(LEGION_GPU_REDUCTIONS ${Legion_GPU_REDUCTIONS})
+
+  if(Legion_USE_CUDA OR (Legion_HIP_TARGET STREQUAL "CUDA"))
+
+    # Find the CUDA toolkit
+    find_package(CUDAToolkit REQUIRED)
+
+    # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDAToolkit.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
-    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
+    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDAToolkit.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
     )
 
-    # before cmake 3.13, the CUDAHOSTCXX env variable wasn't propagated to CUDA_HOST_COMPILER automatically
-    if(CMAKE_VERSION VERSION_LESS "3.13" AND DEFINED ENV{CUDAHOSTCXX})
-      set(CUDA_HOST_COMPILER $ENV{CUDAHOSTCXX} CACHE FILEPATH "Host side compiler used by NVCC" FORCE)
+    # CMAKE_CUDA_RUNTIME_LIBRARY determines whether CUDA objs link to the static
+    # or shared CUDA runtime library. Must be set before `enable_language(CUDA)`
+    # https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_RUNTIME_LIBRARY.html
+    # if(NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
+    #   if(NOT BUILD_SHARED_LIBS)
+    #     set(CMAKE_CUDA_RUNTIME_LIBRARY STATIC)
+    #   else()
+    #     set(CMAKE_CUDA_RUNTIME_LIBRARY SHARED)
+    #   endif()
+    # endif()
+
+    set(Legion_CUDA_ARCH "" CACHE STRING
+      "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)")
+
+    # Ensure CMAKE_CUDA_ARCHITECTURES is set before `enable_language(CUDA)`
+    if(NOT CMAKE_CUDA_ARCHITECTURES)
+      include(cmake/cuda_arch.cmake)
+      if(Legion_CUDA_ARCH)
+        # Support comma-delimited lists in addition to semicolons
+        string(REPLACE "," ";" CMAKE_CUDA_ARCHITECTURES "${Legion_CUDA_ARCH}")
+      endif()
+      populate_cuda_archs_list(CMAKE_CUDA_ARCHITECTURES)
     endif()
+
+    # Enable the CUDA language
+    enable_language(CUDA)
+
+    # Work around a clangd bug by generating compile commands
+    # with `-isystem <path>` instead of `-isystem=<path>`.
+    # Must come after `enable_language(CUDA)`
+    set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
+
+    set(CUDA_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+
+    #------------------------------------------------------------------------------#
+    # NVTX configuration
+    #------------------------------------------------------------------------------#
+    option(Legion_USE_NVTX "Enable profiling using NVTX" OFF)
+    # define variable for realm_defines.h
+    set(REALM_USE_NVTX ${Legion_USE_NVTX})
+    mark_as_advanced(REALM_USE_NVTX)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------#
+# CUDA configuration
+#------------------------------------------------------------------------------#
+include(CMakeDependentOption)
+
+if(Legion_USE_CUDA)
+
+  option(Legion_CUDA_DYNAMIC_LOAD "Load CUDA libraries at runtime" OFF)
+
+  cmake_dependent_option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime"
+    # The default is to hijack unless Kokkos interop is enabled, or network is UCX.
+    # `cmake_dependent_option` uses python ternary notation, i.e `X if <condition> else Y`.
+    OFF "Legion_USE_Kokkos OR \"ucx\" IN_LIST Legion_NETWORKS" ON
+  )
+
+  if(Legion_CUDA_DYNAMIC_LOAD AND Legion_HIJACK_CUDART)
+    # not compatible with runtime hijack
+    message(FATAL_ERROR "Dynamic CUDA library loading (Legion_CUDA_DYNAMIC_LOAD) is not compatible with CUDA runtime hijack (Legion_HIJACK_CUDART)")
   endif()
 
   # define variable for legion_defines.h
   set(LEGION_USE_CUDA ON)
-
-  option(Legion_GPU_REDUCTIONS "Use tasks to perform reductions on GPU" OFF)
-  if(Legion_GPU_REDUCTIONS)
-    set(LEGION_GPU_REDUCTIONS ON)
-  endif()
-
   # define variable for realm_defines.h
   set(REALM_USE_CUDA ON)
-
-  # default is to use hijack unless Kokkos interop is enabled or network is UCX
-  if(Legion_USE_Kokkos OR "${Legion_NETWORKS}" MATCHES .*ucx.*)
-    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
-  else()
-    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
-  endif()
-  if(Legion_HIJACK_CUDART)
-    set(REALM_USE_CUDART_HIJACK ON)
-  endif()
-  if(Legion_CUDA_DYNAMIC_LOAD)
-    # not compatible with runtime hijack
-    if(Legion_HIJACK_CUDART)
-      message(FATAL_ERROR "Dynamic CUDA library loading (Legion_CUDA_DYNAMIC_LOAD) is not compatible with CUDA runtime hijack (Legion_HIJACK_CUDART)")
-    endif()
-    set(REALM_CUDA_DYNAMIC_LOAD ON)
-  endif()
+  set(REALM_CUDA_DYNAMIC_LOAD ${Legion_CUDA_DYNAMIC_LOAD})
+  set(REALM_USE_CUDART_HIJACK ${Legion_HIJACK_CUDART})
 endif()
 
 #------------------------------------------------------------------------------#
 # HIP configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_HIP "Enable support for the HIP runtime on AMD/NVIDIA GPU" OFF)
-set(Legion_HIP_TARGETS ROCM CUDA)
-set(Legion_HIP_TARGET "ROCM" CACHE STRING "Select HIP target ${Legion_HIP_TARGETS}")
-set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
 if(Legion_USE_HIP)
+
+  set(HIPCC_FLAGS ${HIPCC_FLAGS})
+
   if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(Legion_CUDA_ARCH "" CACHE STRING "Comma-separated list of CUDA architectures to build for (e.g. 60,70)")
-
-    if(NOT BUILD_SHARED_LIBS)
-      set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
-    else()
-      set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
-    endif()
-    find_package(CUDA REQUIRED)
-    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-    )
-    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
-    )
-  set(HIPCC_FLAGS "${HIPCC_FLAGS} -D__HIP_PLATFORM_NVCC__")
-  endif()
-
-  if(Legion_HIP_TARGET STREQUAL "ROCM")
+    list(APPEND HIPCC_FLAGS -D__HIP_PLATFORM_NVCC__)
+  elseif(Legion_HIP_TARGET STREQUAL "ROCM")
     set(Legion_HIP_ARCH "" CACHE STRING "Comma-separated list of HIP architectures to build for (e.g. gfx906,gfx908)")
 
     if(BUILD_SHARED_LIBS)
-      set(HIPCC_FLAGS "${HIPCC_FLAGS} -fPIC")
+      list(APPEND HIPCC_FLAGS -fPIC)
     endif()
 
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindHIP.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
     )
-    set(HIPCC_FLAGS "-fno-strict-aliasing")
+
+    list(APPEND HIPCC_FLAGS -fno-strict-aliasing)
+
     if("${Legion_HIP_ARCH}" STREQUAL "")
       set(HIP_GENCODE "")
     else()
@@ -527,25 +535,15 @@ if(Legion_USE_HIP)
     endif()
   endif()
 
+  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
+
   # find the hip library
   find_package(HIP REQUIRED)
-
   # define variable for legion_defines.h
   set(LEGION_USE_HIP ON)
-
-  option(Legion_GPU_REDUCTIONS "Support reductions natively on GPU" ON)
-  if(Legion_GPU_REDUCTIONS)
-    set(LEGION_GPU_REDUCTIONS ON)
-  endif()
-
   # define variable for realm_defines.h
   set(REALM_USE_HIP ON)
-
-  option(Legion_HIJACK_HIP "Enable HIJACK HIP" ON)
-  if(Legion_HIJACK_HIP)
-    set(REALM_USE_HIP_HIJACK ON)
-  endif()
-
+  set(REALM_USE_HIP_HIJACK ${Legion_HIJACK_HIP})
 endif()
 
 #------------------------------------------------------------------------------#
@@ -654,55 +652,6 @@ option(Legion_USE_Fortran "Enable support for Fortran" OFF)
 if(Legion_USE_Fortran)
   enable_language(Fortran)
   set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -cpp")
-endif()
-
-#------------------------------------------------------------------------------#
-# NVTX configuration
-#------------------------------------------------------------------------------#
-option(Legion_USE_NVTX "Enable profiling using the NVTX" OFF)
-if(Legion_USE_NVTX)
-  # nvtx usually comes with cuda, so we search cuda first
-  #   we also search for NVTX_PATH if no cuda is installed
-  find_package(CUDA)
-  find_path(NVTX_INCLUDE_DIRS
-    NAMES nvToolsExt.h
-    HINTS ${CUDA_INCLUDE_DIRS} $ENV{NVTX_PATH}
-    PATHS ${CUDA_INCLUDE_DIRS} $ENV{NVTX_PATH}
-    PATH_SUFFIXES include/nvtx3 nvtx3
-  )
-  find_library(NVTX_LIBRARIES
-    NAMES libnvToolsExt.so nvToolsExt64_1
-    HINTS ${CUDA_TOOLKIT_ROOT_DIR} $ENV{NVTX_PATH}
-    PATHS ${CUDA_TOOLKIT_ROOT_DIR} $ENV{NVTX_PATH}
-    PATH_SUFFIXES lib lib64 lib/x64
-  )
-  if(NVTX_LIBRARIES AND NVTX_INCLUDE_DIRS)
-    # Get the NVTX version from the headerfile, by reading it and regex matching
-    file(READ "${NVTX_INCLUDE_DIRS}/nvToolsExt.h" nvtx_header_text)
-    string(REGEX MATCH "define NVTX_VERSION ([0-9]+)" NVTX_VERSION_DEFINE ${nvtx_header_text})
-    set(NVTX_VERSION "${CMAKE_MATCH_1}")
-    if(NVTX_VERSION LESS 3)
-      message(FATAL_ERROR
-      " Found NVTX, but its version is older than 3\n"
-      "   NVTX_LIBRARIES: ${NVTX_LIBRARIES}\n"
-      "   NVTX_INCLUDE_DIRS: ${NVTX_INCLUDE_DIRS}\n"
-      "   NVTX_VERSION: ${NVTX_VERSION}")
-    else()
-      # since we include<nvtx3/nvToolsExt.h>, we remove the nvtx3 here
-      get_filename_component(NVTX_INCLUDE_DIRS ${NVTX_INCLUDE_DIRS} DIRECTORY)
-      set(REALM_USE_NVTX ON)
-      message(STATUS
-        " Found NVTX:\n"
-        "   NVTX_LIBRARIES: ${NVTX_LIBRARIES}\n"
-        "   NVTX_INCLUDE_DIRS: ${NVTX_INCLUDE_DIRS}\n"
-        "   NVTX_VERSION: ${NVTX_VERSION}")
-    endif()
-  else()
-    message(FATAL_ERROR
-      " Could not find NVTX - set NVTX_PATH if needed -- got:\n"
-      "   NVTX_LIBRARIES: ${NVTX_LIBRARIES}\n"
-      "   NVTX_INCLUDE_DIRS: ${NVTX_INCLUDE_DIRS}")
-  endif()
 endif()
 
 #------------------------------------------------------------------------------#
@@ -897,28 +846,6 @@ if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_BINDINGS OR Legion_BUIL
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
   add_library(Legion::Realm ALIAS Realm)
-
-  if(Legion_USE_CUDA)
-    # CUDA has some issues propogating target interface properties so we
-    # have to extract them from the target and manually add them to the nvcc
-    # flags
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
-  endif()
-
-  if(Legion_HIP_TARGET STREQUAL "CUDA")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_OPTIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${PROP}")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_COMPILE_DEFINITIONS>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-D$<JOIN:${PROP}, -D>>")
-    set(PROP $<TARGET_PROPERTY:Legion::Legion,INTERFACE_INCLUDE_DIRECTORIES>)
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} ${HIPCC_FLAGS}")
-  endif()
 
   if(Legion_HIP_TARGET STREQUAL "ROCM")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} ${HIPCC_FLAGS} ${HIP_GENCODE}")
