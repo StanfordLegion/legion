@@ -45,6 +45,3 @@ if(Legion_ENABLE_TESTING)
 endif()
 
 target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
-if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND CMAKE_CUDA_STANDARD GREATER_EQUAL 17)
-  target_compile_options(task_throughput PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-std=c++${CMAKE_CUDA_STANDARD}>)
-endif()

@@ -196,7 +196,9 @@ set(CMAKE_ENABLE_EXPORTS ON)
 # builds so we override the cmake defaults here for release, this changes
 # -O3 to -O2 and removes -DNDEBUG
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+set(CMAKE_CUDA_FLAGS_RELEASE "-O2")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO "-O2 -g")
 
 # add build types for thread/ub sanitizer goodness
 set(CMAKE_CXX_FLAGS_TSAN
@@ -413,10 +415,6 @@ set_property(CACHE Legion_HIP_TARGET PROPERTY STRINGS ${Legion_HIP_TARGETS})
 
 if(Legion_USE_CUDA OR Legion_USE_HIP)
 
-  if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
-    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-  endif()
-
   option(Legion_GPU_REDUCTIONS "Use tasks to perform reductions on GPU" OFF)
   # define variable for legion_defines.h
   set(LEGION_GPU_REDUCTIONS ${Legion_GPU_REDUCTIONS})
@@ -458,6 +456,21 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       populate_cuda_archs_list(CMAKE_CUDA_ARCHITECTURES)
     endif()
 
+    # Default CMAKE_CUDA_STANDARD to CMAKE_CXX_STANDARD if unset
+    if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
+      set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+    endif()
+
+    # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so unset it before enabling the CUDA language
+    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND CMAKE_CUDA_STANDARD GREATER_EQUAL 17)
+      unset(CMAKE_CUDA_STANDARD)
+      unset(CMAKE_CUDA_STANDARD CACHE)
+      if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
+        # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
+        string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
+      endif()
+    endif()
+
     # Enable the CUDA language
     enable_language(CUDA)
 
@@ -465,8 +478,6 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     # with `-isystem <path>` instead of `-isystem=<path>`.
     # Must come after `enable_language(CUDA)`
     set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
-
-    set(CUDA_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
     #------------------------------------------------------------------------------#
     # NVTX configuration

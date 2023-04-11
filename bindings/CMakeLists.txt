@@ -21,7 +21,7 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 # enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+list(JOIN "${CMAKE_CXX_FLAGS};${CXX_BUILD_WARNING_FLAGS}" " " CMAKE_CXX_FLAGS)
 
 if(Legion_USE_Python)
   add_subdirectory(python)

@@ -21,9 +21,15 @@ if(NOT Legion_SOURCE_DIR)
 endif()
 
 # enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+list(JOIN "${CMAKE_CXX_FLAGS};${CXX_BUILD_WARNING_FLAGS}" " " CMAKE_CXX_FLAGS)
+
 if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
-  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.18")
+    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+  elseif(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
+    # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
+    string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
+  endif()
 endif()
 
 add_subdirectory(attach_file_mini)

@@ -265,7 +265,7 @@ find_package(Threads REQUIRED)
 cmake_policy(SET CMP0063 NEW) # visibility controls in all builds
 add_library(RealmRuntime ${REALM_SRC})
 add_library(Legion::RealmRuntime ALIAS RealmRuntime)
-target_compile_options(RealmRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 
 # turn on warnings about partially-overloaded methods, if supported
 check_cxx_compiler_flag("-Woverloaded-virtual" COMPILER_SUPORTS_OVERLOADED_VIRTUAL_WARNING)
@@ -276,7 +276,7 @@ endif()
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure realm_defines.h is included
   #  any place it needs to be
-  target_compile_options(RealmRuntime PRIVATE --defcheck realm_defines.h)
+  target_compile_options(RealmRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:--defcheck;realm_defines.h>)
 endif()
 if(REALM_USE_LIBDL)
   target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
@@ -492,10 +492,7 @@ if(Legion_USE_CUDA)
     endif()
   endif()
 
-  target_link_libraries(RealmRuntime PRIVATE CUDA::toolkit)
-  if(NOT REALM_CUDA_DYNAMIC_LOAD)
-    target_link_libraries(RealmRuntime PRIVATE CUDA::cuda_driver)
-  endif()
+  target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit CUDA::cuda_driver)
   # for backwards compatibility in applications
   target_compile_definitions(RealmRuntime INTERFACE USE_CUDA)
 endif()
@@ -506,7 +503,7 @@ if(Legion_USE_HIP)
       target_sources(RealmRuntime PRIVATE realm/hip/hip_hijack.cc)
     endif()
 
-    target_link_libraries(RealmRuntime PRIVATE CUDA::toolkit)
+    target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
     target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include)
     if(NOT REALM_CUDA_DYNAMIC_LOAD)
       target_link_libraries(RealmRuntime PRIVATE CUDA::cuda_driver)
@@ -800,21 +797,16 @@ add_library(Legion::LegionRuntime ALIAS LegionRuntime)
 
 # Add CUDA-specific properties
 if(Legion_USE_CUDA)
-  set(_cuda_options -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant)
+  set(legion_cuda_options -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant)
 
   # starting with nvcc 10.2, we can error out on all warnings
   if(Legion_BUILD_WARN_AS_ERROR AND (CUDAToolkit_VERSION VERSION_GREATER_EQUAL 10.2))
-    list(APPEND _cuda_options -Werror=all-warnings)
+    list(APPEND legion_cuda_options -Werror=all-warnings)
   endif()
 
-  # CMake < 3.18 doesn't recognize 17 as a CUDA standard
-  if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND CMAKE_CUDA_STANDARD GREATER_EQUAL 17)
-    list(APPEND _cuda_options -std=c++${CMAKE_CUDA_STANDARD})
-  endif()
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${legion_cuda_options}>)
 
-  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${_cuda_options}>)
-
-  unset(_cuda_options)
+  unset(legion_cuda_options)
 
   # complex reduction ops bring in a public dependency on cuda headers
   if(Legion_REDOP_COMPLEX)
@@ -877,11 +869,11 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   set_target_properties(LegionRuntime PROPERTIES INSTALL_RPATH "@loader_path")
 endif ()
 
-target_compile_options(LegionRuntime PRIVATE ${CXX_BUILD_WARNING_FLAGS})
+target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_BUILD_WARNING_FLAGS}>)
 if(COMPILER_SUPPORTS_DEFCHECK)
   # use the cxx_defcheck wrapper to make sure legion_defines.h is included
   #  any place it needs to be
-  target_compile_options(LegionRuntime PRIVATE --defcheck legion_defines.h)
+  target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CXX>:--defcheck;legion_defines.h>)
 endif()
 
 target_include_directories(LegionRuntime
