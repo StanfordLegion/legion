@@ -39,8 +39,9 @@ namespace Realm {
    * operations.  An event is triggered when the operation it
    * represents is complet and can be used as pre and post conditions
    * for other operations. This class represents a handle to the event
-+  * itsels and can be passed-by-value as well as
-+  * serialized/deserialized anywhere in the program.
+   * itsels and can be passed-by-value as well as
+   * serialized/deserialized anywhere in the program. Note that events
+   * do not need to be explicitly garbage collected.
    */
     class REALM_PUBLIC_API Event {
     public:
