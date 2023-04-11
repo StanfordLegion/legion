@@ -559,6 +559,7 @@ namespace Realm {
    * linearized using an affine transformation.  AffineAccessors are
    * generally more efficient than GenericAccessors, but are only
    * applicable to a subset of instance layouts.
+   * The random-access look-ups are O(1) in the size of the instance.
    */
   template <typename FT, int N, typename T = int>
   class REALM_PUBLIC_API AffineAccessor {
@@ -734,6 +735,7 @@ namespace Realm {
    * A multi-affine accessor handles instances with multiple pieces, but only
    * if all of them are affine. Multi-affine accessors may be accessed and
    * copied in CUDA device code, but must be initially constructed on the host.
+   * The random-access look-ups are O(log(N)) in the number of pieces.
    */
   template <typename FT, int N, typename T>
   class REALM_PUBLIC_API MultiAffineAccessor {
