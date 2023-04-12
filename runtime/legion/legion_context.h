@@ -1166,6 +1166,7 @@ namespace Legion {
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
+          unsigned refinement_number, unsigned index, 
           std::set<RtEvent> &applied_events);
 #if 0
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
@@ -2906,7 +2907,6 @@ namespace Legion {
       static void handle_defer_disjoint_complete_response(Runtime *runtime,
                                                           const void *args);
 #endif
-      static void handle_equivalence_set_notification(Deserializer &derez);
       static void handle_defer_collective_message(const void *args);
 #if 0
       static void finalize_disjoint_complete_response(Runtime *runtime,
@@ -2956,6 +2956,7 @@ namespace Legion {
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
+          unsigned refinement_number, unsigned index,
           std::set<RtEvent> &applied_events);
 #if 0
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,

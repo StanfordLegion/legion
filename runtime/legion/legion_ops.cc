@@ -11520,7 +11520,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RefinementOp::record_refinement_mask(const FieldMask &mask)
+    void RefinementOp::record_refinement_mask(unsigned number, 
+                                              const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -11528,6 +11529,7 @@ namespace Legion {
       assert(refinement != NULL);
 #endif
       refinement_mask = mask;
+      refinement_number = number;
       if (runtime->legion_spy_enabled && !!mask)
       {
         std::set<FieldID> fields;
@@ -11752,8 +11754,10 @@ namespace Legion {
       node->invalidate_refinement(ctx, refinement_mask,
           false/*self*/, *parent_ctx, map_applied_conditions, to_release);
       // Now we can traverse the new refinement tree and install our updates
-      refinement->register_refinement(ctx, refinement_mask,
-          parent_ctx, context_index, map_applied_conditions, version_infos);
+      refinement->register_refinement(ctx, refinement_mask, parent_ctx,
+                                      context_index, refinement_number,
+                                      find_parent_index(0),
+                                      map_applied_conditions, version_infos);
     }
 
 #if 0

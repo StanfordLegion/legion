@@ -3460,7 +3460,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionRefinementNode::register_refinement(ContextID ctx, 
         const FieldMask &refinement_mask, InnerContext *context,
-        size_t op_ctx_index, std::set<RtEvent> &applied_events,
+        size_t op_ctx_index, unsigned refinement_number,
+        unsigned parent_req_index, std::set<RtEvent> &applied_events,
         const LegionMap<RegionNode*,VersionInfo> &version_infos) const
     //--------------------------------------------------------------------------
     {
@@ -3493,14 +3494,15 @@ namespace Legion {
         if (!!create_mask)
         {
           EquivalenceSet *new_set = 
-            context->create_equivalence_set(node, op_ctx_index,
-                refining_shards, create_mask, old_sets, applied_events);
+            context->create_equivalence_set(node, op_ctx_index, refining_shards,
+                                       create_mask, old_sets, refinement_number,
+                                       parent_req_index, applied_events);
           node->record_refinement(ctx, new_set, create_mask);
         }
       }
       else
-        child->register_refinement(ctx, refinement_mask, context,
-                                   op_ctx_index, applied_events, version_infos);
+        child->register_refinement(ctx, refinement_mask, context, op_ctx_index,
+            refinement_number, parent_req_index, applied_events, version_infos);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3595,7 +3597,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PartitionRefinementNode::register_refinement(ContextID ctx, 
         const FieldMask &refinement_mask, InnerContext *context,
-        size_t op_ctx_index, std::set<RtEvent> &ready_events,
+        size_t op_ctx_index, unsigned refinement_number,
+        unsigned parent_req_index, std::set<RtEvent> &ready_events,
         const LegionMap<RegionNode*,VersionInfo> &version_infos) const
     //--------------------------------------------------------------------------
     {
@@ -3604,7 +3607,8 @@ namespace Legion {
       for (std::unordered_map<LegionColor,RegionRefinementNode*>::const_iterator
             it = children.begin(); it != children.end(); it++)
         it->second->register_refinement(ctx, refinement_mask, context,
-            op_ctx_index, ready_events, version_infos);
+                    op_ctx_index, refinement_number, parent_req_index,
+                    ready_events, version_infos);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6298,6 +6302,7 @@ namespace Legion {
       // If we have any pending refinements, have them record dependences
       // on any pending closes that were done along their path and then
       // issue the refinements 
+      unsigned refinement_number = 0;
       for (OrderedRefinements::const_iterator it =
             pending_refinements.begin(); it != pending_refinements.end(); it++)
       {
@@ -6317,7 +6322,7 @@ namespace Legion {
           }
           path_node = path_node->get_parent();
         }
-        it->first->record_refinement_mask(it->second);
+        it->first->record_refinement_mask(refinement_number++, it->second);
         issue_internal_operation(node, it->first, it->second);
       }
       // Issue the pending closes

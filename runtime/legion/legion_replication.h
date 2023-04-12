@@ -1623,13 +1623,11 @@ namespace Legion {
       void set_repl_close_info(RtBarrier mapped_barrier);
       virtual void record_refinements(const FieldMask &refinement_mask,
                                       const bool overwrite);
-      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
       RtBarrier refinement_barrier;
-      ValueBroadcast<DistributedID> *did_collective;
     };
 
     /**
@@ -2844,9 +2842,13 @@ namespace Legion {
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       EquivalenceSet* get_initial_equivalence_set(unsigned idx,
-                      LogicalRegion region, InnerContext *context);
+              LogicalRegion region, InnerContext *context, bool first_shard);
+      // If the creating shards are NULL we'll assume that they are all
+      // participating in the creation of the index space
       EquivalenceSet* deduplicate_equivalence_set_creation(RegionNode *node,
-                      InnerContext *context, DistributedID did, bool &first);
+          size_t op_ctx_index, unsigned refinement_number, 
+          InnerContext *context, bool first_shard,
+          const std::vector<ShardID> *creating_shards = NULL);
       FillView* deduplicate_fill_view_creation(DistributedID did, FillOp *op,
                                                bool &set_view);
       void deduplicate_attaches(const IndexAttachLauncher &launcher,
@@ -2901,7 +2903,6 @@ namespace Legion {
       void send_collective_message(ShardID target, Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
-      void send_equivalence_set_notification(ShardID target, Serializer &rez);
       void handle_equivalence_set_notification(Deserializer &derez);
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
@@ -2992,7 +2993,6 @@ namespace Legion {
       // std::vector<Processor>        shard_mapping;
       ShardMapping*                    address_spaces;
       std::vector<ShardTask*>          local_shards;
-      std::vector<DistributedID>       mapped_equivalence_dids;
     protected:
       // There are four kinds of signals that come back from 
       // the execution of the shards:
@@ -3016,7 +3016,42 @@ namespace Legion {
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     protected:
-      std::map<DistributedID,std::pair<EquivalenceSet*,size_t> > 
+      // We need a triple here to uniquely identify creations and
+      // make sure the right equivalence set gets hooked up with
+      // in the right way.
+      // 1. index of the creator op in the context
+      // 2. number of the refinement for that creator op
+      // 3. logical region being refined
+      struct EquivalenceSetKey {
+      public:
+        inline EquivalenceSetKey(void)
+          : handle(LogicalRegion::NO_REGION), op_ctx_index(0), 
+            refinement_number(0) { }
+        inline EquivalenceSetKey(size_t op, unsigned number, LogicalRegion h)
+          : handle(h), op_ctx_index(op), refinement_number(number) { }
+      public:
+        inline bool operator<(const EquivalenceSetKey &rhs) const
+        {
+          if (op_ctx_index < rhs.op_ctx_index) return true;
+          if (op_ctx_index > rhs.op_ctx_index) return false;
+          if (refinement_number < rhs.refinement_number) return true;
+          if (refinement_number > rhs.refinement_number) return false;
+          return (handle < rhs.handle);
+        }
+      public:
+        LogicalRegion handle;
+        size_t op_ctx_index;
+        unsigned refinement_number;
+      };
+      struct NewEquivalenceSet {
+      public:
+        EquivalenceSet *new_set;
+        DistributedID did;
+        CollectiveMapping *mapping;
+        RtUserEvent ready_event;
+        size_t remaining;
+      };
+      std::map<EquivalenceSetKey,NewEquivalenceSet>
                                         created_equivalence_sets;
       std::map<DistributedID,std::pair<FutureImpl*,size_t> > created_futures;
       std::map<DistributedID,std::pair<ReplFutureMapImpl*,size_t> >

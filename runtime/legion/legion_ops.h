@@ -2148,7 +2148,8 @@ namespace Legion {
     public:
       void initialize(Operation *creator, unsigned idx,
                       LogicalRegion parent, RefinementNode *refinement);
-      void record_refinement_mask(const FieldMask &refinement_mask);
+      void record_refinement_mask(unsigned refinement_number,
+                                  const FieldMask &refinement_mask);
       RefinementNode* clone_refinement(void) const;
       bool interferes(RefinementNode *refinement, bool &dominates) const;
       void incorporate_refinement(RefinementNode *refinement);
@@ -2192,6 +2193,9 @@ namespace Legion {
     protected:
       RefinementNode *refinement;
       FieldMask refinement_mask;
+      // For uniquely identify this refinement in the context of
+      // its creator operation
+      unsigned refinement_number;
       // The current equivalence sets for the node to be refined
       LegionMap<RegionNode*,VersionInfo> version_infos;
       // Equivalence sets that need to be released at completion

@@ -8082,22 +8082,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::handle_equivalence_set_notification(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(execution_context != NULL);
-      ReplicateContext *repl_ctx = 
-        dynamic_cast<ReplicateContext*>(execution_context);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = 
-        static_cast<ReplicateContext*>(execution_context);
-#endif
-      repl_ctx->handle_equivalence_set_notification(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void ShardTask::handle_intra_space_dependence(Deserializer &derez)
     //--------------------------------------------------------------------------
     {

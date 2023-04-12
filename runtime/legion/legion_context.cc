@@ -3804,6 +3804,30 @@ namespace Legion {
         return RtEvent::NO_RT_EVENT;
     } 
 
+    //--------------------------------------------------------------------------
+    EquivalenceSet* InnerContext::create_equivalence_set(RegionNode *node,
+        size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
+        const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
+        unsigned refinement_number, unsigned index, 
+        std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet *result = new EquivalenceSet(runtime,
+          runtime->get_available_distributed_id(), runtime->address_space,
+          node, find_parent_physical_context(index), true/*register now*/);
+      result->add_base_gc_ref(CONTEXT_REF);
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+            old_sets.begin(); it != old_sets.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(it->first->region_node != node);
+#endif
+        result->clone_from(runtime->address_space, it->first, it->second,
+                           false/*forward to owner*/, applied_events);
+      }
+      return result;
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
@@ -13232,7 +13256,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return shard_manager->get_initial_equivalence_set(idx, req.region,
-                                      find_parent_physical_context(idx));
+          find_parent_physical_context(idx), (owner_shard->shard_id == 0));
     }
 
     //--------------------------------------------------------------------------
@@ -21413,6 +21437,47 @@ namespace Legion {
       if (equivalence_set_allocator_shard == total_shards)
         equivalence_set_allocator_shard = 0;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* ReplicateContext::create_equivalence_set(RegionNode *node,
+        size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
+        const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
+        unsigned refinement_number, unsigned index, 
+        std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!creating_shards.empty());
+      assert(std::binary_search(creating_shards.begin(), creating_shards.end(),
+                                owner_shard->shard_id));
+#endif
+      if (creating_shards.size() > 1)
+      {
+        bool first_shard = false;
+        EquivalenceSet *result = 
+          shard_manager->deduplicate_equivalence_set_creation(node,
+              op_ctx_index, refinement_number,
+              find_parent_physical_context(index),
+              first_shard, &creating_shards);
+        if (first_shard)
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                old_sets.begin(); it != old_sets.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(it->first->region_node != node);
+#endif
+            result->clone_from(runtime->address_space, it->first, it->second,
+                               false/*forward to owner*/, applied_events);
+          }
+        }
+        return result;
+      }
+      else
+        return InnerContext::create_equivalence_set(node, op_ctx_index,
+                            creating_shards, mask, old_sets, 
+                            refinement_number, index, applied_events);
     }
 
 #if 0

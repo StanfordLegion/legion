@@ -1777,7 +1777,6 @@ namespace Legion {
       MergeCloseOp::activate();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
       refinement_barrier = RtBarrier::NO_RT_BARRIER;
-      did_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1785,8 +1784,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MergeCloseOp::deactivate(false/*free*/);
-      if (did_collective != NULL)
-        delete did_collective;
       if (freeop)
         runtime->free_repl_merge_close_op(this);
     }
@@ -1820,38 +1817,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMergeCloseOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(mapped_barrier.exists());
-#endif
-      if (!!refinement_mask)
-      {
-#ifdef DEBUG_LEGION
-        assert(did_collective == NULL);
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-        const ShardID origin = repl_ctx->get_next_equivalence_set_origin();
-        const CollectiveID collective_id = 
-         repl_ctx->get_next_collective_index(COLLECTIVE_LOC_20,true/*logical*/);
-        did_collective =
-          new ValueBroadcast<DistributedID>(collective_id, repl_ctx, origin);
-        if (did_collective->is_origin())
-        {
-          const DistributedID did = runtime->get_available_distributed_id();
-          did_collective->broadcast(did);
-        }
-      }
-      // The do the base call
-      MergeCloseOp::trigger_dependence_analysis();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplMergeCloseOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -1882,13 +1847,6 @@ namespace Legion {
         Runtime::phase_barrier_arrive(refinement_barrier, 1/*count*/);
         ready_events.insert(refinement_barrier);
       }
-      if ((did_collective != NULL) && !did_collective->is_origin())
-      {
-        const RtEvent ready = 
-          did_collective->perform_collective_wait(false/*block*/);
-        if (ready.exists() && !ready.has_triggered())
-          ready_events.insert(ready);
-      }
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));
       else
@@ -1909,7 +1867,6 @@ namespace Legion {
         ReplicateContext *repl_ctx = 
           dynamic_cast<ReplicateContext*>(parent_ctx);
         assert(repl_ctx != NULL);
-        assert(did_collective != NULL);
 #else
         ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
@@ -1921,11 +1878,10 @@ namespace Legion {
         assert(refinement_barrier.exists());
 #endif
         // Make a new equivalence set and record it at this node
-        bool first = false;
-        const DistributedID did = did_collective->get_value(false/*block*/);
+        bool first = (repl_ctx->owner_shard->shard_id == 0);
         EquivalenceSet *set = 
           repl_ctx->shard_manager->deduplicate_equivalence_set_creation(
-                                        region_node, context, did, first);
+            region_node, context_index, 0/*refinement number*/, context, first);
         // Merge the state from the old equivalence sets if not overwriting
         if (first && !refinement_overwrite)
         {
@@ -9590,10 +9546,6 @@ namespace Legion {
       // which has as many arrivers as unique shard spaces
       callback_barrier = 
         RtBarrier(Realm::Barrier::create_barrier(shard_groups.size()));
-      // Make initial equivalence sets for each of the mapped regions
-      mapped_equivalence_dids.resize(virtual_mapped.size());
-      for (unsigned idx = 0; idx < mapped_equivalence_dids.size(); idx++)
-        mapped_equivalence_dids[idx] = runtime->get_available_distributed_id();
       // Now either send the shards to the remote nodes or record them locally
       for (std::map<AddressSpaceID,std::vector<ShardTask*> >::const_iterator 
             it = shard_groups.begin(); it != shard_groups.end(); it++)
@@ -9661,11 +9613,6 @@ namespace Legion {
             rez.serialize(*it);
         }
         rez.serialize<size_t>(shards.size());
-        rez.serialize<size_t>(mapped_equivalence_dids.size());
-        for (std::vector<DistributedID>::const_iterator it = 
-              mapped_equivalence_dids.begin(); it != 
-              mapped_equivalence_dids.end(); it++)
-          rez.serialize(*it);
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
         {
@@ -9709,11 +9656,6 @@ namespace Legion {
       }
       size_t num_shards;
       derez.deserialize(num_shards);
-      size_t num_equivalence_dids;
-      derez.deserialize(num_equivalence_dids);
-      mapped_equivalence_dids.resize(num_equivalence_dids);
-      for (unsigned idx = 0; idx < num_equivalence_dids; idx++)
-        derez.deserialize(mapped_equivalence_dids[idx]);
       local_shards.resize(num_shards);
       for (unsigned idx = 0; idx < num_shards; idx++)
       {
@@ -9743,65 +9685,228 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::get_initial_equivalence_set(unsigned idx,
-                                    LogicalRegion handle, InnerContext *context)
+                  LogicalRegion handle, InnerContext *context, bool first_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(idx < mapped_equivalence_dids.size());
-#endif
       RegionNode *region = runtime->forest->get_node(handle);
-      bool dummy_first;
-      return deduplicate_equivalence_set_creation(region, context,
-                        mapped_equivalence_dids[idx], dummy_first);
+      // Technically this is not correct to use the 'idx' as the op_ctx_index
+      // but we know all the shards need to be initialized before any of them
+      // can start running so there's no interference with the actual operation
+      // indexes when the do start
+      return deduplicate_equivalence_set_creation(region, SIZE_MAX, idx,
+                                                  context, first_shard);
     }
 
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
-                                RegionNode *region_node, InnerContext *context,
-                                DistributedID eq_did, bool &first)
+                                RegionNode *region_node, size_t op_ctx_index,
+                                unsigned refinement_number,
+                                InnerContext *context, bool first_shard,
+                                const std::vector<ShardID> *creating_shards)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(collective_mapping != NULL);
-#endif
-      const AddressSpaceID owner_space = runtime->determine_owner(eq_did);
-      EquivalenceSet *result = NULL;
-      if (local_shards.size() > 1)
+      RtEvent wait_on;
+      const EquivalenceSetKey key(op_ctx_index, 
+          refinement_number, region_node->handle);
+      if (first_shard)
       {
-        AutoLock m_lock(manager_lock);
-        // See if we already have this here or not
-        std::map<DistributedID,std::pair<EquivalenceSet*,size_t> >::iterator
-          finder = created_equivalence_sets.find(eq_did);
-        if (finder != created_equivalence_sets.end())
+        // We're going to make this equivalence set no matter what so 
+        // go ahead and do that now and then send out the updates
+        size_t local_users;
+        CollectiveMapping *eq_mapping;
+        if (creating_shards != NULL)
         {
-          result = finder->second.first;
-#ifdef DEBUG_LEGION
-          assert(finder->second.second > 0);
-#endif
-          if (--finder->second.second == 0)
-            created_equivalence_sets.erase(finder);
-          first = false;
-          return result;
+          // Count how many total address spaces are going to need this
+          local_users = 0;
+          const ShardMapping &local_mapping = get_mapping();
+          std::vector<AddressSpaceID> spaces;
+          for (std::vector<ShardID>::const_iterator it =
+                creating_shards->begin(); it != creating_shards->end(); it++)
+          {
+            AddressSpaceID space = local_mapping[*it];
+            if (space == runtime->address_space)
+              local_users++;
+            if (std::binary_search(spaces.begin(), spaces.end(), space))
+              continue;
+            spaces.push_back(space);
+            std::sort(spaces.begin(), spaces.end());
+          }
+          eq_mapping =
+            new CollectiveMapping(spaces, runtime->legion_collective_radix);
         }
-        // Didn't find it so make it
-        result = new EquivalenceSet(runtime, eq_did, owner_space,
-              region_node, context, true/*register now*/, collective_mapping);
-        // This adds as many context refs as there are shards
-        result->initialize_collective_references(local_shards.size());
-        // Record it for the shards that come later
-        std::pair<EquivalenceSet*,size_t> &pending = 
-          created_equivalence_sets[eq_did];
-        pending.first = result;
-        pending.second = local_shards.size() - 1;
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(collective_mapping != NULL);
+#endif
+          eq_mapping = collective_mapping;
+          local_users = local_shards.size();
+        }
+        // Make the distributed ID and broadcast it out to all the participants
+        const AddressSpaceID owner_space = runtime->address_space;
+        const DistributedID eq_did = runtime->get_available_distributed_id();
+        if (eq_mapping->size() > 1)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(op_ctx_index);
+            rez.serialize(refinement_number);
+            rez.serialize(region_node->handle);
+            rez.serialize(eq_did);
+            if (creating_shards != NULL)
+              eq_mapping->pack(rez);
+            else
+              rez.serialize<size_t>(0); // use this to indicate all shards
+          }
+          std::vector<AddressSpaceID> children;
+          eq_mapping->get_children(owner_space, owner_space, children);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            runtime->send_control_replicate_equivalence_set_notification(
+                                                                *it, rez);
+        }
+        // Now make the equivalence set locally and register it
+        EquivalenceSet *result = new EquivalenceSet(runtime, eq_did,
+          owner_space, region_node, context, true/*register now*/, eq_mapping);
+        result->initialize_collective_references(local_users);
+        if (local_users > 1)
+        {
+          AutoLock m_lock(manager_lock);
+          std::map<EquivalenceSetKey,NewEquivalenceSet>::iterator
+            finder = created_equivalence_sets.find(key);
+          if (finder == created_equivalence_sets.end())
+          {
+            NewEquivalenceSet &new_eq = created_equivalence_sets[key];
+            new_eq.new_set = result;
+            new_eq.remaining = local_users - 1;
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second.new_set == NULL);
+            assert(finder->second.ready_event.exists());
+            assert(finder->second.remaining > 1);
+#endif
+            finder->second.new_set = result;
+            finder->second.remaining--;
+            Runtime::trigger_event(finder->second.ready_event);
+          }
+        }
+        return result;
       }
-      else // Only one shard here on this node so just make it
+      else
       {
-        result = new EquivalenceSet(runtime, eq_did, owner_space,
-              region_node, context, true/*register now*/, collective_mapping);
-        // This adds as many context refs as there are shards
-        result->initialize_collective_references(1/*local shard count*/);
+        // First check to see if we've already made the entry
+        AutoLock m_lock(manager_lock);
+        std::map<EquivalenceSetKey,NewEquivalenceSet>::iterator
+          finder = created_equivalence_sets.find(key);
+        if (finder == created_equivalence_sets.end())
+        {
+          // Equivalence set not ready, so set up the entry for it
+          NewEquivalenceSet &new_eq = created_equivalence_sets[key];
+          new_eq.new_set = NULL;
+          new_eq.did = 0;
+          new_eq.mapping = NULL;
+          new_eq.ready_event = Runtime::create_rt_user_event();
+          wait_on = new_eq.ready_event;
+          // Count how many local arrivals we will have
+          if (creating_shards != NULL)
+          {
+            new_eq.remaining = 0;
+            const ShardMapping &local_mapping = get_mapping();
+            for (std::vector<ShardID>::const_iterator it =
+                  creating_shards->begin(); it != creating_shards->end(); it++)
+              if (local_mapping[*it] == runtime->address_space)
+                new_eq.remaining++;
+          }
+          else
+            new_eq.remaining = local_shards.size();
+        }
+        else
+        {
+          // See if the equvialence set is ready or not
+          if (finder->second.new_set != NULL)
+          {
+            EquivalenceSet *result = finder->second.new_set;
+#ifdef DEBUG_LEGION
+            assert(finder->second.remaining > 0);
+#endif
+            if (--finder->second.remaining == 0)
+              created_equivalence_sets.erase(finder);
+            return result;
+          }
+          // Count the number of expected arrivals if they haven't
+          // already been counted
+          if (finder->second.remaining == 0)
+          {
+            if (creating_shards != NULL)
+            {
+              const ShardMapping &local_mapping = get_mapping();
+              for (std::vector<ShardID>::const_iterator it =
+                    creating_shards->begin(); it != creating_shards->end(); it++)
+                if (local_mapping[*it] == runtime->address_space)
+                  finder->second.remaining++;
+            }
+            else
+              finder->second.remaining = local_shards.size();
+          }
+          // If we have a did from a remote notification we can use that now
+          // to create the equivalence set
+          if (finder->second.did > 0)
+          {
+            // We're the first ones to get here after a notification
+            // count the number of expected arrivals here if necessary
+            EquivalenceSet *result = new EquivalenceSet(runtime,
+               finder->second.did, runtime->determine_owner(finder->second.did),
+               region_node, context, true/*register now*/,
+               finder->second.mapping);
+#ifdef DEBUG_LEGION
+            assert(finder->second.remaining > 0);
+#endif
+            result->initialize_collective_references(finder->second.remaining);
+            if (--finder->second.remaining == 0)
+              created_equivalence_sets.erase(finder);
+            else
+              finder->second.new_set = result;
+            return result;
+          }
+#ifdef DEBUG_LEGION
+          assert(finder->second.ready_event.exists());
+#endif
+          wait_on = finder->second.ready_event;
+        }
       }
-      first = true;
+#ifdef DEBUG_LEGION
+      assert(wait_on.exists());
+#endif
+      wait_on.wait();
+      AutoLock m_lock(manager_lock);
+      std::map<EquivalenceSetKey,NewEquivalenceSet>::iterator
+          finder = created_equivalence_sets.find(key);
+#ifdef DEBUG_LEGION
+      assert(finder != created_equivalence_sets.end());
+      assert(finder->second.remaining > 0);
+#endif
+      if (finder->second.new_set == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second.did > 0);
+#endif
+        finder->second.new_set = new EquivalenceSet(runtime,
+               finder->second.did, runtime->determine_owner(finder->second.did),
+               region_node, context, true/*register now*/,
+               finder->second.mapping);
+#ifdef DEBUG_LEGION
+        assert(finder->second.remaining > 0);
+#endif
+        finder->second.new_set->initialize_collective_references(
+                                        finder->second.remaining);
+      }
+      EquivalenceSet *result = finder->second.new_set;
+      if (--finder->second.remaining == 0)
+        created_equivalence_sets.erase(finder);
       return result;
     }
 
@@ -10568,46 +10673,71 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::send_equivalence_set_notification(ShardID target, 
-                                                         Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(target < address_spaces->size());
-#endif
-      AddressSpaceID target_space = (*address_spaces)[target];
-      // Check to see if this is a local shard
-      if (target_space == runtime->address_space)
-      {
-        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        // Have to unpack the preample we already know
-        DistributedID local_repl;
-        derez.deserialize(local_repl);
-        handle_equivalence_set_notification(derez);
-      }
-      else
-        runtime->send_control_replicate_equivalence_set_notification(
-                                                    target_space, rez);
-    }
-
-    //--------------------------------------------------------------------------
     void ShardManager::handle_equivalence_set_notification(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      // Figure out which shard we are going to
-      ShardID target;
-      derez.deserialize(target);
-      for (std::vector<ShardTask*>::const_iterator it = 
-            local_shards.begin(); it != local_shards.end(); it++)
+      EquivalenceSetKey key;
+      derez.deserialize(key.op_ctx_index);
+      derez.deserialize(key.refinement_number);
+      derez.deserialize(key.handle);
+      DistributedID eq_did;
+      derez.deserialize(eq_did);
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+#endif
+      CollectiveMapping *eq_mapping = (num_spaces == 0) ? collective_mapping :
+        new CollectiveMapping(derez, num_spaces);
+      const AddressSpaceID owner_space = runtime->determine_owner(eq_did);
+      // Send this off to any children in the collective mapping
+      std::vector<AddressSpaceID> children;
+      eq_mapping->get_children(owner_space, runtime->address_space, children);
+      if (!children.empty())
       {
-        if ((*it)->shard_id == target)
+        Serializer rez;
         {
-          (*it)->handle_equivalence_set_notification(derez);
-          return;
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(key.op_ctx_index);
+          rez.serialize(key.refinement_number);
+          rez.serialize(key.handle);
+          rez.serialize(eq_did);
+          if (eq_mapping != collective_mapping)
+            eq_mapping->pack(rez);
+          else
+            rez.serialize<size_t>(0); // use this to indicate all the shards
         }
+        for (std::vector<AddressSpaceID>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          runtime->send_control_replicate_equivalence_set_notification(
+                                                              *it, rez);
       }
-      // Should never get here
-      assert(false);
+      // Now we can save this locally and wake up any waiters
+      AutoLock m_lock(manager_lock);
+      std::map<EquivalenceSetKey,NewEquivalenceSet>::iterator
+        finder = created_equivalence_sets.find(key);
+      if (finder == created_equivalence_sets.end())
+      {
+        NewEquivalenceSet &new_eq = created_equivalence_sets[key];
+        new_eq.new_set = NULL;
+        new_eq.did = eq_did;
+        new_eq.mapping = eq_mapping;
+        new_eq.remaining = 0; // don't know what this is yet
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second.new_set == NULL);
+        assert(finder->second.did == 0);
+        assert(finder->second.mapping == NULL);
+        assert(finder->second.ready_event.exists());
+        assert(finder->second.remaining > 0);
+#endif
+        finder->second.did = eq_did;
+        finder->second.mapping = eq_mapping;
+        Runtime::trigger_event(finder->second.ready_event);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11408,6 +11538,7 @@ namespace Legion {
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       DistributedID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);

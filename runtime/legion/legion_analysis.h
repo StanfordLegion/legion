@@ -1001,8 +1001,8 @@ namespace Legion {
           UniqueID op_id, AddressSpaceID local_space,
           std::set<RtEvent> &ready_events) const = 0;
       virtual void register_refinement(ContextID ctx, const FieldMask &mask,
-          InnerContext *context, size_t op_ctx_index,
-          std::set<RtEvent> &applied_events,
+          InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
+          unsigned parent_req_index, std::set<RtEvent> &applied_events,
           const LegionMap<RegionNode*,VersionInfo> &version_infos) const = 0;
 #if 0
     public:
@@ -1052,8 +1052,8 @@ namespace Legion {
           UniqueID op_id, AddressSpaceID local_space,
           std::set<RtEvent> &ready_events) const;
       virtual void register_refinement(ContextID ctx, const FieldMask &mask,
-          InnerContext *context, size_t op_ctx_index,
-          std::set<RtEvent> &applied_events,
+          InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
+          unsigned parent_req_index, std::set<RtEvent> &applied_events,
           const LegionMap<RegionNode*,VersionInfo> &version_infos) const;
     public:
       RegionNode *const node;
@@ -1088,8 +1088,8 @@ namespace Legion {
           UniqueID op_id, AddressSpaceID local_space,
           std::set<RtEvent> &ready_events) const;
       virtual void register_refinement(ContextID ctx, const FieldMask &mask,
-          InnerContext *context, size_t op_ctx_index,
-          std::set<RtEvent> &applied_events,
+          InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
+          unsigned parent_req_index, std::set<RtEvent> &applied_events,
           const LegionMap<RegionNode*,VersionInfo> &version_infos) const;
     public:
       PartitionNode *const node;
@@ -4164,8 +4164,13 @@ namespace Legion {
       // node for representing the refinement tree. Note that if this
       // context is control replicated this set might not be complete
       // for partition nodes, Some sub-region nodes might only exist
-      // in contexts on remote shards.
+      // in contexts on remote shards. In those cases we will find an
+      // entry for those fields for disjoint_complete_children_shards.
       FieldMaskSet<RegionTreeNode> disjoint_complete_children;
+      // This data structure tracks look-ups for children which only
+      // other shards no about for control replication. This data
+      // structure will only be non-empty on partition nodes
+      FieldMaskSet<ShardedColorMap> disjoint_complete_children_shards;
       // We are sometimes lazy in filling in the equivalence sets for
       // disjoint-complete partitions from refinement ops so we can 
       // pick the logical owner from the first address space to attempt
