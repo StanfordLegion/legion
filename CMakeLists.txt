@@ -424,20 +424,6 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     # Find the CUDA toolkit
     find_package(CUDAToolkit REQUIRED)
 
-    if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
-      get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_C_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_C_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
-      unset(_cuda_stubs_path)
-    endif()
-
     # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDAToolkit.cmake
       DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
@@ -487,6 +473,23 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
 
     # Enable the CUDA language
     enable_language(CUDA)
+
+    if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
+      get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
+      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_C_IMPLICIT_LINK_DIRECTORIES)
+        list(APPEND CMAKE_C_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+      endif()
+      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES)
+        list(APPEND CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+      endif()
+      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES)
+        list(APPEND CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+      endif()
+      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CUDA_HOST_IMPLICIT_LINK_DIRECTORIES)
+        list(APPEND CMAKE_CUDA_HOST_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+      endif()
+      unset(_cuda_stubs_path)
+    endif()
 
     # Work around a clangd bug by generating compile commands
     # with `-isystem <path>` instead of `-isystem=<path>`.
