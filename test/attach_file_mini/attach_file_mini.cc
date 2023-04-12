@@ -38,8 +38,7 @@ void top_level_task(const Task *task,
                     Context ctx, Runtime *runtime)
 {
    char input_file[64];
-  //sprintf(input_file, "/scratch/sdb1_ext4/input.dat");
-  sprintf(input_file, "input.dat");
+  snprintf(input_file, sizeof input_file, "input.dat");
 
   Rect<1> rect_A(0,1023);
   IndexSpace is_A = runtime->create_index_space(ctx, rect_A);

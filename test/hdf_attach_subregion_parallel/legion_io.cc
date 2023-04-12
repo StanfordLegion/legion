@@ -378,7 +378,8 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
       case 2:
         {
           ds_name_stream <<  pieces[i].dp[0] << "-" << pieces[i].dp[1];
-          sprintf(pieces[i].shard_name, "%lld-%lld-%s",
+          snprintf(pieces[i].shard_name, sizeof pieces[i].shard_name,
+              "%lld-%lld-%s",
               pieces[i].dp[0], pieces[i].dp[1], name); 
 
           x_min = d.get_rect<2>().lo.x[0];
@@ -412,7 +413,8 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
         {
           ds_name_stream <<  pieces[i].dp[0] << "-" <<
             pieces[i].dp[1] << "-" << pieces[i].dp[2];
-          sprintf(pieces[i].shard_name, "%lld-%lld-%lld-%s",
+          snprintf(pieces[i].shard_name, sizeof pieces[i].shard_name,
+              "%lld-%lld-%lld-%s",
               pieces[i].dp[0], pieces[i].dp[1],
               pieces[i].dp[2], name);
 
