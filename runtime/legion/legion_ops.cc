@@ -10797,7 +10797,7 @@ namespace Legion {
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-           refinement_mask, unique_op_id, runtime->address_space, ready_events);
+           refinement_mask, unique_op_id, ready_events);
         if (!ready_events.empty())
           enqueue_ready_operation(Runtime::merge_events(ready_events));
         else
@@ -11715,8 +11715,7 @@ namespace Legion {
       {
         const ContextID ctx = parent_ctx->get_context().get_id();
         refinement->perform_versioning_analysis(ctx, parent_ctx,
-            refinement_mask, version_infos, unique_op_id,
-            runtime->address_space, ready_events);
+            refinement_mask, version_infos, unique_op_id, ready_events);
       }
       if (!ready_events.empty())
         enqueue_ready_operation(Runtime::merge_events(ready_events));

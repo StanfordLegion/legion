@@ -4771,7 +4771,7 @@ namespace Legion {
       ContextID ctxid = context->get_context().get_id();
       AddressSpaceID space = forest->runtime->address_space;
       region->compute_equivalence_sets(ctxid, context, this, space, 
-          condition_expr, invalid_mask, opid, space, ready_events,
+          condition_expr, invalid_mask, ready_events,
           false/*downward only*/, false/*covers*/);
       invalid_mask.clear();
       if (!ready_events.empty())
@@ -5003,8 +5003,7 @@ namespace Legion {
             trace_regions.begin(); it != trace_regions.end(); it++, index++)
       {
         it->first->perform_versioning_analysis(ctx, context, 
-            &version_infos[index], it->second, opid, 
-            trace->runtime->address_space, eq_events);
+            &version_infos[index], it->second, opid, eq_events);
         if (it->first->remove_base_resource_ref(TRACE_REF))
           delete it->first;
       }

@@ -3439,8 +3439,7 @@ namespace Legion {
     void RegionRefinementNode::perform_versioning_analysis(ContextID ctx,
         InnerContext *context, const FieldMask &refinement_mask,
         LegionMap<RegionNode*,VersionInfo> &version_infos,
-        UniqueID op_id, AddressSpaceID local_space,
-        std::set<RtEvent> &ready_events) const
+        UniqueID op_id, std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       if (child == NULL)
@@ -3450,11 +3449,11 @@ namespace Legion {
 #endif
         VersionInfo &version_info = version_infos[node];
         node->perform_versioning_analysis(ctx, context, &version_info,
-            refinement_mask, op_id, local_space, ready_events);
+            refinement_mask, op_id, ready_events);
       }
       else
         child->perform_versioning_analysis(ctx, context, refinement_mask,
-            version_infos, op_id, local_space, ready_events);
+            version_infos, op_id, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -3498,6 +3497,10 @@ namespace Legion {
                                        create_mask, old_sets, refinement_number,
                                        parent_req_index, applied_events);
           node->record_refinement(ctx, new_set, create_mask);
+          // Remove the reference added by context when it made the 
+          // equivalence set now that it has been recorded
+          if (new_set->remove_base_gc_ref(CONTEXT_REF))
+            delete new_set;
         }
       }
       else
@@ -3584,14 +3587,13 @@ namespace Legion {
     void PartitionRefinementNode::perform_versioning_analysis(ContextID ctx,
         InnerContext *context, const FieldMask &refinement_mask,
         LegionMap<RegionNode*,VersionInfo> &version_infos,
-        UniqueID op_id, AddressSpaceID local_space,
-        std::set<RtEvent> &ready_events) const
+        UniqueID op_id, std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       for (std::unordered_map<LegionColor,RegionRefinementNode*>::const_iterator
             it = children.begin(); it != children.end(); it++)
         it->second->perform_versioning_analysis(ctx, context, refinement_mask,
-            version_infos, op_id, local_space, ready_events);
+                                          version_infos, op_id, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -22205,6 +22207,7 @@ namespace Legion {
       assert(equivalence_sets_ready.empty());
       assert(!disjoint_complete);
       assert(disjoint_complete_children.empty());
+      assert(disjoint_complete_children_shards.empty());
       assert(refinement_subscriptions.empty());
       assert(subscription_owners.empty());
 #endif
@@ -22215,7 +22218,7 @@ namespace Legion {
                    VersionInfo *version_info, RegionNode *region_node,
                    IndexSpaceExpression *expr, const bool expr_covers,
                    const FieldMask &version_mask, const UniqueID opid,
-                   const AddressSpaceID source, std::set<RtEvent> &ready_events)
+                   std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22316,7 +22319,7 @@ namespace Legion {
         // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
         const RtEvent ready = context->compute_equivalence_sets(this, 
-            runtime->address_space, region_node, remaining_mask, opid, source);
+            runtime->address_space, region_node, remaining_mask);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -22350,16 +22353,6 @@ namespace Legion {
             continue;
         }
         version_info->record_equivalence_set(it->first, overlap);
-      }
-      // If we have any disjoint complete events we need to record 
-      // precondition events from them as well since they are not ready
-      if (!disjoint_complete_ready.empty())
-      {
-        for (LegionMap<RtEvent,FieldMask>::const_iterator it =
-              disjoint_complete_ready.begin(); it !=
-              disjoint_complete_ready.end(); it++)
-          if (!(mask * it->second))
-            ready_events.insert(it->first);
       }
     }
 
@@ -22584,6 +22577,7 @@ namespace Legion {
         assert(equivalence_sets_ready.empty());
         assert(!disjoint_complete);
         assert(disjoint_complete_children.empty());
+        assert(disjoint_complete_children_shards.empty());
 #endif
         if (!equivalence_sets.empty())
           to_remove.swap(equivalence_sets);
@@ -22682,6 +22676,154 @@ namespace Legion {
           it->first->add_base_gc_ref(DISJOINT_COMPLETE_REF);
           it->first->add_base_resource_ref(VERSION_MANAGER_REF);
         }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::compute_equivalence_sets(IndexSpaceExpression *expr,
+                                          EqSetTracker *target,
+                                          const AddressSpaceID target_space,
+                                          FieldMask mask,
+                                          std::set<RtEvent> &ready_events,
+                                          FieldMaskSet<PartitionNode> &children,
+                                          FieldMask &parent_traversal,
+                                          const bool downward_only)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node->is_region());
+#endif
+      bool new_subscriber = false;
+      FieldMaskSet<EquivalenceSet> to_record;
+      {
+        AutoLock m_lock(manager_lock);
+        if (!downward_only)
+        {
+          // Keep going up the tree for any fields which we haven't
+          // found the refinement for yet
+          parent_traversal = mask - disjoint_complete;
+          // Any remaining fields we can start analyzing this node
+          mask -= parent_traversal;
+          if (!mask)
+            return;
+        }
+#ifdef DEBUG_LEGION
+        assert(!(mask - disjoint_complete));
+        assert(disjoint_complete_children_shards.empty());
+#endif
+        // See if there are any children to traversa
+        if (!disjoint_complete_children.empty() &&
+            !(mask * disjoint_complete_children.get_valid_mask()))
+        {
+          for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+                disjoint_complete_children.begin(); it !=
+                disjoint_complete_children.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+            children.insert(it->first->as_partition_node(), overlap);
+            mask -= overlap;
+            if (!mask)
+              return;
+          }
+        }
+        // At this point we're done with the symbolic analysis so we
+        // can actually test the expression for emptiness
+        if ((expr != node->as_region_node()->row_source) && expr->is_empty())
+          return;
+        // If we make it here then we should have equivalence sets for
+        // all these remaining fields
+#ifdef DEBUG_LEGION
+        assert(!equivalence_sets.empty() ||
+                node->as_region_node()->row_source->is_empty());
+        assert(!(mask - equivalence_sets.get_valid_mask()) ||
+                node->as_region_node()->row_source->is_empty());
+#endif
+        if (target_space != runtime->address_space)
+        {
+          FieldMaskSet<EquivalenceSet> to_send;
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            // We should only be sending equivalence sets that we
+            // know we are the owners of
+            // This used to be a valid assertion, but is no longer a valid
+            // assertion if we have virtual-mapped parent region with
+            // read-only privileges because then we have equivalence sets
+            // which only overlap our region here
+            //assert(it->first->region_node == node);
+#endif
+            to_send.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+          if (!to_send.empty())
+          {
+            // Record that we have a refinement tracker
+            new_subscriber = refinement_subscriptions[target_space].insert(
+                                          target, to_send.get_valid_mask());
+            const RtUserEvent done = Runtime::create_rt_user_event();
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(target);
+              rez.serialize<bool>(new_subscriber);
+              if (new_subscriber)
+                rez.serialize(this);
+              rez.serialize<size_t>(to_send.size());
+              for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                    to_send.begin(); it != to_send.end(); it++)
+              {
+                rez.serialize(it->first->did);
+                rez.serialize(it->second);
+              }
+              rez.serialize(done);
+            }
+            runtime->send_compute_equivalence_sets_response(target_space, rez);
+            ready_events.insert(done);
+          }
+        }
+        else if (target != this)
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          {
+            const FieldMask overlap = mask & it->second;
+            if (!overlap)
+              continue;
+#ifdef DEBUG_LEGION
+            // We should only be sending equivalence sets that we
+            // know we are the owners of
+            // This used to be a valid assertion, but is no longer a valid
+            // assertion if we have virtual-mapped parent region with
+            // read-only privileges because then we have equivalence sets
+            // which only overlap our region here
+            //assert(it->first->region_node == node);
+#endif
+            to_record.insert(it->first, overlap);
+            mask -= overlap;
+            if (!mask)
+              break;
+          }
+          if (!to_record.empty())
+            // Record that we have a refinement tracker
+            new_subscriber = refinement_subscriptions[target_space].insert(
+                                        target, to_record.get_valid_mask());
+        }
+      }
+      if (!to_record.empty())
+      {
+        if (new_subscriber)
+          target->record_subscription(this, runtime->address_space);
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              to_record.begin(); it != to_record.end(); it++)
+          target->record_equivalence_set(it->first, it->second);
+      }
     }
 
 #if 0
@@ -23052,55 +23194,151 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::compute_equivalence_sets(const FieldMask &mask, 
-                                            FieldMask &parent_traversal, 
-                                            FieldMask &children_traversal) const
+    void VersionManager::record_refinement(ShardedColorMap *map,
+                                  const FieldMask &mask, FieldMask &parent_mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!node->is_region());
-#endif
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-      if (!!disjoint_complete)
-      {
-        children_traversal = disjoint_complete & mask;
-        if (!!children_traversal)
-          parent_traversal = mask - children_traversal;
-        else
-          parent_traversal = mask;
-      }
-      else
-        parent_traversal = mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::propagate_refinement(
-                const std::vector<RegionNode*> &children, const FieldMask &mask,
-                FieldMask &parent_mask)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-      assert(!node->is_region());
-#endif
-      AutoLock m_lock(manager_lock);
-      for (std::vector<RegionNode*>::const_iterator it =
-            children.begin(); it != children.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert((disjoint_complete_children.find(*it) ==
-                disjoint_complete_children.end()) ||
-            (disjoint_complete_children[*it] * mask));
-#endif
-        if (disjoint_complete_children.insert(*it, mask))
-          (*it)->add_base_gc_ref(VERSION_MANAGER_REF);
-      }
+      if (disjoint_complete_children_shards.insert(map, mask))
+        map->add_reference();
       parent_mask = mask;
       if (!!disjoint_complete)
         parent_mask -= disjoint_complete;
       else
         add_node_disjoint_complete_ref();
       disjoint_complete |= mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::compute_equivalence_sets(IndexSpaceExpression *expr,
+                                            const FieldMask &mask, 
+                                            FieldMask &parent_traversal, 
+                                            FieldMaskSet<RegionNode> &children,
+                                            std::map<ShardID,
+                                              LegionMap<LegionColor,
+                                                  FieldMask> > &shard_children,
+                                            const bool downward_only,
+                                            const bool expr_covers) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!node->is_region());
+#endif
+      FieldMask local_mask;
+      const FieldMask &child_mask = downward_only ? mask : local_mask;
+      if (!downward_only)
+      {
+        local_mask = mask; 
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        parent_traversal = mask - disjoint_complete;
+        if (!!parent_traversal)
+        {
+          local_mask -= parent_traversal;
+          if (!local_mask)
+            return;
+        }
+      }
+      // Find the colors of all the interfering children for this expression
+      IndexPartNode *partition = node->as_partition_node()->row_source;
+      std::vector<LegionColor> interfering_children;
+      if (expr_covers)
+      {
+        // Expr covers so all the children interfere
+        interfering_children.reserve(partition->total_children);
+        for (ColorSpaceIterator itr(partition); itr; itr++)
+          interfering_children.push_back(*itr);
+      }
+      else
+        partition->find_interfering_children(expr, interfering_children);
+#ifdef DEBUG_LEGION
+      // These are sorted so we can use binary search for lookup
+      assert(std::is_sorted(interfering_children.begin(),
+            interfering_children.end()));
+#endif
+      // Do the look-up to find all the local children and any shard
+      LegionMap<LegionColor,FieldMask> partial_colors;
+      // children that we might need to find
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+            disjoint_complete_children.begin(); it !=
+            disjoint_complete_children.end(); it++)
+      {
+        const LegionColor child_color = it->first->get_color();
+        // If it's not a color that we need then we're done
+        std::vector<LegionColor>::iterator finder =
+          std::lower_bound(interfering_children.begin(), 
+              interfering_children.end(), child_color);
+        // We didn't find it if either of these are true
+        if ((finder == interfering_children.end()) ||
+            (*finder != child_color))
+          continue;
+        // Remove it from the vector since we don't need it anymore
+        FieldMask overlap = child_mask & it->second;
+        if (!overlap)
+          continue;
+        children.insert(it->first->as_region_node(), overlap);
+        if (overlap != child_mask)
+        {
+          // If not all the fields are described then we better have
+          // something that will tell us which shard to go to
+          const FieldMask &remainder = child_mask - overlap;
+#ifdef DEBUG_LEGION
+          assert(!(remainder - 
+                disjoint_complete_children_shards.get_valid_mask()));
+#endif
+          partial_colors[child_color] = remainder;
+        }
+        interfering_children.erase(finder);
+        if (interfering_children.empty())
+          break;
+      }
+      if (!interfering_children.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(!(child_mask -
+              disjoint_complete_children_shards.get_valid_mask()));
+#endif
+        // For all these colors we do them for all the child fields
+        // since we didn't see them at all when looking at the
+        // disjoint and complete children
+        for (FieldMaskSet<ShardedColorMap>::const_iterator cit =
+              disjoint_complete_children_shards.begin(); cit !=
+              disjoint_complete_children_shards.end(); cit++)
+        {
+          const FieldMask overlap = child_mask & cit->second;
+          if (!overlap)
+            continue;
+          for (std::vector<LegionColor>::const_iterator it =
+                interfering_children.begin(); it !=
+                interfering_children.end(); it++)
+          {
+            ShardID shard = cit->first->at(*it);
+            shard_children[shard][*it] |= child_mask;
+          }
+        }
+      }
+      if (!partial_colors.empty())
+      {
+        for (LegionMap<LegionColor,FieldMask>::iterator cit =
+              partial_colors.begin(); cit != partial_colors.end(); cit++)
+        {
+          for (FieldMaskSet<ShardedColorMap>::const_iterator it =
+                disjoint_complete_children_shards.begin(); it !=
+                disjoint_complete_children_shards.end(); it++)
+          {
+            const FieldMask overlap = it->second & cit->second;
+            if (!overlap)
+              continue;
+            ShardID shard = it->first->at(cit->first);
+            shard_children[shard][cit->first] |= overlap;
+            cit->second -= overlap;
+            if (!cit->second)
+              break;
+          }
+#ifdef DEBUG_LEGION
+          assert(!cit->second);
+#endif
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -23364,6 +23602,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::merge(VersionManager &src, 
                                std::set<RegionTreeNode*> &to_traverse,
@@ -23439,6 +23678,7 @@ namespace Legion {
         src.disjoint_complete_children.clear();
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::swap(VersionManager &src,
@@ -23453,6 +23693,7 @@ namespace Legion {
       assert(!!src.disjoint_complete || (src.node->get_parent() == NULL));
       assert(equivalence_sets.empty());
       assert(disjoint_complete_children.empty());
+      assert(disjoint_complete_children_shards.empty());
 #endif
       // The disjoint complete node ref can propagate here but we need
       // to deduplicate if we already have a reference since it's about
@@ -23491,8 +23732,11 @@ namespace Legion {
             disjoint_complete_children.begin(); it != 
             disjoint_complete_children.end(); it++)
         to_traverse.insert(it->first);
+      disjoint_complete_children_shards.swap(
+          src.disjoint_complete_children_shards);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::pack_manager(Serializer &rez, const bool invalidate,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse,
@@ -23678,6 +23922,7 @@ namespace Legion {
         it->first->unpack_global_ref();
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *node,

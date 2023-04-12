@@ -1161,13 +1161,17 @@ namespace Legion {
                             TaskTreeCoordinates &coordinates) const;
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
-                      const FieldMask &mask, const UniqueID opid, 
-                      const AddressSpaceID original_source);
+                      const FieldMask &mask);
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index, 
           std::set<RtEvent> &applied_events);
+      virtual void compute_shard_equivalence_sets(EqSetTracker *target,
+          AddressSpaceID target_space, IndexSpaceExpression *expr,
+          LogicalPartition partition, std::set<RtEvent> &ready_events,
+          const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
+          const bool expr_covers);
 #if 0
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
                                                 const FieldMask &mask);
@@ -2071,8 +2075,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events, size_t num_shards);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
-                      const FieldMask &mask, const UniqueID opid, 
-                      const AddressSpaceID original_source);
+                      const FieldMask &mask);
     public:
       const UniqueID root_uid;
     protected:
@@ -2958,6 +2961,11 @@ namespace Legion {
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
           unsigned refinement_number, unsigned index,
           std::set<RtEvent> &applied_events);
+      virtual void compute_shard_equivalence_sets(EqSetTracker *target,
+          AddressSpaceID target_space, IndexSpaceExpression *expr,
+          LogicalPartition partition, std::set<RtEvent> &ready_events,
+          const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
+          const bool expr_covers);
 #if 0
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
@@ -3368,8 +3376,7 @@ namespace Legion {
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
-                      const FieldMask &mask, const UniqueID opid, 
-                      const AddressSpaceID original_source);
+                      const FieldMask &mask);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 

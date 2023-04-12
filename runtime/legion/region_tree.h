@@ -4135,28 +4135,6 @@ namespace Legion {
         const SemanticTag tag;
         const AddressSpaceID source;
       };
-      struct DeferComputeEquivalenceSetArgs : 
-        public LgTaskArgs<DeferComputeEquivalenceSetArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COMPUTE_EQ_SETS_TASK_ID;
-      public:
-        DeferComputeEquivalenceSetArgs(RegionNode *proxy, ContextID x,
-            InnerContext *c, EqSetTracker *t, const AddressSpaceID ts,
-            IndexSpaceExpression *e, const FieldMask &m, 
-            const UniqueID id, const AddressSpaceID s, const bool covers);
-      public:
-        RegionNode *const proxy_this;
-        const ContextID ctx;
-        InnerContext *const context;
-        EqSetTracker *const target;
-        const AddressSpaceID target_space;
-        IndexSpaceExpression *const expr;
-        FieldMask *const mask;
-        const UniqueID opid;
-        const AddressSpaceID source;
-        const RtUserEvent ready;
-        const bool expr_covers;
-      };
     public:
       RegionNode(LogicalRegion r, PartitionNode *par, IndexSpaceNode *row_src,
              FieldSpaceNode *col_src, RegionTreeForest *ctx, 
@@ -4279,7 +4257,6 @@ namespace Legion {
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
                                        const UniqueID opid, 
-                                       const AddressSpaceID original_source,
                                        std::set<RtEvent> &ready_events);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,
@@ -4287,12 +4264,9 @@ namespace Legion {
                                     const AddressSpaceID target_space,
                                     IndexSpaceExpression *expr,
                                     const FieldMask &mask,
-                                    const UniqueID opid,
-                                    const AddressSpaceID original_source,
                                     std::set<RtEvent> &ready_events,
                                     const bool downward_only,
                                     const bool expr_covers);
-      static void handle_deferred_compute_equivalence_sets(const void *args);
       virtual void invalidate_refinement(ContextID ctx, const FieldMask &mask,
                                  bool self, InnerContext &source_context,
                                  std::set<RtEvent> &applied_events, 
@@ -4408,8 +4382,6 @@ namespace Legion {
                                     const AddressSpaceID target_space,
                                     IndexSpaceExpression *expr,
                                     const FieldMask &mask,
-                                    const UniqueID opid,
-                                    const AddressSpaceID source,
                                     std::set<RtEvent> &ready_events,
                                     const bool downward_only,
                                     const bool expr_covers);

@@ -3785,9 +3785,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
-                               AddressSpaceID target_space, RegionNode *region,
-                               const FieldMask &mask, const UniqueID opid,
-                               const AddressSpaceID source)
+         AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       // We know we are on a node now where the version information
@@ -3796,8 +3794,8 @@ namespace Legion {
       std::set<RtEvent> ready;
       const ContextID ctx = get_context_id();
       region->compute_equivalence_sets(ctx, this, target, target_space,
-                                       region->row_source, mask, opid, source, 
-                                       ready,false/*down only*/,true/*covers*/);
+                                       region->row_source, mask, ready,
+                                       false/*down only*/, true/*covers*/);
       if (!ready.empty())
         return Runtime::merge_events(ready);
       else
@@ -10739,15 +10737,11 @@ namespace Legion {
       RegionNode *region = runtime->forest->get_node(handle);
       FieldMask mask;
       derez.deserialize(mask);
-      UniqueID opid;
-      derez.deserialize(opid);
-      AddressSpaceID original_source;
-      derez.deserialize(original_source);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
-                                          region, mask, opid, original_source);
+                                                               region, mask);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -12145,9 +12139,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
-                      AddressSpaceID target_space, RegionNode *region, 
-                      const FieldMask &mask, const UniqueID opid,
-                      const AddressSpaceID original_source)
+         AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -22029,9 +22021,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
-                      AddressSpaceID target_space, RegionNode *region,
-                      const FieldMask &mask, const UniqueID opid,
-                      const AddressSpaceID original_source)
+         AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22047,8 +22037,6 @@ namespace Legion {
         rez.serialize(target);
         rez.serialize(region->handle);
         rez.serialize(mask);
-        rez.serialize(opid);
-        rez.serialize(original_source);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 

@@ -32414,11 +32414,6 @@ namespace Legion {
             FieldSpaceNode::handle_defer_infos_request(args);
             break;
           }
-        case LG_DEFER_COMPUTE_EQ_SETS_TASK_ID:
-          {
-            RegionNode::handle_deferred_compute_equivalence_sets(args);
-            break;
-          }
         case LG_REGION_SEMANTIC_INFO_REQ_TASK_ID:
           {
             RegionNode::SemanticRequestArgs *req_args = 

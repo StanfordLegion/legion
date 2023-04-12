@@ -1847,9 +1847,8 @@ namespace Legion {
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
-      region_node->perform_versioning_analysis(ctx.get_id(), context, 
-                  &version_info, user_mask, op->get_unique_op_id(), 
-                  runtime->address_space, ready_events);
+      region_node->perform_versioning_analysis(ctx.get_id(), context,
+          &version_info, user_mask, op->get_unique_op_id(), ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -20746,13 +20745,12 @@ namespace Legion {
                                                  VersionInfo *version_info,
                                                  const FieldMask &mask,
                                                  const UniqueID opid,
-                                                 const AddressSpaceID source,
                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-            row_source, true/*expr covers*/, mask, opid, source, applied);
+            row_source, true/*expr covers*/, mask, opid, applied);
     }
     
     //--------------------------------------------------------------------------
@@ -20762,8 +20760,6 @@ namespace Legion {
                                               const AddressSpaceID target_space,
                                               IndexSpaceExpression *expr,
                                               const FieldMask &mask,
-                                              const UniqueID opid,
-                                              const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
                                               const bool downward_only,
                                               const bool expr_covers)
@@ -20772,29 +20768,8 @@ namespace Legion {
       VersionManager &manager = get_current_version_manager(ctx);
       FieldMask parent_traversal;
       FieldMaskSet<PartitionNode> children_traversal;
-      std::set<RtEvent> deferral_events;
-      manager.compute_equivalence_sets(ctx, expr, target, target_space, mask, 
-                context, opid, source, ready_events, children_traversal, 
-                parent_traversal, deferral_events, downward_only);
-      if (!deferral_events.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(downward_only);
-#endif
-        const RtEvent deferral_event = Runtime::merge_events(deferral_events);
-        if (deferral_event.exists() && !deferral_event.has_triggered())
-        {
-          // Defer this computation until the version manager data is ready
-          DeferComputeEquivalenceSetArgs args(this, ctx, context, target, 
-                    target_space, expr, mask, opid, source, expr_covers);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, deferral_event);
-          ready_events.insert(args.ready);
-        }
-        else
-          compute_equivalence_sets(ctx, context, target, target_space, expr,
-            mask, opid, source, ready_events,true/*downward only*/,expr_covers);
-      }
+      manager.compute_equivalence_sets(expr, target, target_space, mask,
+          ready_events, children_traversal, parent_traversal, downward_only);
       if (!!parent_traversal)
       {
 #ifdef DEBUG_LEGION
@@ -20802,8 +20777,8 @@ namespace Legion {
         assert(!downward_only);
 #endif
         parent->compute_equivalence_sets(ctx, context, target, target_space,
-                                         expr, parent_traversal, opid, source, 
-                                         ready_events, false/*downward only*/,
+                                         expr, parent_traversal, ready_events,
+                                         false/*downward only*/,
                                          false/*expr covers*/);
       }
       if (!children_traversal.empty())
@@ -20811,45 +20786,9 @@ namespace Legion {
         for (FieldMaskSet<PartitionNode>::const_iterator it = 
               children_traversal.begin(); it != children_traversal.end(); it++)
           it->first->compute_equivalence_sets(ctx, context, target,target_space,
-                                   expr, it->second, opid, source, ready_events,
-                                   true/*downward only*/, expr_covers);
+                                           expr, it->second, ready_events,
+                                           true/*downward only*/, expr_covers);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    RegionNode::DeferComputeEquivalenceSetArgs::DeferComputeEquivalenceSetArgs(
-          RegionNode *proxy, ContextID x, InnerContext *c, EqSetTracker *t, 
-          const AddressSpaceID ts, IndexSpaceExpression *e, const FieldMask &m, 
-          const UniqueID id, const AddressSpaceID s, const bool covers)
-      : LgTaskArgs<DeferComputeEquivalenceSetArgs>(implicit_provenance),
-        proxy_this(proxy), ctx(x), context(c), target(t), target_space(ts),
-        expr(e), mask(new FieldMask(m)), opid(id), source(s),
-        ready(Runtime::create_rt_user_event()), expr_covers(covers)
-    //--------------------------------------------------------------------------
-    {
-      expr->add_base_expression_reference(META_TASK_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RegionNode::handle_deferred_compute_equivalence_sets(
-                                                               const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferComputeEquivalenceSetArgs *dargs = 
-        (const DeferComputeEquivalenceSetArgs*)args;
-      std::set<RtEvent> ready_events;
-      dargs->proxy_this->compute_equivalence_sets(dargs->ctx, dargs->context,
-          dargs->target, dargs->target_space, dargs->expr, *(dargs->mask), 
-          dargs->opid, dargs->source, ready_events, true/*downward only*/,
-          dargs->expr_covers);
-      if (!ready_events.empty())
-        Runtime::trigger_event(dargs->ready, 
-            Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(dargs->ready);
-      delete dargs->mask;
-      if (dargs->expr->remove_base_expression_reference(META_TASK_REF))
-        delete dargs->expr;
     }
 
     //--------------------------------------------------------------------------
@@ -22279,77 +22218,35 @@ namespace Legion {
                                               const AddressSpaceID target_space,
                                               IndexSpaceExpression *expr,
                                               const FieldMask &mask,
-                                              const UniqueID opid,
-                                              const AddressSpaceID source,
                                               std::set<RtEvent> &ready_events,
                                               const bool downward_only,
                                               const bool expr_covers)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      if (downward_only)
+      FieldMask parent_traversal;
+      FieldMaskSet<RegionNode> children_traversal;
+      std::map<ShardID,LegionMap<LegionColor,FieldMask> > shard_children;
+      manager.compute_equivalence_sets(expr, mask, parent_traversal,
+          children_traversal, shard_children, downward_only, expr_covers);
+      if (!shard_children.empty())
+        context->compute_shard_equivalence_sets(target, target_space, expr,
+            handle, ready_events, shard_children, expr_covers);
+      if (!!parent_traversal)
       {
-        std::vector<LegionColor> interfering_children;
-        if (expr_covers)
-        {
-          // Expr covers so all the children interfere
-          interfering_children.reserve(row_source->total_children);
-          for (ColorSpaceIterator itr(row_source); itr; itr++)
-            interfering_children.push_back(*itr);
-        }
-        else
-          row_source->find_interfering_children(expr, interfering_children);
-        for (std::vector<LegionColor>::const_iterator it = 
-              interfering_children.begin(); it != 
-              interfering_children.end(); it++)
-        {
-          RegionNode *child = get_child(*it);
-          // Still need to filter empty children when traversing here
-          if (expr_covers && child->row_source->is_empty())
-            continue;
-          child->compute_equivalence_sets(ctx, context, target, target_space,
-                                expr, mask, opid, source, ready_events,
-                                true/*downward only*/, expr_covers);
-        }
-      }
-      else
-      {
-        FieldMask parent_traversal, children_traversal;
-        manager.compute_equivalence_sets(mask, parent_traversal, 
-                                         children_traversal);
 #ifdef DEBUG_LEGION
-        assert((parent_traversal | children_traversal) == mask);
+        assert(!downward_only);
 #endif
-        if (!!parent_traversal)
-          parent->compute_equivalence_sets(ctx, context, target, target_space,
-                                           expr, parent_traversal, opid, source, 
-                                           ready_events, false/*downward only*/,
-                                           false/*expr covers*/);
-        if (!!children_traversal)
-        {
-          std::vector<LegionColor> interfering_children;
-          if (expr_covers)
-          {
-            // Expr covers so all the children interfere
-            interfering_children.reserve(row_source->total_children);
-            for (ColorSpaceIterator itr(row_source); itr; itr++)
-              interfering_children.push_back(*itr);
-          }
-          else
-            row_source->find_interfering_children(expr, interfering_children);
-          for (std::vector<LegionColor>::const_iterator it = 
-                interfering_children.begin(); it != 
-                interfering_children.end(); it++)
-          {
-            RegionNode *child = get_child(*it);
-            // Still need to filter empty children when traversing here
-            if (expr_covers && child->row_source->is_empty())
-              continue;
-            child->compute_equivalence_sets(ctx, context, target, 
-                target_space, expr, children_traversal, opid, source,
-                ready_events, true/*downward only*/, expr_covers);
-          }
-        }
+        parent->compute_equivalence_sets(ctx, context, target, target_space,
+          expr, parent_traversal, ready_events, false/*downward*/, expr_covers);
+      }
+      if (!children_traversal.empty())
+      {
+        for (FieldMaskSet<RegionNode>::const_iterator it =
+              children_traversal.begin(); it != children_traversal.end(); it++)
+          it->first->compute_equivalence_sets(ctx, context, target,
+              target_space, expr, it->second, ready_events,
+              true/*downward only*/, expr_covers);
       }
     }
 
@@ -22384,6 +22281,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PartitionNode::record_refinement(ContextID ctx, 
+                        ShardedColorMap *children_shards, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      // Record it
+      FieldMask parent_mask;
+      manager.record_refinement(children_shards, mask, parent_mask);
+      if (!!parent_mask)
+        parent->propagate_refinement(ctx, this, parent_mask);
+    }
+
+    //--------------------------------------------------------------------------
     void PartitionNode::propagate_refinement(ContextID ctx, RegionNode *child, 
                                              const FieldMask &mask)
     //--------------------------------------------------------------------------
@@ -22394,20 +22304,6 @@ namespace Legion {
       if (!!parent_mask)
         parent->propagate_refinement(ctx, this, parent_mask);
     }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void PartitionNode::propagate_refinement(ContextID ctx,
-                const std::vector<RegionNode*> &children, const FieldMask &mask)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager &manager = get_current_version_manager(ctx);
-      FieldMask parent_mask;
-      manager.propagate_refinement(children, mask, parent_mask);
-      if (!!parent_mask)
-        parent->propagate_refinement(ctx, this, parent_mask);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void PartitionNode::print_logical_context(ContextID ctx,

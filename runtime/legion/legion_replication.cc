@@ -1826,7 +1826,7 @@ namespace Legion {
         const ContextID ctx = parent_ctx->get_context().get_id();
         RegionNode *region_node = runtime->forest->get_node(requirement.region);
         region_node->perform_versioning_analysis(ctx, parent_ctx, &version_info,
-           refinement_mask, unique_op_id, runtime->address_space, ready_events);
+                                   refinement_mask, unique_op_id, ready_events);
 #ifdef DEBUG_LEGION
         assert(refinement_barrier.exists());
 #endif
@@ -1994,8 +1994,7 @@ namespace Legion {
       {
         const ContextID ctx = parent_ctx->get_context().get_id();
         refinement->perform_versioning_analysis(ctx, parent_ctx,
-            refinement_mask, version_infos, unique_op_id,
-            runtime->address_space, ready_events);
+            refinement_mask, version_infos, unique_op_id, ready_events);
       }
 #ifdef DEBUG_LEGION
       assert(refinement_barrier.exists());

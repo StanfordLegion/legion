@@ -998,8 +998,7 @@ namespace Legion {
       virtual void perform_versioning_analysis(ContextID ctx,
           InnerContext *context, const FieldMask &mask, 
           LegionMap<RegionNode*,VersionInfo> &version_infos,
-          UniqueID op_id, AddressSpaceID local_space,
-          std::set<RtEvent> &ready_events) const = 0;
+          UniqueID op_id, std::set<RtEvent> &ready_events) const = 0;
       virtual void register_refinement(ContextID ctx, const FieldMask &mask,
           InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
           unsigned parent_req_index, std::set<RtEvent> &applied_events,
@@ -1049,8 +1048,7 @@ namespace Legion {
       virtual void perform_versioning_analysis(ContextID ctx,
           InnerContext *context, const FieldMask &mask, 
           LegionMap<RegionNode*,VersionInfo> &version_infos,
-          UniqueID op_id, AddressSpaceID local_space,
-          std::set<RtEvent> &ready_events) const;
+          UniqueID op_id, std::set<RtEvent> &ready_events) const;
       virtual void register_refinement(ContextID ctx, const FieldMask &mask,
           InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
           unsigned parent_req_index, std::set<RtEvent> &applied_events,
@@ -1085,8 +1083,7 @@ namespace Legion {
       virtual void perform_versioning_analysis(ContextID ctx,
           InnerContext *context, const FieldMask &mask, 
           LegionMap<RegionNode*,VersionInfo> &version_infos,
-          UniqueID op_id, AddressSpaceID local_space,
-          std::set<RtEvent> &ready_events) const;
+          UniqueID op_id, std::set<RtEvent> &ready_events) const;
       virtual void register_refinement(ContextID ctx, const FieldMask &mask,
           InnerContext *context, size_t op_ctx_index,unsigned refinement_number,
           unsigned parent_req_index, std::set<RtEvent> &applied_events,
@@ -4057,7 +4054,6 @@ namespace Legion {
                                        const bool expr_covers,
                                        const FieldMask &version_mask,
                                        const UniqueID opid,
-                                       const AddressSpaceID source,
                                        std::set<RtEvent> &ready);
     protected:
       void add_node_disjoint_complete_ref(void) const;
@@ -4087,17 +4083,13 @@ namespace Legion {
                                           const FieldMask &mask);
       void initialize_nonexclusive_virtual_analysis(const FieldMask &mask,
                                     const FieldMaskSet<EquivalenceSet> &sets);
-      void compute_equivalence_sets(const ContextID ctx,
-                                    IndexSpaceExpression *expr,
+      void compute_equivalence_sets(IndexSpaceExpression *expr,
                                     EqSetTracker *target, 
                                     const AddressSpaceID target_space,
-                                    FieldMask mask, InnerContext *context,
-                                    const UniqueID opid,
-                                    const AddressSpaceID original_source,
+                                    FieldMask mask,
                                     std::set<RtEvent> &ready_events,
                                     FieldMaskSet<PartitionNode> &children,
                                     FieldMask &parent_traversal,
-                                    std::set<RtEvent> &deferral_events,
                                     const bool downward_only);
       void find_or_create_empty_equivalence_sets(EqSetTracker *target,
                                     const AddressSpaceID target_space,
@@ -4106,18 +4098,22 @@ namespace Legion {
                                     std::set<RtEvent> &ready_events);
       static void handle_compute_equivalence_sets_response(
                   Deserializer &derez, Runtime *runtime, AddressSpaceID source);
+      // Call these from region nodes
       void record_refinement(EquivalenceSet *set, const FieldMask &mask,
                              FieldMask &parent_mask);
       void record_empty_refinement(const FieldMask &mask);
-    public:
       // Call these from partition nodes
-      void compute_equivalence_sets(const FieldMask &mask,
+      void record_refinement(ShardedColorMap *map, const FieldMask &mask,
+                             FieldMask &parent_mask);
+      void compute_equivalence_sets(IndexSpaceExpression *expr,
+                                    const FieldMask &mask, 
                                     FieldMask &parent_traversal, 
-                                    FieldMask &children_traversal) const;
-      void propagate_refinement(const std::vector<RegionNode*> &children,
-                                const FieldMask &child_mask, 
-                                FieldMask &parent_mask);
-    public:
+                                    FieldMaskSet<RegionNode> &children,
+                                    std::map<ShardID,
+                                      LegionMap<LegionColor,
+                                          FieldMask> > &shard_children,
+                                    const bool downward_only,
+                                    const bool expr_covers) const;
       // Call these from either type of region tree node
       void propagate_refinement(RegionTreeNode *child, 
                                 const FieldMask &child_mask, 
@@ -4171,13 +4167,6 @@ namespace Legion {
       // other shards no about for control replication. This data
       // structure will only be non-empty on partition nodes
       FieldMaskSet<ShardedColorMap> disjoint_complete_children_shards;
-      // We are sometimes lazy in filling in the equivalence sets for
-      // disjoint-complete partitions from refinement ops so we can 
-      // pick the logical owner from the first address space to attempt
-      // to touch it. In that case we need a data structure to make
-      // sure that there is only one call going out to the context
-      // at a time for each field to make the equivalence sets.
-      LegionMap<RtEvent,FieldMask> disjoint_complete_ready;
       // Track all the equivalence set trackers that are tracking this
       // refinement so that we can invalidate them whenever this refinement
       // is invalidated. Note that we only need to record the fields that
