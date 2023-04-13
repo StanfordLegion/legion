@@ -147,20 +147,34 @@ namespace Realm {
 
     /**
      * \class UserEvent
-     * A user level event has all the properties of event, except
-     * it can be triggered by the user.  This prevents users from
-     * triggering arbitrary events without doing something like
-     * an unsafe cast.
+     * UserEvents are events that can be scheduled to trigger at a
+     * future point in an application and can be waited upon
+     * dynamically. This is in contrast to a Realm::Event, which must
+     * be a direct consequence of the completion of a specific
+     * operation.
      */
     class REALM_PUBLIC_API UserEvent : public Event {
     public:
+
+      /**
+       * Create a new user event.
+       * @return the new user event
+       */
       static UserEvent create_user_event(void);
 
+      /**
+       * Trigger the user event.
+       * @param wait_on an event that must trigger before this user event
+       * can.
+       * @param ignore_faults if true, the user event will be triggered even if
+       * the event it is waiting on is poisoned.
+       */
       void trigger(Event wait_on = Event::NO_EVENT,
-		   bool ignore_faults = false) const;
+                   bool ignore_faults = false) const;
 
       /*
-       * Attempt to cancel the operation associated with this event.
+       * Attempt to cancell all the operations waiting on this user
+       * event.
        */
       void cancel(void) const;
 
@@ -194,12 +208,43 @@ namespace Realm {
        * @return the new barrier handle.
        */
       Barrier advance_barrier(void) const;
+
+      /*
+       * Alter the arrival count of a barrier.
+       * @param delta the amount to adjust the arrival count by
+       * @return the new barrier handle.
+       */
       Barrier alter_arrival_count(int delta) const;
+
+      /*
+       * Get the previous phase of a barrier.
+       * @return the previous phase of the barrier
+       */
       Barrier get_previous_phase(void) const;
 
+      /*
+       * Adjust the arrival count of a barrier.
+       * @param count the amount to adjust the arrival count by
+       * @param wait_on an event that must trigger before the arrival count
+       * can be adjusted.
+       * @param ignore_faults if true, the arrival count will be adjusted even
+       * if the event it is waiting on is poisoned.
+       * @param reduce_value if non-null, the value will be used to update the
+       * reduction value associated with the barrier.
+       * @param reduce_value_size the size of the reduction value
+       */
       void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT,
-		  const void *reduce_value = 0, size_t reduce_value_size = 0) const;
+                  const void* reduce_value = 0,
+                  size_t reduce_value_size = 0) const;
 
+
+      /*
+       * Get the resulting barrier value.
+       * @param value the resulting value
+       * @param value_size the size of the resulting value
+       * @return true if the value was successfully retrieved,
+       * generation hasn't triggered yet.
+       */
       bool get_result(void *value, size_t value_size) const;
     };
 
@@ -233,7 +278,6 @@ namespace Realm {
        */
       static CompletionQueue create_completion_queue(size_t max_size);
 
-      ///@{
       /**
        * Destroy a completion queue.
        * @param wait_on an event to wait on before destroying the
@@ -241,6 +285,7 @@ namespace Realm {
        */
       void destroy(Event wait_on = Event::NO_EVENT);
 
+      ///@{
       /**
        * Add an event to the completion queue (once it triggers).
        * non-faultaware version raises a fatal error if the specified 'event'
