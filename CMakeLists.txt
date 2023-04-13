@@ -476,18 +476,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
 
     if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
       get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_C_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_C_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
-      if(NOT "${_cuda_stubs_path}" IN_LIST CMAKE_CUDA_HOST_IMPLICIT_LINK_DIRECTORIES)
-        list(APPEND CMAKE_CUDA_HOST_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      endif()
+      list(APPEND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
       unset(_cuda_stubs_path)
     endif()
 
@@ -509,17 +498,15 @@ endif()
 #------------------------------------------------------------------------------#
 # CUDA configuration
 #------------------------------------------------------------------------------#
-include(CMakeDependentOption)
-
 if(Legion_USE_CUDA)
 
   option(Legion_CUDA_DYNAMIC_LOAD "Load CUDA libraries at runtime" OFF)
+  option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
 
-  cmake_dependent_option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime"
+  if(Legion_USE_Kokkos OR ("${Legion_NETWORKS}" MATCHES .*ucx.*))
     # The default is to hijack unless Kokkos interop is enabled, or network is UCX.
-    # `cmake_dependent_option` uses python ternary notation, i.e `X if <condition> else Y`.
-    OFF "Legion_USE_Kokkos OR \"ucx\" IN_LIST Legion_NETWORKS AND NOT Legion_CUDA_DYNAMIC_LOAD" ON
-  )
+    set(Legion_HIJACK_CUDART OFF)
+  endif()
 
   if(Legion_CUDA_DYNAMIC_LOAD AND Legion_HIJACK_CUDART)
     # not compatible with runtime hijack
