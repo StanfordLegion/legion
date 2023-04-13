@@ -501,11 +501,12 @@ endif()
 if(Legion_USE_CUDA)
 
   option(Legion_CUDA_DYNAMIC_LOAD "Load CUDA libraries at runtime" OFF)
-  option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
 
-  if(Legion_USE_Kokkos OR ("${Legion_NETWORKS}" MATCHES .*ucx.*))
-    # The default is to hijack unless Kokkos interop is enabled, or network is UCX.
-    set(Legion_HIJACK_CUDART OFF)
+  # The default is to hijack unless Kokkos interop is enabled, or network is UCX.
+  if(Legion_USE_Kokkos OR "${Legion_NETWORKS}" MATCHES .*ucx.*)
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" OFF)
+  else()
+    option(Legion_HIJACK_CUDART "Hijack and rewrite application calls into the CUDA runtime" ON)
   endif()
 
   if(Legion_CUDA_DYNAMIC_LOAD AND Legion_HIJACK_CUDART)
