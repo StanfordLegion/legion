@@ -20,7 +20,7 @@
 
 #include "realm/python/python_source.h"
 
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
 #include "realm/openmp/openmp_threadpool.h"
 #endif
 
@@ -189,7 +189,7 @@ namespace Realm {
 
     int numa_node;
     CoreReservation *core_rsrv;
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
     ThreadPool *omp_threadpool;
 #endif
     const std::vector<std::string>& import_modules;
