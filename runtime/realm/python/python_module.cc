@@ -370,7 +370,7 @@ namespace Realm {
       interpreter_ready = true;
     }
 
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
     // associate with an OpenMP thread pool if one is available
     if(pyproc->omp_threadpool != 0)
       pyproc->omp_threadpool->associate_as_master();
@@ -687,7 +687,13 @@ namespace Realm {
     deferred_spawn_cache.clear();
 
     CoreReservationParameters params;
+#if defined(REALM_USE_OPENMP) && defined(REALM_OPENMP_SYSTEM_RUNTIME)
+    // if we're using the system's openmp runtime, we need to make sure this
+    //  python processor has enough cores available for omp goodness
+    params.set_num_cores(_omp_workers);
+#else
     params.set_num_cores(1);
+#endif
     params.set_numa_domain(numa_node);
     params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
     params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
@@ -698,7 +704,7 @@ namespace Realm {
 
     core_rsrv = new CoreReservation(name, crs, params);
 
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
     if(_omp_workers > 0) {
       // create a pool (except for one thread, which is the main task thread)
       omp_threadpool = new ThreadPool(me, _omp_workers - 1,
@@ -715,7 +721,7 @@ namespace Realm {
   {
     delete core_rsrv;
     delete sched;
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
     if(omp_threadpool != 0)
       delete omp_threadpool;
 #endif
@@ -733,7 +739,7 @@ namespace Realm {
     log_py.info() << "shutting down";
 
     sched->shutdown();
-#ifdef REALM_USE_OPENMP
+#if defined(REALM_USE_OPENMP) && !defined(REALM_OPENMP_SYSTEM_RUNTIME)
     if(omp_threadpool != 0)
       omp_threadpool->stop_worker_threads();
 #endif
