@@ -5922,14 +5922,14 @@ class CollectiveRendezvous(object):
                                 ' (from '+provenance+') but no point operations shared '+
                                 'the same logical region. This could lead to unnecessary '+
                                 'runtime overhead.')
-                        if self.op.state.assert_on_warning:
+                        if self.owner.state.assert_on_warning:
                             assert False
                     else:
                         print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
                                 ' but no point operations shared the same logical region.'+
                                 ' This could lead to unnecessary runtime overhead.')
-                        if self.op.state.assert_on_warning:
+                        if self.owner.state.assert_on_warning:
                             assert False
             elif requested:
                 matched_reqs.append(idx)
@@ -5977,14 +5977,14 @@ class CollectiveRendezvous(object):
                             'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
                             ') which had '+str(total_points)+' out of '+str(total_points)+
                             ' ('+efficiency+'%) use the same logical region as another point.')
-                    if self.op.state.assert_on_warning:
+                    if self.owner.state.assert_on_warning:
                         assert False
                 else:
                     print('WARNING: Missed collective rendezvous optimization for region '+
                             'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
                             str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
                             'use the same logical region as another point.')
-                    if self.op.state.assert_on_warning:
+                    if self.owner.state.assert_on_warning:
                         assert False
                 for region,ops in iteritems(self.matches[idx]):
                     pointstr = ''

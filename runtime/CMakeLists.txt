@@ -874,7 +874,7 @@ if(LEGION_CUDA_SRC)
     RELWITHDEBINFO -g -O2)
   target_sources(LegionRuntime PRIVATE ${LEGION_CUDA_OBJS})
   target_include_directories(LegionRuntime PUBLIC ${CUDA_INCLUDE_DIRS})
-  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES} PRIVATE ${CUDA_CUDA_LIBRARY})
+  target_link_libraries(LegionRuntime PUBLIC ${CUDA_LIBRARIES} ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(LEGION_HIP_SRC)

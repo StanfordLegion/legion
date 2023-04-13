@@ -5617,14 +5617,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char point_string[128];
-      sprintf(point_string," (");
+      snprintf(point_string, sizeof point_string, " (");
       for (int d = 0; d < p.get_dim(); d++)
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", p[0]);
+          snprintf(buffer, sizeof buffer, "%lld", p[0]);
         else
-          sprintf(buffer,",%lld", p[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", p[d]);
         strcat(point_string, buffer);
       }
       strcat(point_string,")");
@@ -5678,14 +5678,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char rect_string[256];
-      sprintf(rect_string," (");
+      snprintf(rect_string, sizeof rect_string, " (");
       for (int d = 0; d < dom.get_dim(); d++)
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", dom.lo()[0]);
+          snprintf(buffer, sizeof buffer, "%lld", dom.lo()[0]);
         else
-          sprintf(buffer,",%lld", dom.lo()[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", dom.lo()[d]);
         strcat(rect_string, buffer);
       }
       strcat(rect_string,") - (");
@@ -5693,9 +5693,9 @@ namespace Legion {
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", dom.hi()[0]);
+          snprintf(buffer, sizeof buffer, "%lld", dom.hi()[0]);
         else
-          sprintf(buffer,",%lld", dom.hi()[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", dom.hi()[d]);
         strcat(rect_string, buffer);
       }
       strcat(rect_string,")");
@@ -5730,14 +5730,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char point_string[128];
-      sprintf(point_string," (");
+      snprintf(point_string, sizeof point_string, " (");
       for (int d = 0; d < p.get_dim(); d++)
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", p[0]);
+          snprintf(buffer, sizeof buffer, "%lld", p[0]);
         else
-          sprintf(buffer,",%lld", p[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", p[d]);
         strcat(point_string, buffer);
       }
       strcat(point_string,")");
@@ -5787,14 +5787,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char rect_string[256];
-      sprintf(rect_string," (");
+      snprintf(rect_string, sizeof rect_string, " (");
       for (int d = 0; d < dom.get_dim(); d++)
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", dom.lo()[0]);
+          snprintf(buffer, sizeof buffer, "%lld", dom.lo()[0]);
         else
-          sprintf(buffer,",%lld", dom.lo()[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", dom.lo()[d]);
         strcat(rect_string, buffer);
       }
       strcat(rect_string,") - (");
@@ -5802,9 +5802,9 @@ namespace Legion {
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", dom.hi()[0]);
+          snprintf(buffer, sizeof buffer, "%lld", dom.hi()[0]);
         else
-          sprintf(buffer,",%lld", dom.hi()[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", dom.hi()[d]);
         strcat(rect_string, buffer);
       }
       strcat(rect_string,")");
@@ -5837,14 +5837,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char point_string[128];
-      sprintf(point_string," (");
+      snprintf(point_string, sizeof point_string, " (");
       for (int d = 0; d < p.get_dim(); d++)
       {
         char buffer[32];
         if (d == 0)
-          sprintf(buffer,"%lld", p[0]);
+          snprintf(buffer, sizeof buffer, "%lld", p[0]);
         else
-          sprintf(buffer,",%lld", p[d]);
+          snprintf(buffer, sizeof buffer, ",%lld", p[d]);
         strcat(point_string, buffer);
       }
       strcat(point_string,")");

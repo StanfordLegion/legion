@@ -521,7 +521,7 @@ var currentPos;
 var nextPos;
 var clickBoxProf_uid = null;
 var searchRegex = null;
-var searchInstRegex = null;
+var searchInstRegex = null; // this is not a regext, just an array of prof_uid
 var searchInstRegexLength = 0;
 
 function showSlider() {
@@ -1352,7 +1352,7 @@ function timelineEventMouseDown(_timelineEvent) {
         searchInstRegex = new Array(searchInstRegexLength);
         for (let i = 0; i < searchInstRegexLength; i++) {
           var re = timelineEvent.instances[i][1];
-          searchInstRegex[i] = new RegExp(re);
+          searchInstRegex[i] = re;
         }
       } else {
         state.searchInstEnabled = false;
@@ -1419,7 +1419,7 @@ function drawTimeline() {
       }
       if (state.searchInstEnabled) {
         for (let i = 0; i < searchInstRegexLength; i++) {
-          if (searchInstRegex[i].exec(d.prof_uid) != null) {
+          if (searchInstRegex[i] == d.prof_uid) {
             color = "#ff0000";
             d.is_highlighted = true;
             break;

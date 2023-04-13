@@ -1755,7 +1755,7 @@ namespace Realm {
       if(pos && *pos) continue;  // doesn't match node[0-9]+
 	  
       char per_node_path[1024];
-      sprintf(per_node_path, "/sys/devices/system/node/%s", ne->d_name);
+      snprintf(per_node_path, sizeof per_node_path, "/sys/devices/system/node/%s", ne->d_name);
       DIR *cd = opendir(per_node_path);
       if(!cd) {
 	log_thread.warning() << "can't open '" << per_node_path << "' - skipping";
@@ -1777,7 +1777,7 @@ namespace Realm {
 
 	// figure out which physical core it is (i.e. detect hyperthreads)
 	char core_id_path[1024];
-	sprintf(core_id_path, "/sys/devices/system/node/%s/%s/topology/core_id", ne->d_name, ce->d_name);
+	snprintf(core_id_path, sizeof core_id_path, "/sys/devices/system/node/%s/%s/topology/core_id", ne->d_name, ce->d_name);
 	FILE *f = fopen(core_id_path, "r");
 	if(!f) {
 	  log_thread.warning() << "can't read '" << core_id_path << "' - skipping";
@@ -1807,7 +1807,7 @@ namespace Realm {
 	//  expect symmetry across all cores in the same set
 	{
 	  char sibling_path[1024];
-	  sprintf(sibling_path, "/sys/devices/system/node/%s/%s/topology/thread_siblings_list", ne->d_name, ce->d_name);
+	  snprintf(sibling_path, sizeof sibling_path, "/sys/devices/system/node/%s/%s/topology/thread_siblings_list", ne->d_name, ce->d_name);
 	  FILE *f = fopen(sibling_path, "r");
 	  if(f) {
 	    char line[256];
@@ -1842,7 +1842,7 @@ namespace Realm {
   static bool get_bd_sibling_id(int cpu_id, int core_id,
 				std::set<int>& sibling_ids) {
     char str[1024];
-    sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
+    snprintf(str, sizeof str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
     FILE *f = fopen(str, "r");
     if(!f) {
       log_thread.warning() << "can't read '" << str << "' - skipping";
@@ -1862,7 +1862,7 @@ namespace Realm {
       // don't filter siblings with the same core ID - this catches
       //  hyperthreads too
 #if 0
-      sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
+      snprintf(str, sizeof str, "/sys/devices/system/cpu/cpu%d/topology/core_id", siblingid);
       f = fopen(str, "r");
       if(!f) {
 	log_thread.warning() << "can't read '" << str << "' - skipping";
