@@ -7933,6 +7933,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       pack_single_task(rez, target);
+      parent_ctx->pack_task_context(rez);
       return false;
     }
 
@@ -7948,6 +7949,10 @@ namespace Legion {
       // Save this on the stack to prevent it being overwritten by unpack_single
       const ApUserEvent temp_single_task_termination = single_task_termination;
       unpack_single_task(derez, ready_events);
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Restore the single task termination event
 #ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
