@@ -22378,13 +22378,13 @@ namespace Legion {
       RtEvent ctx_ready;
       InnerContext *result = 
         runtime->find_or_request_inner_context(result_did, ctx_ready);
-      if (ctx_ready.exists())
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
       {
         // Launch a continuation in case we need to page in the context
         // We obviously can't block the virtual channel
         RemotePhysicalResponseArgs args(target, result, index);
-        RtEvent done = 
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
+        RtEvent done = runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
         Runtime::trigger_event(to_trigger, done);
       }
       else
