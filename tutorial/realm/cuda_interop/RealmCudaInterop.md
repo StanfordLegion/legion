@@ -8,12 +8,12 @@ of the GPU.
 This tutorial will go over several features and best practices for working with
 Realm and CUDA, listed below:
 
-* [Enabling CUDA in Realm](#Enabling-CUDA-in-Realm)
-* [Registering GPU Tasks](#Registering-GPU-tasks)
-* [Allocating Memory Through Realm](#Allocating-Memory-Through-Realm)
-  * [CUDA Arrays](#CUDA-Arrays)
-* [Data Movement](#Data-Movement)
-* [Best Practices](#Best-Practices)
+* [Enabling CUDA in Realm](#enabling-cuda-in-realm)
+* [Registering GPU Tasks](#registering-gpu-tasks)
+* [Allocating Memory Through Realm](#allocating-memory-through-realm)
+  * [CUDA Arrays](#cuda-arrays)
+* [Data Movement](#data-movement)
+* [Best Practices](#best-practices)
 
 ## Enabling CUDA in Realm
 
