@@ -3826,6 +3826,18 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    void InnerContext::compute_shard_equivalence_sets(EqSetTracker *target,
+          AddressSpaceID target_space, IndexSpaceExpression *expr,
+          LogicalPartition partition, std::set<RtEvent> &ready_events,
+          const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
+          const bool expr_covers)
+    //--------------------------------------------------------------------------
+    {
+      // We should never get this call for a non-control replicated context
+      assert(false);
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
@@ -21470,6 +21482,84 @@ namespace Legion {
         return InnerContext::create_equivalence_set(node, op_ctx_index,
                             creating_shards, mask, old_sets, 
                             refinement_number, index, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::compute_shard_equivalence_sets(EqSetTracker *target,
+          AddressSpaceID target_space, IndexSpaceExpression *expr,
+          LogicalPartition partition, std::set<RtEvent> &ready_events,
+          const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
+          const bool expr_covers)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Our own shard here should never be represented
+      assert(children.find(owner_shard->shard_id) == children.end());
+#endif
+      // Forward the rest of these on to the other shards in the context
+      const ShardMapping &mapping = shard_manager->get_mapping();
+      for (std::map<ShardID,LegionMap<LegionColor,FieldMask> >::const_iterator
+            cit = children.begin(); cit != children.end(); cit++)
+      {
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        rez.serialize(shard_manager->did);
+        rez.serialize(cit->first);
+        rez.serialize(target);
+        rez.serialize(target_space);
+        rez.serialize(runtime->address_space); // source for expression
+        expr->pack_expression(rez, mapping[cit->first]);
+        rez.serialize<bool>(expr_covers);
+        rez.serialize(partition);
+        rez.serialize(cit->second.size());
+        for (LegionMap<LegionColor,FieldMask>::const_iterator it =
+              cit->second.begin(); it != cit->second.end(); it++)
+        {
+          rez.serialize(it->first);
+          it->second.serialize(rez);
+        }
+        rez.serialize(ready);
+        shard_manager->send_compute_equivalence_sets(cit->first, rez);
+        ready_events.insert(ready);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_compute_equivalence_sets(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EqSetTracker *target;
+      derez.deserialize(target);
+      AddressSpaceID target_space, expr_space;
+      derez.deserialize(target_space);
+      derez.deserialize(expr_space);
+      IndexSpaceExpression *expr = IndexSpaceExpression::unpack_expression(
+                                        derez, runtime->forest, expr_space);
+      bool expr_covers;
+      derez.deserialize<bool>(expr_covers);
+      LogicalPartition handle;
+      derez.deserialize(handle);
+      PartitionNode *partition = runtime->forest->get_node(handle);
+      size_t num_children;
+      derez.deserialize(num_children);
+      std::set<RtEvent> ready_events;
+      const ContextID ctx = get_context_id();
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        LegionColor child_color;
+        derez.deserialize(child_color);
+        FieldMask child_mask;
+        child_mask.deserialize(derez);
+        RegionNode *child = partition->get_child(child_color);
+        child->compute_equivalence_sets(ctx, this, target, target_space,
+            expr, child_mask, ready_events, true/*downward only*/, expr_covers);
+      }
+      RtUserEvent ready;
+      derez.deserialize(ready);
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
     }
 
 #if 0

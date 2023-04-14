@@ -849,6 +849,7 @@ namespace Legion {
       SEND_FUTURE_CREATE_INSTANCE_RESPONSE,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
+      SEND_REPL_COMPUTE_EQUIVALENCE_SETS,
       SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
       SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_BROADCAST_UPDATE,
@@ -1111,6 +1112,7 @@ namespace Legion {
         "Send Future Create Instance Response",                       \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
+        "Send Replicate Compute Equivalence Sets",                    \
         "Send Replicate Equivalence Set Notification",                \
         "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Broadcast Update",                            \

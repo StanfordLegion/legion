@@ -2903,6 +2903,8 @@ namespace Legion {
       void send_collective_message(ShardID target, Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
+      void send_compute_equivalence_sets(ShardID target, Serializer &rez);
+      void handle_compute_equivalence_sets(Deserializer &derez);
       void handle_equivalence_set_notification(Deserializer &derez);
     public:
       void send_intra_space_dependence(ShardID target, Serializer &rez);
@@ -2951,6 +2953,8 @@ namespace Legion {
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
+      static void handle_compute_equivalence_sets(Deserializer &derez,
+                                                  Runtime *runtime);
       static void handle_equivalence_set_notification(Deserializer &derez, 
                                                       Runtime *rt);
       static void handle_intra_space_dependence(Deserializer &derez, 

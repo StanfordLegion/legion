@@ -12850,6 +12850,12 @@ namespace Legion {
               runtime->handle_future_map_future_response(derez);
               break;
             }
+          case SEND_REPL_COMPUTE_EQUIVALENCE_SETS:
+            {
+              runtime->handle_control_replicate_compute_equivalence_sets(
+                                                                    derez);
+              break;
+            }
           case SEND_REPL_EQUIVALENCE_SET_NOTIFICATION:
             {
               runtime->handle_control_replicate_equivalence_set_notification(
@@ -22757,6 +22763,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_compute_equivalence_sets(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_REPL_COMPUTE_EQUIVALENCE_SETS>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_equivalence_set_notification(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -24996,6 +25011,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureImpl::handle_future_create_instance_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_compute_equivalence_sets(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_compute_equivalence_sets(derez, this);
     }
 
     //--------------------------------------------------------------------------

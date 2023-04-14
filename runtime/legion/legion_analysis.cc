@@ -23366,7 +23366,6 @@ namespace Legion {
       disjoint_complete |= mask;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_refinement(InnerContext &context,
                                       const FieldMask &mask, bool self,
@@ -23380,116 +23379,99 @@ namespace Legion {
       AutoLock m_lock(manager_lock);     
  #ifdef DEBUG_LEGION
       assert(to_traverse.empty());
+      assert(!(mask - disjoint_complete));
 #endif
-      if (self)
-      {
-        if (node->is_region())
-        {
-          // Check to see if we have pending refinements we need
-          // to tell the context that it can invalidate
-          const FieldMask invalidate_mask = mask - disjoint_complete;
-          if (!!invalidate_mask)
-            context.invalidate_disjoint_complete_sets(node->as_region_node(), 
-                                                      invalidate_mask);
-        }
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        else
-          assert(!(mask - disjoint_complete));
-#endif
-#endif
-        if (!!disjoint_complete)
-        {
-          disjoint_complete -= mask;
-          if (!disjoint_complete)
-            remove_node_disjoint_complete_ref();
-        }
-      }
       FieldMask children_overlap;
       if (!disjoint_complete_children.empty())
         children_overlap = mask & disjoint_complete_children.get_valid_mask();
-      // Always invalidate any equivalence sets that we might have
-      if (!equivalence_sets.empty() && 
-          !(mask * equivalence_sets.get_valid_mask()))
+      if (self)
       {
-        std::vector<EquivalenceSet*> to_delete;
-#ifdef DEBUG_LEGION
-        assert(node->is_region());
-#endif
-        FieldMask untrack_mask;
-        // Handle the nasty case where there is just one equivalence set
-        // and the index space is empty so the summary valid mask is aliased
-        if ((equivalence_sets.size() == 1) &&
-            node->as_region_node()->row_source->is_empty())
+        disjoint_complete -= mask;
+        if (!disjoint_complete)
+          remove_node_disjoint_complete_ref();
+        // Invalidate any equivalence sets that we might have at this node
+        if (!equivalence_sets.empty() && 
+            !(mask * equivalence_sets.get_valid_mask()))
         {
-          FieldMaskSet<EquivalenceSet>::iterator finder =
-            equivalence_sets.begin();
-          const FieldMask overlap = finder->second & mask;
-          if (!!overlap)
+          std::vector<EquivalenceSet*> to_delete;
+#ifdef DEBUG_LEGION
+          assert(node->is_region());
+#endif
+          FieldMask untrack_mask;
+          // Handle the nasty case where there is just one equivalence set
+          // and the index space is empty so the summary valid mask is aliased
+          if ((equivalence_sets.size() == 1) &&
+              node->as_region_node()->row_source->is_empty())
           {
-            finder.filter(overlap);
-            untrack_mask |= overlap;
-            // Remove this if the only remaining fields are not refinements
-            if (!finder->second || (finder->second * disjoint_complete))
+            FieldMaskSet<EquivalenceSet>::iterator finder =
+              equivalence_sets.begin();
+            const FieldMask overlap = finder->second & mask;
+            if (!!overlap)
             {
-              // Remove this entirely from the set
-              // The version manager resource reference flows back
-              to_delete.push_back(finder->first);
-              // Record this to be released once all the effects are applied
-              to_release.push_back(finder->first);
+              finder.filter(overlap);
+              untrack_mask |= overlap;
+              // Remove this if the only remaining fields are not refinements
+              if (!finder->second || (finder->second * disjoint_complete))
+              {
+                // Remove this entirely from the set
+                // The version manager resource reference flows back
+                to_delete.push_back(finder->first);
+                // Record this to be released once all the effects are applied
+                to_release.push_back(finder->first);
+              }
             }
           }
-        }
-        else
-        {
-          // This is the common case
-          for (FieldMaskSet<EquivalenceSet>::iterator it = 
-                equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          else
           {
-            // Skip any nodes that are not even part of a refinement 
-            // Unless we are a non-exclusive virtual mapping root in
-            // which case we do still want to invalidate these
-            if ((it->first->region_node != node) && 
-                !nonexclusive_virtual_mapping_root)
-              continue;
-            FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            // If we have disjoint complete children then we do not actually
-            // own these equivalence sets (we're just another observer) so
-            // we can't actually remove them, just ignore them
-            if (!!children_overlap)
+            // This is the common case
+            for (FieldMaskSet<EquivalenceSet>::iterator it = 
+                  equivalence_sets.begin(); it != equivalence_sets.end(); it++)
             {
-              overlap -= children_overlap;
+              // Skip any nodes that are not even part of a refinement 
+              // Unless we are a non-exclusive virtual mapping root in
+              // which case we do still want to invalidate these
+              if ((it->first->region_node != node) && 
+                  !nonexclusive_virtual_mapping_root)
+                continue;
+              FieldMask overlap = it->second & mask;
               if (!overlap)
                 continue;
-            }
-            untrack_mask |= overlap; 
-            it.filter(overlap);
-            if (!it->second)
-            {
-              to_delete.push_back(it->first);
-              // Record this to be released once all the effects are applied
-              to_release.push_back(it->first);
+              // If we have disjoint complete children then we do not actually
+              // own these equivalence sets (we're just another observer) so
+              // we can't actually remove them, just ignore them
+              if (!!children_overlap)
+              {
+                overlap -= children_overlap;
+                if (!overlap)
+                  continue;
+              }
+              untrack_mask |= overlap; 
+              it.filter(overlap);
+              if (!it->second)
+              {
+                to_delete.push_back(it->first);
+                // Record this to be released once all the effects are applied
+                to_release.push_back(it->first);
+              }
             }
           }
-        }
-        if (!!untrack_mask && !refinement_subscriptions.empty())
-          filter_refinement_subscriptions(untrack_mask, subscribers);
-        if (!to_delete.empty())
-        {
-          for (std::vector<EquivalenceSet*>::const_iterator it =
-                to_delete.begin(); it != to_delete.end(); it++)
+          if (!!untrack_mask && !refinement_subscriptions.empty())
+            filter_refinement_subscriptions(untrack_mask, subscribers);
+          if (!to_delete.empty())
           {
-            equivalence_sets.erase(*it);
-            // Remove our version manager reference here, this shouldn't
-            // end up deleting the equivalence set though since the 
-            // to_release data structure still holds a disjoin-complete ref
-            if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
-              assert(false);
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              equivalence_sets.erase(*it);
+              // Remove our version manager reference here, this shouldn't
+              // end up deleting the equivalence set though since the 
+              // to_release data structure still holds a disjoin-complete ref
+              if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
+                assert(false);
+            }
           }
+          equivalence_sets.tighten_valid_mask();
         }
-        equivalence_sets.tighten_valid_mask();
       }
       if (!!children_overlap)
       {
@@ -23520,8 +23502,30 @@ namespace Legion {
         }
         disjoint_complete_children.tighten_valid_mask();
       }
+      if (!disjoint_complete_children_shards.empty() &&
+          !(mask * disjoint_complete_children_shards.get_valid_mask()))
+      {
+        std::vector<ShardedColorMap*> to_delete;
+        for (FieldMaskSet<ShardedColorMap>::iterator it =
+              disjoint_complete_children_shards.begin(); it !=
+              disjoint_complete_children_shards.end(); it++)
+        {
+          it.filter(mask);
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<ShardedColorMap*>::const_iterator it =
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            disjoint_complete_children_shards.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
+          }
+        }
+      }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::filter_refinement_subscriptions(const FieldMask &mask,

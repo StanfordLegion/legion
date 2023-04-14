@@ -10840,6 +10840,7 @@ namespace Legion {
             set->clone_from(runtime->address_space, it->first, 
                 it->second, false/*forward*/, map_applied_conditions);
         }
+        // No need for invalidation since we're the first ones here
         region_node->invalidate_refinement(ctx, refinement_mask, 
             false/*self*/, *parent_ctx, map_applied_conditions, to_release);
         region_node->record_refinement(ctx, set, refinement_mask);

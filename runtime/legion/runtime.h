@@ -3335,6 +3335,8 @@ namespace Legion {
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
                                            Serializer &rez);
+      void send_control_replicate_compute_equivalence_sets(
+                                        AddressSpaceID target, Serializer &rez);
       void send_control_replicate_equivalence_set_notification(
                                         AddressSpaceID target, Serializer &rez);
       void send_control_replicate_intra_space_dependence(AddressSpaceID target,
@@ -3832,6 +3834,8 @@ namespace Legion {
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
       void handle_control_replicate_collective_message(Deserializer &derez);
+      void handle_control_replicate_compute_equivalence_sets(
+                                                           Deserializer &derez);
       void handle_control_replicate_equivalence_set_notification(
                                                            Deserializer &derez);
       void handle_control_replicate_intra_space_dependence(Deserializer &derez);
@@ -6026,6 +6030,8 @@ namespace Legion {
         case SEND_FUTURE_MAP_REQUEST:
           break;
         case SEND_FUTURE_MAP_RESPONSE:
+          break;
+        case SEND_REPL_COMPUTE_EQUIVALENCE_SETS:
           break;
         case SEND_REPL_EQUIVALENCE_SET_NOTIFICATION:
           break;

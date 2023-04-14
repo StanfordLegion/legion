@@ -2966,6 +2966,7 @@ namespace Legion {
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
+      void handle_compute_equivalence_sets(Deserializer &derez);
 #if 0
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
