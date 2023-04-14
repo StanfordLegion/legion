@@ -1987,6 +1987,7 @@ namespace Legion {
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplMergeCloseOp;
+    class ReplVirtualCloseOp;
     class ReplRefinementOp;
     class ReplFillOp;
     class ReplIndexFillOp;

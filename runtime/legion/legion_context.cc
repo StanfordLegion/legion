@@ -9981,6 +9981,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VirtualCloseOp* InnerContext::get_virtual_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_virtual_close_op();
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::pack_task_context(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did); // pack our distributed ID
+      rez.serialize<DistributedID>(0); // no shard manager
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ InnerContext* InnerContext::unpack_task_context(
+                    Deserializer &derez, Runtime *runtime, RtEvent &ready_event)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID ctx_did, man_did;
+      derez.deserialize(ctx_did);
+      derez.deserialize(man_did);
+      if ((runtime->determine_owner(ctx_did) != runtime->address_space) &&
+          (man_did > 0))
+      {
+        ShardManager *manager =
+          runtime->find_shard_manager(man_did, true/*can fail*/);
+        if (manager != NULL)
+          return manager->find_local_context();
+      }
+      return runtime->find_or_request_inner_context(ctx_did, ready_event);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
@@ -11526,8 +11560,7 @@ namespace Legion {
           // sets at the same time. For other privileges we're
           // already using the original set without any local
           // refinements so we don't need to do the copy out
-          VirtualCloseOp *close_op = 
-            runtime->get_available_virtual_close_op();
+          VirtualCloseOp *close_op = get_virtual_close_op(); 
           close_op->initialize(this, idx, regions[idx],
               &(owner_task->get_version_info(idx)));
           add_to_dependence_queue(close_op);
@@ -20002,6 +20035,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VirtualCloseOp* ReplicateContext::get_virtual_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_repl_virtual_close_op();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::pack_task_context(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did); // pack our distributed ID
+      rez.serialize<DistributedID>(shard_manager->did);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::pack_remote_context(Serializer &rez,
                                           AddressSpaceID target, bool replicate)
     //--------------------------------------------------------------------------
@@ -21976,6 +22024,14 @@ namespace Legion {
 #endif
         return physical_contexts[index]; 
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::pack_task_context(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(did); // pack our distributed ID
+      rez.serialize<DistributedID>(repl_id); // shard manager ID
     }
 
     //--------------------------------------------------------------------------
@@ -24215,32 +24271,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* LeafContext::get_merge_close_op(const LogicalUser &user,
-                                                  RegionTreeNode *node)
-#else
-    MergeCloseOp* LeafContext::get_merge_close_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    RefinementOp* LeafContext::get_refinement_op(const LogicalUser &user,
-                                                 RegionTreeNode *node)
-#else
-    RefinementOp* LeafContext::get_refinement_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
     }
 
     //--------------------------------------------------------------------------
