@@ -9981,6 +9981,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VirtualCloseOp* InnerContext::get_virtual_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_virtual_close_op();
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::destroy_lock(Lock l)
     //--------------------------------------------------------------------------
     {
@@ -11526,8 +11533,7 @@ namespace Legion {
           // sets at the same time. For other privileges we're
           // already using the original set without any local
           // refinements so we don't need to do the copy out
-          VirtualCloseOp *close_op = 
-            runtime->get_available_virtual_close_op();
+          VirtualCloseOp *close_op = get_virtual_close_op(); 
           close_op->initialize(this, idx, regions[idx],
               &(owner_task->get_version_info(idx)));
           add_to_dependence_queue(close_op);
@@ -20002,6 +20008,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VirtualCloseOp* ReplicateContext::get_virtual_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_repl_virtual_close_op();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::pack_remote_context(Serializer &rez,
                                           AddressSpaceID target, bool replicate)
     //--------------------------------------------------------------------------
@@ -24215,32 +24228,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    MergeCloseOp* LeafContext::get_merge_close_op(const LogicalUser &user,
-                                                  RegionTreeNode *node)
-#else
-    MergeCloseOp* LeafContext::get_merge_close_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef DEBUG_LEGION_COLLECTIVES
-    RefinementOp* LeafContext::get_refinement_op(const LogicalUser &user,
-                                                 RegionTreeNode *node)
-#else
-    RefinementOp* LeafContext::get_refinement_op(void)
-#endif
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return NULL;
     }
 
     //--------------------------------------------------------------------------
