@@ -6488,7 +6488,7 @@ namespace Legion {
         rez.serialize<bool>(valid_output_regions[idx]);
       rez.serialize(orig_task);
       rez.serialize(remote_unique_id);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_task_context(rez);
       rez.serialize(top_level_task);
       if (!elide_future_return)
       {
@@ -6534,8 +6534,9 @@ namespace Legion {
       derez.deserialize(orig_task);
       derez.deserialize(remote_unique_id);
       set_current_proc(current);
-      DistributedID context_did;
-      derez.deserialize(context_did);
+      // Figure out what our parent context is
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
       derez.deserialize(top_level_task);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
@@ -6558,10 +6559,6 @@ namespace Legion {
         deactivate();
         return false;
       }
-      // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = 
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
       if (!elide_future_return)
       {
         result = FutureImpl::unpack_future(runtime, derez);
@@ -7636,8 +7633,6 @@ namespace Legion {
       current_proc = proc;
       shard_manager = manager;
       shard_barrier = shard_manager->get_shard_task_barrier();
-      if (manager->original_task != NULL)
-        context_did = manager->original_task->get_context()->did;
       // Only make our termination event on the node where the shard will run
       if (runtime->find_address_space(proc) == runtime->address_space)
         single_task_termination = Runtime::create_ap_user_event(NULL);
@@ -7899,7 +7894,7 @@ namespace Legion {
     {
       RezCheck z(rez);
       pack_single_task(rez, target);
-      rez.serialize(context_did);
+      parent_ctx->pack_task_context(rez);
       return false;
     }
 
@@ -7915,18 +7910,15 @@ namespace Legion {
       // Save this on the stack to prevent it being overwritten by unpack_single
       const ApUserEvent temp_single_task_termination = single_task_termination;
       unpack_single_task(derez, ready_events);
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Restore the single task termination event
 #ifdef DEBUG_LEGION
       assert(!single_task_termination.exists());
 #endif
       single_task_termination = temp_single_task_termination;
-      derez.deserialize(context_did);
-      // Figure out what our parent context is
-      RtEvent ctx_ready;
-      parent_ctx = 
-        runtime->find_or_request_inner_context(context_did, ctx_ready);
-      if (ctx_ready.exists())
-        ready_events.insert(ctx_ready);
       return false;
     }
 
@@ -11052,7 +11044,7 @@ namespace Legion {
       rez.serialize(index_owner);
       rez.serialize(remote_unique_id);
       rez.serialize(origin_mapped);
-      rez.serialize(parent_ctx->did);
+      parent_ctx->pack_task_context(rez);
       rez.serialize(internal_space);
       if (!elide_future_return)
       {
@@ -11125,8 +11117,8 @@ namespace Legion {
       derez.deserialize(index_owner);
       derez.deserialize(remote_unique_id); 
       derez.deserialize(origin_mapped);
-      DistributedID context_did;
-      derez.deserialize(context_did);
+      RtEvent ctx_ready;
+      parent_ctx = InnerContext::unpack_task_context(derez, runtime, ctx_ready);
       derez.deserialize(internal_space);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
@@ -11138,18 +11130,9 @@ namespace Legion {
       num_uncommitted_points = num_points;
       // Remote slice tasks are always resolved
       resolved = true;
-      // Check to see if we ended up back on the original node
       // We have to do this before unpacking the points
-      if (is_remote())
-      {
-        RtEvent ctx_ready;
-        parent_ctx =
-          runtime->find_or_request_inner_context(context_did, ctx_ready);
-        if (ctx_ready.exists() && !ctx_ready.has_triggered())
-          ctx_ready.wait();
-      }
-      else
-        parent_ctx = index_owner->parent_ctx;
+      if (ctx_ready.exists() && !ctx_ready.has_triggered())
+        ctx_ready.wait();
       if (!elide_future_return)
       {
         if (redop == 0)

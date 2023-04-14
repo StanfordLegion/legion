@@ -17245,6 +17245,7 @@ namespace Legion {
       free_available(available_repl_individual_tasks);
       free_available(available_repl_index_tasks);
       free_available(available_repl_merge_close_ops);
+      free_available(available_repl_virtual_close_ops);
       free_available(available_repl_refinement_ops);
       free_available(available_repl_fill_ops);
       free_available(available_repl_index_fill_ops);
@@ -28160,6 +28161,14 @@ namespace Legion {
     {
       return get_available(merge_close_op_lock, available_repl_merge_close_ops);
     }
+
+    //--------------------------------------------------------------------------
+    ReplVirtualCloseOp* Runtime::get_available_repl_virtual_close_op(void)
+    //-------------------------------------------------------------------------- 
+    {
+      return get_available(virtual_close_op_lock,
+                available_repl_virtual_close_ops);
+    }
     
     //--------------------------------------------------------------------------
     ReplRefinementOp* Runtime::get_available_repl_refinement_op(void)
@@ -28757,6 +28766,14 @@ namespace Legion {
     {
       AutoLock m_lock(merge_close_op_lock);
       release_operation<false>(available_repl_merge_close_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_virtual_close_op(ReplVirtualCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock v_lock(virtual_close_op_lock);
+      release_operation<false>(available_repl_virtual_close_ops, op);
     }
 
     //--------------------------------------------------------------------------

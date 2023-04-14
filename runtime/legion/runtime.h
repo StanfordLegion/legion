@@ -4115,6 +4115,7 @@ namespace Legion {
       ReplIndividualTask*   get_available_repl_individual_task(void);
       ReplIndexTask*        get_available_repl_index_task(void);
       ReplMergeCloseOp*     get_available_repl_merge_close_op(void);
+      ReplVirtualCloseOp*   get_available_repl_virtual_close_op(void);
       ReplRefinementOp*     get_available_repl_refinement_op(void);
       ReplFillOp*           get_available_repl_fill_op(void);
       ReplIndexFillOp*      get_available_repl_index_fill_op(void);
@@ -4192,6 +4193,7 @@ namespace Legion {
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
       void free_repl_merge_close_op(ReplMergeCloseOp *op);
+      void free_repl_virtual_close_op(ReplVirtualCloseOp *op);
       void free_repl_refinement_op(ReplRefinementOp *op);
       void free_repl_fill_op(ReplFillOp *op);
       void free_repl_index_fill_op(ReplIndexFillOp *op);
@@ -4641,6 +4643,7 @@ namespace Legion {
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;
       std::deque<ReplMergeCloseOp*>     available_repl_merge_close_ops;
+      std::deque<ReplVirtualCloseOp*>   available_repl_virtual_close_ops;
       std::deque<ReplRefinementOp*>     available_repl_refinement_ops;
       std::deque<ReplFillOp*>           available_repl_fill_ops;
       std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
@@ -5026,7 +5029,9 @@ namespace Legion {
 #ifdef LEGION_TRACE_ALLOCATION
         HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
-        delete (*it);
+        // Do explicit deletion to keep valgrind happy
+        (*it)->~T();
+        free(*it);
       }
       queue.clear();
     }
@@ -5041,7 +5046,9 @@ namespace Legion {
 #ifdef LEGION_TRACE_ALLOCATION
         HandleAllocation<T,HasAllocType<T>::value>::trace_free();
 #endif
-        delete (operation);
+        // Do explicit deletion to keep valgrind happy
+        operation->~T();
+        free(operation);
       }
       else
         queue.push_front(operation);

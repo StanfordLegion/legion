@@ -1047,7 +1047,6 @@ namespace Legion {
     public:
       const ShardID shard_id;
     protected:
-      DistributedID context_did;
       RtBarrier shard_barrier;
       bool all_shards_complete;
     };

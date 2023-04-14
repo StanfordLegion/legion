@@ -1915,6 +1915,97 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Virtual Close Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplVirtualCloseOp::ReplVirtualCloseOp(Runtime *rt)
+      : VirtualCloseOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplVirtualCloseOp::~ReplVirtualCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplVirtualCloseOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      VirtualCloseOp::activate();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplVirtualCloseOp::deactivate(bool free)
+    //--------------------------------------------------------------------------
+    {
+      VirtualCloseOp::deactivate(false/*free*/);
+      if (free)
+        runtime->free_repl_virtual_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplVirtualCloseOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // We need a consistent way to decide which shard is going to issue
+      // the copies for different sources. We do that based on the owner
+      // space of the equivalence set right now
+      FieldMaskSet<EquivalenceSet> sources;
+      if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+      {
+        const AddressSpaceID local_space = runtime->address_space;
+        const FieldMaskSet<EquivalenceSet> &equivalence_sets = 
+          source_version_info.get_equivalence_sets();
+        const CollectiveMapping &mapping =
+          repl_ctx->shard_manager->get_collective_mapping();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+          if (mapping.contains(it->first->owner_space))
+          {
+            if (it->first->owner_space == local_space)
+              sources.insert(it->first, it->second);
+          }
+          else if (mapping.find_nearest(it->first->owner_space) == local_space)
+            sources.insert(it->first, it->second);
+        }
+      }
+      if (!sources.empty())
+      {
+        IndexSpaceExpression *expr = 
+          runtime->forest->get_node(requirement.region.get_index_space()); 
+        CloneAnalysis *analysis = new CloneAnalysis(runtime, expr, 
+            parent_ctx->owner_task, parent_idx, std::move(sources));
+        analysis->add_reference();
+        
+        const RtEvent traversal_done = analysis->perform_traversal(
+            RtEvent::NO_RT_EVENT, *target_version_info, map_applied_conditions);
+        if (traversal_done.exists() || analysis->has_remote_sets())
+          analysis->perform_remote(traversal_done, map_applied_conditions);
+        if (analysis->remove_reference())
+          delete analysis;
+
+        if (!map_applied_conditions.empty())
+        {
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+          return;
+        }
+      }
+      complete_mapping();
+      complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
     // Repl Refinement Op 
     /////////////////////////////////////////////////////////////
 

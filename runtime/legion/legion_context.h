@@ -1656,6 +1656,11 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
       virtual RefinementOp* get_refinement_op(void);
 #endif
+      virtual VirtualCloseOp* get_virtual_close_op(void);
+    public:
+      virtual void pack_task_context(Serializer &rez) const;
+      static InnerContext* unpack_task_context(Deserializer &derez,
+          Runtime *runtime, RtEvent &ctx_ready);
     public:
       bool nonexclusive_virtual_mapping(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
@@ -2897,6 +2902,9 @@ namespace Legion {
       virtual MergeCloseOp* get_merge_close_op(void);
       virtual RefinementOp* get_refinement_op(void);
 #endif
+      virtual VirtualCloseOp* get_virtual_close_op(void);
+    public:
+      virtual void pack_task_context(Serializer &rez) const;
     public:
       virtual void pack_remote_context(Serializer &rez, 
                                        AddressSpaceID target,
@@ -3379,6 +3387,7 @@ namespace Legion {
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask);
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual void pack_task_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
