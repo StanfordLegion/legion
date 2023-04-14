@@ -5420,6 +5420,18 @@ namespace Legion {
     {
       MustEpochOp::deactivate(false/*free*/);
       shard_single_tasks.clear();
+      if (mapping_broadcast != NULL)
+        delete mapping_broadcast;
+      if (mapping_exchange != NULL)
+        delete mapping_exchange;
+      if (dependence_exchange != NULL)
+        delete dependence_exchange;
+      if (completion_exchange != NULL)
+        delete completion_exchange;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        delete sharding_collective;
+#endif
       if (freeop)
         runtime->free_repl_epoch_op(this);
     }
@@ -5758,27 +5770,6 @@ namespace Legion {
         ReplIndexTask *task = static_cast<ReplIndexTask*>(index_tasks[idx]);
         task->set_sharding_function(sharding_functor, sharding_function);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplMustEpochOp::trigger_commit(void)
-    //--------------------------------------------------------------------------
-    {
-      // We have to delete these here to make sure that they are
-      // unregistered with the context before the context is deleted
-      if (mapping_broadcast != NULL)
-        delete mapping_broadcast;
-      if (mapping_exchange != NULL)
-        delete mapping_exchange;
-      if (dependence_exchange != NULL)
-        delete dependence_exchange;
-      if (completion_exchange != NULL)
-        delete completion_exchange;
-#ifdef DEBUG_LEGION
-      if (sharding_collective != NULL)
-        delete sharding_collective;
-#endif
-      MustEpochOp::trigger_commit();
     }
 
     //--------------------------------------------------------------------------
