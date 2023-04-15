@@ -2159,7 +2159,6 @@ namespace Legion {
                                       std::set<ApEvent> &tasks_complete);
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_commit(void);
       virtual void receive_resources(size_t return_index,
               std::map<LogicalRegion,unsigned> &created_regions,
               std::vector<DeletedRegion> &deleted_regions,
