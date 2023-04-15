@@ -19430,7 +19430,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_logical_state(ContextID src, ContextID dst,
-                                               bool merge)
+                 bool merge, const std::vector<ShardID> *shard_to_shard_mapping)
     //--------------------------------------------------------------------------
     {
       LogicalState &src_state = get_logical_state(src);
@@ -19440,10 +19440,14 @@ namespace Legion {
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_state.merge(src_state, to_traverse); 
+        dst_state.merge_refinements(src_state, 
+            shard_to_shard_mapping, to_traverse); 
       }
+      else if (shard_to_shard_mapping != NULL)
+        dst_state.convert_refinements(src_state, 
+            *shard_to_shard_mapping, to_traverse);
       else
-        dst_state.swap(src_state, to_traverse);
+        dst_state.swap_refinements(src_state, to_traverse);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_logical_state(src, dst, merge);

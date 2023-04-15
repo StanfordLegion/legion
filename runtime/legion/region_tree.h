@@ -4004,7 +4004,8 @@ namespace Legion {
                                    bool force_close_next);
 #endif
     public:
-      void migrate_logical_state(ContextID src, ContextID dst, bool merge);
+      void migrate_logical_state(ContextID src, ContextID dst, bool merge,
+               const std::vector<ShardID> *shard_to_shard_mapping = NULL);
       void migrate_version_state(ContextID src, ContextID dst, 
                                  std::set<RtEvent> &applied, bool merge);
       void pack_logical_state(ContextID ctx, Serializer &rez, 

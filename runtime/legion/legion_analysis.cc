@@ -4138,6 +4138,62 @@ namespace Legion {
         children.insert(refined_child);
     }
 
+#if 0
+    //--------------------------------------------------------------------------
+    RefinementTracker* RegionRefinementTracker::convert(LogicalState *new_owner,
+                       const std::vector<ShardID> *shard_to_shard_mapping) const
+    //--------------------------------------------------------------------------
+    {
+      if (refined_projection != NULL)
+      {
+        
+
+      }
+      else
+        return new RegionRefinementTracker(*this, owner, refined_child);
+    }
+
+
+    //--------------------------------------------------------------------------
+    RefinementTracker* RegionRefinementTracker::merge(
+                       const RefinementTracker *other,
+                       const std::vector<ShardID> *shard_to_shard_mapping) const
+    //--------------------------------------------------------------------------
+    {
+      RegionRefinementTracker *rhs = other->as_region_tracker();
+#ifdef DEBUG_LEGION
+      assert(rhs != NULL);
+      assert(region == rhs->region);
+      assert(current_refinement);
+      assert(rhs->current_refinement);
+#endif
+      if (refined_child != NULL)
+      {
+        // If we have a child the other shards should have the same thing
+        // so there are no discrepancies between them
+#ifdef DEBUG_LEGION
+        assert(rhs->refined_child == refined_child);
+#endif
+        return this;
+      }
+#ifdef DEBUG_LEGION
+      assert((refined_projection != NULL) == (rhs->refined_projection != NULL));
+#endif
+      if (refined_projection == NULL)
+        return this;
+      ProjectionRegion *left = 
+        refined_projection->result->as_region_projection();
+      ProjectionRegion *right = 
+        rhs->refined_projection->result->as_region_projection();
+      ProjectionRegion *merged = left->merge(right, shard_to_shard_mapping);
+      if (merged != left)
+        return new RegionRefinementProjection(*this, owner,
+            new ProjectionSummary(*refined_projection, merged));
+      else
+        return this;
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // PartitionRefinementTracker
     ///////////////////////////////////////////////////////////// 
@@ -4691,41 +4747,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::merge(LogicalState &src, 
+    void LogicalState::merge_refinements(LogicalState &src, 
+                             const std::vector<ShardID> *shard_to_shard_mapping,
                              std::set<RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
-      for (LegionList<FieldState>::iterator fit = 
-            src.field_states.begin(); fit != src.field_states.end(); fit++)
-      {
-        for (FieldState::OrderedFieldMaskChildren::iterator it = 
-              fit->open_children.begin(); it != fit->open_children.end(); it++)
-          to_traverse.insert(it->first);
-        // See if we can add it to any of the existing field states
-        bool merged = false;
-        for (LegionList<FieldState>::iterator it = 
-              field_states.begin(); it != field_states.end(); it++)
-        {
-          if (!it->overlaps(*fit))
-            continue;
-          it->merge(*fit, owner);
-          merged = true;
-          break;
-        }
-        if (!merged)
-          field_states.push_back(*fit);
-      }
-      src.field_states.clear();
-      for (OrderedFieldMaskUsers::const_iterator it =
-            src.curr_epoch_users.begin(); it != 
-            src.curr_epoch_users.end(); it++)
-        if (curr_epoch_users.insert(it->first, it->second))
-          it->first->add_reference();
-      for (OrderedFieldMaskUsers::const_iterator it =
-            src.prev_epoch_users.begin(); it != 
-            src.prev_epoch_users.end(); it++)
-        if (prev_epoch_users.insert(it->first, it->second))
-          it->first->add_reference();
+      // Just need to merge the refinement state
       if (!src.refinement_trackers.empty())
       {
         // We're only migrating the non-projected parts of the
@@ -4737,10 +4764,46 @@ namespace Legion {
           it->first->find_child_refinements(to_traverse);
         if (!refinement_trackers.empty())
         {
-          for (FieldMaskSet<RefinementTracker>::const_iterator it =
-                src.refinement_trackers.begin(); it !=
-                src.refinement_trackers.end(); it++)
-            delete it->first;
+          for (FieldMaskSet<RefinementTracker>::iterator src_it =
+                src.refinement_trackers.begin(); src_it !=
+                src.refinement_trackers.end(); src_it++)
+          {
+            FieldMaskSet<RefinementTracker> to_add;
+            std::vector<RefinementTracker*> to_delete;
+            for (FieldMaskSet<RefinementTracker>::iterator dst_it =
+                  refinement_trackers.begin(); dst_it !=
+                  refinement_trackers.end(); dst_it++)
+            {
+              const FieldMask overlap = dst_it->second & src_it->second;
+              if (!overlap)
+                continue;
+              RefinementTracker *tracker = 
+                dst_it->first->merge(src_it->first, shard_to_shard_mapping);
+              if (tracker != dst_it->first)
+              {
+                to_add.insert(tracker, overlap);
+                dst_it.filter(overlap);
+                if (!dst_it->second)
+                  to_delete.push_back(dst_it->first);
+              }
+              src_it.filter(overlap);
+              if (!src_it->second)
+                break;
+            }
+            for (std::vector<RefinementTracker*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              refinement_trackers.erase(*it);
+              delete (*it);
+            }
+            for (FieldMaskSet<RefinementTracker>::const_iterator it =
+                  to_add.begin(); it != to_add.end(); it++)
+              refinement_trackers.insert(it->first, it->second);
+            if (!src_it->second)
+              delete src_it->first;
+            else
+              refinement_trackers.insert(src_it->first, src_it->second);
+          }
           src.refinement_trackers.clear();
         }
         else
@@ -4752,25 +4815,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LogicalState::swap(LogicalState &src,
-                            std::set<RegionTreeNode*> &to_traverse)
+    void LogicalState::convert_refinements(LogicalState &src,
+        const std::vector<ShardID> &shard_to_shard_mapping,
+        std::set<RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       check_init();
 #endif
-      field_states.swap(src.field_states);
-      curr_epoch_users.swap(src.curr_epoch_users);
-      prev_epoch_users.swap(src.prev_epoch_users);
+      for (FieldMaskSet<RefinementTracker>::const_iterator it =
+            src.refinement_trackers.begin(); it != 
+            src.refinement_trackers.end(); it++)
+      {
+        it->first->find_child_refinements(to_traverse);
+        RefinementTracker *converted = 
+          it->first->convert(shard_to_shard_mapping);
+        if (converted != it->first)
+        {
+          delete it->first;
+          refinement_trackers.insert(converted, it->second);
+        }
+        else
+          refinement_trackers.insert(it->first, it->second);
+      }
+      src.refinement_trackers.clear();
+#ifdef DEBUG_LEGION
+      src.check_init();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::swap_refinements(LogicalState &src,
+                                        std::set<RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      check_init();
+#endif
       refinement_trackers.swap(src.refinement_trackers);
       for (FieldMaskSet<RefinementTracker>::const_iterator it =
             refinement_trackers.begin(); it != refinement_trackers.end(); it++)
         it->first->find_child_refinements(to_traverse);
-      for (LegionList<FieldState>::const_iterator fit = 
-            field_states.begin(); fit != field_states.end(); fit++)
-        for (FieldState::OrderedFieldMaskChildren::const_iterator it = 
-              fit->open_children.begin(); it != fit->open_children.end(); it++)
-          to_traverse.insert(it->first);
 #ifdef DEBUG_LEGION
       src.check_init();
 #endif

@@ -1285,6 +1285,9 @@ namespace Legion {
     public:
       virtual ~RefinementTracker(void) { };
     public:
+      virtual RegionRefinementTracker* as_region_tracker(void) { return NULL; }
+      virtual PartitionRefinementTracker* as_partition_tracker(void)
+        { return NULL; }
       virtual RefinementTracker* clone(void) const = 0;
       virtual bool is_disjoint_complete(void) const = 0;
       virtual bool needs_fallback_refinement(
@@ -1299,6 +1302,10 @@ namespace Legion {
                                       const FieldMask &invalidation_mask) = 0;
       virtual void find_child_refinements(
           std::set<RegionTreeNode*> &children) const = 0;
+      virtual RefinementTracker* convert(
+          const std::vector<ShardID> &shard_to_shard_mapping) = 0;
+      virtual RefinementTracker* merge(RefinementTracker *rhs,
+          const std::vector<ShardID> *shard_to_shard_mapping) = 0;
     public:
       // This is the number of return children or projections we need
       // to observe in total before we consider a change to a refinement
@@ -1331,6 +1338,7 @@ namespace Legion {
       RegionRefinementTracker& operator=(
                               const RegionRefinementTracker &rhs) = delete;
     public:
+      virtual RegionRefinementTracker* as_region_tracker(void) { return this; }
       virtual RefinementTracker* clone(void) const;
       virtual bool is_disjoint_complete(void) const;
       virtual bool needs_fallback_refinement(
@@ -1344,6 +1352,10 @@ namespace Legion {
                                          const FieldMask &invalidation_mask);
       virtual void find_child_refinements(
           std::set<RegionTreeNode*> &children) const;
+      virtual RefinementTracker* convert(
+          const std::vector<ShardID> &shard_to_shard_mapping);
+      virtual RefinementTracker* merge(RefinementTracker *rhs,
+          const std::vector<ShardID> *shard_to_shard_mapping);
     protected:
       bool is_dominant_candidate(double score, bool is_current);
       void invalidate_unused_candidates(void);
@@ -1372,7 +1384,7 @@ namespace Legion {
     };
 
     /**
-     * \class RegionRefinementTracker
+     * \class PartitionRefinementTracker
      * This class tracks the refinements (both sub-regions and projections)
      * on a region node in the region tree.
      */
@@ -1388,6 +1400,8 @@ namespace Legion {
       PartitionRefinementTracker& operator=(
           const PartitionRefinementTracker &rhs) = delete;
     public:
+      virtual PartitionRefinementTracker* as_partition_tracker(void)
+        { return this; }
       virtual RefinementTracker* clone(void) const;
       virtual bool is_disjoint_complete(void) const;
       virtual bool needs_fallback_refinement(
@@ -1401,6 +1415,10 @@ namespace Legion {
                                          const FieldMask &invalidation_mask);
       virtual void find_child_refinements(
           std::set<RegionTreeNode*> &children) const;
+      virtual RefinementTracker* convert(
+          const std::vector<ShardID> &shard_to_shard_mapping);
+      virtual RefinementTracker* merge(RefinementTracker *rhs,
+          const std::vector<ShardID> *shard_to_shard_mapping);
     protected:
       bool is_dominant_candidate(double score, bool is_current);
       void invalidate_unused_candidates(void);
@@ -1455,8 +1473,14 @@ namespace Legion {
       void clear_logical_users(void);
       void reset(void);
       void clear_deleted_state(const FieldMask &deleted_mask);
-      void merge(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
-      void swap(LogicalState &src, std::set<RegionTreeNode*> &to_traverse);
+      void merge_refinements(LogicalState &src,
+          const std::vector<ShardID> *shard_to_shard_mapping,
+          std::set<RegionTreeNode*> &to_traverse);
+      void convert_refinements(LogicalState &src,
+          const std::vector<ShardID> &shard_to_shard_mapping,
+          std::set<RegionTreeNode*> &to_traverse);
+      void swap_refinements(LogicalState &src,
+                            std::set<RegionTreeNode*> &to_traverse);
       ProjectionSummary* find_or_create_projection_summary(
                                           Operation *op, unsigned index,
                                           const RegionRequirement &req,

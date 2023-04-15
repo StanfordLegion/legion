@@ -565,10 +565,9 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &execution_events) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
-                                      std::set<RtEvent> &applied) = 0;
-      virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                      const std::vector<RegionNode*> &created_state,
-                      std::set<RtEvent> &applied_events, size_t num_shards) = 0;
+                                      std::set<RtEvent> &applied,
+                                      const ShardMapping *mapping = NULL,
+                                      ShardID source_shard = 0) = 0;
       // This is called once all the effects from 
       // invalidate_region_tree_contexts have been applied 
       virtual void free_region_tree_context(void) = 0;
@@ -1677,12 +1676,16 @@ namespace Legion {
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
-                                                   std::set<RtEvent> &applied);
+                            std::set<RtEvent> &applied,
+                            const ShardMapping *mapping = NULL,
+                            ShardID source_shard = 0);
       void invalidate_created_requirement_contexts(const bool is_top_level_task,
-                            std::set<RtEvent> &applied, size_t num_shards = 0);
+                            std::set<RtEvent> &applied,
+                            const ShardMapping *mapping, ShardID source_shard);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state,
-                          std::set<RtEvent> &applied_events, size_t num_shards);
+                          std::set<RtEvent> &applied_events,
+                          const ShardMapping *mapping, ShardID source_shard);
       void invalidate_region_tree_context(LogicalRegion handle,
                                       std::set<RtEvent> &applied_events,
                                       std::vector<EquivalenceSet*> &to_release);
@@ -2077,7 +2080,8 @@ namespace Legion {
     public:
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state,
-                          std::set<RtEvent> &applied_events, size_t num_shards);
+                          std::set<RtEvent> &applied_events,
+                          const ShardMapping *mapping, ShardID source_shard);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, RegionNode *region, 
                       const FieldMask &mask);
@@ -2488,14 +2492,13 @@ namespace Legion {
     public:
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
-      virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
-                                                   std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state,
-                          std::set<RtEvent> &applied_events, size_t num_shards);
+                          std::set<RtEvent> &applied_events,
+                          const ShardMapping *mapping, ShardID source_shard);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
-                          std::set<RtEvent> &applied_events, size_t num_shards);
+                          std::set<RtEvent> &applied_events, bool merge);
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
     public: 
@@ -3392,10 +3395,13 @@ namespace Legion {
           RegionTreeID tid, const std::vector<DistributedID> &instances, 
           RtEvent &ready);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
-                                                   std::set<RtEvent> &applied);
+                          std::set<RtEvent> &applied,
+                          const ShardMapping *shard_mapping = NULL,
+                          ShardID source_shard = 0);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state,
-                          std::set<RtEvent> &applied_events, size_t num_shards);
+                          std::set<RtEvent> &applied_events,
+                          const ShardMapping *mapping, ShardID source_shard);
       static void handle_created_region_contexts(Runtime *runtime, 
                                    Deserializer &derez, AddressSpaceID source);
       virtual void free_region_tree_context(void);
@@ -3881,10 +3887,9 @@ namespace Legion {
           const std::vector<ApUserEvent> &unmap_events,
           std::set<RtEvent> &execution_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
-                                                   std::set<RtEvent> &applied);
-      virtual void receive_created_region_contexts(RegionTreeContext ctx,
-                          const std::vector<RegionNode*> &created_state,
-                          std::set<RtEvent> &applied_events, size_t num_shards);
+                                      std::set<RtEvent> &applied,
+                                      const ShardMapping *mapping = NULL,
+                                      ShardID source_shard = 0);
       virtual void free_region_tree_context(void);
     public:
       virtual void end_task(const void *res, size_t res_size, bool owned,

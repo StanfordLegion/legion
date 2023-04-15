@@ -7836,7 +7836,7 @@ namespace Legion {
       // operations can begin committing
       std::set<RtEvent> preconditions;
       execution_context->invalidate_region_tree_contexts(is_top_level_task(),
-                                                         preconditions);
+          preconditions, &shard_manager->get_mapping(), shard_id);
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
       ApEvent task_effects = single_task_termination;

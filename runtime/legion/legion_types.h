@@ -1880,7 +1880,6 @@ namespace Legion {
     class LogicalAnalysis;
     class PhysicalAnalysis;
     class EquivalenceSet;
-    //class PendingEquivalenceSet;
     class EqSetTracker;
     class VersionManager;
     class VersionInfo;
@@ -1890,6 +1889,9 @@ namespace Legion {
     class RefinementNode;
     class RegionRefinementNode;
     class PartitionRefinementNode;
+    class RefinementTracker;
+    class RegionRefinementTracker;
+    class PartitionRefinementTracker;
 
     class Collectable;
     class Notifiable;

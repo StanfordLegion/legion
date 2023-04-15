@@ -10471,7 +10471,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_region_tree_contexts(
-                       const bool is_top_level_task, std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied,
+                       const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
@@ -10492,7 +10493,8 @@ namespace Legion {
                       nonexclusive_virtual_mapping(idx));
       }
       if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(is_top_level_task, applied);
+        invalidate_created_requirement_contexts(is_top_level_task, applied,
+                                                mapping, source_shard);
     }
 
     //--------------------------------------------------------------------------
@@ -10516,7 +10518,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::invalidate_created_requirement_contexts(
-        const bool is_top, std::set<RtEvent> &applied_events, size_t num_shards)
+        const bool is_top, std::set<RtEvent> &applied_events,
+        const ShardMapping *shard_mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       std::set<LogicalRegion> invalidated_regions, return_regions;
@@ -10570,19 +10573,20 @@ namespace Legion {
           created_states[index++] = runtime->forest->get_node(*it);
         InnerContext *parent_ctx = find_parent_context();   
         parent_ctx->receive_created_region_contexts(tree_context,
-            created_states, applied_events, num_shards);
+            created_states, applied_events, shard_mapping, source_shard);
       }
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::receive_created_region_contexts(
-          RegionTreeContext ctx, const std::vector<RegionNode*> &created_states,
-          std::set<RtEvent> &applied_events, size_t num_shards)
+    void InnerContext::receive_created_region_contexts(RegionTreeContext ctx,
+                              const std::vector<RegionNode*> &created_states,
+                              std::set<RtEvent> &applied_events,
+                              const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       const ContextID src_ctx = ctx.get_id();
       const ContextID dst_ctx = tree_context.get_id();
-      const bool merge = (num_shards > 0);
+      const bool merge = (mapping != NULL);
       for (std::vector<RegionNode*>::const_iterator it = 
             created_states.begin(); it != created_states.end(); it++)
       {
@@ -12176,7 +12180,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TopLevelContext::receive_created_region_contexts(RegionTreeContext ctx,
                  const std::vector<RegionNode*> &created_states,
-                 std::set<RtEvent> &applied_events, size_t num_shards)
+                 std::set<RtEvent> &applied_events,
+                 const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -13296,82 +13301,206 @@ namespace Legion {
           find_parent_physical_context(idx), (owner_shard->shard_id == 0));
     }
 
-    //--------------------------------------------------------------------------
-    void ReplicateContext::invalidate_region_tree_contexts(
-                       const bool is_top_level_task, std::set<RtEvent> &applied)
-    //--------------------------------------------------------------------------
-    {
-      // This does mostly the same thing as the InnerContext version
-      // but handles created requirements differently since we know
-      // that we kept those things in our context
-      DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
-      // Invalidate all our region contexts
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (IS_NO_ACCESS(regions[idx]))
-          continue;
-        RegionNode *node = runtime->forest->get_node(regions[idx].region);
-        runtime->forest->invalidate_current_context(tree_context,
-                                      false/*users only*/, node);
-        // State is copied out by the virtual close ops if this is a
-        // virtual mapped region so we invalidate like normal now
-        const FieldMask close_mask = 
-          node->column_source->get_field_mask(regions[idx].privilege_fields);
-        node->invalidate_refinement(tree_context.get_id(), close_mask,
-                true/*self*/, *this, applied, invalidated_refinements);
-      }
-      if (!created_requirements.empty())
-        invalidate_created_requirement_contexts(is_top_level_task, 
-                                                applied, total_shards); 
-    }
-
+#if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
-           std::set<RtEvent> &applied_events, size_t num_shards)
+           std::set<RtEvent> &applied_events,
+           const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
-      // If we have the same number of shards flowing back then we can just 
-      // accept our portion of this, otherwise its too hard to make everything
-      // line up when calling 'finalize_disjoint_complete_sets', so we do the 
-      // full all-to-all so everyone has the same state
-      if (num_shards == total_shards)
+      if (mapping == NULL)
       {
-        InnerContext::receive_created_region_contexts(ctx, created_state,
-                                          applied_events, 0/*no merge*/);
-        return;
+        // Previous context was not control replicated, so we need to 
+        // broadcast it out to all the other shards so they all see
+        // the same thing
+        Serializer rez;
+        rez.serialize(runtime->address_space);
+        rez.serialize<size_t>(num_shards);
+        rez.serialize<size_t>(created_state.size());
+        for (std::vector<RegionNode*>::const_iterator it = 
+              created_state.begin(); it != created_state.end(); it++)
+        {
+          rez.serialize((*it)->handle);
+          (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/); 
+          (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/,
+                                    applied_events);
+        }
+        shard_manager->broadcast_created_region_contexts(owner_shard, rez,
+                                                         applied_events);
+        receive_replicate_created_region_contexts(ctx, created_state,
+                                      applied_events, false/*merge*/);
       }
-      // If we make it down here then we're doing the broadcast to everyone
-      Serializer rez;
-      rez.serialize(runtime->address_space);
-      rez.serialize<size_t>(num_shards);
-      rez.serialize<size_t>(created_state.size());
-      for (std::vector<RegionNode*>::const_iterator it = 
-            created_state.begin(); it != created_state.end(); it++)
+      else
       {
-        rez.serialize((*it)->handle);
-        (*it)->pack_logical_state(ctx.get_id(), rez, false/*invalidate*/); 
-        (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/,
-                                  applied_events);
+        // Build a mapping between the shards of the source context and
+        // the shards of this context and then decide what to do with 
+        // the data from the source shard. Note that this mapping needs 
+        // to be constructed deterministically across all the shards so 
+        // that they all agree to do the same thing. The resulting mapping
+        // needs to satisfy two properties:
+        // 1. Every shard in the destination context must get at least
+        //    one update from a shard in the source context (surjective)
+        // 2. Every shard in the source context has to got to at least
+        //    one shard in the destination context 
+        const ShardMapping &src_mapping = *mapping;
+        const ShardMapping &dst_mapping = shard_manager->get_mapping();
+        const CollectiveMapping &dst_spaces = 
+          shard_manager->get_collective_mapping();
+        std::vector<ShardID> target_shards;
+        std::vector<ShardID> shard_to_shard_mapping(src_mapping.size(),
+                                                    dst_mapping.size());
+        std::vector<ShardID> address_space_shard_offsets(dst_spaces.size(), 0);
+        std::vector<bool> targeted(dst_mapping.size(), false);
+        bool keep_local = false;
+        size_t total_targets = 0;
+        size_t total_received = 0;
+        for (ShardID src = 0; src < src_mapping.size(); src++)
+        {
+          AddressSpaceID src_space = src_mapping[src];
+          AddressSpaceID dst_space = dst_spaces.contains(src_space) ?
+            src_space : dst_spaces.find_nearest(src_space);
+          ShardID dst = address_space_shard_offsets[dst_space];
+          // Find the next shard in our map at the dst space
+          for (unsigned offset = 0; offset < dst_mapping.size(); offset++,dst++)
+          {
+#ifdef DEBUG_LEGION
+            assert(dst <= dst_mapping.size());
+#endif
+            if (dst == dst_mapping.size())
+              dst = 0; // reset back to the first shard on wrap around
+            if (dst_mapping[dst] != dst_space)
+              continue;
+            shard_to_shard_mapping[src] = dst;
+            address_space_shard_offsets[dst_space] = dst+1;
+            if (!targeted[dst])
+            {
+              targeted[dst] = true;
+              total_targets++;
+            }
+            break;
+          }
+#ifdef DEBUG_LEGION
+          // Should have assigned something for this mapping
+          assert(shard_to_shard_mapping[src] < dst_mapping.size());
+#endif
+          if (src == source_shard)
+          {
+            if (dst == owner_shard->shard_id)
+            {
+              keep_local = true;
+              total_local++;
+            }
+            else
+              target_shards.push_back(dst);
+          }
+          else if (dst == owner_shard->shard_id)
+            total_local++;
+        }
+        if (total_targets < dst_mapping.size())
+        {
+          // Not all the destination shards have targets
+          // Find the nearest shards in the source to the destination
+          // and have them send their results to those destinations
+          // If the source shard is the one we're receiving then
+          // add to the destination shard to the targets
+          const CollectiveMapping src_spaces(src_mapping,
+                        runtime->legion_collective_radix);
+          address_space_shard_offsets.resize(src_spaces.size());
+          for (ShardID shard = 0; shard < src_spaces.size(); shard++)
+            address_space_shard_offsets[shard] = 0;
+          for (ShardID dst = 0; dst < targeted.size(); dst++)
+          {
+            if (targeted[dst])
+              continue;
+            if (dst == owner_shard->shard_id)
+              total_local++;
+            AddressSpace dst_space = dst_mapping[dst];
+            AddressSpace src_space = src_spaces.contains(dst_space) ?
+              dst_space : src_spaces.find_nearest(dst_space);
+            ShardID src = address_space_shard_offsets[src_space];
+            for (unsigned offset = 0; 
+                  offset < src_mapping.size(); offset++, src++)
+            {
+#ifdef DEBUG_LEGION
+              assert(src <= src_mapping.size());
+#endif
+              if (src == src_mapping.size())
+                src = 0; // reset back to the first shard on wrap around
+              if (src_mappings[src] != src_space)
+                continue;
+              if (src == local_source)
+              {
+                if (dst == owner_shard->shard_id)
+                  keep_local = true;
+                else
+                  target_shards.push_back(dst);
+              }
+              address_space_shard_offsets[src_space] = src+1;
+              break;
+            }
+#ifdef DEBUG_LEGION
+            assert((src % src_mapping.size()) != 
+                address_space_shard_offsets[src_space]);
+#endif
+          }
+        }
+#ifdef DEBUG_LEGION
+        // Should be sending the source shard to at least one
+        // destination shard
+        assert(keep_local || !target_shards.empty());
+        // Should have at least one source shard sending to the
+        // destination shard in this context
+        assert(total_local > 0);
+#endif
+        if (!target_shards.empty())
+        {
+          Serializer rez;
+          rez.serialize(runtime->address_space);
+          rez.serialize<size_t>(num_shards);
+          rez.serialize<size_t>(created_state.size());
+          for (std::vector<RegionNode*>::const_iterator it = 
+                created_state.begin(); it != created_state.end(); it++)
+          {
+            rez.serialize((*it)->handle);
+            (*it)->pack_logical_state(ctx.get_id(), rez,
+                !keep_local/*invalidate*/, &shard_to_shard_mapping); 
+            (*it)->pack_version_state(ctx.get_id(), rez, 
+                !keep_local/*invalidate*/, applied_events, 
+                &shard_to_shard_mapping);
+          }
+          for (std::vector<ShardID>::const_iterator it =
+                target_shards.begin(); it != target_shards.end(); it++)
+          {
+
+          }
+        }
+        if (keep_local)
+        {
+          const ContextID dst_ctx = tree_context.get_id();
+          const bool merge = (total_local > 1);
+          for (std::vector<RegionNode*>::const_iterator it = 
+                created_states.begin(); it != created_states.end(); it++)
+          {
+            (*it)->migrate_logical_state(src_ctx, dst_ctx, merge, 
+                                         &shard_to_shard_mapping);
+            (*it)->migrate_version_state(src_ctx, dst_ctx, applied_events,
+                                         merge, &shard_to_shard_mapping);
+          }
+        }
       }
-      std::set<RtEvent> broadcast_events;
-      shard_manager->broadcast_created_region_contexts(owner_shard, rez,
-                                                       broadcast_events);
-      if (!broadcast_events.empty())
-        applied_events.insert(broadcast_events.begin(), broadcast_events.end());
-      receive_replicate_created_region_contexts(ctx, created_state,
-                                                applied_events, num_shards);
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_replicate_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
-           std::set<RtEvent> &applied_events, size_t num_shards)
+           std::set<RtEvent> &applied_events, bool merge)
     //--------------------------------------------------------------------------
     {
       InnerContext::receive_created_region_contexts(ctx, created_state,
-                                            applied_events, num_shards);
+          applied_events, merge ? &shard_manager->get_mapping() : NULL);
     }
+#endif
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space(const Domain &domain, 
@@ -22287,13 +22416,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteContext::invalidate_region_tree_contexts(
-                       const bool is_top_level_task, std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied,
+                       const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       // Should never be called
       assert(false);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RemoteContext::receive_created_region_contexts(RegionTreeContext ctx,
                            const std::vector<RegionNode*> &created_state,
@@ -22321,6 +22452,7 @@ namespace Legion {
       runtime->send_created_region_contexts(owner_space, rez);
       applied_events.insert(done_event);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RemoteContext::free_region_tree_context(void)
@@ -22330,6 +22462,7 @@ namespace Legion {
       assert(false);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ void RemoteContext::handle_created_region_contexts(
                    Runtime *runtime, Deserializer &derez, AddressSpaceID source)
@@ -22369,6 +22502,7 @@ namespace Legion {
       context->unpack_global_ref();
       runtime->free_region_tree_context(ctx); 
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez)
@@ -24501,19 +24635,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::invalidate_region_tree_contexts(
-                       const bool is_top_level_task, std::set<RtEvent> &applied)
+                       const bool is_top_level_task, std::set<RtEvent> &applied,
+                       const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       // Nothing to do 
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::receive_created_region_contexts(RegionTreeContext ctx,
-                           const std::vector<RegionNode*> &created_states,
-                           std::set<RtEvent> &applied_events, size_t num_shards)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
