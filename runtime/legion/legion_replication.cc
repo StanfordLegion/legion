@@ -9446,6 +9446,13 @@ namespace Legion {
         derez.deserialize(address_spaces[idx]);
     } 
 
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardMapping::pack_empty(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
+    }
+
     /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
@@ -10924,6 +10931,69 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_created_region_contexts(ShardID target,
+                             Serializer &rez, std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        DistributedID local_repl;
+        derez.deserialize(local_repl);
+        handle_created_region_contexts(derez, applied_events);
+      }
+      else
+      {
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        rez.serialize(applied);
+        runtime->send_control_replicate_created_regions(target_space, rez);
+        applied_events.insert(applied);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_created_regions(Deserializer &derez,
+                                                         Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      std::set<RtEvent> applied_events;
+      manager->handle_created_region_contexts(derez, applied_events);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_created_region_contexts(Deserializer &derez,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_created_region_contexts(derez, applied_events);
+          return;
+        }
+      }
+      assert(false); // should never get here
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::broadcast_message(ShardTask *source, Serializer &rez,
                    BroadcastMessageKind kind, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -11662,7 +11732,6 @@ namespace Legion {
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       DistributedID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);

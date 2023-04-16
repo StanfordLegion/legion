@@ -853,6 +853,7 @@ namespace Legion {
       SEND_REPL_EQUIVALENCE_SET_NOTIFICATION,
       SEND_REPL_INTRA_SPACE_DEP,
       SEND_REPL_BROADCAST_UPDATE,
+      SEND_REPL_CREATED_REGIONS,
       SEND_REPL_TRACE_EVENT_REQUEST,
       SEND_REPL_TRACE_EVENT_RESPONSE,
       SEND_REPL_TRACE_FRONTIER_REQUEST,
@@ -1116,6 +1117,7 @@ namespace Legion {
         "Send Replicate Equivalence Set Notification",                \
         "Send Replicate Intra Space Dependence",                      \
         "Send Replicate Broadcast Update",                            \
+        "Send Replicate Created Regions Return",                      \
         "Send Replicate Trace Event Request",                         \
         "Send Replicate Trace Event Response",                        \
         "Send Replicate Trace Frontier Request",                      \
@@ -1928,7 +1930,6 @@ namespace Legion {
     struct PhysicalUser;
     struct LogicalTraceInfo;
     struct PhysicalTraceInfo;
-    class LogicalCloser;
     class TreeCloseImpl;
     class TreeClose;
     struct CloseInfo; 

@@ -4007,16 +4007,15 @@ namespace Legion {
       void migrate_logical_state(ContextID src, ContextID dst, bool merge,
                const std::vector<ShardID> *shard_to_shard_mapping = NULL);
       void migrate_version_state(ContextID src, ContextID dst, 
-                                 std::set<RtEvent> &applied, bool merge);
+                                 std::set<RtEvent> &applied, bool merge,
+               const std::vector<ShardID> *shard_to_shard_mapping = NULL);
       void pack_logical_state(ContextID ctx, Serializer &rez, 
                               const bool invalidate); 
-      void unpack_logical_state(ContextID ctx, Deserializer &derez,
-                                AddressSpaceID source);
+      void unpack_logical_state(ContextID ctx, Deserializer &derez);
       void pack_version_state(ContextID ctx, Serializer &rez, 
                               const bool invalidate,
                               std::set<RtEvent> &applied_events); 
-      void unpack_version_state(ContextID ctx, Deserializer &derez, 
-                                AddressSpaceID source);
+      void unpack_version_state(ContextID ctx, Deserializer &derez);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -4044,6 +4043,8 @@ namespace Legion {
                                           RegionTreeNode *child) = 0;
       virtual RefinementTracker* create_refinement_tracker(
                                   ProjectionSummary *projection) = 0;
+      virtual RefinementTracker* unpack_refinement(Deserializer &derez,
+                    std::map<LegionColor,RegionTreeNode*> &to_traverse) = 0;
       virtual bool visit_node(PathTraverser *traverser) = 0;
       virtual bool visit_node(NodeTraverser *traverser) = 0;
       virtual AddressSpaceID get_owner_space(void) const = 0;
@@ -4179,7 +4180,11 @@ namespace Legion {
         { return new RegionRefinementTracker(this, next); }
       virtual RefinementTracker* create_refinement_tracker(
                                                   ProjectionSummary *projection)
-        { return new RegionRefinementTracker(this, projection); }
+        { return new RegionRefinementTracker(this,
+            projection->result->as_region_projection()); }
+      virtual RefinementTracker* unpack_refinement(Deserializer &derez,
+          std::map<LegionColor,RegionTreeNode*> &to_traverse)
+        { return RegionRefinementTracker::unpack(this, derez, to_traverse); }
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
@@ -4340,7 +4345,11 @@ namespace Legion {
         { /*shoudl never be called*/ assert(false); return NULL; }
       virtual RefinementTracker* create_refinement_tracker(
                                                   ProjectionSummary* projection)
-        { return new PartitionRefinementTracker(this, projection); }
+        { return new PartitionRefinementTracker(this, 
+            projection->result->as_partition_projection()); }
+      virtual RefinementTracker* unpack_refinement(Deserializer &derez,
+          std::map<LegionColor,RegionTreeNode*> &to_traverse)
+        { return PartitionRefinementTracker::unpack(this, derez, to_traverse); }
     public:
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);

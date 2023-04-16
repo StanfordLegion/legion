@@ -3343,6 +3343,8 @@ namespace Legion {
                                                          Serializer &rez);
       void send_control_replicate_broadcast_update(AddressSpaceID target,
                                                    Serializer &rez);
+      void send_control_replicate_created_regions(AddressSpaceID target,
+                                                  Serializer &rez);
       void send_control_replicate_trace_event_request(AddressSpaceID target,
                                                       Serializer &rez);
       void send_control_replicate_trace_event_response(AddressSpaceID target,
@@ -3624,8 +3626,7 @@ namespace Legion {
       void handle_did_global_acquire_response(Deserializer &derez);
       void handle_did_valid_acquire_request(Deserializer &derez);
       void handle_did_valid_acquire_response(Deserializer &derez);
-      void handle_created_region_contexts(Deserializer &derez,  
-                                          AddressSpaceID source);
+      void handle_created_region_contexts(Deserializer &derez);  
       void handle_send_atomic_reservation_request(Deserializer &derez);
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_padded_reservation_request(Deserializer &derez,
@@ -3840,6 +3841,7 @@ namespace Legion {
                                                            Deserializer &derez);
       void handle_control_replicate_intra_space_dependence(Deserializer &derez);
       void handle_control_replicate_broadcast_update(Deserializer &derez);
+      void handle_control_replicate_created_regions(Deserializer &derez);
       void handle_control_replicate_trace_event_request(Deserializer &derez,
                                                         AddressSpaceID source);
       void handle_control_replicate_trace_event_response(Deserializer &derez);
@@ -6045,6 +6047,8 @@ namespace Legion {
         case SEND_REPL_INTRA_SPACE_DEP:
           break;
         case SEND_REPL_BROADCAST_UPDATE:
+          break;
+        case SEND_REPL_CREATED_REGIONS:
           break;
         case SEND_REPL_TRACE_EVENT_REQUEST:
           break;

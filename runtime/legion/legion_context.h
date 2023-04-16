@@ -2498,7 +2498,10 @@ namespace Legion {
                           const ShardMapping *mapping, ShardID source_shard);
       void receive_replicate_created_region_contexts(RegionTreeContext ctx,
                           const std::vector<RegionNode*> &created_state, 
-                          std::set<RtEvent> &applied_events, bool merge);
+                          const std::multimap<ShardID,ShardID> &src_to_dst,
+                          size_t num_srcs, std::set<RtEvent> &applied_events);
+      bool compute_shard_to_shard_mapping(const ShardMapping &src_mapping,
+                std::multimap<ShardID,ShardID> &src_to_dst_mapping) const;
       void handle_created_region_contexts(Deserializer &derez,
                                           std::set<RtEvent> &applied_events);
     public: 
@@ -3403,7 +3406,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
       static void handle_created_region_contexts(Runtime *runtime, 
-                                   Deserializer &derez, AddressSpaceID source);
+                                                 Deserializer &derez);
       virtual void free_region_tree_context(void);
     public:
       const Task* get_parent_task(void);

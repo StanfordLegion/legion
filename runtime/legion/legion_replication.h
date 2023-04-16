@@ -2761,11 +2761,13 @@ namespace Legion {
       AddressSpaceID operator[](unsigned idx) const;
       AddressSpaceID& operator[](unsigned idx);
     public:
+      inline bool empty(void) const { return address_spaces.empty(); }
       inline size_t size(void) const { return address_spaces.size(); }
       inline void resize(size_t size) { address_spaces.resize(size); }
     public:
       void pack_mapping(Serializer &rez) const;
       void unpack_mapping(Deserializer &derez);
+      static void pack_empty(Serializer &rez);
     protected:
       std::vector<AddressSpaceID> address_spaces;
     }; 
@@ -2933,6 +2935,10 @@ namespace Legion {
     public:
       void broadcast_created_region_contexts(ShardTask *source, Serializer &rez,
                                              std::set<RtEvent> &applied_events);
+      void send_created_region_contexts(ShardID target, Serializer &rez,
+                                        std::set<RtEvent> &applied_events);
+      void handle_created_region_contexts(Deserializer &derez,
+                                          std::set<RtEvent> &applied_events);
     protected:
       void broadcast_message(ShardTask *source, Serializer &rez,
                 BroadcastMessageKind kind, std::set<RtEvent> &applied_events);
@@ -2978,6 +2984,7 @@ namespace Legion {
       static void handle_intra_space_dependence(Deserializer &derez, 
                                                 Runtime *rt);
       static void handle_broadcast_update(Deserializer &derez, Runtime *rt);
+      static void handle_created_regions(Deserializer &derez, Runtime *rt);
       static void handle_trace_event_request(Deserializer &derez, Runtime *rt,
                                              AddressSpaceID request_source);
       static void handle_trace_event_response(Deserializer &derez);

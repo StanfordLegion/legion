@@ -19443,11 +19443,9 @@ namespace Legion {
         dst_state.merge_refinements(src_state, 
             shard_to_shard_mapping, to_traverse); 
       }
-      else if (shard_to_shard_mapping != NULL)
-        dst_state.convert_refinements(src_state, 
-            *shard_to_shard_mapping, to_traverse);
       else
-        dst_state.swap_refinements(src_state, to_traverse);
+        dst_state.convert_refinements(src_state, 
+            shard_to_shard_mapping, to_traverse);
       for (std::set<RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
         (*it)->migrate_logical_state(src, dst, merge);
@@ -19455,7 +19453,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::migrate_version_state(ContextID src, ContextID dst,
-                                  std::set<RtEvent> &applied_events, bool merge)
+                             std::set<RtEvent> &applied_events, bool merge,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
     //--------------------------------------------------------------------------
     {
       VersionManager &src_manager = get_current_version_manager(src);
@@ -19466,10 +19465,12 @@ namespace Legion {
       {
         // Use the node lock here for serialization
         AutoLock n_lock(node_lock);
-        dst_manager.merge(src_manager, to_traverse, subscribers);
+        dst_manager.merge(src_manager, to_traverse, subscribers,
+                          shard_to_shard_mapping);
       }
       else
-        dst_manager.swap(src_manager, to_traverse, subscribers);
+        dst_manager.convert(src_manager, to_traverse, subscribers,
+                            shard_to_shard_mapping);
       EqSetTracker::finish_subscriptions(context->runtime, src_manager, 
                                          subscribers, applied_events);
       for (std::set<RegionTreeNode*>::const_iterator it = 
@@ -19477,7 +19478,6 @@ namespace Legion {
         (*it)->migrate_version_state(src, dst, applied_events, merge);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_logical_state(ContextID ctx, Serializer &rez,
                                             const bool invalidate)
@@ -19485,67 +19485,7 @@ namespace Legion {
     {
       LogicalState &state = get_logical_state(ctx);
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      RezCheck z(rez);
-      rez.serialize<size_t>(state.field_states.size());
-      for (LegionList<FieldState>::const_iterator fit = 
-            state.field_states.begin(); fit != 
-            state.field_states.end(); fit++)
-      {
-        rez.serialize(fit->valid_fields());
-        rez.serialize(fit->open_state);
-        rez.serialize(fit->redop);
-        rez.serialize<size_t>(fit->open_children.size());
-        for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-              fit->open_children.begin(); it != 
-              fit->open_children.end(); it++)
-        {
-          const LegionColor child_color = it->first->get_color();
-          rez.serialize(child_color);
-          rez.serialize(it->second);
-          to_traverse.insert(std::make_pair(child_color, it->first));
-        }
-      }
-      rez.serialize(state.disjoint_complete_tree);
-      rez.serialize<size_t>(state.disjoint_complete_children.size());
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
-            state.disjoint_complete_children.begin(); it !=
-            state.disjoint_complete_children.end(); it++)
-      {
-        const LegionColor child_color = it->first->get_color();
-        rez.serialize(child_color);
-        rez.serialize(it->second);
-        to_traverse.insert(std::make_pair(child_color, it->first));
-      }
-      rez.serialize<size_t>(state.disjoint_complete_accesses.size());
-      for (FieldMaskSet<RegionTreeNode>::const_iterator it =
-            state.disjoint_complete_accesses.begin(); it !=
-            state.disjoint_complete_accesses.end(); it++)
-      {
-        const LegionColor child_color = it->first->get_color();
-        rez.serialize(child_color);
-        rez.serialize(it->second);
-#ifdef DEBUG_LEGION
-        // All the children here should be open from the field states
-        // which means we should be able to find it in to_traverse
-        assert(to_traverse.find(child_color) != to_traverse.end());
-#endif
-      }
-      rez.serialize<size_t>(state.disjoint_complete_child_counts.size());
-      for (LogicalState::FieldSizeMap::const_iterator it =
-            state.disjoint_complete_child_counts.begin(); it !=
-            state.disjoint_complete_child_counts.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
-      rez.serialize<size_t>(state.disjoint_complete_projections.size());
-      for (FieldMaskSet<RefProjectionSummary>::const_iterator it =
-            state.disjoint_complete_projections.begin(); it !=
-            state.disjoint_complete_projections.end(); it++)
-      {
-        it->first->pack_summary(rez);
-        rez.serialize(it->second);
-      }
+      state.pack_refinements(rez, to_traverse);
       // Now recurse down the tree in a deterministic way
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it = 
             to_traverse.begin(); it != to_traverse.end(); it++)
@@ -19557,105 +19497,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::unpack_logical_state(ContextID ctx,
-                                     Deserializer &derez, AddressSpaceID source)
+                                              Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       LogicalState &state = get_logical_state(ctx);
 #ifdef DEBUG_LEGION
       state.check_init();
 #endif
-      DerezCheck z(derez);
-      size_t num_field_states;
-      derez.deserialize(num_field_states);
-      state.field_states.resize(num_field_states);
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      for (LegionList<FieldState>::iterator fit = state.field_states.begin();
-            fit != state.field_states.end(); fit++)
-      {
-        FieldMask valid_fields;
-        derez.deserialize(valid_fields);
-        fit->open_children.relax_valid_mask(valid_fields);
-        derez.deserialize(fit->open_state);
-        derez.deserialize(fit->redop);
-        size_t num_open_children;
-        derez.deserialize(num_open_children);
-        for (unsigned idx = 0; idx < num_open_children; idx++)
-        {
-          LegionColor child_color;
-          derez.deserialize(child_color);
-          RegionTreeNode *child = get_tree_child(child_color);
-          FieldMask mask;
-          derez.deserialize(mask);
-          fit->add_child(child, mask);
-          to_traverse.insert(std::make_pair(child_color, child));
-        }
-      }
-      derez.deserialize(state.disjoint_complete_tree);
-      size_t num_disjoint_children;
-      derez.deserialize(num_disjoint_children);
-      for (unsigned idx = 0; idx < num_disjoint_children; idx++)
-      {
-        LegionColor child_color;
-        derez.deserialize(child_color);
-        RegionTreeNode *child = get_tree_child(child_color);
-        FieldMask mask;
-        derez.deserialize(mask);  
-        if (state.disjoint_complete_children.insert(child, mask))
-          child->add_base_gc_ref(DISJOINT_COMPLETE_REF);
-        to_traverse.insert(std::make_pair(child_color, child));
-      }
-      size_t num_disjoint_complete_accesses;
-      derez.deserialize(num_disjoint_complete_accesses);
-      for (unsigned idx = 0; idx < num_disjoint_complete_accesses; idx++)
-      {
-        LegionColor child_color;
-        derez.deserialize(child_color);
-        RegionTreeNode *child = get_tree_child(child_color);
-        FieldMask mask;
-        derez.deserialize(mask);
-        state.disjoint_complete_accesses.insert(child, mask);
-#ifdef DEBUG_LEGION
-        assert(to_traverse.find(child_color) != to_traverse.end());
-#endif
-      }
-      size_t num_disjoint_complete_counts;
-      derez.deserialize(num_disjoint_complete_counts);
-      const bool inline_counts = state.disjoint_complete_child_counts.empty();
-      for (unsigned idx = 0; idx < num_disjoint_complete_counts; idx++)
-      {
-        size_t count;
-        derez.deserialize(count);
-        if (!inline_counts)
-        {
-          LogicalState::FieldSizeMap::iterator finder =
-            state.disjoint_complete_child_counts.find(count);
-          if (finder != state.disjoint_complete_child_counts.end())
-          {
-            FieldMask mask;
-            derez.deserialize(mask);
-            finder->second |= mask;
-            continue;
-          }
-        }
-        derez.deserialize(state.disjoint_complete_child_counts[count]);
-      }
-      size_t num_disjoint_complete_projections;
-      derez.deserialize(num_disjoint_complete_projections);
-      for (unsigned idx = 0; idx < num_disjoint_complete_projections; idx++)
-      {
-        RefProjectionSummary *summary = new RefProjectionSummary(
-            ProjectionSummary::unpack_summary(derez, context));
-        FieldMask mask;
-        derez.deserialize(mask);
-        summary->add_reference();
-        state.disjoint_complete_projections.insert(summary, mask);
-      }
+      state.unpack_refinements(derez, to_traverse);
       // Traverse and remove remote references after we are done
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
-        it->second->unpack_logical_state(ctx, derez, source);
+        it->second->unpack_logical_state(ctx, derez);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::pack_version_state(ContextID ctx, Serializer &rez,
@@ -19680,15 +19535,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::unpack_version_state(ContextID ctx, 
-                                     Deserializer &derez, AddressSpaceID source)
+                                              Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       std::map<LegionColor,RegionTreeNode*> to_traverse;
-      manager.unpack_manager(derez, source, to_traverse);
+      manager.unpack_manager(derez, to_traverse);
       for (std::map<LegionColor,RegionTreeNode*>::const_iterator it =
             to_traverse.begin(); it != to_traverse.end(); it++)
-        it->second->unpack_version_state(ctx, derez, source);
+        it->second->unpack_version_state(ctx, derez);
     }
 
     //--------------------------------------------------------------------------

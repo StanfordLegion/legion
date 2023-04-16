@@ -10584,14 +10584,17 @@ namespace Legion {
                               const ShardMapping *mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(mapping == NULL);
+#endif
       const ContextID src_ctx = ctx.get_id();
       const ContextID dst_ctx = tree_context.get_id();
-      const bool merge = (mapping != NULL);
       for (std::vector<RegionNode*>::const_iterator it = 
             created_states.begin(); it != created_states.end(); it++)
       {
-        (*it)->migrate_logical_state(src_ctx, dst_ctx, merge);
-        (*it)->migrate_version_state(src_ctx, dst_ctx, applied_events, merge);
+        (*it)->migrate_logical_state(src_ctx, dst_ctx, false/*merge*/);
+        (*it)->migrate_version_state(src_ctx, dst_ctx, 
+                                     applied_events, false/*merge*/);
       }
     }
 
@@ -13301,7 +13304,6 @@ namespace Legion {
           find_parent_physical_context(idx), (owner_shard->shard_id == 0));
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
@@ -13311,12 +13313,9 @@ namespace Legion {
     {
       if (mapping == NULL)
       {
-        // Previous context was not control replicated, so we need to 
-        // broadcast it out to all the other shards so they all see
-        // the same thing
+        // Previous context was not control replicated, so we need to broadcast
+        // it out to all the other shards so they all see the same thing
         Serializer rez;
-        rez.serialize(runtime->address_space);
-        rez.serialize<size_t>(num_shards);
         rez.serialize<size_t>(created_state.size());
         for (std::vector<RegionNode*>::const_iterator it = 
               created_state.begin(); it != created_state.end(); it++)
@@ -13326,181 +13325,235 @@ namespace Legion {
           (*it)->pack_version_state(ctx.get_id(), rez, false/*invalidate*/,
                                     applied_events);
         }
+        ShardMapping::pack_empty(rez);
         shard_manager->broadcast_created_region_contexts(owner_shard, rez,
                                                          applied_events);
-        receive_replicate_created_region_contexts(ctx, created_state,
-                                      applied_events, false/*merge*/);
+        // Merge into our local shard's context
+        InnerContext::receive_created_region_contexts(ctx,
+            created_state, applied_events, mapping, source_shard);
       }
       else
       {
-        // Build a mapping between the shards of the source context and
-        // the shards of this context and then decide what to do with 
-        // the data from the source shard. Note that this mapping needs 
-        // to be constructed deterministically across all the shards so 
-        // that they all agree to do the same thing. The resulting mapping
-        // needs to satisfy two properties:
-        // 1. Every shard in the destination context must get at least
-        //    one update from a shard in the source context (surjective)
-        // 2. Every shard in the source context has to got to at least
-        //    one shard in the destination context 
-        const ShardMapping &src_mapping = *mapping;
-        const ShardMapping &dst_mapping = shard_manager->get_mapping();
-        const CollectiveMapping &dst_spaces = 
-          shard_manager->get_collective_mapping();
-        std::vector<ShardID> target_shards;
-        std::vector<ShardID> shard_to_shard_mapping(src_mapping.size(),
-                                                    dst_mapping.size());
-        std::vector<ShardID> address_space_shard_offsets(dst_spaces.size(), 0);
-        std::vector<bool> targeted(dst_mapping.size(), false);
         bool keep_local = false;
-        size_t total_targets = 0;
-        size_t total_received = 0;
-        for (ShardID src = 0; src < src_mapping.size(); src++)
+        std::vector<ShardID> target_shards;
+        std::multimap<ShardID,ShardID> src_to_dst_mapping;
+        if (compute_shard_to_shard_mapping(*mapping, src_to_dst_mapping))
         {
-          AddressSpaceID src_space = src_mapping[src];
-          AddressSpaceID dst_space = dst_spaces.contains(src_space) ?
-            src_space : dst_spaces.find_nearest(src_space);
-          ShardID dst = address_space_shard_offsets[dst_space];
-          // Find the next shard in our map at the dst space
-          for (unsigned offset = 0; offset < dst_mapping.size(); offset++,dst++)
-          {
-#ifdef DEBUG_LEGION
-            assert(dst <= dst_mapping.size());
-#endif
-            if (dst == dst_mapping.size())
-              dst = 0; // reset back to the first shard on wrap around
-            if (dst_mapping[dst] != dst_space)
-              continue;
-            shard_to_shard_mapping[src] = dst;
-            address_space_shard_offsets[dst_space] = dst+1;
-            if (!targeted[dst])
-            {
-              targeted[dst] = true;
-              total_targets++;
-            }
-            break;
-          }
-#ifdef DEBUG_LEGION
-          // Should have assigned something for this mapping
-          assert(shard_to_shard_mapping[src] < dst_mapping.size());
-#endif
-          if (src == source_shard)
-          {
-            if (dst == owner_shard->shard_id)
-            {
-              keep_local = true;
-              total_local++;
-            }
-            else
-              target_shards.push_back(dst);
-          }
-          else if (dst == owner_shard->shard_id)
-            total_local++;
+          // Identity mapping case
+          if (source_shard == owner_shard->shard_id)
+            keep_local = true;
+          else
+            target_shards.push_back(source_shard);
         }
-        if (total_targets < dst_mapping.size())
+        else
         {
-          // Not all the destination shards have targets
-          // Find the nearest shards in the source to the destination
-          // and have them send their results to those destinations
-          // If the source shard is the one we're receiving then
-          // add to the destination shard to the targets
-          const CollectiveMapping src_spaces(src_mapping,
-                        runtime->legion_collective_radix);
-          address_space_shard_offsets.resize(src_spaces.size());
-          for (ShardID shard = 0; shard < src_spaces.size(); shard++)
-            address_space_shard_offsets[shard] = 0;
-          for (ShardID dst = 0; dst < targeted.size(); dst++)
+          // Non-identity mapping
+          for (std::multimap<ShardID,ShardID>::const_iterator it =
+                src_to_dst_mapping.lower_bound(source_shard); it !=
+                src_to_dst_mapping.upper_bound(source_shard); it++)
           {
-            if (targeted[dst])
-              continue;
-            if (dst == owner_shard->shard_id)
-              total_local++;
-            AddressSpace dst_space = dst_mapping[dst];
-            AddressSpace src_space = src_spaces.contains(dst_space) ?
-              dst_space : src_spaces.find_nearest(dst_space);
-            ShardID src = address_space_shard_offsets[src_space];
-            for (unsigned offset = 0; 
-                  offset < src_mapping.size(); offset++, src++)
-            {
-#ifdef DEBUG_LEGION
-              assert(src <= src_mapping.size());
-#endif
-              if (src == src_mapping.size())
-                src = 0; // reset back to the first shard on wrap around
-              if (src_mappings[src] != src_space)
-                continue;
-              if (src == local_source)
-              {
-                if (dst == owner_shard->shard_id)
-                  keep_local = true;
-                else
-                  target_shards.push_back(dst);
-              }
-              address_space_shard_offsets[src_space] = src+1;
-              break;
-            }
-#ifdef DEBUG_LEGION
-            assert((src % src_mapping.size()) != 
-                address_space_shard_offsets[src_space]);
-#endif
+            if (it->second == owner_shard->shard_id)
+              keep_local = true;
+            else
+              target_shards.push_back(it->second);
           }
         }
 #ifdef DEBUG_LEGION
         // Should be sending the source shard to at least one
         // destination shard
         assert(keep_local || !target_shards.empty());
-        // Should have at least one source shard sending to the
-        // destination shard in this context
-        assert(total_local > 0);
 #endif
         if (!target_shards.empty())
         {
-          Serializer rez;
-          rez.serialize(runtime->address_space);
-          rez.serialize<size_t>(num_shards);
-          rez.serialize<size_t>(created_state.size());
-          for (std::vector<RegionNode*>::const_iterator it = 
-                created_state.begin(); it != created_state.end(); it++)
+          for (unsigned idx = 0; idx < target_shards.size(); idx++)
           {
-            rez.serialize((*it)->handle);
-            (*it)->pack_logical_state(ctx.get_id(), rez,
-                !keep_local/*invalidate*/, &shard_to_shard_mapping); 
-            (*it)->pack_version_state(ctx.get_id(), rez, 
-                !keep_local/*invalidate*/, applied_events, 
-                &shard_to_shard_mapping);
-          }
-          for (std::vector<ShardID>::const_iterator it =
-                target_shards.begin(); it != target_shards.end(); it++)
-          {
-
+            Serializer rez;
+            rez.serialize(shard_manager->did);
+            rez.serialize(target_shards[idx]);
+            rez.serialize<size_t>(created_state.size());
+            const bool invalidate = 
+              !keep_local && (idx == (target_shards.size()-1));
+            for (std::vector<RegionNode*>::const_iterator it =
+                  created_state.begin(); it != created_state.end(); it++)
+            {
+              rez.serialize((*it)->handle);
+              (*it)->pack_logical_state(ctx.get_id(), rez, invalidate);
+              (*it)->pack_version_state(ctx.get_id(), rez, invalidate,
+                                        applied_events);
+            }
+            mapping->pack_mapping(rez);
+            shard_manager->send_created_region_contexts(target_shards[idx],
+                                                        rez, applied_events);
           }
         }
         if (keep_local)
-        {
-          const ContextID dst_ctx = tree_context.get_id();
-          const bool merge = (total_local > 1);
-          for (std::vector<RegionNode*>::const_iterator it = 
-                created_states.begin(); it != created_states.end(); it++)
-          {
-            (*it)->migrate_logical_state(src_ctx, dst_ctx, merge, 
-                                         &shard_to_shard_mapping);
-            (*it)->migrate_version_state(src_ctx, dst_ctx, applied_events,
-                                         merge, &shard_to_shard_mapping);
-          }
-        }
+          receive_replicate_created_region_contexts(ctx, created_state,
+                  src_to_dst_mapping, mapping->size(), applied_events);
       }
     }
 
     //--------------------------------------------------------------------------
     void ReplicateContext::receive_replicate_created_region_contexts(
            RegionTreeContext ctx, const std::vector<RegionNode*> &created_state,
-           std::set<RtEvent> &applied_events, bool merge)
+           const std::multimap<ShardID,ShardID> &src_to_dst_mapping,
+           size_t num_srcs, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      InnerContext::receive_created_region_contexts(ctx, created_state,
-          applied_events, merge ? &shard_manager->get_mapping() : NULL);
-    }
+      bool merge = false;
+      const ContextID src_ctx = ctx.get_id();
+      const ContextID dst_ctx = tree_context.get_id();
+      std::vector<ShardID> shard_to_shard_mapping;
+      if (!src_to_dst_mapping.empty())
+      {
+        // Non-identity mapping case
+        // Need to compute the shard to shard mapping here and also
+        // determine how many incoming cases we have
+        unsigned incoming = 0;
+        unsigned old_distance = 0;
+        shard_to_shard_mapping.resize(num_srcs, total_shards); 
+        const ShardID local_shard = owner_shard->shard_id;
+        for (std::multimap<ShardID,ShardID>::const_iterator it =
+              src_to_dst_mapping.begin(); it != src_to_dst_mapping.end(); it++)
+        {
+          if (shard_to_shard_mapping[it->first] != total_shards)
+          {
+            // Compute the old distance and the new distance
+            unsigned abs_diff = (local_shard < it->second) ?
+              (it->second - local_shard) : (local_shard - it->second);
+            unsigned new_distance =
+             (abs_diff < (total_shards/2)) ? abs_diff : total_shards - abs_diff;
+            if (new_distance < old_distance)
+            {
+              shard_to_shard_mapping[it->first] = it->second;
+              old_distance = new_distance;
+            }
+          }
+          else // Uninitialized case so just assign the shard
+          {
+            shard_to_shard_mapping[it->first] = it->second;
+            unsigned abs_diff = (local_shard < it->second) ?
+              (it->second - local_shard) : (local_shard - it->second);
+            old_distance =
+             (abs_diff < (total_shards/2)) ? abs_diff : total_shards - abs_diff;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(incoming > 0);
 #endif
+        merge = (incoming > 1);
+      }
+      // else identity mapping case
+      for (std::vector<RegionNode*>::const_iterator it = 
+            created_state.begin(); it != created_state.end(); it++)
+      {
+        (*it)->migrate_logical_state(src_ctx, dst_ctx, 
+            merge, &shard_to_shard_mapping);
+        (*it)->migrate_version_state(src_ctx, dst_ctx, 
+            applied_events, merge, &shard_to_shard_mapping);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplicateContext::compute_shard_to_shard_mapping(
+                                   const ShardMapping &src_mapping, 
+                                   std::multimap<ShardID,ShardID> &result) const
+    //--------------------------------------------------------------------------
+    {
+      // Build a mapping between the shards of the source context and
+      // the shards of this context and then decide what to do with 
+      // the data from the source shard. Note that this mapping needs 
+      // to be constructed deterministically across all the shards so 
+      // that they all agree to do the same thing. The resulting mapping
+      // needs to satisfy two properties:
+      // 1. Every shard in the destination context must get at least
+      //    one update from a shard in the source context (surjective)
+      // 2. Every shard in the source context has to got to at least
+      //    one shard in the destination context 
+      const ShardMapping &dst_mapping = shard_manager->get_mapping();
+      const CollectiveMapping &dst_spaces = 
+        shard_manager->get_collective_mapping();
+      std::vector<ShardID> address_space_shard_offsets(dst_spaces.size(), 0);
+      std::vector<bool> targeted(dst_mapping.size(), false);
+      size_t total_targets = 0;
+      for (ShardID src = 0; src < src_mapping.size(); src++)
+      {
+        AddressSpaceID src_space = src_mapping[src];
+        AddressSpaceID dst_space = dst_spaces.contains(src_space) ?
+          src_space : dst_spaces.find_nearest(src_space);
+        ShardID dst = address_space_shard_offsets[dst_space];
+        // Find the next shard in our map at the dst space
+        for (unsigned offset = 0; offset < dst_mapping.size(); offset++,dst++)
+        {
+#ifdef DEBUG_LEGION
+          assert(dst <= dst_mapping.size());
+#endif
+          if (dst == dst_mapping.size())
+            dst = 0; // reset back to the first shard on wrap around
+          if (dst_mapping[dst] != dst_space)
+            continue;
+          result.insert(std::make_pair(src,dst));
+          address_space_shard_offsets[dst_space] = dst+1;
+          if (!targeted[dst])
+          {
+            targeted[dst] = true;
+            total_targets++;
+          }
+          break;
+        }
+#ifdef DEBUG_LEGION
+        // Should have assigned something for this shard
+        assert(result.lower_bound(src)->first == src);
+#endif
+      }
+      if (total_targets < dst_mapping.size())
+      {
+        // Not all the destination shards have targets
+        // Find the nearest shards in the source to the destination
+        // and have them send their results to those destinations too
+        // If the source shard is the one we're receiving then
+        // add to the destination shard to the targets
+        const CollectiveMapping src_spaces(src_mapping,
+                      runtime->legion_collective_radix);
+        address_space_shard_offsets.resize(src_spaces.size());
+        for (ShardID shard = 0; shard < src_spaces.size(); shard++)
+          address_space_shard_offsets[shard] = 0;
+        for (ShardID dst = 0; dst < targeted.size(); dst++)
+        {
+          if (targeted[dst])
+            continue;
+          AddressSpace dst_space = dst_mapping[dst];
+          AddressSpace src_space = src_spaces.contains(dst_space) ?
+            dst_space : src_spaces.find_nearest(dst_space);
+          ShardID src = address_space_shard_offsets[src_space];
+          for (unsigned offset = 0; 
+                offset < src_mapping.size(); offset++, src++)
+          {
+#ifdef DEBUG_LEGION
+            assert(src <= src_mapping.size());
+#endif
+            if (src == src_mapping.size())
+              src = 0; // reset back to the first shard on wrap around
+            if (src_mapping[src] != src_space)
+              continue;
+            result.insert(std::make_pair(src,dst));
+            address_space_shard_offsets[src_space] = src+1;
+            break;
+          }
+#ifdef DEBUG_LEGION
+          assert((src % src_mapping.size()) != 
+              address_space_shard_offsets[src_space]);
+#endif
+        }
+      }
+      // Do the identity check
+      for (std::multimap<ShardID,ShardID>::const_iterator it =
+            result.begin(); it != result.end(); it++)
+        if (it->first != it->second)
+          return false;
+      // If we get here we passed the identity check so clear the result
+      result.clear();
+      return true;
+    }
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space(const Domain &domain, 
@@ -20616,10 +20669,6 @@ namespace Legion {
                                               std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      AddressSpaceID source;
-      derez.deserialize(source);
-      size_t num_shards;
-      derez.deserialize(num_shards);
       size_t num_regions;
       derez.deserialize(num_regions);
       std::vector<RegionNode*> created_states(num_regions);
@@ -20629,12 +20678,22 @@ namespace Legion {
         LogicalRegion handle;
         derez.deserialize(handle);
         RegionNode *node = runtime->forest->get_node(handle);
-        node->unpack_logical_state(ctx.get_id(), derez, source);
-        node->unpack_version_state(ctx.get_id(), derez, source);
+        node->unpack_logical_state(ctx.get_id(), derez);
+        node->unpack_version_state(ctx.get_id(), derez);
         created_states[idx] = node;
       }
-      receive_replicate_created_region_contexts(ctx, created_states,
-                                                applied_events, num_shards);
+      ShardMapping src_mapping;
+      src_mapping.unpack_mapping(derez);
+      if (!src_mapping.empty())
+      {
+        std::multimap<ShardID,ShardID> src_to_dst_mapping;
+        compute_shard_to_shard_mapping(src_mapping, src_to_dst_mapping);
+        receive_replicate_created_region_contexts(ctx, created_states,
+                src_to_dst_mapping, src_mapping.size(), applied_events);
+      }
+      else
+        InnerContext::receive_created_region_contexts(ctx, created_states,
+                      applied_events, NULL/*mapping*/, 0/*source shard*/);
       runtime->free_region_tree_context(ctx);
     }
 
@@ -22424,11 +22483,11 @@ namespace Legion {
       assert(false);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RemoteContext::receive_created_region_contexts(RegionTreeContext ctx,
-                           const std::vector<RegionNode*> &created_state,
-                           std::set<RtEvent> &applied_events, size_t num_shards)
+                        const std::vector<RegionNode*> &created_state,
+                        std::set<RtEvent> &applied_events,
+                        const ShardMapping *shard_mapping, ShardID source_shard)
     //--------------------------------------------------------------------------
     {
       const RtUserEvent done_event = Runtime::create_rt_user_event();
@@ -22436,7 +22495,6 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize<size_t>(num_shards);
         rez.serialize<size_t>(created_state.size());
         for (std::vector<RegionNode*>::const_iterator it = 
               created_state.begin(); it != created_state.end(); it++)
@@ -22446,13 +22504,19 @@ namespace Legion {
           (*it)->pack_version_state(ctx.get_id(), rez, true/*invalidate*/,
                                     applied_events);
         }
+        if (shard_mapping != NULL)
+        {
+          shard_mapping->pack_mapping(rez);
+          rez.serialize(source_shard);
+        }
+        else
+          ShardMapping::pack_empty(rez);
         rez.serialize(done_event);
       }
       pack_global_ref();
       runtime->send_created_region_contexts(owner_space, rez);
       applied_events.insert(done_event);
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RemoteContext::free_region_tree_context(void)
@@ -22462,18 +22526,15 @@ namespace Legion {
       assert(false);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ void RemoteContext::handle_created_region_contexts(
-                   Runtime *runtime, Deserializer &derez, AddressSpaceID source)
+                   Runtime *runtime, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID context_did;
       derez.deserialize(context_did);
       const RegionTreeContext ctx = runtime->allocate_region_tree_context();
-      size_t num_shards;
-      derez.deserialize(num_shards);
       size_t num_regions;
       derez.deserialize(num_regions);
       std::vector<RegionNode*> created_state(num_regions);
@@ -22483,17 +22544,23 @@ namespace Legion {
         LogicalRegion handle;
         derez.deserialize(handle);
         RegionNode *node = runtime->forest->get_node(handle);
-        node->unpack_logical_state(ctx.get_id(), derez, source);
-        node->unpack_version_state(ctx.get_id(), derez, source);
+        node->unpack_logical_state(ctx.get_id(), derez);
+        node->unpack_version_state(ctx.get_id(), derez);
         created_state[idx] = node;
       }
+      ShardMapping src_mapping;
+      src_mapping.unpack_mapping(derez);
+      ShardID source_shard = 0;
+      if (!src_mapping.empty())
+        derez.deserialize(source_shard);
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
       InnerContext *context = static_cast<InnerContext*>(
           runtime->find_distributed_collectable(context_did));
-      context->receive_created_region_contexts(ctx, created_state, 
-                                               applied_events, num_shards);
+      context->receive_created_region_contexts(ctx, created_state,
+          applied_events, src_mapping.empty() ? NULL : &src_mapping,
+          source_shard);
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -22502,7 +22569,6 @@ namespace Legion {
       context->unpack_global_ref();
       runtime->free_region_tree_context(ctx); 
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez)

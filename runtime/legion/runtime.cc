@@ -12540,8 +12540,7 @@ namespace Legion {
             }
           case SEND_CREATED_REGION_CONTEXTS:
             {
-              runtime->handle_created_region_contexts(derez,
-                                                      remote_address_space);
+              runtime->handle_created_region_contexts(derez);
               break;
             }
           case SEND_MATERIALIZED_VIEW:
@@ -12870,6 +12869,11 @@ namespace Legion {
           case SEND_REPL_BROADCAST_UPDATE:
             {
               runtime->handle_control_replicate_broadcast_update(derez);
+              break;
+            }
+          case SEND_REPL_CREATED_REGIONS:
+            {
+              runtime->handle_control_replicate_created_regions(derez);
               break;
             }
           case SEND_REPL_TRACE_EVENT_REQUEST:
@@ -22800,6 +22804,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_created_regions(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_REPL_CREATED_REGIONS>(
+                                                    rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_control_replicate_trace_event_request(
                                          AddressSpaceID target, Serializer &rez) 
     //--------------------------------------------------------------------------
@@ -24528,11 +24541,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_created_region_contexts(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_created_region_contexts(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RemoteContext::handle_created_region_contexts(this, derez, source);
+      RemoteContext::handle_created_region_contexts(this, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -25043,6 +25055,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_broadcast_update(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_created_regions(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_created_regions(derez, this);
     }
 
     //--------------------------------------------------------------------------

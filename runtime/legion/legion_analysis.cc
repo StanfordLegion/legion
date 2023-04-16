@@ -2782,6 +2782,85 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::convert(
+                             const std::vector<ShardID> *shard_to_shard_mapping)
+    //--------------------------------------------------------------------------
+    {
+      // If we're converting, we don't need the shard users anymore
+      if (!shard_users.empty())
+        shard_users.clear();
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+        it->second->convert(shard_to_shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::merge(ProjectionRegion *rhs,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = rhs->local_children.begin(); 
+            it != rhs->local_children.end(); it++)
+      {
+        std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+          finder = local_children.find(it->first);
+        if (finder == local_children.end())
+        {
+          // Do the conversion over
+          it->second->convert(shard_to_shard_mapping);
+          add_child(it->second);
+        }
+        else
+          finder->second->merge(it->second, shard_to_shard_mapping);
+      }
+#ifdef DEBUG_LEGION
+      // Should already have been converted and cleared this
+      assert(shard_users.empty());
+#endif
+      // No need to merge over the shard users since we don't need them
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(local_children.size());
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        rez.serialize(it->first);
+        it->second->pack(rez);
+      }
+      rez.serialize<size_t>(shard_users.size());
+      for (unsigned idx = 0; idx < shard_users.size(); idx++)
+        rez.serialize(shard_users[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionRegion::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        PartitionNode *partition = region->get_child(color);
+        ProjectionPartition *child = new ProjectionPartition(partition);
+        child->unpack(derez);
+        local_children[color] = child;
+        child->add_reference();
+      }
+      size_t num_users;
+      derez.deserialize(num_users);
+      shard_users.resize(num_users);
+      for (unsigned idx = 0; idx < num_users; idx++)
+        derez.deserialize(shard_users[idx]);
+    }
+
     /////////////////////////////////////////////////////////////
     // ProjectionPartition
     /////////////////////////////////////////////////////////////
@@ -2919,11 +2998,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(it->second != local_shard);
 #endif
-            size_t diff = (local_shard < it->second) ? 
+            size_t abs_diff = (local_shard < it->second) ? 
               (it->second - local_shard) : (local_shard - it->second);
             // closest distance by shard ID with wrap around
             size_t distance = 
-              (diff < (total_shards/2)) ? diff : total_shards - diff;
+             (abs_diff < (total_shards/2)) ? abs_diff : total_shards - abs_diff;
             if (distance < closest_distance)
             {
               closest_shard = it->second;
@@ -3036,6 +3115,188 @@ namespace Legion {
         refinement->children[it->first] =
           it->second->create_refinement()->as_region_refinement();
       return refinement;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::convert(
+                             const std::vector<ShardID> *shard_to_shard_mapping)
+    //--------------------------------------------------------------------------
+    {
+      if (disjoint_complete_children_shards != NULL)
+      {
+        if ((shard_to_shard_mapping == NULL) || 
+            !shard_to_shard_mapping->empty())
+        {
+          std::unordered_map<LegionColor,ShardID> new_mapping;
+          if (shard_to_shard_mapping != NULL)
+          {
+            // Make a new mapping
+            for (std::unordered_map<LegionColor,ShardID>::const_iterator it =
+                  disjoint_complete_children_shards->color_shards.begin(); it !=
+                  disjoint_complete_children_shards->color_shards.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(it->second < shard_to_shard_mapping->size());
+#endif
+              new_mapping[it->first] = shard_to_shard_mapping->at(it->second);
+            }
+          }
+          if (disjoint_complete_children_shards->remove_reference())
+            delete disjoint_complete_children_shards;
+          if (!new_mapping.empty())
+          {
+            disjoint_complete_children_shards = 
+              new ShardedColorMap(std::move(new_mapping)); 
+            disjoint_complete_children_shards->add_reference();
+          }
+          else
+            disjoint_complete_children_shards = NULL;
+        }
+        // else the identity case means we don't need to do anything
+      }
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+        it->second->convert(shard_to_shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::merge(ProjectionPartition *rhs,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
+    //--------------------------------------------------------------------------
+    {
+      std::unordered_map<LegionColor,ShardID> new_mapping;
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator it
+           = rhs->local_children.begin(); it != rhs->local_children.end(); it++)
+      {
+        std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator
+          finder = local_children.find(it->first);
+        if (finder == local_children.end())
+        {
+          it->second->convert(shard_to_shard_mapping);
+          add_child(it->second);
+          // If we have a disjoint complete children shards then remove the
+          // entry from the mapping
+          if (disjoint_complete_children_shards != NULL)
+          {
+            if (new_mapping.empty())
+              new_mapping = disjoint_complete_children_shards->color_shards;
+            std::unordered_map<LegionColor,ShardID>::iterator color_finder =
+              new_mapping.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(color_finder != new_mapping.end());
+#endif
+            new_mapping.erase(color_finder);
+            if (new_mapping.empty())
+            {
+              if (disjoint_complete_children_shards->remove_reference())
+                delete disjoint_complete_children_shards;
+              disjoint_complete_children_shards = NULL;
+            }
+          }
+        }
+        else
+          finder->second->merge(it->second, shard_to_shard_mapping);
+      }
+      if (!new_mapping.empty())
+      {
+        if (disjoint_complete_children_shards->remove_reference())
+          delete disjoint_complete_children_shards;
+        disjoint_complete_children_shards =
+          new ShardedColorMap(std::move(new_mapping));
+        disjoint_complete_children_shards->add_reference();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::pack(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(local_children.size());
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+      {
+        rez.serialize(it->first);
+        it->second->pack(rez);
+      }
+      if (disjoint_complete_children_shards != NULL)
+        disjoint_complete_children_shards->pack(rez);
+      else
+        ShardedColorMap::pack_empty(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionPartition::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_children;
+      derez.deserialize(num_children);
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        RegionNode *region = partition->get_child(color);
+        ProjectionRegion *child = new ProjectionRegion(region);
+        child->unpack(derez);
+        local_children[color] = child;
+        child->add_reference();
+      }
+      disjoint_complete_children_shards = ShardedColorMap::unpack(derez);
+      if (disjoint_complete_children_shards != NULL)
+        disjoint_complete_children_shards->add_reference();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ShardedColorMap
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardID ShardedColorMap::at(LegionColor color) const
+    //--------------------------------------------------------------------------
+    {
+      std::unordered_map<LegionColor,ShardID>::const_iterator finder =
+        color_shards.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != color_shards.end());
+#endif
+      return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedColorMap::pack(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(color_shards.size());
+      for (std::unordered_map<LegionColor,ShardID>::const_iterator it =
+            color_shards.begin(); it != color_shards.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardedColorMap::pack_empty(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardedColorMap* ShardedColorMap::unpack(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      if (num_colors == 0)
+        return NULL;
+      std::unordered_map<LegionColor,ShardID> color_shards;
+      for (unsigned idx = 0; idx < num_colors; idx++)
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        derez.deserialize(color_shards[color]);
+      }
+      return new ShardedColorMap(std::move(color_shards));
     }
 
 #if 0
@@ -3174,13 +3435,11 @@ namespace Legion {
           finder->second->deserialize(derez);
       }
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // RefinementNode
     /////////////////////////////////////////////////////////////
 
-#if 0
     //--------------------------------------------------------------------------
     RefinementNode::RefinementNode(RegionTreeNode *n)
       : node(n)
@@ -3708,7 +3967,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RegionRefinementTracker::RegionRefinementTracker(RegionNode *node,
-                                                     ProjectionSummary *proj)
+                                                     ProjectionRegion *proj)
       : region(node), refined_child(NULL), refined_projection(proj),
         current_refinement(true), total_traversals(0), return_timeout(0)
     //--------------------------------------------------------------------------
@@ -3727,7 +3986,7 @@ namespace Legion {
             candidate_partitions.end(); it++)
         if (it->first->remove_base_gc_ref(REFINEMENT_REF))
           delete it->first;
-      for (std::unordered_map<ProjectionSummary*,
+      for (std::unordered_map<ProjectionRegion*,
                               std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -3760,7 +4019,7 @@ namespace Legion {
         it->first->add_base_gc_ref(REFINEMENT_REF);
         result->candidate_partitions.insert(*it);
       }
-      for (std::unordered_map<ProjectionSummary*,
+      for (std::unordered_map<ProjectionRegion*,
                               std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -3875,15 +4134,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool RegionRefinementTracker::update_refinement_projection(
-                                                     ProjectionSummary *summary)
+                                                           ProjectionNode *proj)
     //--------------------------------------------------------------------------
     {
+      ProjectionRegion *projection = proj->as_region_projection();
+#ifdef DEBUG_LEGION
+      assert(projection != NULL);
+#endif
       // Step the clock for a new traversal
       total_traversals++;
       // Check to see if we observed this refinement before
-      std::unordered_map<ProjectionSummary*,
+      std::unordered_map<ProjectionRegion*,
         std::pair<double,uint64_t> >::iterator finder =
-          candidate_projections.find(summary);
+          candidate_projections.find(projection);
       if (finder != candidate_projections.end())
       {
         // Update the score using exponentially weighted moving average
@@ -3900,25 +4163,25 @@ namespace Legion {
         // then we can check to see if this is now the dominant child
         if (current_refinement && (previous_epoch != current_epoch) &&
             is_dominant_candidate(finder->second.first, 
-                                  (summary == refined_projection)))
+                                  (projection == refined_projection)))
         {
           // If we're current refinement we don't switch but just end
           // invalidating all the other candidates so they can start again
-          if (summary == refined_projection)
+          if (projection == refined_projection)
             invalidate_unused_candidates();
           else
             return true;
         }
       }
-      else if (summary == refined_projection)
+      else if (projection == refined_projection)
       {
 #ifdef DEBUG_LEGION
         assert(current_refinement);
 #endif
         // This counts as a return too since we're refined this way
-        candidate_projections[summary] =
+        candidate_projections[projection] =
           std::pair<double,uint64_t>(1.0, total_traversals);
-        summary->add_reference();
+        projection->add_reference();
         // Reset the timeout since we saw a return
         return_timeout = 0;
         // No need to switch, we're already using the refinement
@@ -3937,9 +4200,9 @@ namespace Legion {
           invalidate_unused_candidates();
           return_timeout = 0;
         }
-        candidate_projections[summary] = 
+        candidate_projections[projection] = 
           std::pair<double,uint64_t>(0.0, total_traversals);
-        summary->add_reference();
+        projection->add_reference();
       }
       return false;
     }
@@ -3968,7 +4231,7 @@ namespace Legion {
         if (score < it->second.first)
           return false;
       }
-      for (std::unordered_map<ProjectionSummary*,
+      for (std::unordered_map<ProjectionRegion*,
                               std::pair<double,uint64_t> >::iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -4009,7 +4272,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(refined_projection != NULL);
 #endif
-          std::unordered_map<ProjectionSummary*,
+          std::unordered_map<ProjectionRegion*,
             std::pair<double,uint64_t> >::const_iterator
               finder = candidate_projections.find(refined_projection);
           // Current refinement is never observed
@@ -4051,7 +4314,7 @@ namespace Legion {
       }
       if (!candidate_projections.empty())
       {
-        for (std::unordered_map<ProjectionSummary*,
+        for (std::unordered_map<ProjectionRegion*,
                             std::pair<double,uint64_t> >::iterator it =
               candidate_projections.begin(); it !=
               candidate_projections.end(); /*nothing*/)
@@ -4061,7 +4324,7 @@ namespace Legion {
           {
             if (it->first->remove_reference())
               delete it->first;
-            std::unordered_map<ProjectionSummary*,
+            std::unordered_map<ProjectionRegion*,
               std::pair<double,uint64_t> >::iterator to_delete = it++;
             candidate_projections.erase(to_delete);
           }
@@ -4073,9 +4336,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionRefinementTracker::change_refinements(ContextID ctx,
-                               const FieldMask &refinement_mask,
-                               FieldMaskSet<RegionTreeNode> &new_children,
-                               FieldMaskSet<ProjectionSummary> &new_projections)
+                                 const FieldMask &refinement_mask,
+                                 FieldMaskSet<RegionTreeNode> &new_children,
+                                 FieldMaskSet<ProjectionNode> &new_projections)
     //--------------------------------------------------------------------------
     {
       // If we had a current refinement then we need to issue an invalidation
@@ -4095,8 +4358,8 @@ namespace Legion {
           best_child = it->first;
         }
       }
-      ProjectionSummary *best_summary = NULL;
-      for (std::unordered_map<ProjectionSummary*,
+      ProjectionRegion *best_projection = NULL;
+      for (std::unordered_map<ProjectionRegion*,
                               std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -4104,12 +4367,12 @@ namespace Legion {
         if (max_score < it->second.first)
         {
           max_score = it->second.first;
-          best_summary = it->first;
+          best_projection = it->first;
           best_child = NULL;
         }
       }
-      if (best_summary != NULL)
-        new_projections.insert(best_summary, refinement_mask);
+      if (best_projection != NULL)
+        new_projections.insert(best_projection, refinement_mask);
       else if (best_child != NULL)
         new_children.insert(best_child, refinement_mask);
     }
@@ -4138,26 +4401,21 @@ namespace Legion {
         children.insert(refined_child);
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    RefinementTracker* RegionRefinementTracker::convert(LogicalState *new_owner,
-                       const std::vector<ShardID> *shard_to_shard_mapping) const
+    void RegionRefinementTracker::convert(
+                             const std::vector<ShardID> *shard_to_shard_mapping)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
       if (refined_projection != NULL)
-      {
-        
-
-      }
-      else
-        return new RegionRefinementTracker(*this, owner, refined_child);
+        refined_projection->convert(shard_to_shard_mapping);
     }
 
-
     //--------------------------------------------------------------------------
-    RefinementTracker* RegionRefinementTracker::merge(
-                       const RefinementTracker *other,
-                       const std::vector<ShardID> *shard_to_shard_mapping) const
+    void RegionRefinementTracker::merge(RefinementTracker *other,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
     //--------------------------------------------------------------------------
     {
       RegionRefinementTracker *rhs = other->as_region_tracker();
@@ -4166,33 +4424,62 @@ namespace Legion {
       assert(region == rhs->region);
       assert(current_refinement);
       assert(rhs->current_refinement);
+      assert(refined_child == rhs->refined_child);
+      assert((refined_projection != NULL) == (rhs->refined_projection != NULL));
+#endif
+      if (refined_projection != NULL)
+        refined_projection->merge(rhs->refined_projection, 
+                                  shard_to_shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionRefinementTracker::pack(Serializer &rez,
+                             std::map<LegionColor,RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
 #endif
       if (refined_child != NULL)
       {
-        // If we have a child the other shards should have the same thing
-        // so there are no discrepancies between them
-#ifdef DEBUG_LEGION
-        assert(rhs->refined_child == refined_child);
-#endif
-        return this;
+        rez.serialize<int>(1); // has a partition
+        rez.serialize(refined_child->row_source->color);
+        to_traverse[refined_child->row_source->color] = refined_child;
       }
-#ifdef DEBUG_LEGION
-      assert((refined_projection != NULL) == (rhs->refined_projection != NULL));
-#endif
-      if (refined_projection == NULL)
-        return this;
-      ProjectionRegion *left = 
-        refined_projection->result->as_region_projection();
-      ProjectionRegion *right = 
-        rhs->refined_projection->result->as_region_projection();
-      ProjectionRegion *merged = left->merge(right, shard_to_shard_mapping);
-      if (merged != left)
-        return new RegionRefinementProjection(*this, owner,
-            new ProjectionSummary(*refined_projection, merged));
+      else if (refined_projection != NULL)
+      {
+        rez.serialize<int>(-1); // has a projection
+        refined_projection->pack(rez);
+      }
       else
-        return this;
+        rez.serialize<int>(0); // just a leaf refinement
     }
-#endif
+
+    //--------------------------------------------------------------------------
+    /*static*/ RegionRefinementTracker* RegionRefinementTracker::unpack(
+        RegionNode *region, Deserializer &derez,
+        std::map<LegionColor,RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+      int kind;
+      derez.deserialize(kind);
+      if (kind > 0)
+      {
+        LegionColor child_color;
+        derez.deserialize(child_color);
+        PartitionNode *child = region->get_child(child_color);
+        to_traverse[child->row_source->color] = child;
+        return new RegionRefinementTracker(region, child); 
+      }
+      else if (kind < 0)
+      {
+        ProjectionRegion *projection = new ProjectionRegion(region);
+        projection->unpack(derez);
+        return new RegionRefinementTracker(region, projection);
+      }
+      else
+        return new RegionRefinementTracker(region, true/*current*/);
+    }
 
     /////////////////////////////////////////////////////////////
     // PartitionRefinementTracker
@@ -4211,7 +4498,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PartitionRefinementTracker::PartitionRefinementTracker(PartitionNode *node,
-                                                        ProjectionSummary *proj) 
+                                                      ProjectionPartition *proj) 
       : partition(node), refined_projection(proj), current_refinement(true),
         children_score(-1.0), children_last(0), total_traversals(0),
         return_timeout(0)
@@ -4225,7 +4512,7 @@ namespace Legion {
     PartitionRefinementTracker::~PartitionRefinementTracker(void)
     //--------------------------------------------------------------------------
     {
-      for (std::unordered_map<ProjectionSummary*,
+      for (std::unordered_map<ProjectionPartition*,
                               std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -4245,7 +4532,7 @@ namespace Legion {
       PartitionRefinementTracker *result = (refined_projection == NULL) ?
         new PartitionRefinementTracker(partition, current_refinement) :
         new PartitionRefinementTracker(partition, refined_projection);
-      for (std::unordered_map<ProjectionSummary*,
+      for (std::unordered_map<ProjectionPartition*,
                               std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -4344,12 +4631,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool PartitionRefinementTracker::update_refinement_projection(
-                                                  ProjectionSummary *projection)
+                                                           ProjectionNode *proj)
     //--------------------------------------------------------------------------
     {
+      ProjectionPartition *projection = proj->as_partition_projection();
+#ifdef DEBUG_LEGION
+      assert(projection != NULL);
+#endif
       // Step the clock for a new traversal
       total_traversals++;
-      std::unordered_map<ProjectionSummary*,
+      std::unordered_map<ProjectionPartition*,
         std::pair<double,uint64_t> >::iterator finder =
           candidate_projections.find(projection);
       if (finder != candidate_projections.end())
@@ -4424,7 +4715,7 @@ namespace Legion {
         if (score < children_score)
           return false;
       }
-      for (std::unordered_map<ProjectionSummary*,
+      for (std::unordered_map<ProjectionPartition*,
                               std::pair<double,uint64_t> >::iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++) 
@@ -4447,7 +4738,7 @@ namespace Legion {
           // obvious that we should switch and not just ping-pong so we need to
           // have a score that is at least sqrt(total_candidates) more than the
           // current refinement's score
-          std::unordered_map<ProjectionSummary*,
+          std::unordered_map<ProjectionPartition*,
               std::pair<double,uint64_t> >::const_iterator 
                 finder = candidate_projections.find(refined_projection);
           // Current refinement is never observed
@@ -4483,7 +4774,7 @@ namespace Legion {
       }
       if (!candidate_projections.empty())
       {
-        for (std::unordered_map<ProjectionSummary*,
+        for (std::unordered_map<ProjectionPartition*,
                             std::pair<double,uint64_t> >::iterator it =
               candidate_projections.begin(); it !=
               candidate_projections.end(); /*nothing*/)
@@ -4493,7 +4784,7 @@ namespace Legion {
           {
             if (it->first->remove_reference())
               delete it->first;
-            std::unordered_map<ProjectionSummary*,
+            std::unordered_map<ProjectionPartition*,
               std::pair<double,uint64_t> >::iterator to_delete = it++;
             candidate_projections.erase(to_delete);
           }
@@ -4507,7 +4798,7 @@ namespace Legion {
     void PartitionRefinementTracker::change_refinements(ContextID ctx,
                                const FieldMask &refinement_mask,
                                FieldMaskSet<RegionTreeNode> &new_children,
-                               FieldMaskSet<ProjectionSummary> &new_projections)
+                               FieldMaskSet<ProjectionNode> &new_projections)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4516,8 +4807,8 @@ namespace Legion {
       assert(!current_refinement || (refined_projection != NULL));
 #endif
       double max_score = children_score;
-      ProjectionSummary *best_projection = NULL;
-      for (std::unordered_map<ProjectionSummary*,
+      ProjectionNode *best_projection = NULL;
+      for (std::unordered_map<ProjectionPartition*,
                               std::pair<double,uint64_t> >::const_iterator it =
             candidate_projections.begin(); it !=
             candidate_projections.end(); it++)
@@ -4571,6 +4862,86 @@ namespace Legion {
       {
         for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
           children.insert(partition->get_child(*itr));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::convert(
+                             const std::vector<ShardID> *shard_to_shard_mapping)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (refined_projection != NULL)
+        refined_projection->convert(shard_to_shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::merge(RefinementTracker *rhs,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
+    //--------------------------------------------------------------------------
+    {
+      PartitionRefinementTracker *other = rhs->as_partition_tracker();
+#ifdef DEBUG_LEGION
+      assert(other != NULL);
+      assert(partition == other->partition);
+      assert(current_refinement);
+      assert(other->current_refinement);
+      assert((refined_projection != NULL) ==
+          (other->refined_projection != NULL));
+#endif
+      if (refined_projection != NULL)
+        refined_projection->merge(other->refined_projection,
+                                  shard_to_shard_mapping);
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionRefinementTracker::pack(Serializer &rez,
+                             std::map<LegionColor,RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(current_refinement);
+#endif
+      if (refined_projection == NULL)
+      {
+        rez.serialize<bool>(true); // has children
+        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+        {
+          RegionNode *child = partition->get_child(*itr);
+          to_traverse[child->row_source->color] = child;
+        }
+      }
+      else
+      {
+        rez.serialize<bool>(false); // has children
+        refined_projection->pack(rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PartitionRefinementTracker* PartitionRefinementTracker::unpack(
+        PartitionNode *partition, Deserializer &derez,
+        std::map<LegionColor,RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+      bool has_children;
+      derez.deserialize(has_children);
+      if (has_children)
+      {
+        for (ColorSpaceIterator itr(partition->row_source); itr; itr++)
+        {
+          RegionNode *child = partition->get_child(*itr);
+          to_traverse[child->row_source->color] = child;
+        }
+        return new PartitionRefinementTracker(partition, true/*current*/);
+      }
+      else
+      {
+        ProjectionPartition *projection = new ProjectionPartition(partition); 
+        projection->unpack(derez);
+        return new PartitionRefinementTracker(partition, projection);
       }
     }
 
@@ -4747,6 +5118,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LogicalState::pack_refinements(Serializer &rez, 
+                       std::map<LegionColor,RegionTreeNode*> &to_traverse) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize<size_t>(refinement_trackers.size());
+      for (FieldMaskSet<RefinementTracker>::const_iterator it =
+            refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+      {
+        it->first->pack(rez, to_traverse);
+        it->second.serialize(rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LogicalState::unpack_refinements(Deserializer &derez,
+                             std::map<LegionColor,RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t num_refinements;
+      derez.deserialize(num_refinements);
+      for (unsigned idx = 0; idx < num_refinements; idx++)
+      {
+        RefinementTracker *tracker = 
+          owner->unpack_refinement(derez, to_traverse);
+        FieldMask mask;
+        mask.deserialize(derez);
+        refinement_trackers.insert(tracker, mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalState::merge_refinements(LogicalState &src, 
                              const std::vector<ShardID> *shard_to_shard_mapping,
                              std::set<RegionTreeNode*> &to_traverse)
@@ -4758,95 +5162,40 @@ namespace Legion {
         // We're only migrating the non-projected parts of the
         // refinement since projections don't translate between
         // contexts so we only need to move these over once
-        for (FieldMaskSet<RefinementTracker>::const_iterator it =
-              src.refinement_trackers.begin(); it !=
-              src.refinement_trackers.end(); it++)
-          it->first->find_child_refinements(to_traverse);
-        if (!refinement_trackers.empty())
+        for (FieldMaskSet<RefinementTracker>::iterator src_it =
+              src.refinement_trackers.begin(); src_it !=
+              src.refinement_trackers.end(); src_it++)
         {
-          for (FieldMaskSet<RefinementTracker>::iterator src_it =
-                src.refinement_trackers.begin(); src_it !=
-                src.refinement_trackers.end(); src_it++)
+          src_it->first->find_child_refinements(to_traverse);
+          for (FieldMaskSet<RefinementTracker>::iterator dst_it =
+                refinement_trackers.begin(); dst_it !=
+                refinement_trackers.end(); dst_it++)
           {
-            FieldMaskSet<RefinementTracker> to_add;
-            std::vector<RefinementTracker*> to_delete;
-            for (FieldMaskSet<RefinementTracker>::iterator dst_it =
-                  refinement_trackers.begin(); dst_it !=
-                  refinement_trackers.end(); dst_it++)
-            {
-              const FieldMask overlap = dst_it->second & src_it->second;
-              if (!overlap)
-                continue;
-              RefinementTracker *tracker = 
-                dst_it->first->merge(src_it->first, shard_to_shard_mapping);
-              if (tracker != dst_it->first)
-              {
-                to_add.insert(tracker, overlap);
-                dst_it.filter(overlap);
-                if (!dst_it->second)
-                  to_delete.push_back(dst_it->first);
-              }
-              src_it.filter(overlap);
-              if (!src_it->second)
-                break;
-            }
-            for (std::vector<RefinementTracker*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              refinement_trackers.erase(*it);
-              delete (*it);
-            }
-            for (FieldMaskSet<RefinementTracker>::const_iterator it =
-                  to_add.begin(); it != to_add.end(); it++)
-              refinement_trackers.insert(it->first, it->second);
+            const FieldMask overlap = dst_it->second & src_it->second;
+            if (!overlap)
+              continue;
+            dst_it->first->merge(src_it->first, shard_to_shard_mapping);
+            src_it.filter(overlap);
             if (!src_it->second)
-              delete src_it->first;
-            else
-              refinement_trackers.insert(src_it->first, src_it->second);
+              break;
           }
-          src.refinement_trackers.clear();
+          if (!!src_it->second)
+          {
+            src_it->first->convert(shard_to_shard_mapping);
+            refinement_trackers.insert(src_it->first, src_it->second);
+          }
+          else
+            delete src_it->first;
         }
-        else
-          refinement_trackers.swap(src.refinement_trackers);
+        src.refinement_trackers.clear();
       }
-#ifdef DEBUG_LEGION
-      src.check_init();
-#endif
+      src.reset();
     }
 
     //--------------------------------------------------------------------------
     void LogicalState::convert_refinements(LogicalState &src,
-        const std::vector<ShardID> &shard_to_shard_mapping,
+        const std::vector<ShardID> *shard_to_shard_mapping,
         std::set<RegionTreeNode*> &to_traverse)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      check_init();
-#endif
-      for (FieldMaskSet<RefinementTracker>::const_iterator it =
-            src.refinement_trackers.begin(); it != 
-            src.refinement_trackers.end(); it++)
-      {
-        it->first->find_child_refinements(to_traverse);
-        RefinementTracker *converted = 
-          it->first->convert(shard_to_shard_mapping);
-        if (converted != it->first)
-        {
-          delete it->first;
-          refinement_trackers.insert(converted, it->second);
-        }
-        else
-          refinement_trackers.insert(it->first, it->second);
-      }
-      src.refinement_trackers.clear();
-#ifdef DEBUG_LEGION
-      src.check_init();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalState::swap_refinements(LogicalState &src,
-                                        std::set<RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4854,11 +5203,13 @@ namespace Legion {
 #endif
       refinement_trackers.swap(src.refinement_trackers);
       for (FieldMaskSet<RefinementTracker>::const_iterator it =
-            refinement_trackers.begin(); it != refinement_trackers.end(); it++)
+            refinement_trackers.begin(); it != 
+            refinement_trackers.end(); it++)
+      {
         it->first->find_child_refinements(to_traverse);
-#ifdef DEBUG_LEGION
-      src.check_init();
-#endif
+        it->first->convert(shard_to_shard_mapping);
+      }
+      src.reset();
     }
 
     //--------------------------------------------------------------------------
@@ -5157,7 +5508,7 @@ namespace Legion {
       {
         // Create a projection summary to represent the fallback refinement
         // subtree to use for equivalence sets
-        ProjectionSummary *fallback = find_or_create_fallback_projection();
+        ProjectionNode *fallback = find_or_create_fallback_projection();
         // Create a new refinement for the fallback fields
         RefinementTracker *tracker = owner->create_refinement_tracker(fallback);
         refinement_trackers.insert(tracker, fallback_refine);
@@ -5198,7 +5549,7 @@ namespace Legion {
             to_add.insert(diff, diff_mask);
             it.filter(diff_mask);
           }
-          if (it->first->update_refinement_projection(projection))
+          if (it->first->update_refinement_projection(projection->result))
           {
             refine_now |= overlap;
             disjoint_complete_mask |= overlap;
@@ -5215,7 +5566,7 @@ namespace Legion {
         {
           RefinementTracker *new_tracker =
             owner->create_refinement_tracker(false/*current refinement*/);
-          if (new_tracker->update_refinement_projection(projection))
+          if (new_tracker->update_refinement_projection(projection->result))
           {
             refine_now |= traversal_mask;
             disjoint_complete_mask |= traversal_mask;
@@ -5246,7 +5597,7 @@ namespace Legion {
             owner->create_refinement_tracker(projection);
           refinement_trackers.insert(tracker, refine_now);
           // Inform the subtree that it's now refined
-          RefinementNode *refinement = projection->create_refinement();
+          RefinementNode *refinement = projection->result->create_refinement();
           // Record the refinement tree with the analysis  
           logical_analysis.record_pending_refinement(privilege, req_index,
                             refinement, refine_now, refinement_operations);
@@ -5274,7 +5625,7 @@ namespace Legion {
           // These fields are not refined at all and we can't use the
           // projection because its not disjoint and complete so we 
           // need to make a default one to consider
-          ProjectionSummary *fallback = find_or_create_fallback_projection();
+          ProjectionNode *fallback = find_or_create_fallback_projection();
           RefinementTracker *tracker =
             owner->create_refinement_tracker(false/*current refinement*/);
           tracker->update_refinement_projection(fallback);
@@ -5292,7 +5643,7 @@ namespace Legion {
       // Iterate through all of our current refinements and get the
       // children to travers and the projections to be done at this level
       FieldMaskSet<RegionTreeNode> new_children;
-      FieldMaskSet<ProjectionSummary> new_projections;
+      FieldMaskSet<ProjectionNode> new_projections;
       std::vector<RefinementTracker*> to_delete;
       for (FieldMaskSet<RefinementTracker>::iterator it =
             refinement_trackers.begin(); it != refinement_trackers.end(); it++)
@@ -5413,7 +5764,7 @@ namespace Legion {
         refinement_trackers.insert(new_tracker, new_children.get_valid_mask());
       }
       // Create new refinements for all the projections
-      for (FieldMaskSet<ProjectionSummary>::const_iterator it =
+      for (FieldMaskSet<ProjectionNode>::const_iterator it =
             new_projections.begin(); it != new_projections.end(); it++)
       {
         RefinementNode *new_refinement = it->first->create_refinement();
@@ -23691,12 +24042,12 @@ namespace Legion {
       }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::merge(VersionManager &src, 
-                               std::set<RegionTreeNode*> &to_traverse,
-                               LegionMap<AddressSpaceID,
-                                SubscriberInvalidations> &subscribers)
+                             std::set<RegionTreeNode*> &to_traverse,
+                             LegionMap<AddressSpaceID,
+                              SubscriberInvalidations> &subscribers,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23754,6 +24105,7 @@ namespace Legion {
       src.disjoint_complete.clear();
       if (!src.disjoint_complete_children.empty())
       {
+        std::vector<LegionColor> new_children;
         for (FieldMaskSet<RegionTreeNode>::const_iterator it = 
               src.disjoint_complete_children.begin(); it !=
               src.disjoint_complete_children.end(); it++)
@@ -23762,18 +24114,116 @@ namespace Legion {
           // Remove duplicate references if it is already there
           // otherwise the references flow to the destination
           if (!disjoint_complete_children.insert(it->first, it->second))
+          {
             it->first->remove_base_gc_ref(VERSION_MANAGER_REF);
+            if (!disjoint_complete_children_shards.empty())
+              new_children.push_back(it->first->get_color());
+          }
         }
         src.disjoint_complete_children.clear();
+        if (!new_children.empty())
+        {
+          FieldMaskSet<ShardedColorMap> new_maps;
+          for (FieldMaskSet<ShardedColorMap>::const_iterator it =
+                disjoint_complete_children_shards.begin(); it !=
+                disjoint_complete_children_shards.end(); it++)
+          {
+            std::unordered_map<LegionColor,ShardID> new_mapping = 
+              it->first->color_shards;
+            for (std::vector<LegionColor>::const_iterator cit =
+                  new_children.begin(); cit != new_children.end(); cit++)
+              new_mapping.erase(*cit);
+            if (!new_mapping.empty())
+            {
+              ShardedColorMap *new_map = 
+                new ShardedColorMap(std::move(new_mapping));
+              new_map->add_reference();
+              new_maps.insert(new_map, it->second);
+            }
+            if (it->first->remove_reference())
+              delete it->first;
+          }
+          disjoint_complete_children_shards.swap(new_maps);
+        }
+      }
+      if (!src.disjoint_complete_children_shards.empty())
+      {
+        if (shard_to_shard_mapping != NULL)
+        {
+          // Need to convert these on the way over
+          std::vector<LegionColor> child_colors;
+          for (FieldMaskSet<ShardedColorMap>::iterator sit =
+                src.disjoint_complete_children_shards.begin(); sit !=
+                src.disjoint_complete_children_shards.end(); sit++)
+          {
+            sit.filter(disjoint_complete_children_shards.get_valid_mask());
+            if (!!sit->second)
+            {
+              // Need to convert on the way over between shards
+              // and also check for any children that we already have
+              std::unordered_map<LegionColor,ShardID> new_mapping;
+              for (std::unordered_map<LegionColor,ShardID>::const_iterator it =
+                    sit->first->color_shards.begin(); it !=
+                    sit->first->color_shards.end(); it++)
+              {
+                if (child_colors.empty() && !disjoint_complete_children.empty())
+                {
+                  child_colors.reserve(disjoint_complete_children.size());
+                  for (FieldMaskSet<RegionTreeNode>::const_iterator it =
+                        disjoint_complete_children.begin(); it !=
+                        disjoint_complete_children.end(); it++)
+                    child_colors.push_back(it->first->get_color());
+                  std::sort(child_colors.begin(), child_colors.end());
+                }
+                // If we already have the child then we no longer need it
+                if (std::binary_search(child_colors.begin(),
+                      child_colors.end(), it->first))
+                  continue;
+                if (!shard_to_shard_mapping->empty())
+                {
+#ifdef DEBUG_LEGION
+                  assert(it->second < shard_to_shard_mapping->size());
+#endif
+                  new_mapping[it->first] = 
+                    shard_to_shard_mapping->at(it->second);
+                }
+                else
+                {
+                  // identity case
+                  new_mapping[it->first] = it->second;
+                }
+              }
+              if (!new_mapping.empty())
+              {
+                ShardedColorMap *new_map = 
+                  new ShardedColorMap(std::move(new_mapping)); 
+                new_map->add_reference();
+                disjoint_complete_children_shards.insert(new_map, sit->second);
+              }
+            }
+            if (sit->first->remove_reference())
+              delete sit->first;
+          }
+        }
+        else
+        {
+          // We can just clear these out
+          for (FieldMaskSet<ShardedColorMap>::iterator it =
+                src.disjoint_complete_children_shards.begin(); it !=
+                src.disjoint_complete_children_shards.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
+        }
+        src.disjoint_complete_children_shards.clear();
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
-    void VersionManager::swap(VersionManager &src,
-                              std::set<RegionTreeNode*> &to_traverse,
-                              LegionMap<AddressSpaceID,
-                                SubscriberInvalidations> &subscribers)
+    void VersionManager::convert(VersionManager &src,
+                             std::set<RegionTreeNode*> &to_traverse,
+                             LegionMap<AddressSpaceID,
+                               SubscriberInvalidations> &subscribers,
+                             const std::vector<ShardID> *shard_to_shard_mapping)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23823,9 +24273,43 @@ namespace Legion {
         to_traverse.insert(it->first);
       disjoint_complete_children_shards.swap(
           src.disjoint_complete_children_shards);
+      if (!src.disjoint_complete_children_shards.empty())
+      {
+        if ((shard_to_shard_mapping == NULL) ||
+            !shard_to_shard_mapping->empty())
+        {
+          for (FieldMaskSet<ShardedColorMap>::iterator sit =
+                src.disjoint_complete_children_shards.begin(); sit !=
+                src.disjoint_complete_children_shards.end(); sit++)
+          {
+            if (shard_to_shard_mapping != NULL)
+            {
+              std::unordered_map<LegionColor,ShardID> new_mapping;
+              for (std::unordered_map<LegionColor,ShardID>::const_iterator it =
+                    sit->first->color_shards.begin(); it !=
+                    sit->first->color_shards.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(it->second < shard_to_shard_mapping->size());
+#endif
+                new_mapping[it->first] = shard_to_shard_mapping->at(it->second);
+              }
+              ShardedColorMap *new_map = 
+                new ShardedColorMap(std::move(new_mapping));
+              new_map->add_reference();
+              disjoint_complete_children_shards.insert(new_map, sit->second);
+            }
+            if (sit->first->remove_reference())
+              delete sit->first;
+          }
+          src.disjoint_complete_children_shards.clear();
+        }
+        else // identity case
+          src.disjoint_complete_children_shards.swap(
+              disjoint_complete_children_shards);
+      }
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::pack_manager(Serializer &rez, const bool invalidate,
                           std::map<LegionColor,RegionTreeNode*> &to_traverse,
@@ -23937,19 +24421,30 @@ namespace Legion {
             it->first->remove_base_gc_ref(VERSION_MANAGER_REF))
           assert(false); // should never get here
       }
+      rez.serialize<size_t>(disjoint_complete_children_shards.size());
+      for (FieldMaskSet<ShardedColorMap>::const_iterator it =
+            disjoint_complete_children_shards.begin(); it !=
+            disjoint_complete_children_shards.end(); it++)
+      {
+        it->first->pack(rez);
+        it->second.serialize(rez);
+        if (invalidate && it->first->remove_reference())
+          delete it->first;
+      }
       if (invalidate)
       {
         if (!!disjoint_complete)
           remove_node_disjoint_complete_ref();
         disjoint_complete.clear();
         disjoint_complete_children.clear();
+        disjoint_complete_children_shards.clear();
         equivalence_sets.clear();
       }
     }
 
     //--------------------------------------------------------------------------
     void VersionManager::unpack_manager(Deserializer &derez, 
-      AddressSpaceID source, std::map<LegionColor,RegionTreeNode*> &to_traverse)
+                             std::map<LegionColor,RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -23993,6 +24488,16 @@ namespace Legion {
         child->add_base_gc_ref(VERSION_MANAGER_REF);
         to_traverse[child_color] = child;
       }
+      size_t num_shard_children;
+      derez.deserialize(num_shard_children);
+      for (unsigned idx = 0; idx < num_shard_children; idx++)
+      {
+        ShardedColorMap *map = ShardedColorMap::unpack(derez);
+        FieldMask mask;
+        mask.deserialize(derez);
+        if (disjoint_complete_children_shards.insert(map, mask))
+          map->add_reference();
+      }
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -24011,7 +24516,6 @@ namespace Legion {
         it->first->unpack_global_ref();
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *node,
