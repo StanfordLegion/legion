@@ -1335,8 +1335,10 @@ namespace Legion {
      */
     class ProjectionTreeExchange : public AllGatherCollective<false> {
     public:
-      ProjectionTreeExchange(ProjectionNode *n, bool &disjoint_complete, 
-                             ReplicateContext *ctx,CollectiveIndexLocation loc);
+      ProjectionTreeExchange(ProjectionNode *n, bool &disjoint,
+          bool &disjoint_complete, bool &leaves_only,
+          bool &unique_shards, ReplicateContext *ctx,
+          CollectiveIndexLocation loc);
       ProjectionTreeExchange(const ProjectionTreeExchange &rhs) = delete;
       ~ProjectionTreeExchange(void);
     public:
@@ -1347,7 +1349,10 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
       ProjectionNode *const node;
+      bool &disjoint;
       bool &disjoint_complete;
+      bool &leaves_only;
+      bool &unique_shards;
     protected:
       typedef ProjectionNode::RegionSummary RegionSummary; 
       typedef ProjectionNode::PartitionSummary PartitionSummary; 

@@ -2610,14 +2610,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionRegion::is_disjoint_complete(void) const
+    bool ProjectionRegion::is_disjoint(void) const
     //--------------------------------------------------------------------------
     {
       if (local_children.size() > 1)
         return false;
       if (!local_children.empty() && 
-          !local_children.begin()->second->is_disjoint_complete())
+          !local_children.begin()->second->is_disjoint())
         return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_complete(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_complete())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_leaves_only(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (shard_users.empty())
+      {
+        for (std::unordered_map<LegionColor,
+                                ProjectionPartition*>::const_iterator
+              it = local_children.begin(); it != local_children.end(); it++)
+          if (!it->second->is_leaves_only())
+            return false;
+        return true;
+      }
+      else
+        return local_children.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionRegion::is_unique_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (shard_users.size() > 1)
+        return false;
+      for (std::unordered_map<LegionColor,ProjectionPartition*>::const_iterator
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_unique_shards())
+          return false;
       return true;
     }
 
@@ -2889,16 +2930,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ProjectionPartition::is_disjoint_complete(void) const
+    bool ProjectionPartition::is_disjoint(void) const
     //--------------------------------------------------------------------------
     {
       if (!partition->row_source->is_disjoint(false/*from app*/))
         return false;
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_disjoint())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_complete(void) const
+    //--------------------------------------------------------------------------
+    {
       if (!partition->row_source->is_complete(false/*from app*/))
         return false;
       for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
             it = local_children.begin(); it != local_children.end(); it++)
-        if (!it->second->is_disjoint_complete())
+        if (!it->second->is_complete())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_leaves_only(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_leaves_only())
+          return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionPartition::is_unique_shards(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (std::unordered_map<LegionColor,ProjectionRegion*>::const_iterator 
+            it = local_children.begin(); it != local_children.end(); it++)
+        if (!it->second->is_unique_shards())
           return false;
       return true;
     }
@@ -3879,12 +3953,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionSummary::ProjectionSummary(const ProjectionInfo &proj_info, 
                              ProjectionNode *node, const RegionRequirement &req,
-                             LogicalState *own, bool dis_comp)
+                             LogicalState *own, bool dis, bool dis_comp,
+                             bool permit_self, bool unique_shards)
       : owner(own), domain(proj_info.projection_space),
         projection(proj_info.projection), sharding(proj_info.sharding_function),
         sharding_domain(proj_info.sharding_space), result(node), 
         arglen(req.projection_args_size), 
-        args((arglen > 0) ? malloc(arglen) : NULL), disjoint_complete(dis_comp)
+        args((arglen > 0) ? malloc(arglen) : NULL), disjoint(dis),
+        disjoint_complete(dis_comp), 
+        permits_name_based_self_analysis(permit_self),
+        unique_shard_users(unique_shards)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4972,7 +5050,7 @@ namespace Legion {
       assert(prev_epoch_users.empty());
       assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
-      assert(interferences.empty());
+      assert(interfering_shards.empty());
 #endif
     }
 
@@ -5266,11 +5344,21 @@ namespace Legion {
         if ((invalidated != NULL) && invalidated->remove_reference())
           delete invalidated;
       }
+      bool disjoint = false;
       bool disjoint_complete = false;
+      bool permits_name_based = false;
+      bool unique_shards = false;
       ProjectionNode *node = analysis.context->construct_projection_tree(op,
-                            index, req, owner, proj_info, disjoint_complete);
-      ProjectionSummary *result = 
-        new ProjectionSummary(proj_info, node, req, this, disjoint_complete);
+                          index, req, owner, proj_info, disjoint,
+                          disjoint_complete, permits_name_based, unique_shards);
+      // Special case here: if we can't prove its disjoint by the region tree
+      // but we know that all the regions are writing and the projection
+      // function is not invertible then the user is guaranteeing use that
+      // all the point in this projection function are disjoint from each other
+      if (!disjoint && IS_WRITE(req) && !proj_info.projection->is_invertible)  
+        disjoint = true;
+      ProjectionSummary *result = new ProjectionSummary(proj_info, node, req,
+          this, disjoint, disjoint_complete, permits_name_based, unique_shards);
       // If the projection functor is functional then we can save it for
       // the future and evict the least recently used projection
       if (proj_info.projection->is_functional)
@@ -5309,18 +5397,18 @@ namespace Legion {
       }
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,bool> >::iterator finder =
-          interferences.find(summary);
-      if (finder != interferences.end())
+          interfering_shards.find(summary);
+      if (finder != interfering_shards.end())
       {
         for (std::unordered_map<ProjectionSummary*,bool>::const_iterator it =
               finder->second.begin(); it != finder->second.end(); it++)
-          interferences[it->first].erase(summary);
-        interferences.erase(finder);
+          interfering_shards[it->first].erase(summary);
+        interfering_shards.erase(finder);
       }
     }
 
     //--------------------------------------------------------------------------
-    bool LogicalState::test_interfering_summaries(LogicalAnalysis &analysis,
+    bool LogicalState::has_interfering_shards(LogicalAnalysis &analysis,
                                  ProjectionSummary *one, ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
@@ -5328,10 +5416,16 @@ namespace Legion {
       assert(one->owner == this);
       assert(two->owner == this);
 #endif
+      if (one == two)
+        // We can elide the close operation here if we can prove that
+        // all the regions used a disjoint from each other and they all
+        // have exactly one kind of shard user
+        return (!one->permits_name_based_self_analysis ||
+                !one->unique_shard_users);
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,bool> >::const_iterator
-          one_finder = interferences.find(one);
-      if (one_finder != interferences.end())
+          one_finder = interfering_shards.find(one);
+      if (one_finder != interfering_shards.end())
       {
         std::unordered_map<ProjectionSummary*,bool>::const_iterator
           two_finder = one_finder->second.find(two);
@@ -5339,9 +5433,9 @@ namespace Legion {
           return two_finder->second;
       }
       // Do the test and save the results for later
-      const bool result = analysis.context->test_interfering_summaries(one,two);
-      interferences[one][two] = result;
-      interferences[two][one] = result;
+      const bool result = analysis.context->has_interfering_shards(one,two);
+      interfering_shards[one][two] = result;
+      interfering_shards[two][one] = result;
       return result;
     }
 
@@ -5528,7 +5622,8 @@ namespace Legion {
               FieldMaskSet<RefinementOp> &refinement_operations)
     //--------------------------------------------------------------------------
     {
-      if (projection->result->is_disjoint_complete())
+      if (projection->result->is_disjoint() && 
+          projection->result->is_complete())
       {
         // The projection is disjoint and complete so we can record it
         FieldMask refine_now;

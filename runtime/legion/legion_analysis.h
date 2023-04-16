@@ -1153,7 +1153,10 @@ namespace Legion {
       virtual ProjectionRegion* as_region_projection(void) { return NULL; }
       virtual ProjectionPartition *as_partition_projection(void) 
         { return NULL; }
-      virtual bool is_disjoint_complete(void) const = 0;
+      virtual bool is_disjoint(void) const = 0;
+      virtual bool is_complete(void) const = 0;
+      virtual bool is_leaves_only(void) const = 0;
+      virtual bool is_unique_shards(void) const = 0;
       virtual bool interferes(ProjectionNode *other, ShardID local) const = 0;
       virtual void extract_shard_summaries(bool disjoint_complete,
           ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
@@ -1176,7 +1179,10 @@ namespace Legion {
       ProjectionRegion& operator=(const ProjectionRegion &rhs) = delete;
     public:
       virtual ProjectionRegion* as_region_projection(void) { return this; }
-      virtual bool is_disjoint_complete(void) const;
+      virtual bool is_disjoint(void) const;
+      virtual bool is_complete(void) const;
+      virtual bool is_leaves_only(void) const;
+      virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
       virtual void extract_shard_summaries(bool disjoint_complete,
           ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
@@ -1210,7 +1216,10 @@ namespace Legion {
     public:
       virtual ProjectionPartition* as_partition_projection(void)
         { return this; }
-      virtual bool is_disjoint_complete(void) const;
+      virtual bool is_disjoint(void) const;
+      virtual bool is_complete(void) const;
+      virtual bool is_leaves_only(void) const;
+      virtual bool is_unique_shards(void) const;
       virtual bool interferes(ProjectionNode *other, ShardID local) const;
       virtual void extract_shard_summaries(bool disjoint_complete,
           ShardID local_shard, std::map<LogicalRegion,RegionSummary> &regions,
@@ -1261,7 +1270,8 @@ namespace Legion {
     class ProjectionSummary : public Collectable {
     public:
       ProjectionSummary(const ProjectionInfo &info, ProjectionNode *node,
-          const RegionRequirement &req, LogicalState *owner, bool dis_comp);
+          const RegionRequirement &req, LogicalState *owner, bool dis,
+          bool dis_comp, bool permit_self, bool unique_shards);
       ProjectionSummary(const ProjectionSummary &rhs) = delete;
       ~ProjectionSummary(void);
     public:
@@ -1278,7 +1288,24 @@ namespace Legion {
       ProjectionNode *const result;
       const size_t arglen;
       void *const args;
+      // We track a few different properties of this index space launch
+      // that are useful for various different analyses and kinds of 
+      // comparisons between index space launches
+      // Whether we know all the points are disjoint from each other
+      // based privileges of the projection and the projection function 
+      const bool disjoint;
+      // Whether this projection represents a disjoint and complete
+      // sub-tree and can therefore be used for a refinement
       const bool disjoint_complete; 
+      // Whether this projection summary can be analyzed against itself
+      // using name-based dependence analysis which is that same as
+      // having sub-regions described using a disjoint-only subtree
+      // and all accesses at the leaves of the tree
+      // Note that individual points in the same launch can still use
+      // the same sub-regions here
+      const bool permits_name_based_self_analysis;
+      // Whether each region has a unique set of shards users
+      const bool unique_shard_users;
     };
 
     /**
@@ -1505,7 +1532,7 @@ namespace Legion {
                                           const ProjectionInfo &proj_info);
       ProjectionNode * find_or_create_fallback_projection(void);
       void remove_projection_summary(ProjectionSummary *summary);
-      bool test_interfering_summaries(LogicalAnalysis &analysis,
+      bool has_interfering_shards(LogicalAnalysis &analysis,
                           ProjectionSummary *one, ProjectionSummary *two);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
@@ -1563,7 +1590,7 @@ namespace Legion {
       // be pruned out once they are no longer alive
       std::list<ProjectionSummary*> projection_summary_cache;
       std::unordered_map<ProjectionSummary*,
-        std::unordered_map<ProjectionSummary*,bool> > interferences;
+        std::unordered_map<ProjectionSummary*,bool> > interfering_shards;
 #if 0
       // Track whether this node is part of the disjoint-complete tree
       FieldMask disjoint_complete_tree;

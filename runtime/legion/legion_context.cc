@@ -10614,18 +10614,32 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionNode* InnerContext::construct_projection_tree(Operation *op,
             unsigned index, const RegionRequirement &req, RegionTreeNode *root,
-            const ProjectionInfo &proj_info, bool &disjoint_complete)
+            const ProjectionInfo &proj_info, bool &disjoint,
+            bool &disjoint_complete, bool &permits_name_based, 
+            bool &unique_shards)
     //--------------------------------------------------------------------------
     {
       ProjectionNode *result = proj_info.projection->construct_projection_tree(
                             op, index, req, 0/*local shard*/, root, proj_info);
-      disjoint_complete = result->is_disjoint_complete();
+      disjoint = result->is_disjoint();
+      if (disjoint)
+      {
+        disjoint_complete = result->is_complete();
+        permits_name_based = result->is_leaves_only();
+      }
+      else
+      {
+        disjoint_complete = false;
+        permits_name_based = false;
+      }
+      // No shards in non-control replicated context so this is easy
+      unique_shards = true;
       return result;
     }
 
     //--------------------------------------------------------------------------
-    bool InnerContext::test_interfering_summaries(ProjectionSummary *one,
-                                                  ProjectionSummary *two)
+    bool InnerContext::has_interfering_shards(ProjectionSummary *one,
+                                              ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {
       return one->result->interferes(two->result, 0/*local shard*/);
@@ -19969,13 +19983,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionNode* ReplicateContext::construct_projection_tree(Operation *op, 
             unsigned index, const RegionRequirement &req, RegionTreeNode *root,
-            const ProjectionInfo &proj_info, bool &disjoint_complete)
+            const ProjectionInfo &proj_info, bool &disjoint, 
+            bool &disjoint_complete, bool &permits_name_based, 
+            bool &unique_shards)
     //--------------------------------------------------------------------------
     {
       const ShardID local_shard = owner_shard->shard_id;
       ProjectionNode *result = proj_info.projection->construct_projection_tree(
                                   op, index, req, local_shard, root, proj_info);
-      disjoint_complete = result->is_disjoint_complete();
       // Now we need to exchange this between the shards. The secret to this
       // function is knowing that it is only called in the logical dependence
       // analysis stage of the pipeline so we can get a collective ID here to
@@ -20004,13 +20019,17 @@ namespace Legion {
               proj_info.sharding_function->find_owner(*itr, shard_domain);
             projection->add_user(shard);
           }
+          disjoint = true;
+          disjoint_complete = true;
+          permits_name_based = true;
+          unique_shards = false;
         }
         else
         {
           // Iterate all the points in the launch space and linearize
           // their colors to add to the summary
-          IndexSpaceNode *color_space = 
-            root->as_partition_node()->row_source->color_space;
+          IndexPartNode *partition = root->as_partition_node()->row_source;
+          IndexSpaceNode *color_space = partition->color_space;
           ProjectionPartition *projection = result->as_partition_projection();
           for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
           {
@@ -20025,20 +20044,42 @@ namespace Legion {
 #endif
             projection->shard_children.add_child(color);
           }
+          disjoint = partition->is_disjoint(false/*from app*/);
+          if (disjoint)
+          {
+            disjoint_complete = partition->is_complete(false/*from app*/);
+            permits_name_based = true;
+          }
+          else
+          {
+            disjoint_complete = false;
+            permits_name_based = false;
+          }
+          // Exactly one point can map to each subregion in this case
+          // and therefore only shard can map to each subregion as well
+          unique_shards = true;
         }
       }
       else
       {
+        disjoint = result->is_disjoint();
+        bool leaves_only = result->is_leaves_only();
+        if (disjoint)
+          disjoint_complete = result->is_complete();
+        else
+          disjoint_complete = false;
+        unique_shards = result->is_unique_shards();
         // For all other projection functors though we need to do the exchange
-        ProjectionTreeExchange exchange(result, disjoint_complete, this,
-                                        COLLECTIVE_LOC_50);
+        ProjectionTreeExchange exchange(result, disjoint, disjoint_complete, 
+            leaves_only, unique_shards, this, COLLECTIVE_LOC_50);
         exchange.perform_collective_sync();
+        permits_name_based = disjoint && leaves_only;
       }
       return result;
     }
 
     //--------------------------------------------------------------------------
-    bool ReplicateContext::test_interfering_summaries(ProjectionSummary *one,
+    bool ReplicateContext::has_interfering_shards(ProjectionSummary *one,
                                                   ProjectionSummary *two)
     //--------------------------------------------------------------------------
     {

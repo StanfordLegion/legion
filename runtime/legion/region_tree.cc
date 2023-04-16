@@ -19679,7 +19679,7 @@ namespace Legion {
                       assert(proj_info.is_sharding());
                       assert(user.shard_proj != NULL);
 #endif
-                      if (state.test_interfering_summaries(logical_analysis,
+                      if (!state.has_interfering_shards(logical_analysis,
                                           prev.shard_proj, user.shard_proj))
                         break;
                     }

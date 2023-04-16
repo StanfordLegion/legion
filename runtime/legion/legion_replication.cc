@@ -16726,10 +16726,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionTreeExchange::ProjectionTreeExchange(ProjectionNode *n,
-        bool &dis_comp, ReplicateContext *ctx, CollectiveIndexLocation loc)
+        bool &dis, bool &dis_comp, bool &leaves, bool &unique,
+        ReplicateContext *ctx, CollectiveIndexLocation loc)
       : AllGatherCollective<false>(ctx,
           ctx->get_next_collective_index(loc, true/*logical*/)),
-        node(n), disjoint_complete(dis_comp)
+        node(n), disjoint(dis), disjoint_complete(dis_comp),
+        leaves_only(leaves), unique_shards(unique)
     //--------------------------------------------------------------------------
     {
       // Extract our local summaries
@@ -16751,7 +16753,10 @@ namespace Legion {
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
+      rez.serialize<bool>(disjoint);
       rez.serialize<bool>(disjoint_complete);
+      rez.serialize<bool>(leaves_only);
+      rez.serialize<bool>(unique_shards);
       rez.serialize<size_t>(region_summaries.size());
       for (std::map<LogicalRegion,RegionSummary>::const_iterator it =
             region_summaries.begin(); it != region_summaries.end(); it++)
@@ -16788,10 +16793,22 @@ namespace Legion {
                                                          int stage)
     //--------------------------------------------------------------------------
     {
+      bool dis;
+      derez.deserialize<bool>(dis);
+      if (!dis)
+        disjoint = false;
       bool dis_comp;
       derez.deserialize<bool>(dis_comp);
       if (!dis_comp)
         disjoint_complete = false;
+      bool leaves;
+      derez.deserialize<bool>(leaves);
+      if (!leaves)
+        leaves_only = false;
+      bool unique;
+      derez.deserialize<bool>(unique);
+      if (!unique)
+        unique_shards = false;
       size_t num_regions;
       derez.deserialize(num_regions);
       for (unsigned idx1 = 0; idx1 < num_regions; idx1++)
@@ -16802,25 +16819,32 @@ namespace Legion {
         summary.children.deserialize(derez);
         size_t num_users;
         derez.deserialize(num_users);
-        if (summary.users.empty())
+        if (num_users > 0)
         {
-          summary.users.resize(num_users);
-          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-            derez.deserialize(summary.users[idx2]);
-        }
-        else
-        {
-          for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+          if (summary.users.empty())
           {
-            ShardID user;
-            derez.deserialize(user);
-            if (std::binary_search(summary.users.begin(),
-                                   summary.users.end(), user))
-              continue;
-            summary.users.push_back(user);
-            std::sort(summary.users.begin(), summary.users.end());
+            summary.users.resize(num_users);
+            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+              derez.deserialize(summary.users[idx2]);
           }
+          else
+          {
+            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
+            {
+              ShardID user;
+              derez.deserialize(user);
+              if (std::binary_search(summary.users.begin(),
+                                     summary.users.end(), user))
+                continue;
+              summary.users.push_back(user);
+              std::sort(summary.users.begin(), summary.users.end());
+            }
+          }
+          if (unique_shards && (summary.users.size() > 1))
+            unique_shards = false;
         }
+        if (leaves_only && !summary.users.empty() && !summary.children.empty())
+          leaves_only = false;
       }
       size_t num_partitions;
       derez.deserialize(num_partitions);
