@@ -1843,15 +1843,12 @@ namespace Realm {
 				std::set<int>& sibling_ids) {
     char str[1024];
     sprintf(str, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings", cpu_id);
-    FILE *f = fopen(str, "r");
-    if(!f) {
+    hwloc_bitmap_t set = hwloc_bitmap_alloc();
+
+    if (hwloc_linux_read_path_as_cpumask(str, set) < 0) {
       log_thread.warning() << "can't read '" << str << "' - skipping";
       return false;
     }
-    hwloc_bitmap_t set = hwloc_bitmap_alloc();
-    hwloc_linux_parse_cpumap_file(f, set);
-
-    fclose(f);
 
     // loop over all siblings (except ourselves)
     for(int siblingid = hwloc_bitmap_first(set);
