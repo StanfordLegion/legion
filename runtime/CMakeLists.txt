@@ -756,7 +756,7 @@ if(Legion_USE_CUDA)
   )
 endif()
 
-if(Legion_USE_HIP AND Legion_GPU_REDUCTIONS)
+if(Legion_USE_HIP)
   list(APPEND LEGION_HIP_SRC
     legion/legion_redop.cu
   )
@@ -815,6 +815,7 @@ endif()
 if(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     target_sources(LegionRuntime PRIVATE ${LEGION_HIP_SRC})
+    target_include_directories(LegionRuntime PRIVATE ${HIP_ROOT_DIR}/include)
     # complex reduction ops bring in a public dependency on cuda headers
     if(Legion_REDOP_COMPLEX)
       target_link_libraries(LegionRuntime PUBLIC CUDA::toolkit)
