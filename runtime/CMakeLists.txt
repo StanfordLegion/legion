@@ -815,6 +815,8 @@ endif()
 if(Legion_USE_HIP)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
     target_sources(LegionRuntime PRIVATE ${LEGION_HIP_SRC})
+    target_compile_options(LegionRuntime PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                           -Xcudafe=--diag_suppress=boolean_controlling_expr_is_constant>)
     target_include_directories(LegionRuntime PRIVATE ${HIP_ROOT_DIR}/include)
     # complex reduction ops bring in a public dependency on cuda headers
     if(Legion_REDOP_COMPLEX)
