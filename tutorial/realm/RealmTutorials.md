@@ -14,9 +14,9 @@ examples.
 
 ## Realm API Tutorial
 
-- [Hello World](/tutorial/realm_tutorial00.md)
+- [Hello World](hello_world/HelloRealm.md)
 - [Machine Model](/tutorial/realm_tutorial01.md)
-- [Events](/tutorial/realm_tutorial02.md)
+- [Events](events/RealmEvents.md)
 - [Region Instances](/tutorial/realm_tutorial03.md)
   - [Deferred Allocation](/tutorial/realm_tutorial04.md)
 - [Index Spaces](/tutorial/realm_tutorial05.md)
@@ -27,7 +27,7 @@ examples.
 - [Reservations](/tutorial/realm_tutorial10.md)
 - [Barriers](/tutorial/realm_tutorial11.md)
 - [Profiling](/tutorial/realm_tutorial12.md)
-- [CUDA Interop](/tutorial/realm_tutorial13.md)
+- [CUDA Interop](cuda_interop/RealmCudaInterop.md)
 - [Dynamic Code Generation](/tutorial/realm_tutorial14.md)
 - [Writing Modules](/tutorial/realm_tutorial15.md)
 
