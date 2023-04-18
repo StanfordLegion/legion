@@ -53,7 +53,7 @@ Other notable low-level command line arguments are the following:
 Looking at `main()` in the tutorial, we see most of the standard realm boiler plate code.  The main difference is, when we want to do something with CUDA, we want to target the `TOC_PROC` (also known as the *throughput optimized compute processor*) rather than the `LOC_PROC` kind (also known as the *latency optimized compute processor*).  This is because when a task is run on a `TOC_LOC` processor, Realm will properly set up the thread state to target the associated device.  In addition, any CUDA work launched or enqueued in a stream will automatically be synchronized in the background after the thread has returned from the task.  We'll get back to why this is important a little later.
 
 To target a `TOC_PROC` for CUDA, we simply change what kind of processors a task id can target when we register it:
-```C++
+```c++
 Processor::register_task_by_kind(Processor::TOC_PROC,
                                  false /*!global*/,
                                  MAIN_TASK,
@@ -64,7 +64,7 @@ Processor::register_task_by_kind(Processor::TOC_PROC,
 
 Afterwards, we just need to find a `TOC_PROC` to spawn the main task onto:
 
-```C++
+```c++
 Processor p = Machine::ProcessorQuery(Machine::get_machine())
                   .only_kind(Processor::TOC_PROC)
                   .first();
@@ -79,19 +79,19 @@ For this tutorial, we're looking at doing something relatively simple: allocate 
 Allocating linear GPU memory is fairly close to how it is done for standard CPU.  Below are highlights from `main_task()`:
 
 1) Define the layout of the memory (remember Realm's bounds are inclusive, whereas CUDA's are not, so we subtract one from the width and height here).
-```C++
+```c++
 std::vector<size_t> field_sizes(1, sizeof(float));
 Rect<2> bounds(Point<2>(0, 0), Point<2>(width - 1, height - 1));
 ```
 2) Find the specific memory you want to allocate that suits are needs.
-```C++
+```c++
 Memory gpu_mem = Machine::MemoryQuery(Machine::get_machine())
                      .has_capacity(bounds.volume() * sizeof(float))
                      .best_affinity_to(gpu)
                      .first();
 ```
 3) Create a Realm::RegionInstance, just like previous tutorials.
-```C++
+```c++
 RegionInstance::create_instance(linear_instance, gpu_mem, bounds, field_sizes,
                                 /*SOA*/ 1, ProfilingRequestSet());
 ```
@@ -124,7 +124,7 @@ Now the linear memory is allocated, time to allocate the `cudaSurfaceObject_t`. 
 While a little more complicated, allocating CUDA surface objects can be essentially broken down into the same basic steps as linear memory with one exception; instead of querying for what memory to use, we'll allocate the memory directly with CUDA APIs and use the `ExternalCudaArrayResource` class to register the memory with Realm to use.  This means we have to manage the memory lifetime ourselves, but we can still leverage all that Realm provides after we complete the registration:
 
 1) Allocate the cuda array and bind a cudaSurfaceObject_t to be used later.  If this code is unfamilar to you, check out the [simpleSurfaceWrite][5] CUDA sample for more information.
-```C++
+```c++
 cudaArray_t array;
 cudaSurfaceObject_t surface_obj;
 cudaExtent extent;
@@ -143,7 +143,7 @@ cudaCreateSurfaceObject(&surface_obj, &resource_descriptor);
 ```
 
 2) Describe the layout of the memory to Realm.  We have to describe this as a non-affine layout and utilize the `CudaArrayLayoutPiece` class in order to tell Realm this isn't ordinarily linear memory and needs to be treated special.
-```C++
+```c++
     InstanceLayout<2, int> layout;
     InstanceLayoutGeneric::FieldLayout &field_layout = layout.fields[0];
 
@@ -162,7 +162,7 @@ cudaCreateSurfaceObject(&surface_obj, &resource_descriptor);
 ```
 
 3) Create a Realm::RegionInstance with the given ExternalCudaArrayResource, this time using create_external_instance instead.
-```C++
+```c++
 RegionInstance::create_external_instance(
     array_instance, cuda_array_external_resource.suggested_memory(),
     layout.clone(), cuda_array_external_resource, ProfilingRequestSet());
@@ -172,7 +172,7 @@ RegionInstance::create_external_instance(
 
 Now that we have allocated memory for the data, let's fill it in.  The logic on how to do this with Realm is exactly the same as previous tutorials:
 
-```C++
+```c++
 // Fill the linear array with ones.
 srcs[0].set_fill<float>(1.0f);
 dsts[0].set_field(linear_instance, 0, field_sizes[0]);
@@ -181,7 +181,7 @@ fill_done_event = bounds.copy(srcs, dsts, ProfilingRequestSet(), fill_done_event
 
 As of this writing, Realm does not currently support non-affine fill operations, so we'll reuse `linear_instance` in order to first fill it, then copy to the array proper:
 
-```C++
+```c++
 // Copy the linear array to the cuda array, filling it with zeros.
 srcs[0].set_field(linear_instance, 0, field_sizes[0]);
 dsts[0].set_field(array_instance, 0, field_sizes[0]);
@@ -194,14 +194,14 @@ So far, we've created Realm managed GPU-visible linear memory and registered a C
 
 As an aside, sometimes you need to pass the GPU address to a library or device code directly, which you can get from the linear_accessor.  Additionally for N dimensional instances like this, we'll need to make sure to handle larger strides of memory chosen by Realm for performance reasons in order to index it properly:
 
-```C++
+```c++
 float *linear_ptr = &linear_accessor[Point<2>(0, 0)];
 size_t pitch_in_elements = linear_accessor.strides[1] / linear_accessor.strides[0];
 ```
 
 The device code for processing is fairly simple, but the key highlights are the fact we can use some Realm structures like `Rect<N,T>`, `AffineAccessor<T,N>`, and `Point<N,T>`.
 
-```C++
+```c++
 __global__ void copyKernel(Rect<2> bounds, AffineAccessor<float, 2> linear_accessor,
                            cudaSurfaceObject_t surface)
 {
@@ -220,7 +220,7 @@ __global__ void copyKernel(Rect<2> bounds, AffineAccessor<float, 2> linear_acces
 
 Once the data is processed, we can read it back by creating some host visible memory to copy to. When creating the instance that we'll be reading, we can choose any memory that our `check_processor` has an affinity to (and can therefore access).  In the tutorial, we let Realm pick the memory to use, but we specify we want memory that is also accessible to the GPU in order to optimize the copy operation.  Without GPU access to the memory, the copy would have to be chunked up and done in stages, which can add extra overhead for large copies, but may be beneficial for when such communication is infrequent, or when pinned memory resources are limited.
 
-```C++
+```c++
 cpu_mem = Machine::MemoryQuery(Machine::get_machine())
               .has_capacity(width * height * sizeof(float))
               .has_affinity_to(check_processor)
