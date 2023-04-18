@@ -9062,7 +9062,7 @@ class Task(object):
                     else:
                         # Not a sharded operation so just run this like normal
                         if self.op.state.verbose:
-                            print('Verifying '+str(op))
+                            print('Verifying '+str(logical_op))
                         previous_deps = dict()
                         if not logical_op.perform_op_logical_verification(logical_op, previous_deps):
                             success = False

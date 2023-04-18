@@ -4550,13 +4550,20 @@ namespace Legion {
         wait_on_events.insert(ApEvent(true_guard));
       // Merge together all the events for the start condition 
       ApEvent start_condition = Runtime::merge_events(NULL, wait_on_events);
-      // Take all the locks in order in the proper way
+      // Need a copy of any locks to release on the stack since the 
+      // atomic_locks cannot be touched after we launch the task
+      std::vector<Reservation> to_release;
       if (!atomic_locks.empty())
       {
+        // Take all the locks in order in the proper way
+        to_release.reserve(atomic_locks.size());
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
           start_condition = Runtime::acquire_ap_reservation(it->first, 
                                           it->second, start_condition);
+          to_release.push_back(it->first);
+        }
       }
       // STEP 3: Finally we get to launch the task
       // Mark that we have an outstanding task in this context 
@@ -4671,11 +4678,11 @@ namespace Legion {
         {
           variant->dispatch_inline(launch_processor, execution_context);
           // Release any reservations that we took on behalf of this task
-          if (!atomic_locks.empty())
+          if (!to_release.empty())
           {
-            for (std::map<Reservation,bool>::const_iterator it = 
-                  atomic_locks.begin(); it != atomic_locks.end(); it++)
-              Runtime::release_reservation(it->first);
+            for (std::vector<Reservation>::const_iterator it = 
+                  to_release.begin(); it != to_release.end(); it++)
+              Runtime::release_reservation(*it);
           }
         }
       }
@@ -4688,11 +4695,11 @@ namespace Legion {
         // Note this happens before protection of the event for predication
         // because the acquires were also subject to poisoning so we either
         // want all the releases to be done or poisoned the same as the acquires
-        if (!atomic_locks.empty())
+        if (!to_release.empty())
         {
-          for (std::map<Reservation,bool>::const_iterator it = 
-                atomic_locks.begin(); it != atomic_locks.end(); it++)
-            Runtime::release_reservation(it->first, task_launch_event);
+          for (std::vector<Reservation>::const_iterator it = 
+                to_release.begin(); it != to_release.end(); it++)
+            Runtime::release_reservation(*it, task_launch_event);
         }
         // If this task was predicated then we need to protect everything that
         // comes after this from the predication poison

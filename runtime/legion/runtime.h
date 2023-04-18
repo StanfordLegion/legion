@@ -1542,6 +1542,7 @@ namespace Legion {
     public:
       void register_remote_instance(PhysicalManager *manager);
       void unregister_remote_instance(PhysicalManager *manager);
+      void unregister_deleted_instance(PhysicalManager *manager);
     public:
       bool create_physical_instance(const LayoutConstraintSet &contraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -1740,8 +1741,7 @@ namespace Legion {
         GarbageCollector(LocalLock &collection_lock, LocalLock &manager_lock,
                          AddressSpaceID local, Memory memory, size_t needed,
                          std::map<GCPriority,std::set<PhysicalManager*>,
-                                 std::greater<GCPriority> > &collectables,
-                         std::map<RegionTreeID,TreeInstances> &instances);
+                                 std::greater<GCPriority> > &collectables);
         GarbageCollector(const GarbageCollector &rhs) = delete;
         ~GarbageCollector(void);
       public:
@@ -1751,19 +1751,21 @@ namespace Legion {
         inline bool collection_complete(void) const 
           { return (current_priority == LEGION_GC_NEVER_PRIORITY); }
       protected:
+        void sort_next_priority_holes(bool advance = true);
+      protected:
         struct Range {
         public:
           Range(void) : size(0) { }
           Range(PhysicalManager *m); 
-          std::set<PhysicalManager*> managers;
+          std::vector<PhysicalManager*> managers;
           size_t size;
         };
       protected:
+        // Note this makes sure there is only one collection at a time
         AutoLock collection_lock;
         LocalLock &manager_lock;
         std::map<GCPriority,std::set<PhysicalManager*>,
                  std::greater<GCPriority> > &collectable_instances;
-        std::map<RegionTreeID,TreeInstances> &current_instances;
         const Memory memory;
         const AddressSpaceID local_space;
         const size_t needed_size;
@@ -1771,9 +1773,7 @@ namespace Legion {
         std::vector<PhysicalManager*> small_holes, perfect_holes;
         std::map<size_t,std::vector<PhysicalManager*> > large_holes;
         std::map<uintptr_t,Range> ranges;
-        std::set<PhysicalManager*> deleted;
         GCPriority current_priority;
-        bool sort_current_priority;
       };
     }; 
 
