@@ -1807,7 +1807,7 @@ namespace Legion {
         bool success = false;
         AutoLock i_lock(inst_lock);
         // Check our current state
-        switch (gc_state)
+        switch (gc_state.load())
         {
           case VALID_GC_STATE:
             {
@@ -2298,7 +2298,7 @@ namespace Legion {
       }
       else
       {
-        switch (gc_state)
+        switch (gc_state.load())
         {
           case VALID_GC_STATE:
           case COLLECTABLE_GC_STATE:
@@ -2317,6 +2317,13 @@ namespace Legion {
         }
         update_remote_instances(target);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::is_collected(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (gc_state == COLLECTED_GC_STATE);
     }
 
     //--------------------------------------------------------------------------
@@ -2439,7 +2446,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(pending_changes > 0);
 #endif
-        switch (gc_state)
+        switch (gc_state.load())
         {
           // Anything in these states means the collection attempt failed
           // because something else acquired a valid reference while
@@ -2489,7 +2496,7 @@ namespace Legion {
                 // Notify the subscribers if we've been collected
                 to_notify.swap(subscribers);
                 // Now we can perform the deletion which will release the lock
-                ready = perform_deletion(runtime->address_space, &i_lock);
+                perform_deletion(runtime->address_space, &i_lock);
                 // Send notification messages to the remote nodes to tell
                 // them that this instance has been deleted, this is needed
                 // so that we can invalidate any subscribers on those nodes
@@ -2677,7 +2684,7 @@ namespace Legion {
             {
               // Check the garbage collection state because this is going 
               // to be like an acquire operation
-              switch (gc_state)
+              switch (gc_state.load())
               {
                 case VALID_GC_STATE:
                   break;
@@ -3104,7 +3111,7 @@ namespace Legion {
     PhysicalManager::DeferDeletePhysicalManager
                      ::DeferDeletePhysicalManager(PhysicalManager *manager_)
       : LgTaskArgs<DeferDeletePhysicalManager>(implicit_provenance),
-        manager(manager_), done(Runtime::create_rt_user_event())
+        manager(manager_)
     //--------------------------------------------------------------------------
     {
     }
@@ -3140,8 +3147,8 @@ namespace Legion {
     {
       const DeferDeletePhysicalManager *dargs =
         (const DeferDeletePhysicalManager*)args;
-      Runtime::trigger_event(dargs->done,
-          dargs->manager->perform_deletion(runtime->address_space));
+      PhysicalManager *manager = dargs->manager;
+      manager->memory_manager->unregister_deleted_instance(manager);
     }
 
     //--------------------------------------------------------------------------
@@ -3183,8 +3190,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PhysicalManager::perform_deletion(AddressSpaceID source,
-                                              AutoLock *i_lock /* = NULL*/)
+    void PhysicalManager::perform_deletion(AddressSpaceID source,
+                                           AutoLock *i_lock /* = NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3194,22 +3201,16 @@ namespace Legion {
       if (i_lock == NULL)
       {
         AutoLock instance_lock(inst_lock);
-        return perform_deletion(source, &instance_lock);
-      }
-      if (instance_ready.exists() && !instance_ready.has_triggered())
-      {
-        DeferDeletePhysicalManager args(this);
-        runtime->issue_runtime_meta_task(
-            args, LG_LOW_PRIORITY, instance_ready);
-        return args.done;
+        perform_deletion(source, &instance_lock);
+        return;
       }
 #ifdef DEBUG_LEGION
       assert(pending_views.empty());
 #endif
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
-#ifndef LEGION_DISABLE_GC
       RtEvent deferred_deletion;
+#ifndef LEGION_DISABLE_GC
       // Get the deferred deletion event from the gc events
       if (!gc_events.empty())
         deferred_deletion = Runtime::protect_merge_events(gc_events);
@@ -3217,6 +3218,9 @@ namespace Legion {
       i_lock->release();
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields);
+      // Handle a small race where the instance name is not ready yet
+      if (instance_ready.exists() && !instance_ready.has_triggered())
+        instance_ready.wait();
 #ifdef LEGION_MALLOC_INSTANCES
       if (kind == INTERNAL_INSTANCE_KIND)
         memory_manager->free_legion_instance(this, deferred_deletion);
@@ -3235,8 +3239,17 @@ namespace Legion {
       // Release the i_lock since we're done with the atomic updates
       i_lock->release();
 #endif
-      // We issued the deletion to Realm so all our effects are done
-      return RtEvent::NO_RT_EVENT;
+      // Once the deletion is actually done then we can tell the memory
+      // manager that the deletion is finished and it is safe to remove
+      // this manager for its list of current instances
+      if (deferred_deletion.exists() && !deferred_deletion.has_triggered())
+      {
+        DeferDeletePhysicalManager args(this);
+        runtime->issue_runtime_meta_task(
+            args, LG_LOW_PRIORITY, deferred_deletion);
+      }
+      else
+        memory_manager->unregister_deleted_instance(this);
     }
 
     //--------------------------------------------------------------------------

@@ -301,7 +301,6 @@ namespace Legion {
         DeferDeletePhysicalManager(PhysicalManager *manager_);
       public:
         PhysicalManager *manager;
-        const RtUserEvent done;
       };
       struct RemoteCreateViewArgs : public LgTaskArgs<RemoteCreateViewArgs> {
       public:
@@ -398,6 +397,7 @@ namespace Legion {
     public:
       virtual void notify_local(void);
     public:
+      bool is_collected(void) const;
       bool can_collect(bool &already_collected) const;
       bool acquire_collect(std::set<ApEvent> &gc_events, 
           uint64_t &sent_valid, uint64_t &received_valid);
@@ -405,7 +405,7 @@ namespace Legion {
       void notify_remote_deletion(void);
       RtEvent set_garbage_collection_priority(MapperID mapper_id, Processor p, 
                                   AddressSpaceID source, GCPriority priority);
-      RtEvent perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
+      void perform_deletion(AddressSpaceID source, AutoLock *i_lock = NULL);
       void force_deletion(ApEvent precondition = ApEvent::NO_AP_EVENT);
       RtEvent update_garbage_collection_priority(AddressSpaceID source,
                                                  GCPriority priority);
@@ -545,7 +545,7 @@ namespace Legion {
       std::map<DistributedID,RtUserEvent> pending_views;
     protected:
       // Stuff for garbage collection
-      GarbageCollectionState gc_state; 
+      std::atomic<GarbageCollectionState> gc_state; 
       unsigned pending_changes;
       std::atomic<unsigned> failed_collection_count;
       RtEvent collection_ready;

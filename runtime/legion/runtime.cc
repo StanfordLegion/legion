@@ -8448,7 +8448,7 @@ namespace Legion {
       // This is a kind of deletion so make sure it is ordered
       AutoLock c_lock(collection_lock);
       // This a collection so make sure we're ordered with other collections
-      std::vector<PhysicalManager*> to_delete, delete_now, external;
+      std::vector<PhysicalManager*> to_delete, external;
       {
         AutoLock m_lock(manager_lock);
         for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
@@ -8474,16 +8474,11 @@ namespace Legion {
             bool already_collected = false;
             if (it->first->can_collect(already_collected))
             {
+              it->first->add_base_gc_ref(MEMORY_MANAGER_REF);
               to_delete.push_back(it->first);
             }
             else if (already_collected)
-            {
-              delete_now.push_back(it->first);
               remove_collectable(it->second, it->first);
-              TreeInstances::iterator delete_it = it++;
-              cit->second.erase(delete_it);
-              continue;
-            }
             it++;
           }
           if (cit->second.empty())
@@ -8497,10 +8492,6 @@ namespace Legion {
       }
       if (!to_delete.empty())
         check_instance_deletions(to_delete);
-      for (std::vector<PhysicalManager*>::const_iterator it =
-            delete_now.begin(); it != delete_now.end(); it++)
-        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
-          delete (*it);
       for (std::vector<PhysicalManager*>::const_iterator it =
             external.begin(); it != external.end(); it++)
       {
@@ -8516,37 +8507,16 @@ namespace Legion {
                                  const std::vector<PhysicalManager*> &to_delete)
     //--------------------------------------------------------------------------
     {
-      std::vector<PhysicalManager*> deleted;
       for (std::vector<PhysicalManager*>::const_iterator it =
             to_delete.begin(); it != to_delete.end(); it++)
       {
+#ifdef DEBUG_LEGION
+        assert(!(*it)->is_external_instance());
+#endif
         RtEvent deletion_done;
-        if ((*it)->is_external_instance() || !(*it)->collect(deletion_done))
-          continue;
-        deleted.push_back(*it);
-      }
-      if (!deleted.empty())
-      {
-        AutoLock m_lock(manager_lock);
-        for (std::vector<PhysicalManager*>::const_iterator it =
-              deleted.begin(); it != deleted.end(); it++)
-        {
-          std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
-            current_instances.find((*it)->tree_id);
-#ifdef DEBUG_LEGION
-          assert(tree_finder != current_instances.end());
-#endif
-          TreeInstances::iterator finder = tree_finder->second.find(*it);
-#ifdef DEBUG_LEGION
-          assert(finder != tree_finder->second.end());
-#endif
-          remove_collectable(finder->second, finder->first);
-          tree_finder->second.erase(finder);
-          if (tree_finder->second.empty())
-            current_instances.erase(tree_finder);
-          if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
-            delete (*it);
-        }
+        (*it)->collect(deletion_done);
+        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+          delete (*it);
       }
     }
 
@@ -8575,6 +8545,10 @@ namespace Legion {
       if (!is_owner)
         return;
       // No need for the lock, no one should be doing anything at this point
+      // The only instances that are left here are the ones that were not
+      // collected since we already waited for any pending collections to 
+      // finish and their meta tasks to run to prune them out of the
+      // current_instances data structure
       for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
             current_instances.begin(); cit != current_instances.end(); cit++)
         for (TreeInstances::const_iterator it = 
@@ -8622,6 +8596,33 @@ namespace Legion {
       finder->second.erase(manager);
       if (finder->second.empty())
         current_instances.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::unregister_deleted_instance(PhysicalManager *manager)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      {
+        AutoLock m_lock(manager_lock);
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
+          current_instances.find(manager->tree_id);
+#ifdef DEBUG_LEGION
+        assert(tree_finder != current_instances.end());
+#endif
+        TreeInstances::iterator finder = tree_finder->second.find(manager);
+#ifdef DEBUG_LEGION
+        assert(finder != tree_finder->second.end());
+#endif
+        remove_collectable(finder->second, finder->first);
+        tree_finder->second.erase(finder);
+        if (tree_finder->second.empty())
+          current_instances.erase(tree_finder);
+      }
+      if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -9205,7 +9206,7 @@ namespace Legion {
       // This is a collection so we need to order it with respect to
       // to other collections
       AutoLock c_lock(collection_lock);
-      std::vector<PhysicalManager*> to_delete, delete_now, external;
+      std::vector<PhysicalManager*> to_delete, external;
       {
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator finder = 
@@ -9231,16 +9232,11 @@ namespace Legion {
             bool already_collected = false;
             if (it->first->can_collect(already_collected))
             {
+              it->first->add_base_gc_ref(MEMORY_MANAGER_REF);
               to_delete.push_back(it->first);
             }
             else if (already_collected)
-            {
-              delete_now.push_back(it->first);
               remove_collectable(it->second, it->first);
-              TreeInstances::iterator delete_it = it++;
-              finder->second.erase(delete_it);
-              continue;
-            }
             it++;
           }
           if (finder->second.empty())
@@ -9249,10 +9245,6 @@ namespace Legion {
       }
       if (!to_delete.empty())
         check_instance_deletions(to_delete);
-      for (std::vector<PhysicalManager*>::const_iterator it =
-            delete_now.begin(); it != delete_now.end(); it++)
-        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
-          delete (*it);
       for (std::vector<PhysicalManager*>::const_iterator it =
             external.begin(); it != external.end(); it++)
       {
@@ -9271,7 +9263,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_owner);
 #endif
-      AutoLock c_lock(collection_lock);
       AutoLock m_lock(manager_lock);
       std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
         current_instances.find(manager->tree_id);
@@ -9864,6 +9855,8 @@ namespace Legion {
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
+          if (it->first->is_collected())
+            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
@@ -9878,6 +9871,8 @@ namespace Legion {
           for (TreeInstances::const_iterator it =
                 rit->second.begin(); it != rit->second.end(); it++)
           {
+            if (it->first->is_collected())
+              continue;
             it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
             candidates.push_back(it->first);
           }
@@ -9977,6 +9972,8 @@ namespace Legion {
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
+          if (it->first->is_collected())
+            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
@@ -9991,6 +9988,8 @@ namespace Legion {
           for (TreeInstances::const_iterator it =
                 rit->second.begin(); it != rit->second.end(); it++)
           {
+            if (it->first->is_collected())
+              continue;
             it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
             candidates.push_back(it->first);
           }
@@ -10087,6 +10086,8 @@ namespace Legion {
         for (TreeInstances::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
+          if (it->first->is_collected())
+            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
@@ -10262,47 +10263,48 @@ namespace Legion {
                                 LocalLock &m_lock, AddressSpaceID local,
                                 Memory mem, size_t needed, 
                                 std::map<GCPriority,std::set<PhysicalManager*>,
-                                       std::greater<GCPriority> > &collectables,
-                                std::map<RegionTreeID,TreeInstances> &instances)
+                                       std::greater<GCPriority> > &collectables)
       : collection_lock(c_lock), manager_lock(m_lock), 
-        collectable_instances(collectables), current_instances(instances),
-        memory(mem), local_space(local), needed_size(needed),
-        sort_current_priority(true)
+        collectable_instances(collectables), memory(mem), local_space(local),
+        needed_size(needed)
     //--------------------------------------------------------------------------
     {
-      if (collectable_instances.empty())
-        current_priority = LEGION_GC_NEVER_PRIORITY;
-      else
+      AutoLock man_lock(manager_lock);
+      if (!collectable_instances.empty())
+      {
         current_priority = collectable_instances.begin()->first;
+        sort_next_priority_holes(false/*advance*/);
+      }
+      else
+        current_priority = LEGION_GC_NEVER_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
     MemoryManager::GarbageCollector::~GarbageCollector(void)
     //--------------------------------------------------------------------------
     {
-      // Clean up any deleted instances
-      if (!deleted.empty())
-      {
-        AutoLock m_lock(manager_lock);
-        for (std::set<PhysicalManager*>::const_iterator it =
-              deleted.begin(); it != deleted.end(); it++)
-        {
-          std::map<RegionTreeID,TreeInstances>::iterator current_finder =
-            current_instances.find((*it)->tree_id);
-#ifdef DEBUG_LEGION
-          assert(current_finder != current_instances.end());
-#endif
-          TreeInstances::iterator finder = current_finder->second.find(*it);
-#ifdef DEBUG_LEGION
-          assert(finder != current_finder->second.end());
-#endif
-          current_finder->second.erase(finder);
-          if (current_finder->second.empty())
-            current_instances.erase(current_finder);
+      // Remove any references to any holes that we are still holding
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            small_holes.begin(); it != small_holes.end(); it++)
+        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      for (std::vector<PhysicalManager*>::const_iterator it =
+            perfect_holes.begin(); it != perfect_holes.end(); it++)
+        if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      for (std::map<size_t,std::vector<PhysicalManager*> >::const_iterator lit =
+            large_holes.begin(); lit != large_holes.end(); lit++)
+        for (std::vector<PhysicalManager*>::const_iterator it =
+              lit->second.begin(); it != lit->second.end(); it++)
           if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
             delete (*it);
-        }
-      }
+      for (std::map<uintptr_t,Range>::const_iterator rit =
+            ranges.begin(); rit != ranges.end(); rit++)
+        for (std::vector<PhysicalManager*>::const_iterator it =
+              rit->second.managers.begin(); it != 
+              rit->second.managers.end(); it++)
+          if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+            delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -10310,28 +10312,33 @@ namespace Legion {
       : size(m->instance_footprint)
     //--------------------------------------------------------------------------
     {
-      managers.insert(m);
+      managers.push_back(m);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent MemoryManager::GarbageCollector::perform_collection(void)
+    void MemoryManager::GarbageCollector::sort_next_priority_holes(bool advance)
     //--------------------------------------------------------------------------
     {
-      std::map<GCPriority,std::set<PhysicalManager*> >::iterator pit =
-        collectable_instances.find(current_priority);
-#ifdef DEBUG_LEGION
-      assert(pit != collectable_instances.end());
-#endif
-      while (pit != collectable_instances.end())
+      if (!collectable_instances.empty())
       {
-        if (sort_current_priority)
+        std::map<GCPriority,std::set<PhysicalManager*>,
+          std::greater<GCPriority> >::iterator next =
+            collectable_instances.lower_bound(current_priority);
+        if ((next->first == current_priority) && advance)
+          next = std::next(next);
+        if (next != collectable_instances.end())
         {
+          current_priority = next->first;
           for (std::set<PhysicalManager*>::iterator it = 
-                pit->second.begin(); it != pit->second.end(); /*nothing*/)
+                next->second.begin(); it != next->second.end(); /*nothing*/)
           {
             bool already_collected = false;
             if ((*it)->can_collect(already_collected))
             {
+              // Add a reference that ensures that this manager
+              // won't be deleted out from under us when we do
+              // the call to 'collect'
+              (*it)->add_base_gc_ref(MEMORY_MANAGER_REF);
               if ((*it)->instance_footprint == needed_size)
                 perfect_holes.push_back(*it);
               else if ((*it)->instance_footprint < needed_size)
@@ -10341,14 +10348,38 @@ namespace Legion {
             }
             else if (already_collected)
             {
-              deleted.insert(*it);
-              std::set<PhysicalManager*>::iterator delete_it = it++;
-              pit->second.erase(delete_it);
+              // We can prune this out of the collected set immediately
+              // since it has already been deleted so there is no need
+              // to consider it again
+              std::set<PhysicalManager*>::iterator to_delete = it++;
+              next->second.erase(to_delete);
               continue;
             }
             it++;
           }
-          sort_current_priority = false;
+          if (next->second.empty())
+            collectable_instances.erase(next);
+        }
+        else
+          current_priority = LEGION_GC_NEVER_PRIORITY;
+      }
+      else
+        current_priority = LEGION_GC_NEVER_PRIORITY;
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MemoryManager::GarbageCollector::perform_collection(void)
+    //--------------------------------------------------------------------------
+    {
+      while (!collection_complete())
+      {
+        // If we've run out of stuff for this priority then go on to the next
+        if (small_holes.empty() && perfect_holes.empty() &&
+            large_holes.empty() && ranges.empty())
+        {
+          AutoLock m_lock(manager_lock);
+          sort_next_priority_holes();
+          continue;
         }
         // Try to use any other perfectly sized instances first
         while (!perfect_holes.empty())
@@ -10356,11 +10387,14 @@ namespace Legion {
           PhysicalManager *manager = perfect_holes.back();
           perfect_holes.pop_back();
           RtEvent collected;
-          if (!manager->collect(collected))
-            continue;
-          pit->second.erase(manager);
-          deleted.insert(manager);
-          return collected;
+          if (manager->collect(collected))
+          {
+            if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
+              delete manager;
+            return collected;
+          }
+          else if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
+            delete manager;
         }
         // If that didn't work try to use any large holes starting from
         // the ones that are closest in size to the largest
@@ -10373,11 +10407,14 @@ namespace Legion {
             PhysicalManager *manager = sit->second.back();
             sit->second.pop_back();
             RtEvent collected;
-            if (!manager->collect(collected))
-              continue;
-            pit->second.erase(manager);
-            deleted.insert(manager);
-            return collected;
+            if (manager->collect(collected))
+            {
+              if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
+                delete manager;
+              return collected;
+            }
+            else if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
+              delete manager;
           }
           large_holes.erase(sit);
         }
@@ -10401,20 +10438,20 @@ namespace Legion {
             {
               // Merge rit into prev
               prev->second.size += rit->second.size;
-              prev->second.managers.insert(
+              prev->second.managers.insert(prev->second.managers.end(),
                   rit->second.managers.begin(), rit->second.managers.end());
               ranges.erase(rit);
               rit = prev;
             }
           }
-          if (std::next(rit) != ranges.end())
+          std::map<uintptr_t,Range>::iterator next = std::next(rit);
+          if (next != ranges.end())
           {
-            std::map<uintptr_t,Range>::iterator next= std::next(rit);
             if ((rit->first + rit->second.size) == next->first)
             {
               // Merge next into rit
               rit->second.size += next->second.size;
-              rit->second.managers.insert(
+              rit->second.managers.insert(rit->second.managers.end(),
                 next->second.managers.begin(), next->second.managers.end());
               ranges.erase(next);
             }
@@ -10423,17 +10460,15 @@ namespace Legion {
           if (needed_size <= rit->second.size)
           {
             std::vector<RtEvent> collected_events;
-            for (std::set<PhysicalManager*>::const_iterator it =
+            for (std::vector<PhysicalManager*>::const_iterator it =
                   rit->second.managers.begin(); it != 
                   rit->second.managers.end(); it++)
             {
               RtEvent collected;
-              if (!(*it)->collect(collected))
-                continue;
-              pit->second.erase(*it);
-              deleted.insert(*it);
-              if (collected.exists())
+              if ((*it)->collect(collected) && collected.exists())
                 collected_events.push_back(collected);
+              if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+                delete (*it);
             }
             ranges.erase(rit);
             if (!collected_events.empty())
@@ -10451,18 +10486,16 @@ namespace Legion {
         while (!ranges.empty())
         {
           std::map<uintptr_t,Range>::iterator rit = ranges.begin(); 
-          for (std::set<PhysicalManager*>::const_iterator it =
+          for (std::vector<PhysicalManager*>::const_iterator it =
                 rit->second.managers.begin(); it != 
                 rit->second.managers.end(); it++)
           {
             RtEvent collected;
-            if (!(*it)->collect(collected))
-              continue;
-            pit->second.erase(*it);
-            deleted.insert(*it);
-            freed_size += (*it)->instance_footprint;
-            if (collected.exists())
+            if ((*it)->collect(collected) && collected.exists())
               collected_events.push_back(collected);
+            if ((*it)->remove_base_gc_ref(MEMORY_MANAGER_REF))
+              delete (*it);
+            freed_size += (*it)->instance_footprint;
           }
           ranges.erase(rit);
           if (needed_size <= freed_size)
@@ -10473,12 +10506,6 @@ namespace Legion {
               return RtEvent::NO_RT_EVENT;
           }
         }
-        pit++;
-        if (pit != collectable_instances.end())
-          current_priority = pit->first;
-        else
-          current_priority = LEGION_GC_NEVER_PRIORITY;
-        sort_current_priority = true;
         // Can try one more collection at this level before going to the next
         if (freed_size > 0)
         {
@@ -10510,7 +10537,7 @@ namespace Legion {
         return result;
       GarbageCollector collector(collection_lock, manager_lock, 
                                  runtime->address_space, memory, needed_size, 
-                                 collectable_instances, current_instances);
+                                 collectable_instances);
       while (!collector.collection_complete())
       {
         const RtEvent collection_done = collector.perform_collection(); 
@@ -10553,7 +10580,6 @@ namespace Legion {
         manager->add_base_valid_ref(NEVER_GC_REF);
       // Record the manager here as being eligible for collection
       {
-        AutoLock c_lock(collection_lock);
         AutoLock m_lock(manager_lock);
         TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
@@ -10761,8 +10787,7 @@ namespace Legion {
 #endif
           if (collector == NULL)
             collector = new GarbageCollector(collection_lock, manager_lock,
-                runtime->address_space, memory, size, 
-                collectable_instances, current_instances);
+                runtime->address_space, memory, size, collectable_instances);
         } while (!collector->collection_complete());
         if (collector != NULL)
           delete collector;
@@ -10995,33 +11020,20 @@ namespace Legion {
       bool allocated = (size == 0);
       size_t offset = 0;
 
-      GarbageCollector *collector = NULL;
-      while (!allocated)
+      if (!allocated)
       {
+        AutoLock m_lock(manager_lock);
+        allocated = eager_allocator->allocate(
+            allocation_id, size, layout->alignment_reqd, offset);
+        if (allocated)
         {
-          AutoLock m_lock(manager_lock);
-          allocated = eager_allocator->allocate(
-              allocation_id, size, layout->alignment_reqd, offset);
-          if (allocated)
-          {
-            eager_remaining_capacity -= size;
-            const uintptr_t ptr = eager_pool + offset;
+          eager_remaining_capacity -= size;
+          const uintptr_t ptr = eager_pool + offset;
 #ifdef DEBUG_LEGION
-            assert(eager_allocations.find(ptr) == eager_allocations.end());
+          assert(eager_allocations.find(ptr) == eager_allocations.end());
 #endif
-            eager_allocations[ptr] = allocation_id;
-            break;
-          }
+          eager_allocations[ptr] = allocation_id;
         }
-        if (collector == NULL)
-          collector = new GarbageCollector(collection_lock, manager_lock, 
-              runtime->address_space, memory, size, 
-              collectable_instances, current_instances);
-        if (collector->collection_complete())
-          break;
-        RtEvent ready = collector->perform_collection();
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
       }
 
       if (allocated)
@@ -11048,9 +11060,6 @@ namespace Legion {
           eager_allocator->dump_all_free_ranges(log_eager);
         }
       }
-
-      if (collector != NULL)
-        delete collector;
 
       return wait_on;
     }
