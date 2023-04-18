@@ -1495,7 +1495,7 @@ namespace Legion {
       for (std::set<ApEvent>::const_iterator it =
             gc_events.begin(); it != gc_events.end(); it++)
         if (!it->has_triggered_faultignorant())
-            preconditions.insert(*it);
+          preconditions.insert(*it);
     }
 
     //--------------------------------------------------------------------------
