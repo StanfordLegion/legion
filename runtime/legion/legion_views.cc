@@ -10000,11 +10000,11 @@ namespace Legion {
         if (next.second)
         {
           // Pre-traversal
+          next.second = false;
           // Push all of our children onto the stack
           for (unsigned child = 0; child < total_memories; child++)
             if (previous[child] == next.first)
               dfs_stack.emplace_back(std::pair<unsigned,bool>(child,true));
-          next.second = false;
         }
         else
         {
