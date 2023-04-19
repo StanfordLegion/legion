@@ -106,6 +106,8 @@ err_del_mod:
     cp.add_option_bool("-ucx:use_wakeup", config.use_wakeup);
 
     cp.add_option_int("-ucx:prog_boff_max", config.prog_boff_max);
+    cp.add_option_int("-ucx:prog_itr_max", config.prog_itr_max);
+    cp.add_option_int("-ucx:rdesc_rel_max", config.rdesc_rel_max);
 
     // pbuf mpool
     cp.add_option_int("-ucx:pb_init_count", config.pbuf_init_count);
