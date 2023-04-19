@@ -11897,7 +11897,6 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(it->first != it->second);
-          assert(it->first != dst_index);
 #endif
           IndividualView *src_view = local_views[it->second];
           PhysicalManager *src_manager = src_view->get_manager();
