@@ -10001,9 +10001,12 @@ namespace Legion {
         {
           // Pre-traversal
           next.second = false;
+          // Need the value because the reference might be invalidated
+          // by the vector changing size when we push children onto it
+          const unsigned current = next.first;
           // Push all of our children onto the stack
           for (unsigned child = 0; child < total_memories; child++)
-            if (previous[child] == next.first)
+            if (previous[child] == current)
               dfs_stack.emplace_back(std::pair<unsigned,bool>(child,true));
         }
         else
