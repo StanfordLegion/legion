@@ -28,6 +28,12 @@
 #include <cuda_runtime.h>
 #endif
 
+#ifdef REALM_USE_HIP
+#include "realm/hip/hip_internal.h"
+
+#include <hip/hip_runtime.h>
+#endif
+
 // some compilers (e.g. clang++ 10) will hide symbols that you want to be
 //  public if any template parameters have hidden visibility, even if they
 //  come from an "external" header file...
@@ -39,6 +45,7 @@ namespace Kokkos {
   class REALM_PUBLIC_API Serial;
   class REALM_PUBLIC_API OpenMP;
   class REALM_PUBLIC_API Cuda;
+  class REALM_PUBLIC_API HIP;
 };
 
 #include <Kokkos_Core.hpp>
@@ -61,6 +68,15 @@ namespace Realm {
     bool is_kokkos_cuda_enabled(void)
     {
 #ifdef KOKKOS_ENABLE_CUDA
+      return true;
+#else
+      return false;
+#endif
+    }
+    
+    bool is_kokkos_hip_enabled(void)
+    {
+#ifdef KOKKOS_ENABLE_HIP
       return true;
 #else
       return false;
@@ -184,6 +200,59 @@ namespace Realm {
       }
     };
 #endif
+    
+#ifdef KOKKOS_ENABLE_HIP
+    std::vector<ProcessorImpl *> kokkos_hip_procs;
+
+    Mutex hip_instance_map_mutex;
+    std::map<std::pair<Processor, hipStream_t>, Kokkos::HIP *> hip_instance_map;
+
+    class KokkosHipInitializer : public KokkosInternalTask {
+    public:
+      virtual void execute_on_processor(Processor p)
+      {
+	log_kokkos.info() << "doing hip init on proc " << p;
+
+	ProcessorImpl *impl = get_runtime()->get_processor_impl(p);
+	assert(impl->kind == Processor::TOC_PROC);
+	Hip::GPUProcessor *gpu = checked_cast<Hip::GPUProcessor *>(impl);
+
+#ifdef REALM_USE_KOKKOS_INITIALIZATION_SETTINGS
+        Kokkos::InitializationSettings init_settings;
+        init_settings.set_device_id(gpu->gpu->info->index);
+        init_settings.set_num_devices(1);
+        Kokkos::HIP::impl_initialize(init_settings);
+#else
+	int hip_device_id = gpu->gpu->info->index;
+
+	Kokkos::HIP::impl_initialize(Kokkos::HIP::SelectDevice(hip_device_id));
+#endif
+	{
+	  // some init is deferred until an instance is created
+	  Kokkos::HIP dummy;
+	}
+	mark_done();
+      }
+    };
+    
+    class KokkosHipFinalizer : public KokkosInternalTask {
+    public:
+      virtual void execute_on_processor(Processor p)
+      {
+	log_kokkos.info() << "doing hip finalize on proc " << p;
+
+	// delete all the cuda instances from this proc that we've cached
+	for(std::map<std::pair<Processor, hipStream_t>, Kokkos::HIP *>::iterator it = hip_instance_map.begin();
+	    it != hip_instance_map.end();
+	    ++it)
+	  if(it->first.first == p)
+	    delete it->second;
+
+	Kokkos::HIP::impl_finalize();
+	mark_done();
+      }
+    };
+#endif
 
     void kokkos_initialize(const std::vector<ProcessorImpl *>& local_procs)
     {
@@ -276,6 +345,27 @@ namespace Realm {
 	}
       }
 #endif
+      
+#ifdef KOKKOS_ENABLE_HIP
+      {
+	size_t count = 0;
+	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
+	    it != local_procs.end();
+	    ++it)
+	  if((*it)->kind == Processor::TOC_PROC) {
+	    count++;
+	    if(count > 1) continue; // we'll complain below
+	    KokkosHipInitializer hipinit;
+	    (*it)->add_internal_task(&hipinit);
+	    hipinit.wait_done();
+	    kokkos_hip_procs.push_back(*it);
+	  }
+	if(count != 1) {
+	  log_kokkos.fatal() << "Kokkos Hip support requires exactly 1 gpu proc (found " << count << ") - suggest -ll:gpu 1";
+	  abort();
+	}
+      }
+#endif
 
       // TODO: warn if Kokkos has other execution spaces enabled that we're not
       //  willing/able to initialize?
@@ -309,6 +399,17 @@ namespace Realm {
 	  KokkosCudaFinalizer cudafinal;
 	  (*it)->add_internal_task(&cudafinal);
 	  cudafinal.wait_done();
+	}
+#endif
+  
+#ifdef KOKKOS_ENABLE_HIP
+      for(std::vector<ProcessorImpl *>::const_iterator it = kokkos_hip_procs.begin();
+	  it != kokkos_hip_procs.end();
+	  ++it)
+	{
+	  KokkosHipFinalizer hipfinal;
+	  (*it)->add_internal_task(&hipfinal);
+	  hipfinal.wait_done();
 	}
 #endif
       
@@ -369,6 +470,40 @@ namespace Realm {
 #else
     // we're oblivious to the application's use of CUDA
     return Kokkos::Cuda();
+#endif
+  }
+#endif
+    
+#ifdef KOKKOS_ENABLE_HIP
+  template <>
+  Processor::KokkosExecInstance::operator Kokkos::HIP() const
+  {
+#ifdef REALM_USE_HIP
+    ProcessorImpl *impl = get_runtime()->get_processor_impl(p);
+    assert(impl->kind == Processor::TOC_PROC);
+    Hip::GPUProcessor *gpu = checked_cast<Hip::GPUProcessor *>(impl);
+    hipStream_t stream = gpu->gpu->get_null_task_stream()->get_stream();
+    log_kokkos.info() << "handing back stream " << stream;
+    Kokkos::HIP *inst = 0;
+    {
+      AutoLock<> al(KokkosInterop::hip_instance_map_mutex);
+      std::pair<Processor, hipStream_t> key(p, stream);
+      std::map<std::pair<Processor, hipStream_t>, Kokkos::HIP *>::iterator it = KokkosInterop::hip_instance_map.find(key);
+      if(it != KokkosInterop::hip_instance_map.end()) {
+	inst = it->second;
+      } else {
+	// creating a Kokkos::HIP instance does some blocking calls, but we're
+	//  not re-entrant here, so enable the scheduler lock
+	Processor::enable_scheduler_lock();
+	inst = new Kokkos::HIP(stream);
+	Processor::disable_scheduler_lock();
+	KokkosInterop::hip_instance_map[key] = inst;
+      }
+    }
+    return *inst;
+#else
+    // we're oblivious to the application's use of HIP
+    return Kokkos::HIP();
 #endif
   }
 #endif
