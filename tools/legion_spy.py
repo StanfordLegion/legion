@@ -5915,7 +5915,12 @@ class CollectiveRendezvous(object):
                     break
             if diff_regions == total_points:
                 # Check to make sure the user didn't ask for any collective behavior
-                if requested:
+                # Skip this for index attach and detach points since we have to do
+                # this check and it might fail but that is just part of the semantics
+                # of those operations so it shouldn't be a warning
+                if requested and self.owner.kind != ATTACH_OP_KIND and \
+                        self.owner.kind != DETACH_OP_KIND:
+                    assert self.kind == INDEX_TASK_KIND
                     if provenance is not None and len(provenance) > 0:
                         print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
@@ -5963,6 +5968,9 @@ class CollectiveRendezvous(object):
                             pointstr += ', '
                         pointstr += str(op.index_point)
                     print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
+        # We skip index attach and detach operations here since they have to do
+        # collective rendezvous by default and might not end up matching and that
+        # is not a bug in the runtime
         if collective_reqs:
             for idx in collective_reqs:
                 # Count the number of points that matched with another
@@ -5972,20 +5980,32 @@ class CollectiveRendezvous(object):
                         total_matches += len(ops)
                 assert total_matches <= total_points
                 efficiency = "{:.2f}".format(100 * total_matches / total_points)
-                if provenance is not None and len(provenance) > 0:
-                    print('WARNING: Missed collective rendezvous optimization for region '+
-                            'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
-                            ') which had '+str(total_points)+' out of '+str(total_points)+
-                            ' ('+efficiency+'%) use the same logical region as another point.')
-                    if self.owner.state.assert_on_warning:
-                        assert False
+                if self.owner.kind == SINGLE_TASK_KIND or self.owner.kind == INDEX_TASK_KIND:
+                    if provenance is not None and len(provenance) > 0:
+                        print('WARNING: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
+                                ') which had '+str(total_points)+' out of '+str(total_points)+
+                                ' ('+efficiency+'%) use the same logical region as another point.')
+                        if self.owner.state.assert_on_warning:
+                            assert False
+                    else:
+                        print('WARNING: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                                str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                                'use the same logical region as another point.')
+                        if self.owner.state.assert_on_warning:
+                            assert False
                 else:
-                    print('WARNING: Missed collective rendezvous optimization for region '+
-                            'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
-                            str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
-                            'use the same logical region as another point.')
-                    if self.owner.state.assert_on_warning:
-                        assert False
+                    if provenance is not None and len(provenance) > 0:
+                        print('INFO: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' (from '+provenance+
+                                ') which had '+str(total_points)+' out of '+str(total_points)+
+                                ' ('+efficiency+'%) use the same logical region as another point.')
+                    else:
+                        print('INFO: Missed collective rendezvous optimization for region '+
+                                'requirement '+str(idx)+' of '+str(self.owner)+' which had '+
+                                str(total_points)+' out of '+str(total_points)+' ('+efficiency+'%) '
+                                'use the same logical region as another point.')
                 for region,ops in iteritems(self.matches[idx]):
                     pointstr = ''
                     first = True
@@ -5996,7 +6016,10 @@ class CollectiveRendezvous(object):
                             pointstr += ', '
                         pointstr += str(op.index_point)
                     print('  '+str(region)+': '+str(len(ops))+' points - '+pointstr)
-
+                if self.owner.kind != SINGLE_TASK_KIND and self.owner.kind != INDEX_TASK_KIND:
+                    print("The runtime does not currently support parallel rendezvous for "+
+                            OpNames[self.owner.kind]+"s but you can request support for mapping "+
+                            "collective views for this kind of operation.")
 
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
@@ -7202,17 +7225,8 @@ class Operation(object):
                     other_req.logical_node.get_index_node())
                 if aliased:
                     assert ancestor
-                    dep_type = compute_dependence_type(req, other_req)
-                    if dep_type != NO_DEPENDENCE:
-                        # Only report this at least one is not a projection requirement
-                        if req.projection_function is None or \
-                            other_req.projection_function is None:
-                            print(("Region requirements %d and %d of operation %s "+
-                                   "are interfering in %s") % 
-                                   (index,idx,str(self),str(self.context)))
-                            if self.state.assert_on_error:
-                                assert False
-                            return False
+                    # We don't need this check for aliasing here anymore as we have
+                    # a more precise check in is_interfering_index_space_launch
                     aliased_children.add(ancestor.depth) 
             # Keep track of the previous dependences so we can 
             # use them for adding/checking dependences on close operations
