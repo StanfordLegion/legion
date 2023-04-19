@@ -819,6 +819,7 @@ namespace Realm {
 #ifdef NODE_LOGGING
 	prefix("."),
 #endif
+  num_untriggered_events(0),
 	nodes(0),
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0),
@@ -1636,7 +1637,7 @@ namespace Realm {
       DiskMemory *diskmem;
       if(disk_mem_size > 0) {
         char file_name[30];
-        sprintf(file_name, "disk_file%d.tmp", Network::my_node_id);
+        snprintf(file_name, sizeof file_name, "disk_file%d.tmp", Network::my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
                                  disk_mem_size,
@@ -2305,6 +2306,14 @@ namespace Realm {
 			       INT_MIN); // runs with lowest priority
 	e.external_wait();
 	log_runtime.info() << "local processor shutdown tasks complete";
+      }
+
+      {
+        size_t n = num_untriggered_events.load();
+        if (n != 0) {
+          log_runtime.fatal() << n << " pending operations during shutdown!";
+          abort();
+        }
       }
 
       // the operation tables on every rank should be clear of work

@@ -38,7 +38,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char file_name[100];
-      sprintf(file_name,"region_tree_state_log_%x.log",sid);
+      snprintf(file_name,sizeof file_name,"region_tree_state_log_%x.log",sid);
       tree_state_log = fopen(file_name,"w");
       assert(tree_state_log != NULL);
       log("");
@@ -96,7 +96,7 @@ namespace Legion {
       vsnprintf(block_buffer, 127, fmt, args);
       va_end(args);
       char temp_buffer[128+32];
-      sprintf(temp_buffer,"BEGIN: ");
+      snprintf(temp_buffer,sizeof temp_buffer,"BEGIN: ");
       strcat(temp_buffer,block_buffer);
       log("");
       log("//////////////////////////////////////////////////////////////////");
@@ -110,7 +110,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       char temp_buffer[128+32];
-      sprintf(temp_buffer,"END: ");
+      snprintf(temp_buffer,sizeof temp_buffer,"END: ");
       strcat(temp_buffer,block_buffer);
       log("");
       log("/////////");

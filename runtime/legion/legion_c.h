@@ -95,6 +95,7 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_mappable_t);
   NEW_OPAQUE_TYPE(legion_region_requirement_t);
   NEW_OPAQUE_TYPE(legion_machine_t);
+  NEW_OPAQUE_TYPE(legion_logger_t);
   NEW_OPAQUE_TYPE(legion_mapper_t);
   NEW_OPAQUE_TYPE(legion_default_mapper_t);
   NEW_OPAQUE_TYPE(legion_processor_query_t);
@@ -5837,6 +5838,110 @@ extern "C" {
   legion_future_t
   legion_issue_timing_op_nanoseconds(legion_runtime_t runtime,
                                      legion_context_t ctx);
+
+  // -----------------------------------------------------------------------
+  // Logging Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Realm::Logger::Logger(const std::string&);
+   */
+  legion_logger_t
+  legion_logger_create(const char* name);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Realm::Logger::~Logger()
+   */
+  void
+  legion_logger_destroy(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::spew()
+   */
+  void
+  legion_logger_spew(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::debug()
+   */
+  void
+  legion_logger_debug(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::info()
+   */
+  void
+  legion_logger_info(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::print()
+   */
+  void
+  legion_logger_print(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::warning()
+   */
+  void
+  legion_logger_warning(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::error()
+   */
+  void
+  legion_logger_error(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::fatal()
+   */
+  void
+  legion_logger_fatal(legion_logger_t handle, const char *msg);
+
+  /**
+   * @see Realm::Logger::want_spew()
+   */
+  bool
+  legion_logger_want_spew(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::want_debug()
+   */
+  bool
+  legion_logger_want_debug(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::want_info()
+   */
+  bool
+  legion_logger_want_info(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::want_print()
+   */
+  bool
+  legion_logger_want_print(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::want_warning()
+   */
+  bool
+  legion_logger_want_warning(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::want_error()
+   */
+  bool
+  legion_logger_want_error(legion_logger_t handle);
+
+  /**
+   * @see Realm::Logger::want_fatal()
+   */
+  bool
+  legion_logger_want_fatal(legion_logger_t handle);
 
   // -----------------------------------------------------------------------
   // Machine Operations

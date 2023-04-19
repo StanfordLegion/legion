@@ -168,6 +168,7 @@ namespace Realm {
     , dsts(_dsts)
     , prs(requests)
     , analysis_complete(false)
+    , analysis_successful(false)
     , fill_data(0)
     , fill_size(0)
   {
