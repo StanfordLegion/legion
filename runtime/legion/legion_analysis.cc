@@ -4009,7 +4009,7 @@ namespace Legion {
       const void *projection_args = req.get_projection_args(&proj_arglen);
       if (arglen != proj_arglen)
         return false;
-      if ((arglen > 0) && (memcmp(args, projection_args, arglen) == 0))
+      if ((arglen > 0) && (memcmp(args, projection_args, arglen) != 0))
         return false;
       return true;
     }
