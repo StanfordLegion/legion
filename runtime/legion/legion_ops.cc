@@ -22030,7 +22030,7 @@ namespace Legion {
       // It's only safe to actually perform the detach after the mapping
       // is performed to know that all the updates to the instance have
       // been mapped
-      manager->detach_external_instance(detach_event);
+      manager->detach_external_instance();
     }
 
     //--------------------------------------------------------------------------
