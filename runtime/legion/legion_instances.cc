@@ -1492,10 +1492,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock,1,false/*exclusive*/);
-      for (std::set<ApEvent>::const_iterator it =
-            gc_events.begin(); it != gc_events.end(); it++)
-        if (!it->has_triggered_faultignorant())
-          preconditions.insert(*it);
+      // Only need to get these if we didn't already delete the manager
+      // If we already deleted the manager there is already a meta-task in
+      // flight that summarizes these events and makes sure we can't shutdown
+      // without it running, see perform_deletion
+      if (gc_state != COLLECTED_GC_STATE)
+      {
+        for (std::set<ApEvent>::const_iterator it =
+              gc_events.begin(); it != gc_events.end(); it++)
+          if (!it->has_triggered_faultignorant())
+            preconditions.insert(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1787,9 +1794,12 @@ namespace Legion {
     {
       // No need for the lock it is held by the caller
 #ifdef DEBUG_LEGION
-      assert(gc_state == VALID_GC_STATE);
+      assert((gc_state == VALID_GC_STATE) || is_external_instance());
 #endif
-      gc_state = COLLECTABLE_GC_STATE;
+      // If we're an external instance that has already been detached and
+      // therfore delete then we don't ever want to go back to collectable
+      if (!is_external_instance() || (gc_state != COLLECTED_GC_STATE))
+        gc_state = COLLECTABLE_GC_STATE;
       return remove_base_gc_ref(INTERNAL_VALID_REF);
     }
 
@@ -2490,7 +2500,6 @@ namespace Legion {
                 // Deletion success and we're the first ones to discover it
                 // Move to the deletion state and send the deletion messages
                 // to mark that we successfully performed the deletion
-                gc_state = COLLECTED_GC_STATE;
                 // Grab the set of active contexts to notify
                 std::set<InstanceDeletionSubscriber*> to_notify;
                 // Notify the subscribers if we've been collected
@@ -3206,7 +3215,9 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(pending_views.empty());
+      assert(gc_state != COLLECTED_GC_STATE);
 #endif
+      gc_state = COLLECTED_GC_STATE;
       log_garbage.spew("Deleting physical instance " IDFMT " in memory " 
                        IDFMT "", instance.id, memory_manager->memory.id);
       RtEvent deferred_deletion;
@@ -3253,33 +3264,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::force_deletion(ApEvent precondition)
+    void PhysicalManager::force_deletion(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      // If we already deleted this then it's deferred deletion task should
+      // have run and pruned it out of the memory manager to prevent calling
+      // force_deletion on this physical manager
+      assert(gc_state != COLLECTED_GC_STATE);
 #endif
+      // There are no races by the time we get here so we don't need the lock
       log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
                        IDFMT "", instance.id, memory_manager->memory.id);
 #ifndef LEGION_DISABLE_GC
       std::vector<PhysicalInstance::DestroyedField> serdez_fields;
       layout->compute_destroyed_fields(serdez_fields);
-      RtEvent deferred_deletion;
-      if (precondition.exists())
-        deferred_deletion = Runtime::protect_event(precondition);
 #ifdef LEGION_MALLOC_INSTANCES
       if (kind == INTERNAL_INSTANCE_KIND)
-        memory_manager->free_legion_instance(this, deferred_deletion);
+        memory_manager->free_legion_instance(this, RtEvent::NO_RT_EVENT);
 #else
       // If this is an eager allocation, return it back to the eager pool
       if (kind == EAGER_INSTANCE_KIND)
-        memory_manager->free_eager_instance(instance, deferred_deletion);
+        memory_manager->free_eager_instance(instance, RtEvent::NO_RT_EVENT);
       else
       {
         if (!serdez_fields.empty())
-          instance.destroy(serdez_fields, deferred_deletion);
+          instance.destroy(serdez_fields);
         else
-          instance.destroy(deferred_deletion);
+          instance.destroy();
       }
 #endif
 #endif
@@ -3322,13 +3335,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalManager::detach_external_instance(ApEvent precondition)
+    void PhysicalManager::detach_external_instance(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_external_instance());
 #endif
-      memory_manager->detach_external_instance(this, precondition);
+      memory_manager->detach_external_instance(this);
     }
     
     //--------------------------------------------------------------------------
