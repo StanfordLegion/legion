@@ -3393,7 +3393,7 @@ namespace Legion {
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               vit->second.begin(); it != vit->second.end(); ++it)
         {
-          char *mask = it->second.to_string();
+          char *mask = region->column_source->to_string(it->second, context);
           const void *name = NULL; size_t name_size = 0;
           forest->runtime->retrieve_semantic_information(lr, 
               LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
@@ -3403,7 +3403,7 @@ namespace Legion {
                       << "Fill view: " << view
                       << ", Index expr: " << it->first->expr_id
                       << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Field Mask: " << mask;
+                      << ", Fields: " << mask;
           }
           else if (view->is_collective_view())
           {
@@ -3412,7 +3412,7 @@ namespace Legion {
                       << "view: " << view
                       << ", Index expr: " << it->first->expr_id
                       << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Field Mask: " << mask;
+                      << ", Fields: " << mask;
           }
           else
           {
@@ -3425,7 +3425,7 @@ namespace Legion {
                       << std::hex << manager->get_instance().id << std::dec
                       << ", Index expr: " << it->first->expr_id
                       << ", Name: " << (name_size > 0 ? (const char*)name : "")
-                      << ", Field Mask: " << mask;
+                      << ", Fields: " << mask;
           }
           free(mask);
         }
