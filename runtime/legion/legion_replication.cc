@@ -9440,9 +9440,12 @@ namespace Legion {
       // Do NOT call 'initialize' here, we're in the dependence
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
-      initialize(ctx, MAPPING_FENCE, false/*need future*/,
-                 provenance, false/*track*/);
+      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      fence_kind = MAPPING_FENCE;
       context_index = invalidator->get_ctx_index();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
+            unique_op_id, context_index, false/*execution fence*/);
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
