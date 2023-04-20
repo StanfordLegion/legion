@@ -731,15 +731,19 @@ namespace Legion {
       }
 
       static inline void log_predicate_operation(UniqueID context, 
-                                                 UniqueID pred_op)
+                                                 UniqueID pred_op,
+                                                 size_t context_index)
       {
-        log_spy.print("Predicate Operation %llu %llu", context, pred_op);
+        log_spy.print("Predicate Operation %llu %llu %zd",
+                      context, pred_op, context_index);
       }
 
       static inline void log_must_epoch_operation(UniqueID context,
-                                                  UniqueID must_op)
+                                                  UniqueID must_op,
+                                                  size_t context_index)
       {
-        log_spy.print("Must Epoch Operation %llu %llu", context, must_op);
+        log_spy.print("Must Epoch Operation %llu %llu %zd",
+                      context, must_op, context_index);
       }
 
       static inline void log_summary_op_creator(UniqueID internal_op_id,

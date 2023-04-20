@@ -1758,10 +1758,10 @@ namespace Legion {
     {
       initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
       fence_kind = MAPPING_FENCE;
+      context_index = invalidator->get_ctx_index();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
             unique_op_id, context_index, false/*execution fence*/);
-      context_index = invalidator->get_ctx_index();
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.
