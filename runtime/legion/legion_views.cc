@@ -11885,10 +11885,10 @@ namespace Legion {
         if (!prepare_allreduce)
           reduced_events.resize(local_views.size(), ApEvent::NO_AP_EVENT);
         reduced_events[dst_index] = precondition;
-        initialized[dst_index] = true;
+        initialized[dst_index] = (source_fields != NULL);
         std::vector<std::vector<CopySrcDstField> > fields(local_views.size());
         std::vector<std::vector<CopySrcDstField> > &local_fields =
-          (source_fields == NULL) ? fields : *source_fields;
+          (source_fields != NULL) ? *source_fields : fields;
         std::map<unsigned,std::vector<Reservation> > local_reservations;
         std::map<unsigned,std::vector<ApEvent> > reduction_preconditions;
         // Note the reversed iterator <destination,source>
