@@ -14288,7 +14288,8 @@ namespace Legion {
       to_predicate = true;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
+                                           unique_op_id, context_index);
         if ((future.impl != NULL) && future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
@@ -14313,7 +14314,8 @@ namespace Legion {
       to_predicate = false;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
+                                    unique_op_id, context_index);
         LegionSpy::log_predicate_use(unique_op_id, p.impl->creator_uid);
       }
       return future;
@@ -14438,7 +14440,8 @@ namespace Legion {
       previous = p;
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
+                                    unique_op_id, context_index);
         LegionSpy::log_predicate_use(unique_op_id, p.impl->creator_uid);
       }
       return to_set;
@@ -14561,7 +14564,8 @@ namespace Legion {
       previous.swap(predicates);
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
+                                    unique_op_id, context_index);
         for (std::vector<Predicate>::const_iterator it = previous.begin();
               it != previous.end(); it++)
           LegionSpy::log_predicate_use(unique_op_id, it->impl->creator_uid); 
@@ -14704,7 +14708,8 @@ namespace Legion {
       to_set = Predicate(ctx->create_predicate_impl(this));
       if (runtime->legion_spy_enabled)
       {
-        LegionSpy::log_predicate_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_predicate_operation(ctx->get_unique_id(),
+                                    unique_op_id, context_index);
         for (std::vector<Predicate>::const_iterator it = previous.begin();
               it != previous.end(); it++)
           LegionSpy::log_predicate_use(unique_op_id, it->impl->creator_uid);
@@ -14913,7 +14918,8 @@ namespace Legion {
             "Nested concurrency is not supported.", 
             parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->legion_spy_enabled)
-        LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
+        LegionSpy::log_must_epoch_operation(ctx->get_unique_id(),
+                                    unique_op_id, context_index);
       return result_map;
     }
 
@@ -22174,7 +22180,7 @@ namespace Legion {
       // It's only safe to actually perform the detach after the mapping
       // is performed to know that all the updates to the instance have
       // been mapped
-      manager->detach_external_instance(detach_event);
+      manager->detach_external_instance();
     }
 
     //--------------------------------------------------------------------------

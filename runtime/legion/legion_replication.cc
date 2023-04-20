@@ -7477,8 +7477,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(effects_barrier.exists());
       assert(collective_map_barrier.exists());
 #endif
+      // Always arrive on the effects barrier with the detach event
+      Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
+      // Then update the detach event with the effects barrier
+      detach_event = effects_barrier;
       Runtime::phase_barrier_arrive(collective_map_barrier, 1/*count*/, pre);
       return collective_map_barrier;
     }
@@ -7532,9 +7537,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplDetachOp::detach_external_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
-    {
-      // Always arrive on the effects barrier with the detach event
-      Runtime::phase_barrier_arrive(effects_barrier, 1/*count*/, detach_event);
+    { 
       if (collective_instances)
       {
 #ifdef DEBUG_LEGION
@@ -7550,7 +7553,7 @@ namespace Legion {
         {
           shard_manager->exchange_shard_local_op_data(context_index,
                                           exchange_index++, manager);
-          manager->detach_external_instance(effects_barrier);
+          manager->detach_external_instance();
         }
         else
         {
@@ -7559,11 +7562,11 @@ namespace Legion {
                                       context_index, exchange_index++);
           // If the managers are different then we do the detach as well
           if (manager != first_manager)
-            manager->detach_external_instance(effects_barrier);
+            manager->detach_external_instance();
         }
       }
       else if (manager->is_owner())
-        manager->detach_external_instance(effects_barrier);
+        manager->detach_external_instance();
     }
 
     /////////////////////////////////////////////////////////////
@@ -9290,9 +9293,12 @@ namespace Legion {
       // Do NOT call 'initialize' here, we're in the dependence
       // analysis stage of the pipeline and we need to get our mapping
       // fence from a different location to avoid racing with the application
-      initialize(ctx, MAPPING_FENCE, false/*need future*/,
-                 provenance, false/*track*/);
+      initialize_operation(ctx, false/*track*/, 0/*regions*/, provenance);
+      fence_kind = MAPPING_FENCE;
       context_index = invalidator->get_ctx_index();
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
+            unique_op_id, context_index, false/*execution fence*/);
       current_template = tpl;
       // The summary could have been marked as being traced,
       // so here we forcibly clear them out.

@@ -8448,23 +8448,18 @@ namespace Legion {
       // This is a kind of deletion so make sure it is ordered
       AutoLock c_lock(collection_lock);
       // This a collection so make sure we're ordered with other collections
-      std::vector<PhysicalManager*> to_delete, external;
+      std::vector<PhysicalManager*> to_delete;
       {
         AutoLock m_lock(manager_lock);
-        for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+        for (std::map<RegionTreeID,TreeInstances>::iterator cit =
               current_instances.begin(); cit != 
-              current_instances.end(); /*nothing*/)
+              current_instances.end(); cit++)
         {
           for (TreeInstances::iterator it =
-                cit->second.begin(); it != cit->second.end(); /*nothing*/)
+                cit->second.begin(); it != cit->second.end(); it++)
           {
             if (it->first->is_external_instance())
-            {
-              external.push_back(it->first);
-              TreeInstances::iterator delete_it = it++;
-              cit->second.erase(delete_it);
               continue;
-            }
             if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
                 it->first->is_owner())
             {
@@ -8479,27 +8474,11 @@ namespace Legion {
             }
             else if (already_collected)
               remove_collectable(it->second, it->first);
-            it++;
           }
-          if (cit->second.empty())
-          {
-            std::map<RegionTreeID,TreeInstances>::iterator delete_it = cit++;
-            current_instances.erase(delete_it);
-          }
-          else
-            cit++;
         }
       }
       if (!to_delete.empty())
         check_instance_deletions(to_delete);
-      for (std::vector<PhysicalManager*>::const_iterator it =
-            external.begin(); it != external.end(); it++)
-      {
-        if ((*it)->is_external_instance())
-          (*it)->perform_deletion(runtime->address_space);
-        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete (*it);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -8621,8 +8600,16 @@ namespace Legion {
         if (tree_finder->second.empty())
           current_instances.erase(tree_finder);
       }
-      if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
-        delete manager;
+      if (manager->is_external_instance())
+      {
+        if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete manager;
+      }
+      else
+      {
+        if (manager->remove_base_gc_ref(MEMORY_MANAGER_REF))
+          delete manager;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9206,7 +9193,7 @@ namespace Legion {
       // This is a collection so we need to order it with respect to
       // to other collections
       AutoLock c_lock(collection_lock);
-      std::vector<PhysicalManager*> to_delete, external;
+      std::vector<PhysicalManager*> to_delete;
       {
         AutoLock m_lock(manager_lock);
         std::map<RegionTreeID,TreeInstances>::iterator finder = 
@@ -9214,15 +9201,10 @@ namespace Legion {
         if (finder != current_instances.end())
         {
           for (TreeInstances::iterator it =
-                finder->second.begin(); it != finder->second.end(); /*nothing*/)
+                finder->second.begin(); it != finder->second.end(); it++)
           {
             if (it->first->is_external_instance())
-            {
-              external.push_back(it->first);
-              TreeInstances::iterator delete_it = it++;
-              finder->second.erase(delete_it);
               continue;
-            }
             if ((it->second == LEGION_GC_NEVER_PRIORITY) && 
                 it->first->is_owner())
             {
@@ -9237,22 +9219,11 @@ namespace Legion {
             }
             else if (already_collected)
               remove_collectable(it->second, it->first);
-            it++;
           }
-          if (finder->second.empty())
-            current_instances.erase(finder);
         }
       }
       if (!to_delete.empty())
         check_instance_deletions(to_delete);
-      for (std::vector<PhysicalManager*>::const_iterator it =
-            external.begin(); it != external.end(); it++)
-      {
-        if ((*it)->is_external_instance())
-          (*it)->perform_deletion(runtime->address_space);
-        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete (*it);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -10931,8 +10902,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::detach_external_instance(PhysicalManager *manager,
-                                                    ApEvent precondition)
+    void MemoryManager::detach_external_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10946,37 +10916,14 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(memory);
           rez.serialize(manager->did);
-          rez.serialize(precondition);
         }
         manager->pack_valid_ref();
         runtime->send_external_detach(manager->owner_space, rez);
       }
       else
       {
-        // Either delete the instance now or do a deferred deltion
-        // that will delete the instance once all operations are
-        // done using it
-        {
-          AutoLock m_lock(manager_lock);
-          std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
-            current_instances.find(manager->tree_id);
-#ifdef DEBUG_LEGION
-          assert(tree_finder != current_instances.end());
-#endif
-          TreeInstances::iterator finder = tree_finder->second.find(manager);
-#ifdef DEBUG_LEGION
-          assert(finder != tree_finder->second.end());
-#endif
-          // Reference will flow out
-          tree_finder->second.erase(finder);
-          if (tree_finder->second.empty())
-            current_instances.erase(tree_finder);
-        }
-        // Perform the deletion now with the precondition for all the users
-        // being done accessing the instance
-        manager->force_deletion(precondition);
-        if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          delete manager;
+        // Tell the manager that it can perform its deletion
+        manager->perform_deletion(runtime->address_space);
       }
     }
 
@@ -25661,12 +25608,10 @@ namespace Legion {
       RtEvent manager_ready;
       PhysicalManager *manager = 
         find_or_request_instance_manager(did, manager_ready);
-      ApEvent precondition;
-      derez.deserialize(precondition);
       MemoryManager *memory_manager = find_memory_manager(target_memory);
       if (manager_ready.exists() && !manager_ready.has_triggered())
         manager_ready.wait();
-      memory_manager->detach_external_instance(manager, precondition);
+      memory_manager->detach_external_instance(manager);
       manager->unpack_valid_ref();
     }
 
