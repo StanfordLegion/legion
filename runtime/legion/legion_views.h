@@ -791,6 +791,9 @@ namespace Legion {
       static void handle_nearest_instances_request(Runtime *runtime,
                                                    Deserializer &derez);
       static void handle_nearest_instances_response(Deserializer &derez);
+      static void process_nearest_instances(std::atomic<size_t> *target,
+          std::vector<DistributedID> *instances, size_t best,
+          const std::vector<DistributedID> &results, bool bandwidth);
       static void handle_remote_analysis_registration(Deserializer &derez,
                                                       Runtime *runtime);
       static void handle_collective_view_deletion(Deserializer &derez,

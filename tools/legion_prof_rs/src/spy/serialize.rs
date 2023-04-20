@@ -350,9 +350,9 @@ pub enum Record {
     #[serde(rename = "All Reduce Operation")]
     AllReduceOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Predicate Operation")]
-    PredicateOperation { ctx: ContextID, uid: UniqueID },
+    PredicateOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Must Epoch Operation")]
-    MustEpochOperation { ctx: ContextID, uid: UniqueID },
+    MustEpochOperation { ctx: ContextID, uid: UniqueID, index: u64 },
     #[serde(rename = "Summary Operation Creator")]
     SummaryCreator { uid: UniqueID, cuid: UniqueID },
     #[serde(rename = "Summary Operation")]

@@ -5929,7 +5929,7 @@ class CollectiveRendezvous(object):
                 # of those operations so it shouldn't be a warning
                 if requested and self.owner.kind != ATTACH_OP_KIND and \
                         self.owner.kind != DETACH_OP_KIND:
-                    assert self.kind == INDEX_TASK_KIND
+                    assert self.owner.kind == INDEX_TASK_KIND
                     if provenance is not None and len(provenance) > 0:
                         print('WARNING: A collective rendezvous was requested for '+
                                 'region requirement '+str(idx)+' of '+str(self.owner)+
@@ -6336,6 +6336,14 @@ class Operation(object):
     def get_context(self):
         assert self.context is not None
         return self.context
+
+    def get_context_index(self):
+        if self.context_index is not None:
+            return self.context_index
+        # This better be an internal oepration with a creator
+        # if it does not have a context index
+        assert self.creator is not None
+        return self.creator.get_context_index()
 
     def set_op_kind(self, kind):
         if self.kind == NO_OP_KIND:
@@ -7483,8 +7491,9 @@ class Operation(object):
         if prev_op in previous_deps:
             if need_fence:
                 # Check to see if the previous dependence had an intermediate close
-                if (field,tree_id) in previous_deps[prev_op]:
+                if previous_deps[prev_op] is not None and (field,tree_id) in previous_deps[prev_op]:
                     return True
+                # else we haven't computed it with a fence yet
             else:
                 # We already found this prev_op as a previous dependence
                 return True
@@ -7497,7 +7506,7 @@ class Operation(object):
                   str(prev_op.uid)+") and region requriement "+str(req.index)+" of "+
                   str(self)+" (UID "+str(self.uid)+")")
             if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, self.field)
+                self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
                 assert False
         elif need_fence and (field,tree_id) not in previous_deps[prev_op]:
@@ -7507,7 +7516,7 @@ class Operation(object):
                     "requriement "+str(req.index)+" of "+str(self)+" (UID "+
                     str(self.uid)+")")
             if self.state.bad_graph_on_error:
-                self.state.dump_bad_graph(self.context, tree_id, self.field)
+                self.state.dump_bad_graph(self.context, tree_id, field)
             if self.state.assert_on_error:
                 assert False
         else:
@@ -7516,19 +7525,55 @@ class Operation(object):
 
     def has_verification_transitive_mapping_dependence(self, prev_op, need_fence, 
                                                     field, tree_id, previous_deps):
-        # If we don't need a close then we can do BFS which is much more efficient
-        # at finding dependences of things nearby in the graph
+        # Equal is for stupid must epoch launches
+        assert prev_op.get_context_index() <= self.get_context_index()
         if not need_fence:
+            # If we don't need a close then we can do BFS which is much more efficient
+            # at finding dependences of things nearby in the graph
+            queue = collections.deque()
+            queue.append(self)
+            if len(previous_deps) > 0:
+                # We already started BFS-ing so we can restart from all
+                # the operations that we already visited
+                for op in iterkeys(previous_deps):
+                    if prev_op.get_context_index() <= op.get_context_index():
+                        queue.append(op)
+            while queue:
+                current = queue.popleft()
+                if not current.logical_incoming:
+                    continue
+                # If this operation comes earlier in the program than the
+                # previous operation that we're searching for then there
+                # is no need to search past it for now
+                if current.get_context_index() < prev_op.get_context_index():
+                    continue
+                for next_op in current.logical_incoming:
+                    if next_op in previous_deps:
+                        continue
+                    previous_deps[next_op] = None
+                    if next_op is prev_op:
+                        return True
+                    queue.append(next_op)
+        else:
+            # First BFS to find all the close fence operations that we can reach 
+            # from this operation but also come before the previous operation. 
+            # Then for each of close fence operations run a BFS to see if we can 
+            # find the prev_op from them. As soon as we find one then we are done, 
+            # otherwise we fail
             next_gen = self.state.get_next_traversal_generation()
             self.generation = next_gen
             queue = collections.deque()
             queue.append(self)
+            merge_close_ops = list()
             while queue:
                 current = queue.popleft()
-                if not current in previous_deps:
-                    previous_deps[current] = set()
-                if current is prev_op:
-                    return True
+                if current.get_context_index() < prev_op.get_context_index():
+                    continue
+                if current.kind == INTER_CLOSE_OP_KIND:
+                    assert current.reqs is not None and len(current.reqs) == 1
+                    if current.reqs[0].logical_node.tree_id == tree_id and \
+                            field in current.reqs[0].fields:
+                        merge_close_ops.append(current)
                 if not current.logical_incoming:
                     continue
                 for next_op in current.logical_incoming:
@@ -7536,75 +7581,27 @@ class Operation(object):
                         continue
                     next_op.generation = next_gen
                     queue.append(next_op)
-        else:
-            # Otherwise start the traversal and look for a path that contains the fence
-            # Since it's likely that the operation we're looking for is nearby in the
-            # graph we'll use a timeout to find it efficiently search ever increasing
-            # depths until we notice that we do not get a timeout
-            max_depth = 4 
-            close_map = dict()
-            timeout_counter = list()
-            timeout_counter.append(0)
-            while True:
-                timeout_counter[0] = 0    
-                assert len(close_map) == 0
-                if self.has_mapping_dependence_with_close(prev_op, field, tree_id, 
-                              previous_deps, close_map, max_depth, timeout_counter):
-                    return True
-                # If we didn't have any timeout it means we explore the whole graph
-                elif timeout_counter[0] == 0:
-                    break;
-                # Increase the depth for the next pass
-                max_depth *= 2
-        return False
-
-    def has_mapping_dependence_with_close(self, prev_op, field, tree_id, 
-                      previous_deps, close_map, timeout, timeout_counter):
-        # Record our dependence set in the previous deps
-        if not self.kind == INTER_CLOSE_OP_KIND:
-            if self not in previous_deps:
-                previous_deps[self] = set()
-            if close_map is not None and len(close_map) > 0:
-                for key in iterkeys(close_map):
-                    previous_deps[self].add(key)
-        # See if we arrived at the node we're looking for
-        if self is prev_op:
-            # Check to see if we have a close for our field and tree
-            if (field,tree_id) in close_map:
-                return True
-            else:
-                return False
-        # If there's no where to traverse we're done
-        if not self.logical_incoming:
-            return False
-        # If we timed out record it in the count
-        if timeout <= 0:
-            timeout_counter[0] += 1
-            return False
-        # Otherwise continue the traversal
-        if self.kind == INTER_CLOSE_OP_KIND:
-            # If we're a close op, add ourselves to the close map
-            assert self.reqs is not None and len(self.reqs) == 1
-            close_tid = self.reqs[0].logical_node.tree_id
-            for close_field in self.reqs[0].fields:
-                key = (close_field,close_tid)
-                if key in close_map:
-                    close_map[key] += 1
-                else:
-                    close_map[key] = 1
-        for next_op in self.logical_incoming:
-            if next_op.has_mapping_dependence_with_close(prev_op, field, tree_id, 
-                            previous_deps, close_map, timeout-1, timeout_counter):
-                # No need to prune close map entries, this is the fast path back
-                return True
-        if self.kind == INTER_CLOSE_OP_KIND:
-            # Remove our entries on the way back
-            for close_field in self.reqs[0].fields:
-                key = (close_field,close_tid)
-                close_map[key] -= 1
-                if close_map[key] == 0:
-                    del close_map[key]
-        return False
+            # Once we've got the merge close fences then iterate over them  
+            # and run BFS from them looking for the previous op, recording
+            # that there are fences on anything we find along the way
+            for close in merge_close_ops:
+                next_gen = self.state.get_next_traversal_generation()
+                close.generation = next_gen
+                queue.append(close)
+                while queue:
+                    current = queue.popleft()
+                    if current not in previous_deps or previous_deps[current] is None:
+                        previous_deps[current] = set()
+                    previous_deps[current].add((field,tree_id))
+                    if current.get_context_index() < prev_op.get_context_index():
+                        continue
+                    if not current.logical_incoming:
+                        continue
+                    for next_op in current.logical_incoming:
+                        if next_op.generation == next_gen:
+                            continue
+                        next_op.generation = next_gen
+                        queue.append(next_op)
 
     def analyze_previous_interference(self, next_op, next_req, reachable):
         if not self.reqs:
@@ -11828,9 +11825,9 @@ tunable_op_pat           = re.compile(
 all_reduce_op_pat        = re.compile(
     prefix+"All Reduce Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 predicate_op_pat         = re.compile(
-    prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Predicate Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 must_epoch_op_pat        = re.compile(
-    prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
+    prefix+"Must Epoch Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<index>[0-9]+)")
 summary_op_pat        = re.compile(
     prefix+"Summary Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 summary_op_creator_pat        = re.compile(
@@ -12618,14 +12615,15 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(PREDICATE_OP_KIND)
         op.set_name("Predicate Op")
-        # Predicate ops are not recorded in the context for now
-        # because they have to outlive when they complete
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, int(m.group('index')))
         return True
     m = must_epoch_op_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
         op.set_op_kind(MUST_EPOCH_OP_KIND)
-        # Don't add it to the context for now
+        context = state.get_task(int(m.group('ctx')))
+        op.set_context(context, int(m.group('index')))
         return True
     m = summary_op_creator_pat.match(line)
     if m is not None:
