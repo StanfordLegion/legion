@@ -8031,22 +8031,33 @@ namespace Legion {
             }
             if (!local_results.empty())
             {
-              const RtUserEvent done = Runtime::create_rt_user_event();
-              Serializer rez;
+              if (source != local_space)
               {
-                RezCheck z(rez);
-                rez.serialize(instances);
-                rez.serialize(target);
-                rez.serialize(best);
-                rez.serialize<size_t>(local_results.size());
-                for (std::vector<PhysicalManager*>::const_iterator it =
-                      local_results.begin(); it != local_results.end(); it++)
-                  rez.serialize((*it)->did);
-                rez.serialize<bool>(bandwidth);
-                rez.serialize(done);
+                const RtUserEvent done = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(instances);
+                  rez.serialize(target);
+                  rez.serialize(best);
+                  rez.serialize<size_t>(local_results.size());
+                  for (std::vector<PhysicalManager*>::const_iterator it =
+                        local_results.begin(); it != local_results.end(); it++)
+                    rez.serialize((*it)->did);
+                  rez.serialize<bool>(bandwidth);
+                  rez.serialize(done);
+                }
+                runtime->send_collective_nearest_instances_response(source,rez);
+                done_events.push_back(done);
               }
-              runtime->send_collective_nearest_instances_response(source, rez);
-              done_events.push_back(done);
+              else
+              {
+                std::vector<DistributedID> results(local_results.size());
+                for (unsigned idx = 0; idx < local_results.size(); idx++)
+                  results[idx] = local_results[idx]->did;
+                process_nearest_instances(target, instances, best, 
+                                          results, bandwidth);
+              }
             }
             if (!done_events.empty())
               return Runtime::merge_events(done_events);
@@ -8254,6 +8265,18 @@ namespace Legion {
         derez.deserialize(results[idx]);
       bool bandwidth;
       derez.deserialize(bandwidth);
+      process_nearest_instances(target, instances, best, results, bandwidth); 
+      RtUserEvent done;
+      derez.deserialize(done);
+      Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CollectiveView::process_nearest_instances(
+         std::atomic<size_t> *target, std::vector<DistributedID> *instances,
+         size_t best, const std::vector<DistributedID> &results, bool bandwidth)
+    //--------------------------------------------------------------------------
+    {
       // spin until we can get safely set the guard to add our entries
       const size_t guard = 
         bandwidth ? std::numeric_limits<size_t>::max() : 0;
@@ -8284,9 +8307,6 @@ namespace Legion {
         target->store(best);
         break;
       }
-      RtUserEvent done;
-      derez.deserialize(done);
-      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
