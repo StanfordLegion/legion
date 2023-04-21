@@ -8472,8 +8472,12 @@ namespace Legion {
       {
         const RegionUsage write_usage((redop > 0) ? LEGION_REDUCE_PRIV : 
             LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, redop);
-        tracing_eq->update_tracing_valid_views(dst, expr, write_usage, mask, 
-                                    false/*do not invalidate copies here*/);
+        // If we're doing a reduction, that does need to invalidate 
+        // everything that is not being reduced to since it is a kind
+        // of a write and this instance has dirty state, otherwise normal
+        // copies are just making another copy of the same data
+        tracing_eq->update_tracing_valid_views(dst, expr, write_usage, mask,
+                                               (redop > 0)/*invalidates*/);
       }
     }
 
