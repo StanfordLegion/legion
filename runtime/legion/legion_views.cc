@@ -9985,6 +9985,16 @@ namespace Legion {
       assert(first_in_memory.size() > 1); // should be multiple memories
 #endif
       const size_t total_memories = first_in_memory.size();
+      // Figure out what the index is of the root memory
+      std::map<Memory,unsigned>::iterator root_finder =
+        first_in_memory.find(
+            local_views[root_index]->get_manager()->memory_manager->memory);
+#ifdef DEBUG_LEGION
+      // Better be able to find it
+      assert(root_finder != first_in_memory.end());
+#endif
+      const unsigned root_memory_index = 
+        std::distance(first_in_memory.begin(), root_finder);
       // Next construct an adjacency matrix between the memories with edges
       // assigned costs of 1/bandwidth so that higher bandwidth gives a 
       // lower edge cost. For connectivity if any memories have no path from 
@@ -9992,7 +10002,7 @@ namespace Legion {
       // Any cost less than zero is considered a missing edge
       std::vector<float> adjacency_matrix(total_memories * total_memories,-1.f);
       const bool same_bandwidth = construct_spanning_adjacency_matrix(
-          root_index, first_in_memory, adjacency_matrix);
+          root_memory_index, first_in_memory, adjacency_matrix);
       // Check for the special case here where all the edges have the
       // same bandwidth in which case we can do this with BFS.
       // The case of all having the same bandwidth happens with switched 
@@ -10002,17 +10012,17 @@ namespace Legion {
       // spanning tree (the root has no parent)
       std::vector<unsigned> previous(total_memories, UINT_MAX);
       if (same_bandwidth)
-        compute_spanning_tree_same_bandwidth(root_index,
+        compute_spanning_tree_same_bandwidth(root_memory_index,
             adjacency_matrix, previous, first_in_memory);
       else
-        compute_spanning_tree_diff_bandwidth(root_index,
+        compute_spanning_tree_diff_bandwidth(root_memory_index,
             adjacency_matrix, previous, first_in_memory);
       // Next we compute the actual order of spanning copies, we do this
       // by first computing a depth-first search to determine which 
       // children have the deepest sub-trees so that we can use that to
       // say what order children should be traversed in from each node
       std::vector<std::pair<unsigned,bool> > dfs_stack; 
-      dfs_stack.emplace_back(std::pair<unsigned,bool>(root_index,true));
+      dfs_stack.emplace_back(std::pair<unsigned,bool>(root_memory_index, true));
       std::vector<unsigned> max_subtree_depth(total_memories, UINT_MAX);
       while (!dfs_stack.empty())
       {
@@ -10053,7 +10063,7 @@ namespace Legion {
       // the order of the spanning copies from each node to maximize getting
       // the ones with the maximum depth out first, need to do this with bfs
       std::deque<unsigned> bfs_queue;
-      bfs_queue.push_back(root_index);
+      bfs_queue.push_back(root_memory_index);
       std::vector<std::pair<unsigned,unsigned> > spanning;
       while (!bfs_queue.empty())
       {
