@@ -9794,7 +9794,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!local_views.empty());
-      assert(has_instance_events != destination_events.empty());
       assert(!has_instance_events || 
           (destination_events.size() == local_views.size()));
 #endif
@@ -9809,9 +9808,15 @@ namespace Legion {
         // broadcast copies across the local views
         const std::vector<std::pair<unsigned,unsigned> > &spanning_copies =
           find_spanning_broadcast_copies(src_index);
+        unsigned destination_events_offset = 0;
         if (!has_instance_events)
-          destination_events.resize(local_views.size(), ApEvent::NO_AP_EVENT);
-        destination_events[src_index] = precondition;
+        {
+          destination_events_offset = destination_events.size();
+          destination_events.resize(
+            destination_events_offset+local_views.size(), ApEvent::NO_AP_EVENT);
+        }
+        ApEvent *local_events = &destination_events[destination_events_offset];
+        local_events[src_index] = precondition;
         std::vector<std::vector<CopySrcDstField> > local_fields(
                                                           local_views.size());
         local_fields[src_index] = src_fields;
@@ -9822,7 +9827,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(it->first != it->second);
           assert(it->second != src_index);
-          assert(!destination_events[it->second].exists());
+          assert(!local_events[it->second].exists());
           assert(!local_fields[it->first].empty());
 #endif
           IndividualView *local_view = local_views[it->first];
@@ -9834,18 +9839,18 @@ namespace Legion {
             !first_local_analysis ? trace_info : 
             local_views[it->second]->find_collective_analysis(op_ctx_index, 
                 index, match_space)->get_trace_info();
-          ApEvent dst_pre = has_instance_events ? destination_events[it->second]
+          ApEvent dst_pre = has_instance_events ? local_events[it->second]
             : dst_view->find_copy_preconditions(false/*reading*/, 0/*redop*/,
                 copy_mask, copy_expression, op_id, index,
                 applied_events, inst_info);
           // Merge in the source precondition
-          if (destination_events[it->first].exists())
+          if (local_events[it->first].exists())
           {
             if (dst_pre.exists())
               dst_pre = Runtime::merge_events(&inst_info, dst_pre,
-                                    destination_events[it->first]);
+                                          local_events[it->first]);
             else
-              dst_pre = destination_events[it->first];
+              dst_pre = local_events[it->first];
           }
           const ApEvent dst_post = copy_expression->issue_copy(
               op, inst_info, local_fields[it->second], 
@@ -9860,8 +9865,8 @@ namespace Legion {
             // Keep the reads in order to to prevent contention on 
             // egress bandwidth since these will mostly be on switched
             // networks like the front-side bus or NVLink
-            destination_events[it->first] = dst_post;
-            destination_events[it->second] = dst_post;
+            local_events[it->first] = dst_post;
+            local_events[it->second] = dst_post;
           }
           if (inst_info.recording)
           {
@@ -9873,9 +9878,9 @@ namespace Legion {
         }
         // Go through and save the results on the views
         for (unsigned idx = 0; idx < local_views.size(); idx++)
-          if ((idx != src_index) && destination_events[idx].exists())
+          if ((idx != src_index) && local_events[idx].exists())
             local_views[idx]->add_copy_user(false/*reading*/, 0/*redop*/,
-                destination_events[idx], copy_mask, copy_expression,
+                local_events[idx], copy_mask, copy_expression,
                 op_id, index, recorded_events, trace_info.recording,
                 runtime->address_space);
         if (!has_instance_events)
@@ -11892,7 +11897,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!local_views.empty());
-      assert(prepare_allreduce != reduced_events.empty());
       assert(!prepare_allreduce || 
           (reduced_events.size() == local_views.size()));
       assert(prepare_allreduce == (source_fields != NULL));
@@ -11912,9 +11916,17 @@ namespace Legion {
         const std::vector<std::pair<unsigned,unsigned> > &spanning_copies =
           find_spanning_broadcast_copies(dst_index);
         std::vector<bool> initialized(local_views.size(), false);
+        unsigned reduced_events_offset = 0;
         if (!prepare_allreduce)
-          reduced_events.resize(local_views.size(), ApEvent::NO_AP_EVENT);
-        reduced_events[dst_index] = precondition;
+        {
+          // Append onto the end of the reduced_events if there were already
+          // events in the reduced_events vectors
+          reduced_events_offset = reduced_events.size();
+          reduced_events.resize(
+              reduced_events_offset + local_views.size(), ApEvent::NO_AP_EVENT);
+        }
+        ApEvent *local_events = &reduced_events[reduced_events_offset];
+        local_events[dst_index] = precondition;
         initialized[dst_index] = (source_fields != NULL);
         std::vector<std::vector<CopySrcDstField> > fields(local_views.size());
         std::vector<std::vector<CopySrcDstField> > &local_fields =
@@ -11957,7 +11969,7 @@ namespace Legion {
           if (!initialized[it->first])
           {
             // Initialize the destination
-            reduced_events[it->first] = local_view->find_copy_preconditions( 
+            local_events[it->first] = local_view->find_copy_preconditions( 
                 false/*reading*/, 0/*redop*/, copy_mask, copy_expression,
                 op_id, index, applied_events, trace_info);
             local_manager->compute_copy_offsets(copy_mask,
@@ -11966,16 +11978,16 @@ namespace Legion {
                                                 local_reservations[it->first]);
             initialized[it->first] = true;
           }
-          if (reduced_events[it->first].exists())
+          if (local_events[it->first].exists())
           {
             if (reduce_pre.exists())
               reduce_pre = Runtime::merge_events(&trace_info, reduce_pre,
-                                                reduced_events[it->first]);
+                                                 local_events[it->first]);
             else
-              reduce_pre = reduced_events[it->first];
+              reduce_pre = local_events[it->first];
           }
           // Issue the copy
-          reduced_events[it->second] = copy_expression->issue_copy(
+          local_events[it->second] = copy_expression->issue_copy(
               op, trace_info, local_fields[it->first], local_fields[it->second],
               local_reservations[it->first],
 #ifdef LEGION_SPY
@@ -11984,22 +11996,22 @@ namespace Legion {
                 reduce_pre, predicate_guard, src_manager->get_unique_event(),
                 local_manager->get_unique_event(), collective_kind);
           // Save the state for later
-          if (reduced_events[it->second].exists())
+          if (local_events[it->second].exists())
           {
             if (!prepare_allreduce)
               src_view->add_copy_user(!writing, 0/*redop*/,
-                  reduced_events[it->second], copy_mask, copy_expression,
+                  local_events[it->second], copy_mask, copy_expression,
                   op_id, index, *recorded_events, trace_info.recording,
                   runtime->address_space);
             // Save it for a future reader
             reduction_preconditions[it->first].push_back(
-                reduced_events[it->second]);
+                local_events[it->second]);
           }
           if (trace_info.recording)
           {
             const UniqueInst src_inst(src_view);
             const UniqueInst local_inst(local_view);
-            trace_info.record_copy_insts(reduced_events[it->second],
+            trace_info.record_copy_insts(local_events[it->second],
                 copy_expression, src_inst, local_inst, copy_mask,
                 copy_mask, redop, applied_events);
           }
@@ -12013,7 +12025,7 @@ namespace Legion {
           // All the copies have already run so there are no
           // preconditions left for us here
           if (!prepare_allreduce)
-            reduced_events.clear();
+            reduced_events.resize(reduced_events_offset);
         }
         else
         {
@@ -12022,7 +12034,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(finder != reduction_preconditions.end());
 #endif
-          reduced_events[dst_index] =
+          local_events[dst_index] =
             Runtime::merge_events(&trace_info, finder->second);
           reduction_preconditions.erase(finder);
         }
