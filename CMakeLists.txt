@@ -421,17 +421,6 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
 
   if(Legion_USE_CUDA OR (Legion_HIP_TARGET STREQUAL "CUDA"))
 
-    # Find the CUDA toolkit
-    find_package(CUDAToolkit REQUIRED)
-
-    # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
-    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDAToolkit.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-    )
-    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDAToolkit.cmake
-      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
-    )
-
     # CMAKE_CUDA_RUNTIME_LIBRARY determines whether CUDA objs link to the static
     # or shared CUDA runtime library. Must be set before `enable_language(CUDA)`
     # https://cmake.org/cmake/help/latest/variable/CMAKE_CUDA_RUNTIME_LIBRARY.html
@@ -452,6 +441,8 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       if(Legion_CUDA_ARCH)
         # Support comma-delimited lists in addition to semicolons
         string(REPLACE "," ";" CMAKE_CUDA_ARCHITECTURES "${Legion_CUDA_ARCH}")
+        list(TRANSFORM CMAKE_CUDA_ARCHITECTURES REPLACE "-virtual" "")
+        list(TRANSFORM CMAKE_CUDA_ARCHITECTURES REPLACE "-real" "")
       endif()
       populate_cuda_archs_list(CMAKE_CUDA_ARCHITECTURES)
     endif()
@@ -492,6 +483,17 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     # define variable for realm_defines.h
     set(REALM_USE_NVTX ${Legion_USE_NVTX})
     mark_as_advanced(REALM_USE_NVTX)
+
+    # Find the CUDA toolkit
+    find_package(CUDAToolkit REQUIRED)
+
+    # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
+    install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDAToolkit.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+    )
+    install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDAToolkit.cmake
+      DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
+    )
   endif()
 endif()
 

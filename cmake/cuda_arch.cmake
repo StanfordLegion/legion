@@ -2,7 +2,7 @@ include_guard(GLOBAL)
 
 function(populate_cuda_archs_list ARCHS)
 
-  set(archs ${ARCHS})
+  set(archs ${${ARCHS}})
 
   if(NOT archs)
     #
