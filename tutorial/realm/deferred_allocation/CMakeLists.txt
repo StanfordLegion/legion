@@ -22,7 +22,7 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(realm_deferred_allocation deferred_allocation_basic.cc)
+add_executable(realm_deferred_allocation deferred_allocation.cc)
 target_link_libraries(realm_deferred_allocation Legion::Realm)
 
 if(Legion_ENABLE_TESTING)

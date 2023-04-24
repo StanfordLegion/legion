@@ -27,9 +27,7 @@ if (NOT REALM_USE_CUDA AND NOT REALM_USE_HIP)
 endif()
 
 if (REALM_USE_CUDA)
-  cuda_add_executable(realm_cuda_interop main.cc gpu_kernel.cu)
-elseif(REALM_USE_HIP)
-  hip_add_executable(realm_cuda_interop main.cc gpu_kernel.cu)
+  cuda_add_executable(realm_cuda_interop cuda_interop.cc gpu_kernel.cu)
 endif()
 
 target_link_libraries(realm_cuda_interop Legion::Realm)

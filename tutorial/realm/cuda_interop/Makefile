@@ -28,10 +28,10 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= realm_completion_queue
+OUTFILE		?= realm_cuda_interop
 # List all the application source files here
-GEN_SRC		?= completion_queue.cc		# .cc files
-GEN_GPU_SRC	?=				# .cu files
+GEN_SRC		?= cuda_interop.cc # .cc files
+GEN_GPU_SRC	?= gpu_kernel.cu   # .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=

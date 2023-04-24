@@ -28,7 +28,7 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= subgraph
+OUTFILE		?= realm_subgraph
 # List all the application source files here
 GEN_SRC		?= subgraph.cc		# .cc files
 GEN_GPU_SRC	?=				# .cu files

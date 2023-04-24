@@ -78,7 +78,27 @@ legion_cxx_tests = [
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
     ['test/legion_stl/test_stl', []],
+
+    # Tutorial/realm
+    ['tutorial/realm/hello_world/realm_hello_world', []],
+    ['tutorial/realm/machine_model/realm_machine_model', []],
+    ['tutorial/realm/events/realm_events', []],
+    ['tutorial/realm/region_instances/realm_region_instances', []],
+    ['tutorial/realm/deferred_allocation/realm_deferred_allocation', []],
+    ['tutorial/realm/index_space_ops/realm_index_space_ops', []],
+    ['tutorial/realm/index_spaces/realm_index_spaces', []],
+    ['tutorial/realm/reductions/realm_reductions', []],
+    ['tutorial/realm/barrier/realm_barrier', []],
+    ['tutorial/realm/subgraph/realm_subgraph', []],
+    ['tutorial/realm/reservation/realm_reservation', []],
+    ['tutorial/realm/completion_queue/realm_completion_queue', []],
+    ['tutorial/realm/profiling/realm_profiling', []],
 ]
+
+if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == 1:
+    legion_cxx_tests += [
+        ['tutorial/realm/cuda_interop/realm_cuda_interop', []],
+    ]
 
 legion_cxx_provenance_tests = [
     ['examples/provenance/provenance', []],
@@ -1045,7 +1065,11 @@ def run_tests(test_modules=None,
     cxx_standard = os.environ['CXX_STANDARD'] if 'CXX_STANDARD' in os.environ else ''
     # if not use cmake, let's add -std=c++NN to CXXFLAGS
     if use_cmake == False:
-        os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
+        if cxx_standard != '':
+            if 'CXX_STANDARD' in os.environ:                
+                os.environ['CXXFLAGS'] += " -std=c++" + os.environ['CXX_STANDARD']
+            else:
+                os.environ['CXXFLAGS'] = " -std=c++" + os.environ['CXX_STANDARD']
 
     gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
