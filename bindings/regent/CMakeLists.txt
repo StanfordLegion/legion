@@ -53,9 +53,9 @@ list(APPEND REGENT_SRC
 )
 
 if(Legion_USE_HIP)
-  hip_add_library(Regent ${REGENT_SRC})
+  hip_add_library(Regent SHARED ${REGENT_SRC})
 else()
-  add_library(Regent ${REGENT_SRC})
+  add_library(Regent SHARED ${REGENT_SRC})
 endif()
 add_library(Legion::Regent ALIAS Regent)
 target_link_libraries(Regent PUBLIC Legion::Legion)
