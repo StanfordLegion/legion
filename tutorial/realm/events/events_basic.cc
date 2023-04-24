@@ -20,47 +20,56 @@ using namespace Realm;
 
 enum
 {
-  TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
-  READER_TASK,
+  MAIN_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
+  READER_TASK_0,
+  READER_TASK_1,
 };
 
 Logger log_app("app");
 
 namespace ProgramConfig {
-  size_t num_tasks = 2;
+  size_t num_tasks = 1;
 };
 
-void reader_task(const void *args, size_t arglen, const void *userdata,
-                 size_t userlen, Processor p)
-{
-  int x = *reinterpret_cast<const int *>(args);
-  log_app.info() << "reader task: proc=" << p << " x=" << x;
+struct TaskArgs {
+  int x;
+};
+
+void reader_task_0(const void *args, size_t arglen, const void *userdata,
+                   size_t userlen, Processor p) {
+  const TaskArgs *task_args = reinterpret_cast<const TaskArgs *>(args);
+  log_app.info() << "reader task 0: proc=" << p << " x=" << task_args->x;
 }
 
-void top_level_task(const void *args, size_t arglen, const void *userdata,
-                    size_t userlen, Processor p)
-{
-  int x = 7;
+void reader_task_1(const void *args, size_t arglen, const void *userdata,
+                   size_t userlen, Processor p) {
+  const TaskArgs *task_args = reinterpret_cast<const TaskArgs *>(args);
+  log_app.info() << "reader task 1: proc=" << p << " x=" << task_args->x;
+}
+
+void main_task(const void *args, size_t arglen, const void *userdata,
+                    size_t userlen, Processor p) {
+  TaskArgs task_args{.x = 7};
+
+  UserEvent user_event = UserEvent::create_user_event();
 
   std::vector<Event> events;
-  for(size_t i = 0; i < ProgramConfig::num_tasks; i++) {
-    UserEvent user_event = UserEvent::create_user_event();
-
-    Event reader_event = p.spawn(READER_TASK, &x, sizeof(int), user_event);
-
-    events.push_back(reader_event);
-    user_event.trigger();
+  for (size_t i = 0; i < ProgramConfig::num_tasks; i++) {
+    Event reader_event0 =
+        p.spawn(READER_TASK_0, &task_args, sizeof(TaskArgs), user_event);
+    Event reader_event1 =
+        p.spawn(READER_TASK_1, &task_args, sizeof(TaskArgs), reader_event0);
+    events.push_back(reader_event1);
   }
 
+  user_event.trigger();
   Event::merge_events(events).wait();
 
   log_app.info() << "Completed successfully";
-
   Runtime::get_runtime().shutdown(Event::NO_EVENT, 0 /*success*/);
 }
 
-int main(int argc, const char **argv)
-{
+int main(int argc, const char **argv) {
   Runtime rt;
 
   rt.init(&argc, (char ***)&argv);
@@ -69,23 +78,28 @@ int main(int argc, const char **argv)
                     .only_kind(Processor::LOC_PROC)
                     .first();
 
-  if(!p.exists()) {
+  if (!p.exists()) {
     p = Machine::ProcessorQuery(Machine::get_machine()).first();
   }
 
   assert(p.exists());
 
-  Processor::register_task_by_kind(p.kind(), false /*!global*/, TOP_LEVEL_TASK,
-                                   CodeDescriptor(top_level_task),
+  Processor::register_task_by_kind(p.kind(), false /*!global*/, MAIN_TASK,
+                                   CodeDescriptor(main_task),
                                    ProfilingRequestSet())
       .external_wait();
 
-  Processor::register_task_by_kind(p.kind(), false /*!global*/, READER_TASK,
-                                   CodeDescriptor(reader_task),
+  Processor::register_task_by_kind(p.kind(), false /*!global*/, READER_TASK_0,
+                                   CodeDescriptor(reader_task_0),
                                    ProfilingRequestSet())
       .external_wait();
 
-  rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+  Processor::register_task_by_kind(p.kind(), false /*!global*/, READER_TASK_1,
+                                   CodeDescriptor(reader_task_1),
+                                   ProfilingRequestSet())
+      .external_wait();
+
+  rt.collective_spawn(p, MAIN_TASK, 0, 0);
 
   int ret = rt.wait_for_shutdown();
 

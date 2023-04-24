@@ -1,103 +1,139 @@
-## Realm Events
+# Realm Events
 
-### Introduction
-In this tutorial, we examine the concept of Realm events and provide 
-clear example on how to express control dependencies between operations effectively.
+* [Introduction](#introduction)
+* [Events Basics](#events-basics)
+* [Creating Events](#creating-events)
+* [Triggering Events](#trigerring-events)
+* [Creating Control Dependencies](#creating-control-dependencies)
+* [References](#references)
 
-Events form the backbone of Realm's programming model, describing the dependencies between operations.
-They are created by the runtime and can be used as a pre or post condition for any Realm operation.
-Events provide an interface that allows the runtime to effectively manage program execution, ensuring efficient and safe operation.
 
-### Creating Events
-There are two types of events: internal runtime events and user events. Internal runtime events are generated
-automatically by the runtime system and typically occur in response to an operation such as a `task launch` at line 34.
-User events, on the other hand, can be manually triggered from application code, as demonstrated at line 31 and 37.
-These events are generally similar in nature to internal runtime events, but allow for greater control over when and how events are triggered.
+## Introduction
+Realm is a fully asynchronous, event-based runtime, and events form
+the backbone of Realm's programming model, describing the dependencies
+between operations. Realm operations are deferred by the runtime,
+which returns an event that triggers upon completion of the operation.
+These events are created by the runtime and can be used as pre- or
+post-conditions for other operations. Events provide a mechanism that
+allows the runtime to efficiently manage asynchronous program
+execution, offering opportunities to hide latencies when
+communications are required.
 
-### Createing Control Dependencies
-In this program, we launch several `reader_tasks` that are responsible for printing an integer value `x`. Each task launch is a
-non-blocking call and the reader task will not start running until the user event is triggered (line: 34).
-Since the launches are asynchronous, they return an internal event handle which can be used to guarantee that the task has completed (line: 37).
-To simplify the process, we can merge all the events together and use a single `wait` call (line: 40).
-This will cause the calling thread to block until all the events have finished.
+In this tutorial, we'll demonstrate how to use events to take 
+advantage of Realm's deferred execution model when writing asynchronous 
+applications.
+
+## Events Basics
+Usually, Realm creates Events as part of handling application requests
+for asynchronous operations. An Event is a lightweight handle
+that can be easily transported around the system. The node that
+creates an Event owns it, and the space for these handles is statically
+divided across all nodes by including the node ID in the upper bits of
+the handle. This design ensures that any node can create new handles
+without the risk of collision or requiring inter-node communication.
+
+The basic event is implemented as a distributed object and spread
+across one or several nodes. Each node uses the event handle to look up
+their piece of the object as needed. This lookup uses a monotonic data
+structure that allows wait-free queries even when updates are being
+performed.
+
+When a new Event is created, the owning node allocates a data
+structure to track its state, which is initially `untriggered` but
+will eventually become triggered or poisoned. The data structure also
+includes a list of `local waiters` and `remote waiters`. Local waiters are
+dependent operations on the owner node, and remote waiters are other nodes
+that are interested in the Event (event dependencies).
+
+## Creating Events
+In this program, we launch several tasks (`reader_task_0` and
+`reader_task_1`) responsible for
+printing an integer value `x`:
 
 ```c++
- 1 #include <realm.h>
- 2 #include <realm/cmdline.h>
- 3 
- 4 using namespace Realm;
- 5 
- 6 enum
- 7 {
- 8   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
- 9   READER_TASK,
-10 };
-11 
-12 Logger log_app("app");
-13 
-14 namespace ProgramConfig {
-15   size_t num_tasks = 2;
-16 };
-17 
-18 void reader_task(const void *args, size_t arglen, const void *userdata,
-19                  size_t userlen, Processor p)
-20 {
-21   int x = *reinterpret_cast<const int *>(args);
-22   log_app.info() << "reader task: proc=" << p << " x=" << x;
-23 }
-24 
-25 void top_level_task(const void *args, size_t arglen, const void *userdata,
-26                     size_t userlen, Processor p)
-27 {
-28   int x = 7;
-29 
-30   std::vector<Event> events;
-31   for(size_t i = 0; i < ProgramConfig::num_tasks; i++) {
-32     UserEvent user_event = UserEvent::create_user_event();
-33 
-34     Event task_event = p.spawn(READER_TASK, &x, sizeof(int), user_event);
-35 
-36     events.push_back(task_event);
-37     user_event.trigger();
-38   }
-39 
-40   Event::merge_events(events).wait();
-41 
-42   log_app.info() << "Completed successfully";
-43 
-44   Runtime::get_runtime().shutdown(Event::NO_EVENT, 0 /*success*/);
-45 }
-46 
-47 int main(int argc, const char **argv)
-48 {
-49   Runtime rt;
-50 
-51   rt.init(&argc, (char ***)&argv);
-52 
-53   Processor p = Machine::ProcessorQuery(Machine::get_machine())
-54                     .only_kind(Processor::LOC_PROC)
-55                     .first();
-56 
-57   if(!p.exists()) {
-58     p = Machine::ProcessorQuery(Machine::get_machine()).first();
-59   }
-60 
-61   assert(p.exists());
-62 
-63   Processor::register_task_by_kind(p.kind(), false /*!global*/, TOP_LEVEL_TASK,
-64                                    CodeDescriptor(top_level_task),
-65                                    ProfilingRequestSet())
-66       .external_wait();
-67 
-68   Processor::register_task_by_kind(p.kind(), false /*!global*/, READER_TASK,
-69                                    CodeDescriptor(reader_task),
-70                                    ProfilingRequestSet())
-71       .external_wait();
-72 
-73   rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
-74 
-75   int ret = rt.wait_for_shutdown();
-76 
-77   return ret;
-78 }
+void reader_task_0(const void *args, size_t arglen, const void *userdata,
+                   size_t userlen, Processor p) {
+  const TaskArgs *task_args = reinterpret_cast<const TaskArgs *>(args);
+  log_app.info() << "reader task 0: proc=" << p << " x=" << task_args->x;
+}
+
+void reader_task_1(const void *args, size_t arglen, const void *userdata,
+                   size_t userlen, Processor p) {
+  const TaskArgs *task_args = reinterpret_cast<const TaskArgs *>(args);
+  log_app.info() << "reader task 1: proc=" << p << " x=" << task_args->x;
+}
 ```
+
+Each task launch is a non-blocking  asynchronous call that returns an
+internal event  handle such as `reader_event0` and `reader_event1`.
+Once created, the Event handle can be passed around through 
+task arguments or shared data structures and eventually used as a 
+pre- or post-condition for operations to be executed on other nodes.
+
+When a remote node makes the first reference to `task_event`, it 
+allocates the same data structure, sets its state to `untriggered`, and
+adds the dependent operation to its own local waiter list. Then, an 
+event subscription active message is sent to the owner node to 
+indicate that the remote node is interested and should be added to 
+the list of remote waiters, so it can be informed when `task_event` 
+triggers. Any additional dependent operations on a remote node are 
+added to the list of local waiters without requiring communication 
+with the owner node. When `task_event` eventually triggers, the owner 
+node notifies all local waiters and sends an event trigger message to 
+each subscribed node on the list of remote waiters. If the owner node 
+receives additional subscription messages after it has been triggered, 
+it immediately responds to the new subscribers with a trigger message 
+as well.
+
+## Triggering Events
+An event can be triggered from any node, not necessarily the owner node.
+One common scenario in which this happens is with `UserEvent`. These are
+created and triggered from the application code, where
+we create `user_event` to start an operation:
+
+```c++
+  UserEvent user_event = UserEvent::create_user_event();
+```
+
+
+User events offer greater flexibility in building the event graph by allowing
+users to connect different parts of the graph independently. However, it is
+important to note that using user events carries the risk of creating cycles,
+which can cause the program to hang. Therefore, it is the user's responsibility
+to avoid creating cycles while leveraging user events.
+
+When a `user_event` is triggered on a node that does not own it, a
+trigger message is sent from the trigger node to the owner node, which then
+forwards the message to all other subscribed nodes. If the triggering 
+node has any local waiters, it immediately notifies them without 
+sending a message back to the owner node. Although triggering a remote
+event incurs a latency of at least two active message flight times, it 
+limits the number of active messages required per event trigger to 
+`2*N - 2`, where `N` is the number of nodes interested in the event.
+
+## Creating Control Dependencies
+We will now demonstrate how to establish a control dependency using
+events, by making `reader_task_1` dependent on the completion of
+`reader_task_0`. We achieve this by passing `reader_event0` to the
+task invocation procedure:
+
+```c++
+  Event reader_event0 =
+      p.spawn(READER_TASK_0, &task_args, sizeof(TaskArgs), user_event);
+
+  Event reader_event1 =
+      p.spawn(READER_TASK_1, &task_args, sizeof(TaskArgs), reader_event0);
+```
+
+Often, it is necessary to spawn multiple tasks simultaneously and 
+express a collective wait using a single event handle. To illustrate 
+this, the program runs `num_tasks`, stores the events produced by
+`reader_task_1` into an `events` vector and combines them by calling:
+
+```c++
+Event::merge_events(events).wait()
+```
+
+## References
+1. [Event header file](https://github.com/StanfordLegion/legion/blob/stable/runtime/realm/event.h)
+2. [Realm: Performance Portability through Composable Asynchrony](https://legion.stanford.edu/pdfs/treichler_thesis.pdf)
