@@ -33,7 +33,7 @@ void main_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p) {
   std::vector<Memory> memories;
   Machine::MemoryQuery mq(Machine::get_machine());
-  mq.only_kind(Memory::SYSTEM_MEM).has_capacity(1);
+  mq.only_kind(Memory::SYSTEM_MEM).local_address_space().has_capacity(1);
   memories.assign(mq.begin(), mq.end());
 
   std::map<FieldID, size_t> field_sizes;
