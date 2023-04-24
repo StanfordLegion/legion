@@ -10263,8 +10263,8 @@ namespace Legion {
         const std::pair<unsigned,unsigned> &next = bfs_queue.front();
         for (unsigned child = next.second; child < total_memories; child++)
         {
-          // Skip going to ourself
-          if (child == next.first)
+          // Skip going to ourself or back to the root
+          if ((child == next.first) || (child == root_index))
             continue;
           // Check to see if the next child is already reached
           if (previous[child] != UINT_MAX)
@@ -10330,8 +10330,8 @@ namespace Legion {
         unsigned lowest_child = UINT_MAX;
         for (unsigned child = 0; child < total_memories; child++)
         {
-          // Skip going to ourself
-          if (child == next)
+          // Skip going to ourself or back to the root
+          if ((child == next) || (child == root_index))
             continue;
           // Check to see if the next child is already reached
           if (previous[child] != UINT_MAX)
