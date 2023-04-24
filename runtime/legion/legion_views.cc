@@ -10255,8 +10255,6 @@ namespace Legion {
       // get pulled off the queue until they have exhausted their children
       // so that we can order copies for maximum bandwidth
       const size_t total_memories = first_in_memory.size();
-      std::vector<bool> reachable(total_memories, false);
-      reachable[root_index] = true;
       // <current node,next child to search>
       std::deque<std::pair<unsigned,unsigned> > bfs_queue;
       bfs_queue.emplace_back(std::pair<unsigned,unsigned>(root_index,0));
@@ -10269,13 +10267,11 @@ namespace Legion {
           if (child == next.first)
             continue;
           // Check to see if the next child is already reached
-          if (reachable[child])
+          if (previous[child] != UINT_MAX)
             continue;
           // Check to see if we have an edge to the next child
           if (adjacency_matrix[next.first*total_memories + child] < 0.f)
             continue;
-          // Found a next child so record it
-          reachable[child] = true;
           // Find the first local view in this memory
           std::map<Memory,unsigned>::iterator finder = 
             first_in_memory.begin();
@@ -10295,14 +10291,7 @@ namespace Legion {
           assert(finder->second != UINT_MAX);
 #endif
           // Record it in the spanning
-          std::map<Memory,unsigned>::iterator current = 
-            first_in_memory.begin();
-          std::advance(current, next.first);
-#ifdef DEBUG_LEGION
-          assert(current->second != UINT_MAX);
-          assert(previous[finder->second] == UINT_MAX);
-#endif
-          previous[finder->second] = current->second;
+          previous[child] = next.first;
           // Add it the child to list to search
           bfs_queue.emplace_back(std::pair<unsigned,unsigned>(child,0));
           // Add ourself back on the list if there are more children to search
@@ -10327,8 +10316,6 @@ namespace Legion {
       // in copies going as quickly as possible by having each node
       // always choose the next child with the lowest cost to copy
       // to next and then continue the process
-      std::vector<bool> reachable(total_memories, false);
-      reachable[root_index] = true;
       // <current node,next child to search>
       std::deque<unsigned> bfs_queue;
       bfs_queue.push_back(root_index);
@@ -10347,7 +10334,7 @@ namespace Legion {
           if (child == next)
             continue;
           // Check to see if the next child is already reached
-          if (reachable[child])
+          if (previous[child] != UINT_MAX)
             continue;
           // Check to see if we have an edge to the next child
           float cost = adjacency_matrix[next*total_memories + child];
@@ -10365,7 +10352,6 @@ namespace Legion {
         if (total_children > 0)
         {
           // Found a next child so record it
-          reachable[lowest_child] = true;
           // Find the first local view in this memory
           std::map<Memory,unsigned>::iterator finder = 
             first_in_memory.begin();
@@ -10383,16 +10369,10 @@ namespace Legion {
           }
 #ifdef DEBUG_LEGION
           assert(finder->second != UINT_MAX);
+          assert(previous[lowest_child] == UINT_MAX);
 #endif
           // Record it in the spanning
-          std::map<Memory,unsigned>::iterator current = 
-            first_in_memory.begin();
-          std::advance(current, next);
-#ifdef DEBUG_LEGION
-          assert(current->second != UINT_MAX);
-          assert(previous[finder->second] == UINT_MAX);
-#endif
-          previous[finder->second] = current->second;
+          previous[lowest_child] = next;
           // Add the child to list to search
           bfs_queue.push_back(lowest_child);
           // If we still have more children we could copy to then 
