@@ -331,18 +331,18 @@ void main_task(const void *args, size_t arglen,
   copy_result.done.wait();
   long long copy_total_time = copy_metrics.complete_time - copy_metrics.start_time;
   log_app.print("Copy start at %lld, complete at %lld, total time %lld ns, "
-                "src inst %llx on memory %llx, dst inst %llx on memory %llx, size %ld (B), num hops %u",  
+                "src inst %llx on memory %llx, dst inst %llx on memory %llx, size %zu (B), num hops %u",  
                 copy_metrics.start_time, copy_metrics.complete_time, copy_total_time,
                 copy_metrics.src_inst_id, copy_metrics.src_mem.id, copy_metrics.dst_inst_id, copy_metrics.dst_mem.id,
                 copy_metrics.size, copy_metrics.num_hops);
 
   src_inst_done.wait();
-  log_app.print("Src instance on memory %llx, size %ld (B), created at %lld, ready at %lld, destroyed at %lld",
+  log_app.print("Src instance on memory %llx, size %zu (B), created at %lld, ready at %lld, destroyed at %lld",
                 src_inst_metrics.memory.id, src_inst_metrics.bytes,
                 src_inst_metrics.create_time, src_inst_metrics.ready_time, src_inst_metrics.delete_time);
 
   dst_inst_done.wait();
-  log_app.print("Dst instance on memory %llx, size %ld (B), created at %lld, ready at %lld, destroyed at %lld",
+  log_app.print("Dst instance on memory %llx, size %zu (B), created at %lld, ready at %lld, destroyed at %lld",
                 dst_inst_metrics.memory.id, dst_inst_metrics.bytes,
                 dst_inst_metrics.create_time, dst_inst_metrics.ready_time, dst_inst_metrics.delete_time);
 

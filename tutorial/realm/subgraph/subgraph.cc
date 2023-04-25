@@ -111,9 +111,10 @@ void main_task(const void *args, size_t arglen, const void *userdata,
   Memory m = Machine::MemoryQuery(Machine::get_machine()).only_kind(Memory::Kind::SYSTEM_MEM).first();
   assert(m.exists());
 
-  Machine::ProcessorQuery pq = Machine::ProcessorQuery(Machine::get_machine()).only_kind(Processor::Kind::LOC_PROC);
+  // We want all tasks to run on local rank
+  Machine::ProcessorQuery pq = Machine::ProcessorQuery(Machine::get_machine()).same_address_space_as(p).only_kind(Processor::Kind::LOC_PROC);
   if (pq.count() < 3) {
-    log_app.warning("The optimal number of CPU processor for this program is at least 3, please specify it through -ll:cpu");
+    log_app.warning("The optimal number of CPU processor for this program is at least 3 per rank, please specify it through -ll:cpu");
   }
   std::vector<Processor> cpus(pq.begin(), pq.end());
   // p1 is used to run tasks on the left side of the DAG

@@ -72,7 +72,7 @@ void cleancq_task(const void *args, size_t arglen, const void *userdata,
     popped.clear();
     size_t count = completion_queue.pop_events(&popped[0], task_args.num_tasks);
     if(count > 0) {
-      log_app.info("clean up %ld tasks", count);
+      log_app.info("clean up %zu tasks", count);
       num_finished_task += count;
     } else {
 	    // instead of hammering cq, ask for a nonempty event and wait on it
