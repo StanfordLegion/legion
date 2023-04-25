@@ -443,6 +443,10 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
         string(REPLACE "," ";" CMAKE_CUDA_ARCHITECTURES "${Legion_CUDA_ARCH}")
         list(TRANSFORM CMAKE_CUDA_ARCHITECTURES REPLACE "-virtual" "")
         list(TRANSFORM CMAKE_CUDA_ARCHITECTURES REPLACE "-real" "")
+      elseif(CMAKE_VERSION VERSION_LESS "3.23")
+        # Find the CUDA toolkit first. We need to know the CTK version to
+        # automatically populate the architectures list for CMake < v3.23.
+        find_package(CUDAToolkit REQUIRED)
       endif()
       populate_cuda_archs_list(CMAKE_CUDA_ARCHITECTURES)
     endif()
@@ -484,8 +488,10 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     set(REALM_USE_NVTX ${Legion_USE_NVTX})
     mark_as_advanced(REALM_USE_NVTX)
 
-    # Find the CUDA toolkit
-    find_package(CUDAToolkit REQUIRED)
+    # Find the CUDA toolkit if we haven't already.
+    if(NOT CUDAToolkit_FOUND)
+      find_package(CUDAToolkit REQUIRED)
+    endif()
 
     # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
     install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDAToolkit.cmake
