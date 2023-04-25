@@ -10067,34 +10067,41 @@ namespace Legion {
       // Now we've got the max depth of each sub-tree, so we can compute
       // the order of the spanning copies from each node to maximize getting
       // the ones with the maximum depth out first, need to do this with bfs
-      std::deque<unsigned> bfs_queue;
-      bfs_queue.push_back(root_memory_index);
+      // <memory index,view index>
+      std::deque<std::pair<unsigned,unsigned> > bfs_queue;
+      bfs_queue.emplace_back(std::make_pair(root_memory_index, root_index));
       std::vector<std::pair<unsigned,unsigned> > spanning;
       while (!bfs_queue.empty())
       {
-        unsigned next = bfs_queue.front();
-        bfs_queue.pop_front();
+        const std::pair<unsigned,unsigned> &next = bfs_queue.front();
         // Track the <depth,child> pairs so we can sort them 
         // and then traverse them in order
         std::vector<std::pair<unsigned,unsigned> > child_depths;
-        for (unsigned child = 0; child < total_memories; child++)
-          if (previous[child] == next)
-            child_depths.emplace_back(
-                std::pair<unsigned,unsigned>(max_subtree_depth[child], child));
+        unsigned child = 0;
+        for (std::map<Memory,unsigned>::const_iterator it =
+              first_in_memory.begin(); it != 
+              first_in_memory.end(); it++, child++)
+        {
+          if (previous[child] != next.first)
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->second != UINT_MAX);
+#endif
+          child_depths.emplace_back(
+              std::make_pair(max_subtree_depth[child], it->second));
+          // Add the child to the queue to traverse next
+          bfs_queue.emplace_back(std::make_pair(child, it->second));
+        }
         if (!child_depths.empty())
         {
           std::sort(child_depths.begin(), child_depths.end());
           // Reverse order traverse so we do the max depth ones first
           for (std::vector<std::pair<unsigned,unsigned> >::reverse_iterator it =
                 child_depths.rbegin(); it != child_depths.rend(); it++)
-          {
             // Add it to the spanning
-            spanning.emplace_back(
-                std::pair<unsigned,unsigned>(next, it->second));
-            // Add it to the queue to traverse next
-            bfs_queue.push_back(it->second);
-          }
+            spanning.emplace_back(std::make_pair(next.second, it->second));
         }
+        bfs_queue.pop_front();
       }
 #ifdef DEBUG_LEGION
       // Should have a copy into every memory except the root one
