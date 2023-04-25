@@ -30,16 +30,16 @@ using namespace Realm;
 Logger log_app("app");
 
 enum {
+  MAIN_TASK = Processor::TASK_ID_FIRST_AVAILABLE + 0,
+};
+
+enum {
   FID_INT = 44,
   FID_COMPLEX_TYPE = 45,
 };
 
 enum {
   REDOP_SUM = 99,
-};
-
-namespace TestConfig {
-bool all_memories = false;
 };
 
 struct StructType {
@@ -72,10 +72,29 @@ class SumReduction {
 };
 
 template <int N, typename T, typename FID_T>
-bool verify(RegionInstance dst_inst, IndexSpace<N, T> domain, FieldID dst_fid,
+bool verify(RegionInstance dst_inst, IndexSpace<N, T> domain, FieldID dst_fid, size_t field_size,
             FID_T exp) {
+  RegionInstance inst = RegionInstance::NO_INST;
+  Processor proc = Processor::get_executing_processor();
+  if (proc.address_space() == dst_inst.get_location().address_space()) {
+    inst = dst_inst;
+  } else {
+    Memory cpu_mem = Machine::MemoryQuery(Machine::get_machine()).local_address_space().only_kind(Memory::Kind::SYSTEM_MEM).first();
+    assert(cpu_mem.exists());
+    Event e1 = dst_inst.fetch_metadata(proc);
+    std::map<FieldID, size_t> fields;
+    fields[dst_fid] = field_size;
+    Event e2 = RegionInstance::create_instance(inst, cpu_mem, domain, fields,
+                                    0 /*block_size=SOA*/,
+                                    ProfilingRequestSet());
+    Event e = Event::merge_events(e1, e2);
+    std::vector<CopySrcDstField> srcs(1), dsts(1);
+    srcs[0].set_field(dst_inst, dst_fid, field_size);
+    dsts[0].set_field(inst, dst_fid, field_size);
+    domain.copy(srcs, dsts, ProfilingRequestSet(), e).wait();
+  }
   size_t errors = 0;
-  AffineAccessor<FID_T, N, T> acc(dst_inst, dst_fid);
+  AffineAccessor<FID_T, N, T> acc(inst, dst_fid);
   for (IndexSpaceIterator<N, T> it(domain); it.valid; it.step()) {
     for (PointInRectIterator<N, T> it2(it.rect); it2.valid; it2.step()) {
       FID_T act = acc[it2.p];
@@ -191,10 +210,10 @@ bool do_reduction(IndexSpace<N, T> domain, IndexSpace<N, T> bloat,
 
   // Verify the results.
   bool success = verify<2, T, int>(dst_inst0, domain,
-                                   /*dst_fid=*/FID_INT,
+                                   /*dst_fid=*/FID_INT, /*field_size*/sizeof(int),
                                    /*exp=*/5) &&
                  verify<2, T, StructType>(dst_inst1, domain,
-                                          /*dst_fid=*/FID_COMPLEX_TYPE,
+                                          /*dst_fid=*/FID_COMPLEX_TYPE, /*field_size*/sizeof(StructType),
                                           /*exp=*/StructType{11});
 
   dst_inst1.destroy();
@@ -203,20 +222,10 @@ bool do_reduction(IndexSpace<N, T> domain, IndexSpace<N, T> bloat,
   return success;
 }
 
-int main(int argc, char **argv) {
-  Runtime rt;
-
-  rt.init(&argc, &argv);
-
-  CommandLineParser cp;
-  cp.add_option_bool("-all", TestConfig::all_memories);
-  bool ok = cp.parse_command_line(argc, const_cast<const char **>(argv));
-  assert(ok);
-
-  rt.register_reduction<SumReduction>(REDOP_SUM);
-
+void main_task(const void *args, size_t arglen, const void *userdata,
+               size_t userlen, Processor p) {
   std::vector<Memory> mems;
-  Machine::MemoryQuery mq(Machine::get_machine());
+  Machine::MemoryQuery mq = Machine::MemoryQuery(Machine::get_machine()).only_kind(Memory::Kind::SYSTEM_MEM);
   for (Machine::MemoryQuery::iterator it = mq.begin(); it != mq.end(); ++it)
     if ((*it).capacity() > 0) mems.push_back(*it);
 
@@ -229,8 +238,26 @@ int main(int argc, char **argv) {
                        mems[i], mems[i]);
     }
   }
+}
 
-  Runtime::get_runtime().shutdown(Event::NO_EVENT, success ? 0 : 1);
+int main(int argc, char **argv) {
+  Runtime rt;
+
+  rt.init(&argc, &argv);
+
+  rt.register_reduction<SumReduction>(REDOP_SUM);
+
+  Processor p = Machine::ProcessorQuery(Machine::get_machine())
+                    .only_kind(Processor::LOC_PROC)
+                    .first();
+  assert(p.exists());
+
+  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, MAIN_TASK,
+                                   CodeDescriptor(main_task),
+                                   ProfilingRequestSet()).external_wait();
+
+  Event e = rt.collective_spawn(p, MAIN_TASK, 0, 0);
+  rt.shutdown(e);
   return rt.wait_for_shutdown();
 }
 
