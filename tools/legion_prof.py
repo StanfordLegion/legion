@@ -2201,11 +2201,12 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val = repr(self.copy_kind) + ': size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
+        val = repr(self.copy_kind) + ': size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ', num hops=' + str(self.num_hops)
         cnt = 0
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
             cnt = cnt+1
+        print(val)
         return val
 
     @typeassert(instances=dict)
