@@ -37,9 +37,9 @@ namespace Realm {
    * \class Event
    * Event is created by the runtime and is used to synchronize
    * operations.  An event is triggered when the operation it
-   * represents is complet and can be used as pre and post conditions
+   * represents is complete and can be used as pre and post conditions
    * for other operations. This class represents a handle to the event
-   * itsels and can be passed-by-value as well as
+   * itself and can be passed-by-value as well as
    * serialized/deserialized anywhere in the program. Note that events
    * do not need to be explicitly garbage collected.
    */
@@ -54,6 +54,10 @@ namespace Realm {
 
       static const Event NO_EVENT;
 
+      /**
+       * Check whether an event has a valid ID.
+       * @return true if the event has a valid ID, false otherwise
+       */
       bool exists(void) const;
 
       /**
@@ -81,7 +85,6 @@ namespace Realm {
        */
       bool external_timedwait(long long max_ns) const;
 
-      ///@{
       /**
        * Fault-aware versions of the above (the above versions will cause the
        * caller to fault as well if a poisoned event is queried).
@@ -89,14 +92,34 @@ namespace Realm {
        * @return true if the event has triggered, false otherwise
        */
       bool has_triggered_faultaware(bool& poisoned) const;
-      void wait_faultaware(bool& poisoned) const;
-      void external_wait_faultaware(bool& poisoned) const;
-      bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
-      ///@}
+
 
       /**
-       * Subscribe to an event, ensuring that the triggeredness of it will be
-       * available as soon as possible (and without having to call wait).
+       * Fault-aware versions of the wait function.
+       * @param poisoned set to true if the event is poisoned
+       * @return true if the event has triggered, false otherwise
+       */
+      void wait_faultaware(bool& poisoned) const;
+
+      /**
+       * Fault-aware versions of the external wait function.
+       * @param poisoned set to true if the event is poisoned
+       * @return true if the event has triggered, false otherwise
+       */
+      void external_wait_faultaware(bool& poisoned) const;
+
+      /**
+       * Fault-aware versions of the external timed wait function.
+       * @param poisoned set to true if the event is poisoned
+       * @param max_ns the maximum number of nanoseconds to wait
+       * @return true if the event has triggered, false if the timeout occurred
+       */
+      bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
+
+      /**
+       * Subscribe to an event, ensuring that the triggeredness of the
+       * event will be available as soon as possible (and without having to call
+       * wait).
        */
       void subscribe(void) const;
 
@@ -110,13 +133,16 @@ namespace Realm {
       /**
        * Attempt to change the priority of the operation associated with this
        * event.
-       * @param new_priority the new priority
+       * @param new_priority the new priority.
        */
       void set_operation_priority(int new_priority) const;
 
       ///@{
       /**
        * Create an event that won't trigger until all input events
+       * have.
+       * @param wait_for the events to wait for
+       * @return the event that will trigger when all input events
        * have.
        */
       static Event merge_events(const std::set<Event>& wait_for);
@@ -126,8 +152,13 @@ namespace Realm {
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
       ///@}
 
-      // normal merged events propagate poison - this version ignores poison on
-      //  inputs - use carefully!
+      /**
+       * Create an event that won't trigger until all input events
+       * have, ignoring any poison on the input events.
+       * @param wait_for the events to wait for
+       * @return the event that will trigger when all input events
+       * have.
+       */
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
       static Event merge_events_ignorefaults(const std::vector<Event>& wait_for);
       static Event ignorefaults(Event wait_for);
@@ -252,7 +283,7 @@ namespace Realm {
     /**
      * \class CompletionQueue
      * A completion queue funnels the completion of unordered events into a
-     * single stream that can be queried (and waited on) by a single servicer
+     * single queue that can be queried (and waited on) by a single servicer
      * task.
      */
     class REALM_PUBLIC_API CompletionQueue {
