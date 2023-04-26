@@ -48,7 +48,12 @@ namespace Realm {
 
   class ProfilingRequestSet;
   class CodeDescriptor;
-  
+
+  /**
+   * \class CopySrcDstField
+   * A class used to describe a single field of a source or destination
+   * instance for a copy operation.
+   */
   struct CopySrcDstField {
   public:
     CopySrcDstField(void);
@@ -90,9 +95,8 @@ namespace Realm {
   /**
    * \class FieldDataDescriptor
    * A template class used to describe field data provided for partitioning
-   * operations. This class is templated on the dimensionality (N) and base type
-   * (T) of the index space that defines the domain over which the data
-   * is defined, and the type of the data contained in the field (FT).
+   * operations. IS is the type of the index space that defines the domain
+   * dimensionality and base type.
    */
   template <typename IS, typename FT>
   struct FieldDataDescriptor {
@@ -114,6 +118,13 @@ namespace Realm {
     TranslationTransform(void) = default;
     TranslationTransform(const Point<N, T>& _offset);
 
+    /**
+     * Apply the translation transform to a point in the domain
+     * source coordinate space to produce a point in the destination
+     * coordinate space. Adds the offset to the point.
+     * @param point The point in the source coordinate space.
+     * @return The point in the destination coordinate space.
+     */
     template <typename T2>
     Realm::Point<N, T> operator[](const Realm::Point<N, T2>& point) const;
 
@@ -134,6 +145,13 @@ namespace Realm {
     AffineTransform(const Realm::Matrix<M, N, T>& _transform,
                     const Point<M, T>& _offset);
 
+    /**
+     * Apply the affine transform to a point in the domain
+     * source coordinate space to produce a point in the destination
+     * coordinate space.
+     * @param point The point in the source coordinate space.
+     * @return The point in the destination coordinate space.
+     */
     template <typename T2>
     Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
 
@@ -163,6 +181,13 @@ namespace Realm {
       TRANSLATION = 2,
     };
 
+    /**
+     * Apply the structured transform to a point in the domain
+     * source coordinate space to produce a point in the destination
+     * coordinate space.
+     * @param point The point in the source coordinate space.
+     * @return The point in the destination coordinate space.
+     */
     Point<N, T> operator[](const Point<N2, T>& point) const;
 
     // protected:
