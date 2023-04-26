@@ -891,17 +891,19 @@ impl ContainerEntry for ChanEntry {
                 let nreqs = copy.copy_inst_infos.len();
                 if nreqs > 0 {
                     format!(
-                        "{}: size={}, num reqs={}{}",
+                        "{}: size={}, num reqs={}, num hops={}{}",
                         copy.copy_kind.unwrap(),
                         SizePretty(copy.size.unwrap()),
                         nreqs,
+                        copy.num_hops.unwrap(),
                         CopyInstInfoVec(&copy.copy_inst_infos, state)
                     )
                 } else {
                     format!(
-                        "Copy: size={}, num reqs={}",
+                        "Copy: size={}, num reqs={}, num hops={}",
                         SizePretty(copy.size.unwrap()),
-                        nreqs
+                        nreqs,
+                        copy.num_hops.unwrap()
                     )
                 }
             }
