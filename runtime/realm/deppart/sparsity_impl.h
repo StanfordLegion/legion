@@ -30,6 +30,14 @@ namespace Realm {
 
   class PartitioningMicroOp;
 
+  /**
+   * SparsityMapImpl is the actual dynamically allocated object that exists on
+   * each "interested" node for a given SparsityMap - it inherits from
+   * SparsityMapPublicImpl and adds the "private" storage and functionality -
+   * this separation is primarily to avoid the installed version of of Realm
+   * having to include all the internal .h files.
+   * TODO(apryakhin@): Consider doing an doxygen style.
+   */
   template <int N, typename T>
   class SparsityMapImpl : public SparsityMapPublicImpl<N,T> {
   public:
