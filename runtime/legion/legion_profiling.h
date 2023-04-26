@@ -285,7 +285,6 @@ namespace Legion {
         FieldID fid;
         LgEvent dst_inst_uid;
         LgEvent fevent;
-        bool collective;
       };
       struct FillInfo {
       public:
