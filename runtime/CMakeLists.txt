@@ -508,6 +508,8 @@ if(Legion_USE_HIP)
     endif()
 
     target_link_libraries(RealmRuntime PUBLIC CUDA::toolkit)
+    # Advertise our driver link to Realm consumers while ensuring libcuda.so isn't in Realm's RPATH
+    target_link_libraries(RealmRuntime INTERFACE CUDA::cuda_driver)
     target_include_directories(RealmRuntime PRIVATE ${HIP_ROOT_DIR}/include)
     # for backwards compatibility in applications
     target_compile_definitions(RealmRuntime INTERFACE USE_HIP)
