@@ -3838,6 +3838,88 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    ProjectionNode* InnerContext::compute_fallback_refinement(RegionNode *root)
+    //--------------------------------------------------------------------------
+    {
+      // Explore the region tree to find the disjoint and complete
+      // subtree with the largest number of leaves
+      std::vector<ShardID> empty_participants;
+      ProjectionNode *node =
+        root->find_largest_disjoint_complete_subtree(this, empty_participants);
+      if (node != NULL)
+        return node;
+      // If we don't have any such disjoint and complete sub-tree then we
+      // look to see if we have a disjoint-only sub-tree that we can use as
+      // the basis for creating a disjoint and complete partition
+
+      // If that still doesn't work then we need to take a guess and create
+      // a partition just based on spatial sub-division
+
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::find_all_disjoint_complete_children(IndexSpaceNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<IndexPartNode*> &children)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participants.empty());
+#endif
+      std::vector<LegionColor> colors;
+      node->get_colors(colors);
+      for (std::vector<LegionColor>::const_iterator it =
+            colors.begin(); it != colors.end(); it++)
+      {
+        IndexPartNode *child = 
+          node->get_child(*it, NULL/*defer*/, true/*can fail*/);
+        if (child == NULL)
+          continue;
+        if (child->is_disjoint(false/*from app*/) && 
+            child->is_complete(false/*from app*/) &&
+            child->check_global_and_increment(this->did))
+          children.push_back(child);
+        // Remove the reference that we got from the get_child call
+        if (child->remove_base_resource_ref(REGION_TREE_REF))
+          delete child;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedColorMap* InnerContext::find_all_local_children(IndexPartNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<ShardID> &child_participants,
+                                       std::vector<IndexSpaceNode*> &children)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participants.empty());
+      assert(child_participants.empty());
+      assert(children.empty());
+#endif
+      children.reserve(node->get_num_children());
+      for (ColorSpaceIterator itr(node); itr; itr++)
+      {
+        IndexSpaceNode *child = node->get_child(*itr);
+        child->add_nested_gc_ref(did);
+        children.push_back(child);
+      }
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t InnerContext::count_total_leaves(size_t leaves,
+                                       const std::vector<ShardID> &participants)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participants.empty());
+#endif
+      // Nothing to accumulate here since there's no control replication
+      return leaves;
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     void InnerContext::record_pending_disjoint_complete_set(
@@ -20418,6 +20500,86 @@ namespace Legion {
         collective->handle_collective_message(derez);
     }
 
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_rendezvous(ShardRendezvous *rendezvous)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::pair<void*,size_t> > to_handle;
+      {
+        AutoLock repl_lock(replication_lock);
+#ifdef DEBUG_LEGION
+        assert(shard_rendezvous.find(rendezvous->origin_shard) == 
+                shard_rendezvous.end());
+#endif
+        shard_rendezvous[rendezvous->origin_shard] = rendezvous;
+        std::map<ShardID,std::vector<std::pair<void*,size_t> > >::iterator
+          finder = pending_rendezvous_updates.find(rendezvous->origin_shard);
+        if (finder != pending_rendezvous_updates.end())
+        {
+          to_handle.swap(finder->second);
+          pending_rendezvous_updates.erase(finder);
+        }
+      }
+      for (std::vector<std::pair<void*,size_t> >::const_iterator it =
+            to_handle.begin(); it != to_handle.end(); it++)
+      {
+        Deserializer derez(it->first, it->second);
+        if (rendezvous->receive_message(derez))
+        {
+          AutoLock repl_lock(replication_lock);
+          std::map<ShardID,ShardRendezvous*>::iterator finder =
+            shard_rendezvous.find(rendezvous->origin_shard);
+#ifdef DEBUG_LEGION
+          assert(finder != shard_rendezvous.end());
+          assert(finder->second == rendezvous);
+#endif
+          shard_rendezvous.erase(finder);
+        }
+        free(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_rendezvous_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardRendezvous *rendezvous = find_or_buffer_rendezvous(derez);
+      if ((rendezvous != NULL) && rendezvous->receive_message(derez))
+      {
+        AutoLock repl_lock(replication_lock);
+        std::map<ShardID,ShardRendezvous*>::iterator finder =
+          shard_rendezvous.find(rendezvous->origin_shard);
+#ifdef DEBUG_LEGION
+        assert(finder != shard_rendezvous.end());
+        assert(finder->second == rendezvous);
+#endif
+        shard_rendezvous.erase(finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardRendezvous* ReplicateContext::find_or_buffer_rendezvous(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardID origin_shard;
+      derez.deserialize(origin_shard);
+      AutoLock repl_lock(replication_lock);
+      // See if we already have a rendezvous here to rendezvous with
+      std::map<ShardID,ShardRendezvous*>::const_iterator finder =
+        shard_rendezvous.find(origin_shard);
+      if (finder != shard_rendezvous.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_rendezvous_updates[origin_shard].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     void ReplicateContext::handle_disjoint_complete_request(Deserializer &derez)
@@ -21837,6 +21999,322 @@ namespace Legion {
         Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
       else
         Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::find_all_disjoint_complete_children(
+                                       IndexSpaceNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<IndexPartNode*> &children)
+    //--------------------------------------------------------------------------
+    {
+      if (!participants.empty())
+      {
+        // Figure out which of the shards is the first shard on the same 
+        // address space or the closest address space as the owner node 
+        // for the index space
+        ShardID source_shard = total_shards;
+        size_t source_distance = runtime->total_address_spaces;
+        const ShardMapping &mapping = shard_manager->get_mapping();
+        const AddressSpaceID ideal_space = node->owner_space;
+        if (participants.size() == 1)
+        {
+#ifdef DEBUG_LEGION
+          // All the shards are participating
+          assert(participants.back() == total_shards);
+#endif
+          for (ShardID shard = 0; shard < total_shards; shard++)
+          {
+            const AddressSpaceID shard_space = mapping[shard];
+            if (shard_space == ideal_space)
+            {
+              source_shard = shard;
+              source_distance = 0;
+              break;
+            }
+            size_t distance = runtime->find_distance(shard_space, ideal_space);
+            if (distance < source_distance)
+            {
+              source_shard = shard;
+              source_distance = distance;
+            }
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(std::binary_search(participants.begin(),
+                  participants.end(), owner_shard->shard_id));
+#endif
+          for (std::vector<ShardID>::const_iterator it = 
+                participants.begin(); it != participants.end(); it++)
+          {
+            const AddressSpaceID shard_space = mapping[*it];
+            if (shard_space == ideal_space)
+            {
+              source_shard = *it;
+              source_distance = 0;
+              break;
+            }
+            size_t distance = runtime->find_distance(shard_space, ideal_space);
+            if (distance < source_distance)
+            {
+              source_shard = *it;
+              source_distance = distance;
+            }
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(source_shard < total_shards);
+#endif
+        if (source_shard == owner_shard->shard_id)
+        {
+          // If we're the source shard do the lookup and broadcast it out
+          // to all the participant shards
+          std::vector<LegionColor> colors;
+          node->get_colors(colors);
+          for (std::vector<LegionColor>::const_iterator it =
+                colors.begin(); it != colors.end(); it++)
+          {
+            IndexPartNode *child = 
+              node->get_child(*it, NULL/*defer*/, true/*can fail*/);
+            if (child == NULL)
+              continue;
+            if (child->is_disjoint(false/*from app*/) && 
+                child->is_complete(false/*from app*/) &&
+                child->check_global_and_increment(this->did))
+              children.push_back(child);
+            // Remove the reference that we got from the get_child call
+            if (child->remove_base_resource_ref(REGION_TREE_REF))
+              delete child;
+          }
+          ShardedChildrenBroadcast rendezvous(this,
+              source_shard, participants, children);
+          rendezvous.broadcast();
+        }
+        else
+        {
+          // Otherwise we wait to receive the results from the source shard
+          ShardedChildrenBroadcast rendezvous(this,
+              source_shard, participants, children);
+          rendezvous.receive();
+          for (std::vector<IndexPartNode*>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            (*it)->add_nested_gc_ref(this->did);
+        }
+      }
+      else
+        InnerContext::find_all_disjoint_complete_children(node, participants,
+                                                          children);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedColorMap* ReplicateContext::find_all_local_children(
+                                      IndexPartNode *node,
+                                      const std::vector<ShardID> &participants,
+                                      std::vector<ShardID> &child_participants,
+                                      std::vector<IndexSpaceNode*> &children)
+    //--------------------------------------------------------------------------
+    {
+      if (participants.empty())
+        return InnerContext::find_all_local_children(node, participants, 
+                                              child_participants, children);
+      else if (node->get_num_children() == 1)
+      {
+        // Only one child to traverse so we know that all the shards
+        // will need to traverse it together
+        for (ColorSpaceIterator itr(node); itr; itr++)
+        {
+          IndexSpaceNode *child = node->get_child(*itr);
+          child->add_nested_gc_ref(did);
+          children.push_back(child);
+        }
+        child_participants = participants;
+        return NULL;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert((participants.size() > 1) || 
+            (participants.back() == total_shards));
+#endif
+        const bool all_shards_participating = (participants.size() == 1);
+        const size_t total_participants =
+          all_shards_participating ? total_shards : participants.size();
+        const size_t num_children = node->get_num_children();
+        const ShardID local_shard = owner_shard->shard_id;
+#ifdef DEBUG_LEGION
+        assert((total_participants == total_shards) ||
+            std::binary_search(participants.begin(),
+              participants.end(), owner_shard->shard_id));
+#endif
+        std::unordered_map<LegionColor,ShardID> color_shards;
+        if (total_participants <= num_children)
+        {
+          // If we have as many children as participants then we can chunk
+          // up the children nodes for each of the participants and then
+          // each participant can explore that sub-tree on their own
+          const size_t chunk =
+            (num_children + total_participants - 1) / total_participants;
+          unsigned idx = 0, index = 0;
+          ShardID shard = all_shards_participating ? 0 : participants[index];
+          for (ColorSpaceIterator itr(node); itr; itr++)
+          {
+            if (shard == local_shard)
+            {
+              IndexSpaceNode *child = node->get_child(*itr);
+              child->add_nested_gc_ref(did);
+              children.push_back(child);
+            }
+            else
+              color_shards[*itr] = shard;
+#ifdef DEBUG_LEGION
+            assert(idx < chunk);
+#endif
+            if ((++idx) == chunk)
+            {
+              idx = 0;
+              if (all_shards_participating)
+                shard++;
+              else
+                shard = participants[++index];
+            }
+          }
+          // No need to add any child participants as we know that there is
+          // exactly one shard traversing each child in this case
+        }
+        else
+        {
+          // If there are more participants than children, then we can chunk
+          // up the participants to traverse children together
+          const size_t chunk = 
+            (total_participants + num_children - 1) / num_children;
+          unsigned distance = owner_shard->shard_id;
+          if (!all_shards_participating)
+          {
+            std::vector<ShardID>::const_iterator finder = std::lower_bound(
+               participants.begin(), participants.end(), owner_shard->shard_id);
+#ifdef DEBUG_LEGION
+            assert(finder != participants.end());
+            assert(*finder == owner_shard->shard_id);
+#endif
+            distance = std::distance(participants.begin(), finder);
+          }
+          const unsigned local = distance / chunk;
+          unsigned index = 0;
+          for (ColorSpaceIterator itr(node); itr; itr++, index++)
+          {
+            if (index == local)
+            {
+              // This is the child we're traversing
+              IndexSpaceNode *child = node->get_child(*itr);
+              child->add_nested_gc_ref(did);
+              children.push_back(child);
+            }
+            else
+            {
+              // Find the closest shard to ourselves and record it
+              ShardID closest_shard = total_shards;
+              unsigned closest_distance = total_shards;
+              const unsigned offset = index * chunk;
+              for (unsigned idx = 0; idx < chunk; idx++)
+              {
+                ShardID shard = 0;
+                if (all_shards_participating)
+                {
+                  shard = offset + idx;
+                  if (shard == total_shards)
+                    break;
+                }
+                else
+                {
+                  if ((offset + idx) == participants.size())
+                    break;
+                  shard = participants[offset + idx];
+                }
+                unsigned abs_diff = (local_shard < shard) ?
+                  (shard - local_shard) : (local_shard - shard);
+                unsigned distance = (abs_diff < (total_shards/2)) ? abs_diff :
+                  total_shards - abs_diff;
+                if (distance < closest_distance)
+                {
+                  closest_shard = shard;
+                  closest_distance = distance;
+                }
+              }
+#ifdef DEBUG_LEGION
+              assert(closest_shard != total_shards);
+#endif
+              color_shards[*itr] = closest_shard;
+            }
+          }
+          // Record all shards that are traversing this child with us
+          const unsigned offset = local * chunk;
+          if (all_shards_participating)
+          {
+            for (unsigned idx = 0; idx < chunk; idx++)
+            {
+              ShardID shard = offset + idx;
+              if (shard == total_shards)
+                break;
+              child_participants.push_back(shard);
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < chunk; idx++)
+            {
+              if ((offset + idx) == participants.size())
+                break;
+              child_participants.push_back(participants[offset + idx]);
+            }
+          }
+#ifdef DEBUG_LEGION
+          // Better be able to find ourselves in the list of child participants
+          assert(std::binary_search(child_participants.begin(),
+                child_participants.end(), owner_shard->shard_id));
+#endif
+          // If there is only one shard in this chunk then we can clear it
+          if (child_participants.size() == 1)
+            child_participants.clear();
+        }
+#ifdef DEBUG_LEGION
+        assert(!color_shards.empty());
+#endif
+        return new ShardedColorMap(std::move(color_shards));
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ReplicateContext::count_total_leaves(size_t leaves,
+                                       const std::vector<ShardID> &participants)
+    //--------------------------------------------------------------------------
+    {
+      if (!participants.empty())
+      {
+        if (participants.size() == 1)
+        {
+#ifdef DEBUG_LEGION
+          // All the shards are participating
+          assert(participants.back() == total_shards);
+#endif
+          TotalLeavesRendezvous rendezvous(this,
+              0/*owner shard*/, participants);
+          return rendezvous.accumulate(leaves);
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(std::binary_search(participants.begin(),
+                participants.end(), owner_shard->shard_id));
+#endif
+          TotalLeavesRendezvous rendezvous(this,
+              participants.front(), participants);
+          return rendezvous.accumulate(leaves);
+        }
+      }
+      else
+        return InnerContext::count_total_leaves(leaves, participants);
     }
 
 #if 0

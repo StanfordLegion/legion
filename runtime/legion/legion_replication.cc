@@ -10767,6 +10767,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_rendezvous_message(ShardID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        // Have to unpack the preample we already know
+        DistributedID local_repl;
+        derez.deserialize(local_repl);
+        handle_rendezvous_message(derez);
+      }
+      else
+        runtime->send_control_replicate_rendezvous_message(target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_rendezvous_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_rendezvous_message(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     void ShardManager::send_compute_equivalence_sets(ShardID target,
                                                      Serializer &rez)
     //--------------------------------------------------------------------------
@@ -11719,6 +11760,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_collective_message(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_rendezvous_message(Deserializer &derez,
+                                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DistributedID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_rendezvous_message(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -16979,6 +17031,398 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Sharded Rendezvous
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardRendezvous::ShardRendezvous(ReplicateContext *ctx, ShardID origin,
+                                              const std::vector<ShardID> &parts)
+      : context(ctx), origin_shard(origin), 
+        local_shard(ctx->owner_shard->shard_id), participants(parts),
+        all_shards_participating(parts.size() == 1)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!parts.empty());
+      assert(!all_shards_participating || (parts.back() == ctx->total_shards));
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardRendezvous::prefix_message(Serializer &rez,ShardID target) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(context->shard_manager->did);
+      rez.serialize(target);
+      rez.serialize(origin_shard);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardRendezvous::register_rendezvous(void)
+    //--------------------------------------------------------------------------
+    {
+      context->register_rendezvous(this);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ShardRendezvous::get_total_participants(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (all_shards_participating)
+        return context->total_shards;
+      else
+        return participants.size();
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardRendezvous::get_parent(void) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local_shard);
+      const unsigned origin_index = find_index(origin_shard);
+#ifdef DEBUG_LEGION
+      assert(local_index < get_total_participants());
+      assert(origin_index < get_total_participants());
+#endif
+      const unsigned offset = convert_to_offset(local_index, origin_index);
+      const unsigned index = convert_to_index(
+          (offset-1) / context->runtime->legion_collective_radix, origin_index);
+      return get_index(index);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t ShardRendezvous::count_children(void) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local_shard);
+      const unsigned origin_index = find_index(origin_shard);
+      const size_t total_participants = get_total_participants();
+#ifdef DEBUG_LEGION
+      assert(local_index < total_participants);
+      assert(origin_index < total_participants);
+#endif
+      const unsigned radix = context->runtime->legion_collective_radix;
+      const unsigned offset = radix *
+        convert_to_offset(local_index, origin_index);
+      size_t result = 0;
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < total_participants)
+          result++;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardRendezvous::get_children(std::vector<ShardID> &children) const
+    //--------------------------------------------------------------------------
+    {
+      const unsigned local_index = find_index(local_shard);
+      const unsigned origin_index = find_index(origin_shard);
+      const size_t total_participants = get_total_participants();
+#ifdef DEBUG_LEGION
+      assert(local_index < total_participants);
+      assert(origin_index < total_participants);
+#endif
+      const unsigned radix = context->runtime->legion_collective_radix;
+      const unsigned offset = radix *
+        convert_to_offset(local_index, origin_index);
+      for (unsigned idx = 1; idx <= radix; idx++)
+      {
+        const unsigned child_offset = offset + idx;
+        if (child_offset < total_participants)
+        {
+          const unsigned index = convert_to_index(child_offset, origin_index);
+          children.push_back(get_index(index));
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardRendezvous::find_index(ShardID shard) const
+    //--------------------------------------------------------------------------
+    {
+      if (!all_shards_participating)
+      {
+        std::vector<ShardID>::const_iterator finder = 
+          std::lower_bound(participants.begin(), participants.end(), shard);
+#ifdef DEBUG_LEGION
+        assert(finder != participants.end());
+        assert(*finder == shard);
+#endif
+        return std::distance(participants.begin(), finder);
+      }
+      else
+        return shard;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardRendezvous::get_index(unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      if (all_shards_participating)
+      {
+#ifdef DEBUG_LEGION
+        assert(index < context->total_shards);
+#endif
+        return index;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(index < participants.size());
+#endif
+        return participants[index];
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardRendezvous::convert_to_offset(unsigned index, 
+                                                  unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t total_participants = get_total_participants();
+#ifdef DEBUG_LEGION
+      assert(index < total_participants);
+      assert(origin_index < total_participants);
+#endif
+      if (index < origin_index)
+      {
+        // Modulus arithmetic here
+        return ((index + total_participants) - origin_index);
+      }
+      else
+        return (index - origin_index);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned ShardRendezvous::convert_to_index(unsigned offset,
+                                                 unsigned origin_index) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t total_participants = get_total_participants();
+#ifdef DEBUG_LEGION
+      assert(offset < total_participants);
+      assert(origin_index < total_participants);
+#endif
+      unsigned result = origin_index + offset;
+      if (result >= total_participants)
+        result -= total_participants;
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Sharded Children Broadcast
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardedChildrenBroadcast::ShardedChildrenBroadcast(ReplicateContext *ctx,
+                              ShardID source, const std::vector<ShardID> &parts,
+                              std::vector<IndexPartNode*> &child)
+      : ShardRendezvous(ctx, source, parts), children(child), received(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardedChildrenBroadcast::~ShardedChildrenBroadcast(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(received);
+#endif
+      if (!children.empty() && (local_shard != origin_shard))
+      {
+        for (std::vector<IndexPartNode*>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+          (*it)->unpack_global_ref();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedChildrenBroadcast::broadcast(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_shard == origin_shard);
+#endif
+      // Add global references to all the children
+      const size_t receivers = get_total_participants() - 1;
+      for (std::vector<IndexPartNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        (*it)->pack_global_ref(receivers);
+      // Send messages to each of our children in the broadcast tree
+      std::vector<ShardID> child_shards;
+      get_children(child_shards);
+      for (std::vector<ShardID>::const_iterator it =
+            child_shards.begin(); it != child_shards.end(); it++)
+      {
+        Serializer rez;
+        prefix_message(rez, *it);
+        rez.serialize<size_t>(children.size());
+        for (unsigned idx = 0; idx < children.size(); idx++)
+          rez.serialize(children[idx]->handle);
+        context->shard_manager->send_rendezvous_message(*it, rez);
+      }
+#ifdef DEBUG_LEGION
+      received = true;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardedChildrenBroadcast::receive(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(children.empty());
+#endif
+      register_rendezvous();
+      // Take the lock and see if we've been received or not
+      RtEvent wait_on;
+      {
+        AutoLock r_lock(rendezvous_lock);
+        if (!received)
+        {
+          received_event = Runtime::create_rt_user_event();
+          wait_on = received_event;
+        }
+      }
+      if (wait_on.exists())
+        wait_on.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardedChildrenBroadcast::receive_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // We can do this first part without the lock since we know that
+      // we'll be the only ones updating this data structure
+      size_t num_children;
+      derez.deserialize(num_children);
+      children.resize(num_children);
+      RegionTreeForest *forest = context->runtime->forest;
+      for (unsigned idx = 0; idx < num_children; idx++)
+      {
+        IndexPartition handle;
+        derez.deserialize(handle);
+        children[idx] = forest->get_node(handle);
+      }
+      AutoLock r_lock(rendezvous_lock);
+#ifdef DEBUG_LEGION
+      assert(!received);
+#endif
+      received = true; 
+      if (received_event.exists())
+        Runtime::trigger_event(received_event);
+      // Can safely unregister this collective rendezvous as there
+      // will be no more messages associated with it
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Total Leaves Rendezvous
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TotalLeavesRendezvous::TotalLeavesRendezvous(ReplicateContext *ctx,
+                                ShardID root, const std::vector<ShardID> &parts)
+      : ShardRendezvous(ctx, root, parts)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    size_t TotalLeavesRendezvous::accumulate(size_t leaves)
+    //--------------------------------------------------------------------------
+    {
+      total_leaves = leaves;
+      remaining = count_children();
+      if (remaining == 0)
+      {
+        // Send off the message to the parent now
+        ShardID parent = get_parent();
+        Serializer rez;
+        prefix_message(rez, parent);
+        rez.serialize(total_leaves);
+        rez.serialize<bool>(true); // reduce
+        context->shard_manager->send_rendezvous_message(parent, rez);
+      }
+      register_rendezvous();
+      // Take the lock and see if we received our value
+      RtEvent wait_on;
+      {
+        AutoLock r_lock(rendezvous_lock);
+        if (remaining == 0)
+        {
+          // Haven't received the response yet
+          received_event = Runtime::create_rt_user_event();
+          wait_on = received_event;
+        }
+      }
+      if (wait_on.exists())
+        wait_on.wait();
+      return total_leaves;
+    }
+
+    //--------------------------------------------------------------------------
+    bool TotalLeavesRendezvous::receive_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t leaves;
+      derez.deserialize(leaves);
+      bool reduce;
+      derez.deserialize<bool>(reduce);
+      if (reduce)
+      {
+        AutoLock r_lock(rendezvous_lock);
+        total_leaves += leaves;
+#ifdef DEBUG_LEGION
+        assert(remaining > 0);
+#endif
+        if (--remaining == 0)
+        {
+          if (local_shard != origin_shard)
+          {
+            ShardID parent = get_parent();
+            Serializer rez;
+            prefix_message(rez, parent);
+            rez.serialize(total_leaves);
+            rez.serialize<bool>(true); // reduce
+            context->shard_manager->send_rendezvous_message(parent, rez);
+            return false;
+          }
+          // Otherwise fall through and broadcast it out to any children
+        }
+        else
+          return false;
+      }
+      else
+        total_leaves = leaves; 
+      // Do the broadcast out to the children
+      std::vector<ShardID> children;
+      get_children(children);
+      for (std::vector<ShardID>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        Serializer rez;
+        prefix_message(rez, *it);
+        rez.serialize(total_leaves);
+        rez.serialize<bool>(false); // reduce
+        context->shard_manager->send_rendezvous_message(*it, rez);
+      }
+      // We've received the final value so we're done
+      AutoLock r_lock(rendezvous_lock);
+#ifdef DEBUG_LEGION
+      assert(remaining == 0);
+#endif
+      remaining--;
+      if (received_event.exists())
+        Runtime::trigger_event(received_event);
+      return true;
     }
 
   }; // namespace Internal

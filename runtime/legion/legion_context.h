@@ -1171,6 +1171,16 @@ namespace Legion {
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
+      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root);
+      virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<IndexPartNode*> &children);
+      virtual ShardedColorMap* find_all_local_children(IndexPartNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<ShardID> &child_participants,
+                                       std::vector<IndexSpaceNode*> &children);
+      virtual size_t count_total_leaves(size_t leaves,
+                                      const std::vector<ShardID> &participants);
 #if 0
       void record_pending_disjoint_complete_set(PendingEquivalenceSet *set,
                                                 const FieldMask &mask);
@@ -1180,6 +1190,7 @@ namespace Legion {
       void invalidate_disjoint_complete_sets(RegionNode *region,
                                              const FieldMask &mask);
 #endif
+    public:
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       bool inline_child_task(TaskOp *child);
@@ -2925,8 +2936,10 @@ namespace Legion {
                                                     Runtime *runtime);
       static void handle_defer_disjoint_complete_response(Runtime *runtime,
                                                           const void *args);
-#endif
       static void handle_defer_collective_message(const void *args);
+#endif
+      void register_rendezvous(ShardRendezvous *rendezvous);
+      void handle_rendezvous_message(Deserializer &derez);
 #if 0
       static void finalize_disjoint_complete_response(Runtime *runtime,
             UniqueID opid, VersionManager *target, AddressSpaceID target_space,
@@ -2963,6 +2976,7 @@ namespace Legion {
       void register_collective(ShardCollective *collective);
       ShardCollective* find_or_buffer_collective(Deserializer &derez);
       void unregister_collective(ShardCollective *collective);
+      ShardRendezvous* find_or_buffer_rendezvous(Deserializer &derez);
     public:
       // Physical template methods
       size_t register_trace_template(ShardedPhysicalTemplate *phy_template);
@@ -2983,6 +2997,16 @@ namespace Legion {
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
       void handle_compute_equivalence_sets(Deserializer &derez);
+      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root);
+      virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<IndexPartNode*> &children);
+      virtual ShardedColorMap* find_all_local_children(IndexPartNode *node,
+                                       const std::vector<ShardID> &participants,
+                                       std::vector<ShardID> &child_participants,
+                                       std::vector<IndexSpaceNode*> &children);
+      virtual size_t count_total_leaves(size_t leaves,
+                                      const std::vector<ShardID> &participants);
 #if 0
       virtual bool finalize_disjoint_complete_sets(RegionNode *region,
           VersionManager *target, FieldMask mask, const UniqueID opid,
@@ -3249,6 +3273,10 @@ namespace Legion {
       std::map<CollectiveID,ShardCollective*> collectives;
       std::map<CollectiveID,std::vector<
                 std::pair<void*,size_t> > > pending_collective_updates;
+    protected:
+      std::map<ShardID,ShardRendezvous*> shard_rendezvous;
+      std::map<ShardID,std::vector<
+                std::pair<void*,size_t> > > pending_rendezvous_updates;
     protected:
       // Pending allocations of various resources
       std::deque<std::pair<ValueBroadcast<ISBroadcast>*,bool> > 

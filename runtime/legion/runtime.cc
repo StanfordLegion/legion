@@ -13313,6 +13313,11 @@ namespace Legion {
               runtime->handle_control_replicate_collective_message(derez);
               break;
             }
+          case SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE:
+            {
+              runtime->handle_control_replicate_rendezvous_message(derez);
+              break;
+            }
           case SEND_LIBRARY_MAPPER_REQUEST:
             {
               runtime->handle_library_mapper_request(derez, 
@@ -23522,6 +23527,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_rendezvous_message(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE>( 
+                                rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_library_mapper_request(AddressSpaceID target, 
                                               Serializer &rez)
     //--------------------------------------------------------------------------
@@ -25816,6 +25831,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_rendezvous_message(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_rendezvous_message(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_library_mapper_request(Deserializer &derez,
                                                 AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -26819,6 +26842,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ((did & LEGION_DISTRIBUTED_ID_MASK) % total_address_spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t Runtime::find_distance(AddressSpaceID src, AddressSpaceID dst) const
+    //--------------------------------------------------------------------------
+    {
+      size_t abs_diff = (src < dst) ? (dst - src) : (src - dst);
+      return (abs_diff < (total_address_spaces / 2)) ? abs_diff : 
+        (total_address_spaces - abs_diff);
     }
 
     //--------------------------------------------------------------------------

@@ -8082,7 +8082,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode *child = get_child(c, NULL/*defer*/, true/*can fail*/);
-      return (child != NULL);
+      if (child == NULL)
+        return false;
+      if (child->remove_base_resource_ref(REGION_TREE_REF))
+        delete child;
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -8193,7 +8197,11 @@ namespace Legion {
         std::map<LegionColor,IndexPartNode*>::const_iterator finder = 
           color_map.find(c);
         if ((finder != color_map.end()) && (finder->second != NULL))
+        {
+          if (can_fail)
+            finder->second->add_base_resource_ref(REGION_TREE_REF);
           return finder->second;
+        }
         std::map<LegionColor,IndexPartition>::const_iterator remote_finder = 
           remote_colors.find(c);
         if (remote_finder != remote_colors.end())
@@ -8204,7 +8212,12 @@ namespace Legion {
       if (owner_space == context->runtime->address_space)
       {
         if (remote_handle.exists())
-          return context->get_node(remote_handle, defer);
+        {
+          IndexPartNode *result = context->get_node(remote_handle, defer);
+          if (can_fail)
+            result->add_base_resource_ref(REGION_TREE_REF);
+          return result;
+        }
         if (can_fail)
           return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
@@ -8240,7 +8253,12 @@ namespace Legion {
         }
         IndexPartition child_handle(child_id.load(),
             handle.get_tree_id(), handle.get_type_tag());
-        return context->get_node(child_handle);
+        IndexPartNode *result = context->get_node(child_handle);
+        if (can_fail)
+          result->add_base_resource_ref(REGION_TREE_REF);
+        // Always unpack the global ref that got sent back with this
+        result->unpack_global_ref();
+        return result;
       }
       else
       {
@@ -8819,14 +8837,24 @@ namespace Legion {
       }
       if (child != NULL)
       {
-        Serializer rez;
+        if (child->check_global_and_increment(REGION_TREE_REF))
         {
-          RezCheck z(rez);
-          rez.serialize(child->handle);
-          rez.serialize(target);
-          rez.serialize(to_trigger);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(child->handle);
+            rez.serialize(target);
+            rez.serialize(to_trigger);
+            child->pack_global_ref();
+          }
+          forest->runtime->send_index_space_child_response(source, rez);
+          if (child->remove_base_gc_ref(REGION_TREE_REF))
+            delete child;
         }
-        forest->runtime->send_index_space_child_response(source, rez);
+        else // can fail and unable to get a global reference
+          Runtime::trigger_event(to_trigger);
+        if (child->remove_base_resource_ref(REGION_TREE_REF))
+          delete child;
       }
       else // Failed so just trigger the result
         Runtime::trigger_event(to_trigger);
@@ -8850,6 +8878,8 @@ namespace Legion {
         }
         Runtime *runtime = dargs->proxy_this->context->runtime;
         runtime->send_index_space_child_response(dargs->source, rez);
+        if (child->remove_base_resource_ref(REGION_TREE_REF))
+          delete child;
       }
       else // Failed so just trigger the result
         Runtime::trigger_event(dargs->to_trigger);
@@ -11289,7 +11319,7 @@ namespace Legion {
       simple_step = 
         (partition->total_children == partition->max_linearized_color);
       const LegionColor chunk = 
-        compute_chunk(partition->max_linearized_color, total_shards);
+        (partition->max_linearized_color + total_shards - 1) / total_shards;
       current = shard * chunk;
       end = ((current + chunk) < partition->max_linearized_color) ?
         (current + chunk) : partition->max_linearized_color;
@@ -11298,6 +11328,7 @@ namespace Legion {
         step();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ LegionColor ColorSpaceIterator::compute_chunk(
                                      LegionColor max_color, size_t total_shards)
@@ -11305,6 +11336,7 @@ namespace Legion {
     {
       return (max_color + total_shards - 1) / total_shards;
     }
+#endif
 
     //--------------------------------------------------------------------------
     ColorSpaceIterator::operator bool(void) const
@@ -20095,6 +20127,60 @@ namespace Legion {
       state.initialize_refined_fields(mask);
     }
 
+    //--------------------------------------------------------------------------
+    ProjectionRegion* RegionNode::find_largest_disjoint_complete_subtree(
+                                      InnerContext *context,
+                                      const std::vector<ShardID> &participants,
+                                      size_t *leaves)
+    //--------------------------------------------------------------------------
+    {
+      // Find all of our local children to explore
+      std::vector<IndexPartNode*> children;
+      context->find_all_disjoint_complete_children(row_source, 
+                                      participants, children);
+      if (children.empty())
+      {
+        if (leaves != NULL)
+          *leaves = 0;
+        return NULL;
+      }
+      // Explore all the subtrees we are supposed to explore and keep track
+      // of which one has the largest number of leaves
+      size_t max_leaves = 0;
+      ProjectionPartition *largest = NULL;
+      for (std::vector<IndexPartNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        PartitionNode *child = get_child((*it)->color);
+        size_t leaves = 0;
+        ProjectionPartition *projection = 
+          child->find_largest_disjoint_complete_subtree(context, 
+                                          participants, leaves);
+#ifdef DEBUG_LEGION
+        assert((*it)->get_num_children() <= leaves);
+#endif
+        if (max_leaves < leaves)
+        {
+          if (largest != NULL)
+            delete largest;
+          largest = projection;
+          max_leaves = leaves;
+        }
+        else
+          delete projection;
+        if ((*it)->remove_nested_gc_ref(context->did))
+          delete (*it);
+      }
+#ifdef DEBUG_LEGION
+      assert(largest != NULL);
+#endif
+      ProjectionRegion *result = new ProjectionRegion(this);
+      result->add_child(largest);
+      if (leaves != NULL)
+        *leaves = max_leaves;
+      return result;
+    }
+
 #if 0
     //--------------------------------------------------------------------------
     void RegionNode::refine_disjoint_complete_tree(ContextID ctx,
@@ -21917,6 +22003,50 @@ namespace Legion {
                                           is_mutable, false/*local only*/);
       if (ready.exists())
         Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionPartition* PartitionNode::find_largest_disjoint_complete_subtree(
+                                      InnerContext *context,
+                                      const std::vector<ShardID> &participants,
+                                      size_t &leaves)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(leaves == 0);
+      assert(row_source->is_disjoint(false/*from app*/));
+      assert(row_source->is_complete(false/*from app*/));
+#endif
+      // Find the local set of regions to traverse
+      std::vector<IndexSpaceNode*> children;
+      std::vector<ShardID> child_participants;
+      ShardedColorMap *color_map =
+        context->find_all_local_children(row_source, participants,
+                                         child_participants, children);
+      ProjectionPartition *result = new ProjectionPartition(this, color_map);
+      for (std::vector<IndexSpaceNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
+        RegionNode *child = get_child((*it)->color);
+        size_t child_leaves = 0; 
+        ProjectionRegion *projection =
+          child->find_largest_disjoint_complete_subtree(context, 
+                              child_participants, &child_leaves);
+        if (projection == NULL)
+        {
+          // This means the child had no disjoint-complete projections
+          // so it is its own leaf
+          projection = new ProjectionRegion(child);
+          child_leaves = 1;
+        }
+        result->add_child(projection);
+        leaves += child_leaves;
+        if ((*it)->remove_nested_gc_ref(context->did))
+          delete (*it);
+      }
+      // Exchange the total number of leaves in case we are sharded
+      leaves = context->count_total_leaves(leaves, participants);
+      return result;
     }
 
 #if 0

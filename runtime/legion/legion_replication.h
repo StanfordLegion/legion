@@ -1430,7 +1430,95 @@ namespace Legion {
     };
 
     /**
-     * \class ShardedCollective
+     * \class ShardRendezvous
+     * A sharded rendezvous class is similar to a shard collective, but it
+     * instead of performing collective operations between all the shards
+     * in a control replicated context, it will support doing parallel
+     * rendezvous between a subset of shards in the context. Callers must
+     * provide a unique key for performing the rendezvous.
+     */
+    class ShardRendezvous {
+    public:
+      ShardRendezvous(ReplicateContext *ctx, ShardID origin,
+                      const std::vector<ShardID> &participants);
+      ShardRendezvous(const ShardRendezvous &rhs) = delete;
+      virtual ~ShardRendezvous(void) { }
+    public:
+      ShardRendezvous& operator=(const ShardRendezvous &rhs) = delete;
+    public:
+      virtual bool receive_message(Deserializer &derez) = 0;
+    public:
+      void prefix_message(Serializer &rez, ShardID target) const;
+      void register_rendezvous(void);
+      size_t get_total_participants(void) const;
+      ShardID get_parent(void) const;
+      size_t count_children(void) const;
+      void get_children(std::vector<ShardID> &children) const;
+    protected:
+      unsigned find_index(ShardID shard) const;
+      ShardID get_index(unsigned index) const;
+      unsigned convert_to_offset(unsigned index, unsigned origin) const;
+      unsigned convert_to_index(unsigned offset, unsigned origin) const;
+    public:
+      ReplicateContext *const context;
+      const ShardID origin_shard;
+      const ShardID local_shard;
+      const std::vector<ShardID> &participants;
+      const bool all_shards_participating;
+    protected:
+      mutable LocalLock rendezvous_lock;
+    };
+
+    /**
+     * \class ShardedChildrenBroadcast
+     * Broadcast out a set of child nodes across the set of shards
+     */
+    class ShardedChildrenBroadcast : public ShardRendezvous {
+    public:
+      ShardedChildrenBroadcast(ReplicateContext *ctx,
+          ShardID source, const std::vector<ShardID> &participants,
+          std::vector<IndexPartNode*> &children);
+      ShardedChildrenBroadcast(const ShardedChildrenBroadcast &rhs) = delete;
+      virtual ~ShardedChildrenBroadcast(void);
+    public:
+      ShardedChildrenBroadcast& operator=(
+          const ShardedChildrenBroadcast &rhs) = delete;
+    public:
+      virtual bool receive_message(Deserializer &derez);
+      void broadcast(void);
+      void receive(void);
+    protected:
+      std::vector<IndexPartNode*> &children;
+      RtUserEvent received_event;
+      bool received;
+    };
+
+    /**
+     * \class TotalLeavesRendezvous
+     * Perform an all-reduce to count the total number of leaves
+     * in a region-subtree for a subsets of shards in a control
+     * replicated context.
+     */
+    class TotalLeavesRendezvous : public ShardRendezvous {
+    public:
+      TotalLeavesRendezvous(ReplicateContext *ctx,
+          ShardID root, const std::vector<ShardID> &participants);
+      TotalLeavesRendezvous(const TotalLeavesRendezvous &rhs) = delete;
+      virtual ~TotalLeavesRendezvous(void) { }
+    public:
+      TotalLeavesRendezvous& operator=(
+          const TotalLeavesRendezvous &rhs) = delete;
+    public:
+      virtual bool receive_message(Deserializer &derez);
+      size_t accumulate(size_t leaves);
+    protected:
+      size_t total_leaves;
+      RtUserEvent received_event;
+      int remaining;
+    };
+
+    /**
+     * \class ShardedMapping
      * This class mirrors the CollectiveMapping class and provides helper
      * methods for doing collective-style tree broadcasts and reductions
      * on a unique set of shards.
@@ -2928,6 +3016,9 @@ namespace Legion {
       void send_collective_message(ShardID target, Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
+      void send_rendezvous_message(ShardID target, Serializer &rez);
+      void handle_rendezvous_message(Deserializer &derez);
+    public:
       void send_compute_equivalence_sets(ShardID target, Serializer &rez);
       void handle_compute_equivalence_sets(Deserializer &derez);
       void handle_equivalence_set_notification(Deserializer &derez);
@@ -2982,6 +3073,7 @@ namespace Legion {
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
+      static void handle_rendezvous_message(Deserializer &derez, Runtime *rt);
       static void handle_compute_equivalence_sets(Deserializer &derez,
                                                   Runtime *runtime);
       static void handle_equivalence_set_notification(Deserializer &derez, 

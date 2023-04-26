@@ -737,7 +737,8 @@ namespace Legion {
       EXPRESSION_VIRTUAL_CHANNEL = 11,
       MIGRATION_VIRTUAL_CHANNEL = 12,
       TRACING_VIRTUAL_CHANNEL = 13,
-      MAX_NUM_VIRTUAL_CHANNELS = 14, // this one must be last
+      RENDEZVOUS_VIRTUAL_CHANNEL = 14,
+      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
     };
 
     enum MessageKind {
@@ -971,6 +972,7 @@ namespace Legion {
       SEND_REPLICATE_TRIGGER_COMPLETE,
       SEND_REPLICATE_TRIGGER_COMMIT,
       SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE,
+      SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE,
       SEND_LIBRARY_MAPPER_REQUEST,
       SEND_LIBRARY_MAPPER_RESPONSE,
       SEND_LIBRARY_TRACE_REQUEST,
@@ -1235,6 +1237,7 @@ namespace Legion {
         "Send Replication Trigger Complete",                          \
         "Send Replication Trigger Commit",                            \
         "Send Control Replication Collective Message",                \
+        "Send Control Replication Rendezvous Message",                \
         "Send Library Mapper Request",                                \
         "Send Library Mapper Response",                               \
         "Send Library Trace Request",                                 \
@@ -2035,6 +2038,7 @@ namespace Legion {
     class FutureNameExchange;
     class MustEpochMappingBroadcast;
     class MustEpochMappingExchange;
+    class ShardRendezvous;
 
     // Nasty global variable for TLS support of figuring out
     // our context implicitly

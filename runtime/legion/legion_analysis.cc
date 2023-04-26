@@ -2916,11 +2916,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ProjectionPartition::ProjectionPartition(PartitionNode *node)
-      : partition(node), disjoint_complete_children_shards(NULL)
+    ProjectionPartition::ProjectionPartition(PartitionNode *node, 
+                                             ShardedColorMap *map)
+      : partition(node), disjoint_complete_children_shards(map)
     //--------------------------------------------------------------------------
     {
       partition->add_base_gc_ref(PROJECTION_REF);
+      if (disjoint_complete_children_shards != NULL)
+        disjoint_complete_children_shards->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -5038,7 +5041,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalState::LogicalState(RegionTreeNode *node, ContextID c)
-      : owner(node)
+      : owner(node), fallback_refinement(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5060,6 +5063,7 @@ namespace Legion {
       assert(refinement_trackers.empty());
       assert(projection_summary_cache.empty());
       assert(interfering_shards.empty());
+      assert(fallback_refinement == NULL);
 #endif
     }
 
@@ -5187,6 +5191,12 @@ namespace Legion {
         if ((projection_summary_cache.size() < PROJECTION_CACHE_SIZE) &&
             summary->remove_reference())
           delete summary;
+      }
+      if (fallback_refinement != NULL)
+      {
+        if (fallback_refinement->remove_reference())
+          delete fallback_refinement;
+        fallback_refinement = NULL;
       }
     }
 
@@ -5449,6 +5459,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProjectionNode* LogicalState::find_or_create_fallback_refinement(
+                                                          InnerContext *context)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner->is_region());
+#endif
+      if (fallback_refinement == NULL)
+      {
+        fallback_refinement = 
+          context->compute_fallback_refinement(owner->as_region_node());
+        fallback_refinement->add_reference();
+      }
+      return fallback_refinement;
+    }
+
+    //--------------------------------------------------------------------------
     void LogicalState::initialize_refined_fields(const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
@@ -5611,7 +5638,8 @@ namespace Legion {
       {
         // Create a projection summary to represent the fallback refinement
         // subtree to use for equivalence sets
-        ProjectionNode *fallback = find_or_create_fallback_projection();
+        ProjectionNode *fallback =
+          find_or_create_fallback_refinement(analysis.context);
         // Create a new refinement for the fallback fields
         RefinementTracker *tracker = owner->create_refinement_tracker(fallback);
         refinement_trackers.insert(tracker, fallback_refine);
@@ -5729,7 +5757,8 @@ namespace Legion {
           // These fields are not refined at all and we can't use the
           // projection because its not disjoint and complete so we 
           // need to make a default one to consider
-          ProjectionNode *fallback = find_or_create_fallback_projection();
+          ProjectionNode *fallback =
+            find_or_create_fallback_refinement(logical_analysis.context);
           RefinementTracker *tracker =
             owner->create_refinement_tracker(false/*current refinement*/);
           tracker->update_refinement_projection(fallback);

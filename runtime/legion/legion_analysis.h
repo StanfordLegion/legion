@@ -1213,7 +1213,7 @@ namespace Legion {
 
     class ProjectionPartition : public ProjectionNode {
     public:
-      ProjectionPartition(PartitionNode *node);
+      ProjectionPartition(PartitionNode *node, ShardedColorMap *map = NULL);
       ProjectionPartition(const ProjectionPartition &rhs) = delete;
       virtual ~ProjectionPartition(void);
     public:
@@ -1535,10 +1535,10 @@ namespace Legion {
                                           const RegionRequirement &req,
                                           LogicalAnalysis &analysis,
                                           const ProjectionInfo &proj_info);
-      ProjectionNode * find_or_create_fallback_projection(void);
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
                           ProjectionSummary *one, ProjectionSummary *two);
+      ProjectionNode* find_or_create_fallback_refinement(InnerContext *context);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1596,6 +1596,13 @@ namespace Legion {
       std::list<ProjectionSummary*> projection_summary_cache;
       std::unordered_map<ProjectionSummary*,
         std::unordered_map<ProjectionSummary*,bool> > interfering_shards;
+    public:
+      // This is the fallback refinement for the logical region in this
+      // context on this node of the region tree. Note that we only need
+      // to compute this once and we can save it for the rest of the 
+      // context. It will only be invalidated when this part of the
+      // context is cleared out.
+      ProjectionNode* fallback_refinement;
 #if 0
       // Track whether this node is part of the disjoint-complete tree
       FieldMask disjoint_complete_tree;

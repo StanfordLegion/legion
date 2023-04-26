@@ -2085,6 +2085,8 @@ namespace Legion {
       bool has_color(const LegionColor color);
       LegionColor generate_color(LegionColor suggestion = INVALID_COLOR);
       void release_color(LegionColor color);
+      // If you pass can_fail=true here then the node comes back with 
+      // a resource REGION_TREE_REF to keep it alive
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
       void add_child(IndexPartNode *child);
@@ -2992,8 +2994,10 @@ namespace Legion {
       LegionColor operator*(void) const;
       ColorSpaceIterator& operator++(int/*postfix*/);
       void step(void);
+#if 0
       static LegionColor compute_chunk(LegionColor max_color, 
                                        size_t total_shards);
+#endif
     private:
       IndexSpaceNode *color_space;
       LegionColor current, end;
@@ -4165,6 +4169,9 @@ namespace Legion {
       void remove_child(const LegionColor p);
       void add_tracker(PartitionTracker *tracker);
       void initialize_disjoint_complete_tree(ContextID ctx, const FieldMask &m);
+      ProjectionRegion* find_largest_disjoint_complete_subtree(
+          InnerContext *context, const std::vector<ShardID> &participants,
+          size_t *leaves = NULL);
 #if 0
       void refine_disjoint_complete_tree(ContextID ctx, PartitionNode *child,
                                          RefinementOp *refinement, 
@@ -4257,10 +4264,12 @@ namespace Legion {
 #endif
     public:
       // Support for refinements and versioning
+#if 0
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
                                          FieldMask &refined_partition,
                                          std::set<RtEvent> &applied_events);
+#endif
       void initialize_versioning_analysis(ContextID ctx, EquivalenceSet *set,
                                           const FieldMask &mask);
       void initialize_nonexclusive_virtual_analysis(ContextID ctx,
@@ -4391,9 +4400,14 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
+      ProjectionPartition* find_largest_disjoint_complete_subtree(
+          InnerContext *context, const std::vector<ShardID> &participants,
+          size_t &leaves);
+#if 0
       void update_disjoint_complete_tree(ContextID ctx, RefinementOp *op,
                                          const FieldMask &refinement_mask,
                                          std::set<RtEvent> &applied_events);
+#endif
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *context,
                                     EqSetTracker *target,

@@ -3487,6 +3487,8 @@ namespace Legion {
                                          Serializer &rez);
       void send_control_replicate_collective_message(AddressSpaceID target,
                                                      Serializer &rez);
+      void send_control_replicate_rendezvous_message(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_library_mapper_request(AddressSpaceID target, Serializer &rez);
       void send_library_mapper_response(AddressSpaceID target, Serializer &rez);
       void send_library_trace_request(AddressSpaceID target, Serializer &rez);
@@ -3835,6 +3837,7 @@ namespace Legion {
       void handle_replicate_trigger_complete(Deserializer &derez);
       void handle_replicate_trigger_commit(Deserializer &derez);
       void handle_control_replicate_collective_message(Deserializer &derez);
+      void handle_control_replicate_rendezvous_message(Deserializer &derez);
       void handle_control_replicate_compute_equivalence_sets(
                                                            Deserializer &derez);
       void handle_control_replicate_equivalence_set_notification(
@@ -3983,6 +3986,7 @@ namespace Legion {
                                                 AddressSpaceID source);
       void handle_remote_distributed_id_response(Deserializer &derez);
       AddressSpaceID determine_owner(DistributedID did) const;
+      size_t find_distance(AddressSpaceID src, AddressSpaceID dst) const;
     public:
       void register_distributed_collectable(DistributedID did,
                                             DistributedCollectable *dc);
@@ -6231,6 +6235,9 @@ namespace Legion {
           break;
         case SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE:
           break;
+        // All rendezvous messages need to be ordered
+        case SEND_CONTROL_REPLICATE_RENDEZVOUS_MESSAGE:
+          return RENDEZVOUS_VIRTUAL_CHANNEL;
         case SEND_LIBRARY_MAPPER_REQUEST:
           break;
         case SEND_LIBRARY_MAPPER_RESPONSE:
