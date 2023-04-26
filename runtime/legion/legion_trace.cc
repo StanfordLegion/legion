@@ -7422,7 +7422,8 @@ namespace Legion {
                                              PredEvent pred_guard,
                                              LgEvent src_unique,
                                              LgEvent dst_unique,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -7445,7 +7446,7 @@ namespace Legion {
 #ifdef LEGION_SPY
             src_tree_id, dst_tree_id,
 #endif
-            rhs_, src_unique, dst_unique, priority)); 
+            rhs_, src_unique, dst_unique, priority, collective)); 
     }
 
     //--------------------------------------------------------------------------
@@ -7463,7 +7464,8 @@ namespace Legion {
                                              ApEvent precondition,
                                              PredEvent pred_guard,
                                              LgEvent unique_event,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -7485,7 +7487,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                        fill_uid, handle, tree_id,
 #endif
-                                       rhs_, unique_event, priority));
+                                       rhs_, unique_event,
+                                       priority, collective));
     }
 
     //--------------------------------------------------------------------------
@@ -8513,7 +8516,7 @@ namespace Legion {
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
                                  LgEvent src_unique, LgEvent dst_unique, 
-                                 int priority)
+                                 int priority, CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -8534,7 +8537,8 @@ namespace Legion {
                                           src_tree_id, dst_tree_id,
 #endif
                                           precondition, pred_guard,
-                                          src_unique, dst_unique, priority); 
+                                          src_unique, dst_unique,
+                                          priority, collective); 
     } 
     
     //--------------------------------------------------------------------------
@@ -8547,7 +8551,8 @@ namespace Legion {
                                  RegionTreeID tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 LgEvent unique_event, int priority)
+                                 LgEvent unique_event, int priority,
+                                 CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       // Make sure the lhs event is local to our shard
@@ -8568,7 +8573,7 @@ namespace Legion {
                                           fill_uid, handle, tree_id,
 #endif
                                           precondition, pred_guard, 
-                                          unique_event, priority);
+                                          unique_event, priority, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -10251,14 +10256,14 @@ namespace Legion {
                          RegionTreeID src_tid, RegionTreeID dst_tid,
 #endif
                          unsigned pi, LgEvent src_uni, LgEvent dst_uni,
-                         int pr)
+                         int pr, CollectiveKind collect)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
         reservations(r),
 #ifdef LEGION_SPY
         src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
         precondition_idx(pi), src_unique(src_uni),
-        dst_unique(dst_uni), priority(pr)
+        dst_unique(dst_uni), priority(pr), collective(collect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10300,7 +10305,7 @@ namespace Legion {
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
                                      src_unique, dst_unique,
-                                     priority, true/*replay*/);
+                                     collective, priority, true/*replay*/);
     }
 
     //--------------------------------------------------------------------------
@@ -10414,12 +10419,14 @@ namespace Legion {
 #ifdef LEGION_SPY
                          UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
-                         unsigned pi, LgEvent unique, int pr)
+                         unsigned pi, LgEvent unique, int pr,
+                         CollectiveKind collect)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
         fill_uid(uid), handle(h), tree_id(tid),
 #endif
-        precondition_idx(pi), unique_event(unique), priority(pr)
+        precondition_idx(pi), unique_event(unique), priority(pr),
+        collective(collect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10461,7 +10468,8 @@ namespace Legion {
                                      fill_uid, handle, tree_id,
 #endif
                                      precondition, PredEvent::NO_PRED_EVENT,
-                                     unique_event, priority, true/*replay*/);
+                                     unique_event, collective, priority,
+                                     true/*replay*/);
     }
 
     //--------------------------------------------------------------------------

@@ -274,7 +274,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
-                           int priority) = 0;
+                           int priority, CollectiveKind collective) = 0;
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -312,7 +312,8 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event, int priority) = 0;
+                           LgEvent unique_event, int priority, 
+                           CollectiveKind collective) = 0;
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -428,7 +429,8 @@ namespace Legion {
                            RegionTreeID src_tree_id, RegionTreeID dst_tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent src_unique, LgEvent dst_unique,int priority);
+                           LgEvent src_unique, LgEvent dst_unique,
+                           int priority, CollectiveKind collective);
       virtual void record_issue_across(const TraceLocalID &tlid, ApEvent &lhs,
                            ApEvent collective_precondition, 
                            ApEvent copy_precondition,
@@ -465,7 +467,8 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event, int priority);
+                           LgEvent unique_event, int priority,
+                           CollectiveKind collective);
       virtual void record_fill_inst(ApEvent lhs, IndexSpaceExpression *expr,
                            const UniqueInst &dst_inst,
                            const FieldMask &fill_mask,
@@ -673,7 +676,7 @@ namespace Legion {
 #endif
                           ApEvent precondition, PredEvent pred_guard,
                           LgEvent src_unique, LgEvent dst_unique,
-                          int priority) const
+                          int priority, CollectiveKind collective) const
         {
           sanity_check();
           rec->record_issue_copy(tlid, result, expr, src_fields,
@@ -682,7 +685,8 @@ namespace Legion {
                                  src_tree_id, dst_tree_id,
 #endif
                                  precondition, pred_guard,
-                                 src_unique, dst_unique, priority);
+                                 src_unique, dst_unique,
+                                 priority, collective);
         }
       inline void record_issue_fill(ApEvent &result,
                           IndexSpaceExpression *expr,
@@ -694,7 +698,8 @@ namespace Legion {
                           RegionTreeID tree_id,
 #endif
                           ApEvent precondition, PredEvent pred_guard,
-                          LgEvent unique_event, int priority) const
+                          LgEvent unique_event, int priority,
+                          CollectiveKind collective) const
         {
           sanity_check();
           rec->record_issue_fill(tlid, result, expr, fields, 
@@ -703,7 +708,7 @@ namespace Legion {
                                  fill_uid, handle, tree_id,
 #endif
                                  precondition, pred_guard,
-                                 unique_event, priority);
+                                 unique_event, priority, collective);
         }
       inline void record_issue_across(ApEvent &result,
                                       ApEvent collective_precondition,
