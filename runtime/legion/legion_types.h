@@ -314,6 +314,35 @@ namespace Legion {
       DEP_PART_WEIGHTS = 15, // create partition by weights
     };
 
+    // Collective copy kinds
+    enum CollectiveKind {
+      COLLECTIVE_NONE = 0,
+      // Filling a collective instance (both normal and reductions)
+      COLLECTIVE_FILL = 1,
+      // Broadcasting one normal instance to a collective normal instance
+      COLLECTIVE_BROADCAST = 2,
+      // Reducing a collective reduction instance to either a
+      // single normal or a single reduction instance
+      COLLECTIVE_REDUCTION = 3,
+      // Performing an all-reduce from a collective reduction instance
+      // to a collective normal or reduction instance using a butterfly
+      // network reduction (both instances using the same nodes)
+      COLLECTIVE_BUTTERFLY_ALLREDUCE = 4,
+      // Performing an all-reduce by doing a reduction down to a single
+      // instance and then broadcasting the result out from that instance
+      // (instances don't exist on the same set of nodes)
+      COLLECTIVE_HOURGLASS_ALLREDUCE = 5,
+      // Copy from one collective normal instanace to another collective
+      // normal instance for each of the points in the destination
+      COLLECTIVE_POINT_TO_POINT = 6,
+      // Apply a reduction from a single reduction instance to 
+      // a collective normal instance
+      COLLECTIVE_REDUCECAST = 7,
+      // Degenerate case: apply a copy-across from a collective reduction
+      // instance to any kind of other instance without doing an all-reduce
+      COLLECTIVE_HAMMER_REDUCTION = 8,
+    };
+
     // Enumeration of Legion runtime tasks
     enum LgTaskID {
       LG_SCHEDULER_ID,

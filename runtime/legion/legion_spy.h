@@ -1610,11 +1610,12 @@ namespace Legion {
                                          IndexSpaceExprID expr_id,
                                          RegionTreeID src_tree_id,
                                          RegionTreeID dst_tree_id,
-                                         LgEvent pre, LgEvent post)
+                                         LgEvent pre, LgEvent post,
+                                         CollectiveKind collective)
       {
-        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT,
+        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT " %d",
                       op_unique_id, expr_id, src_tree_id,
-                      dst_tree_id, pre.id, post.id);
+                      dst_tree_id, pre.id, post.id, collective);
       }
 
       static inline void log_copy_field(LgEvent post, FieldID src_fid,
@@ -1663,11 +1664,12 @@ namespace Legion {
                                          FieldSpace handle,
                                          RegionTreeID tree_id,
                                          LgEvent pre, LgEvent post,
-                                         UniqueID fill_unique_id)
+                                         UniqueID fill_unique_id,
+                                         CollectiveKind collective)
       {
-        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu",
+        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu %d",
 		      op_unique_id, expr_id, handle.get_id(), tree_id,
-		      pre.id, post.id, fill_unique_id);
+		      pre.id, post.id, fill_unique_id, collective);
       }
 
       static inline void log_fill_field(LgEvent post, 

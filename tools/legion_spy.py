@@ -140,6 +140,15 @@ UNION_EXPR = 1
 INTERSECT_EXPR = 2
 DIFFERENCE_EXPR = 3,
 
+COLLECTIVE_FILL = 1,
+COLLECTIVE_BROADCAST = 2
+COLLECTIVE_REDUCTION = 3
+COLLECTIVE_BUTTERFLY_ALLREDUCE = 4
+COLLECTIVE_HOURGLASS_ALLREDUCE = 5
+COLLECTIVE_POINT_TO_POINT = 6
+COLLECTIVE_REDUCECAST = 7
+COLLECTIVE_HAMMER_REDUCTION = 8
+
 # Helper methods for python 2/3 foolishness
 def iteritems(obj):
     return obj.items() if sys.version_info > (3,) else obj.viewitems()
@@ -10479,7 +10488,7 @@ class RealmBase(object):
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
                  'event_context', 'version_numbers', 'across_version_numbers', 
-                 'indirections', 'cluster_name']
+                 'indirections', 'collective', 'cluster_name']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -10498,6 +10507,7 @@ class RealmBase(object):
         self.version_numbers = None
         self.across_version_numbers = None
         self.indirections = None
+        self.collective = None
         self.cluster_name = None # always none
 
     def is_realm_operation(self):
@@ -10505,6 +10515,10 @@ class RealmBase(object):
 
     def is_physical_operation(self):
         return True 
+
+    def set_collective(self, collective):
+        assert self.collective is None
+        self.collective = collective
 
     def add_equivalence_incoming(self, eq, src):
         assert eq in self.eq_privileges
@@ -10755,6 +10769,7 @@ class RealmCopy(RealmBase):
 
     def __str__(self):
         if self.indirections:
+            assert self.collective is None
             has_src = False
             for index in self.src_indirections:
                 if index is not None:
@@ -10773,6 +10788,16 @@ class RealmCopy(RealmBase):
                     return "Gather Copy ("+str(self.realm_num)+")"
             else:
                 return "Scatter Copy ("+str(self.realm_num)+")"
+        elif self.collective is not None:
+            return {
+                COLLECTIVE_BROADCAST : "Broadcast ",
+                COLLECTIVE_REDUCTION : "Reduction ",
+                COLLECTIVE_BUTTERFLY_ALLREDUCE : "Butterfly Allreduce ",
+                COLLECTIVE_HOURGLASS_ALLREDUCE : "Hourglass Allreduce ",
+                COLLECTIVE_POINT_TO_POINT : "Point-to-Point ",
+                COLLECTIVE_REDUCECAST : "Reducecast ",
+                COLLECTIVE_HAMMER_REDUCTION : "Hammer Reduction ",
+            }[self.collective] + "Realm Copy ("+str(self.realm_num)+")"
         else:
             return "Realm Copy ("+str(self.realm_num)+")"
 
@@ -11122,7 +11147,13 @@ class RealmFill(RealmBase):
         self.node_name = 'realm_fill_'+str(realm_num)
 
     def __str__(self):
-        return "Realm Fill ("+str(self.realm_num)+")"
+        if self.collective is not None:
+            return {
+                COLLECTIVE_FILL : "Collective ",
+                COLLECTIVE_BUTTERFLY_ALLREDUCE : "Butterfly Allreduce ",
+            }[self.collective] + "Realm Fill ("+str(self.realm_num)+")"
+        else:
+            return "Realm Fill ("+str(self.realm_num)+")"
 
     __repr__ = __str__
 
@@ -11936,7 +11967,7 @@ operation_event_pat     = re.compile(
 realm_copy_pat          = re.compile(
     prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
            "(?P<src_tid>[0-9]+) (?P<dst_tid>[0-9]+) "+
-           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<collective>[0-9]+)")
 realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
@@ -11955,7 +11986,8 @@ indirect_group_pat      = re.compile(
            "(?P<inst>[0-9a-f]+) (?P<ispace>[0-9]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<fill_uid>[0-9]+)")
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) "+
+           "(?P<fill_uid>[0-9]+) (?P<collective>[0-9]+)")
 realm_fill_field_pat    = re.compile(
     prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
@@ -12035,6 +12067,9 @@ def parse_legion_spy_line(line, state):
         src_tree_id = int(m.group('src_tid'))
         dst_tree_id = int(m.group('dst_tid'))
         copy.set_tree_properties(index_expr, src_tree_id, dst_tree_id)
+        collective = int(m.group('collective'))
+        if collective > 0:
+            copy.set_collective(collective)
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:
@@ -12097,6 +12132,9 @@ def parse_legion_spy_line(line, state):
         if fill_uid > 0:
             fill_op = state.get_operation(fill_uid)
             fill.set_fill_op(fill_op)
+        collective = int(m.group('collective'))
+        if collective > 0:
+            fill.set_collective(collective)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:

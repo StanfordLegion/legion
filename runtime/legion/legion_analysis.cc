@@ -720,7 +720,8 @@ namespace Legion {
                                              PredEvent pred_guard,
                                              LgEvent src_unique,
                                              LgEvent dst_unique,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -757,6 +758,7 @@ namespace Legion {
           rez.serialize(src_unique);
           rez.serialize(dst_unique);
           rez.serialize(priority);
+          rez.serialize(collective);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -769,7 +771,7 @@ namespace Legion {
                               src_tree_id, dst_tree_id,
 #endif
                               precondition, pred_guard,
-                              src_unique, dst_unique, priority);
+                              src_unique, dst_unique, priority, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -875,7 +877,8 @@ namespace Legion {
                                              ApEvent precondition,
                                              PredEvent pred_guard,
                                              LgEvent unique_event,
-                                             int priority)
+                                             int priority,
+                                             CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
       if (local_space != origin_space)
@@ -905,6 +908,7 @@ namespace Legion {
           rez.serialize(pred_guard);  
           rez.serialize(unique_event);
           rez.serialize(priority);
+          rez.serialize(collective);
         }
         runtime->send_remote_trace_update(origin_space, rez);
         // Wait to see if lhs changes
@@ -917,7 +921,7 @@ namespace Legion {
                                       fill_uid, handle, tree_id,
 #endif
                                       precondition, pred_guard,
-                                      unique_event, priority);
+                                      unique_event, priority, collective);
     }
 
     //--------------------------------------------------------------------------
@@ -1375,6 +1379,8 @@ namespace Legion {
             derez.deserialize(dst_unique);
             int priority;
             derez.deserialize(priority);
+            CollectiveKind collective;
+            derez.deserialize(collective);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs;
             // Do the base call
@@ -1384,7 +1390,8 @@ namespace Legion {
                                    src_tree_id, dst_tree_id,
 #endif
                                    precondition, pred_guard,
-                                   src_unique, dst_unique, priority);
+                                   src_unique, dst_unique,
+                                   priority, collective);
             if (lhs != lhs_copy)
             {
               Serializer rez;
@@ -1475,6 +1482,8 @@ namespace Legion {
             derez.deserialize(unique_event);
             int priority;
             derez.deserialize(priority);
+            CollectiveKind collective;
+            derez.deserialize(collective);
             // Use this to track if lhs changes
             const ApUserEvent lhs_copy = lhs; 
             // Do the base call
@@ -1484,7 +1493,7 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
                                    precondition, pred_guard,
-                                   unique_event, priority);
+                                   unique_event, priority, collective);
             if (lhs != lhs_copy)
             {
               Serializer rez;

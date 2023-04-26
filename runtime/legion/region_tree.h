@@ -1365,8 +1365,9 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event, int priority = 0,
-                           bool replay = false) = 0;
+                           LgEvent unique_event,
+                           CollectiveKind collective = COLLECTIVE_NONE,
+                           int priority = 0, bool replay = false) = 0;
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1378,6 +1379,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
+                           CollectiveKind collective = COLLECTIVE_NONE,
                            int priority = 0, bool replay = false) = 0;
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
@@ -1436,7 +1438,8 @@ namespace Legion {
                                RegionTreeID tree_id,
 #endif
                                ApEvent precondition, PredEvent pred_guard,
-                               LgEvent unique_event, int priority, bool replay);
+                               LgEvent unique_event, CollectiveKind collective,
+                               int priority, bool replay);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,Operation*op,
                                const Realm::IndexSpace<DIM,T> &space,
@@ -1450,6 +1453,7 @@ namespace Legion {
 #endif
                                ApEvent precondition, PredEvent pred_guard,
                                LgEvent src_unique, LgEvent dst_unique,
+                               CollectiveKind collective,
                                int priority, bool replay);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
@@ -1653,8 +1657,9 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event, int priority = 0,
-                           bool replay = false);
+                           LgEvent unique_event,
+                           CollectiveKind collective = COLLECTIVE_NONE,
+                           int priority = 0, bool replay = false);
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -1666,6 +1671,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
+                           CollectiveKind collective = COLLECTIVE_NONE,
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
@@ -2617,8 +2623,9 @@ namespace Legion {
                            RegionTreeID tree_id,
 #endif
                            ApEvent precondition, PredEvent pred_guard,
-                           LgEvent unique_event, int priority = 0,
-                           bool replay = false);
+                           LgEvent unique_event,
+                           CollectiveKind collective = COLLECTIVE_NONE,
+                           int priority = 0, bool replay = false);
       virtual ApEvent issue_copy(Operation *op,
                            const PhysicalTraceInfo &trace_info,
                            const std::vector<CopySrcDstField> &dst_fields,
@@ -2630,6 +2637,7 @@ namespace Legion {
 #endif
                            ApEvent precondition, PredEvent pred_guard,
                            LgEvent src_unique, LgEvent dst_unique,
+                           CollectiveKind collective = COLLECTIVE_NONE,
                            int priority = 0, bool replay = false);
       virtual CopyAcrossUnstructured* create_across_unstructured(
                            const std::map<Reservation,bool> &reservations,
