@@ -3716,6 +3716,11 @@ class State(object):
                           start: int, stop: int, 
                           gpu_start: int, gpu_stop: int
     ) -> None:
+        # it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled, 
+        # because the cuda event completions of these two timestamp may be out of order when
+        # they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
+        if gpu_start > gpu_stop:
+            gpu_start = gpu_stop - 1
         variant = self.find_or_create_variant(task_id, variant_id)
         task = self.find_or_create_task(op_id, variant, create, ready, gpu_start, gpu_stop)
 

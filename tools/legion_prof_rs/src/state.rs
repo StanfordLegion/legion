@@ -3524,7 +3524,14 @@ fn process_record(
             gpu_stop,
             ..
         } => {
-            let time_range = TimeRange::new_full(*create, *ready, *gpu_start, *gpu_stop);
+            // it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled,
+            // because the cuda event completions of these two timestamp may be out of order when
+            // they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
+            let mut gpu_start = *gpu_start;
+            if gpu_start > *gpu_stop {
+                gpu_start.0 = gpu_stop.0 - 1;
+            }
+            let time_range = TimeRange::new_full(*create, *ready, gpu_start, *gpu_stop);
             state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
             state.update_last_time(*gpu_stop);
         }
