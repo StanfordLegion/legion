@@ -86,7 +86,7 @@ legion_cxx_tests = [
     ['tutorial/realm/region_instances/realm_region_instances', []],
     ['tutorial/realm/deferred_allocation/realm_deferred_allocation', []],
     ['tutorial/realm/index_space_ops/realm_index_space_ops', []],
-    ['tutorial/realm/index_spaces/realm_index_spaces', []],
+    ['tutorial/realm/index_space_copy_fill/realm_index_space_copy_fill', []],
     ['tutorial/realm/reductions/realm_reductions', []],
     ['tutorial/realm/barrier/realm_barrier', []],
     ['tutorial/realm/subgraph/realm_subgraph', []],

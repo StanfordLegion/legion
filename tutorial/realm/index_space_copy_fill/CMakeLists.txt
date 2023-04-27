@@ -15,16 +15,16 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(RealmExample_index_spaces)
+project(RealmExample_index_space_copy_fill)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(realm_index_spaces index_spaces.cc)
-target_link_libraries(realm_index_spaces Legion::Realm)
+add_executable(realm_index_space_copy_fill index_space_copy_fill.cc)
+target_link_libraries(realm_index_space_copy_fill Legion::Realm)
 
 if(Legion_ENABLE_TESTING)
-  add_test(NAME realm_index_spaces COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_index_spaces> ${Legion_TEST_ARGS})
+  add_test(NAME realm_index_space_copy_fill COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_index_space_copy_fill> ${Legion_TEST_ARGS})
 endif()

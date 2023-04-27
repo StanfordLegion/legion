@@ -28,9 +28,9 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= realm_index_spaces
+OUTFILE		?= realm_index_space_copy_fill
 # List all the application source files here
-GEN_SRC		?= index_spaces.cc		# .cc files
+GEN_SRC		?= index_space_copy_fill.cc		# .cc files
 GEN_GPU_SRC	?=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
