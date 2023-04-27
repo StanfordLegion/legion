@@ -1,8 +1,5 @@
 # Deferred Allocation
 
-* [Introduction](#introduction)
-* [Chaining Allocations](#chaining-allocations)
-
 ## Introduction
 In a previous tutorial, we covered how Realm's programming model
 relies on deferred execution, allowing operations to be performed
@@ -18,6 +15,10 @@ greatly increase the lifetime of the allocation, leading to the wastage
 of memory resources. By deferring the allocation request until the
 first user of the allocation is able to execute, the lifetime of the
 allocation is minimized.
+
+Here is a list of covered topics:
+
+* [Chaining Allocations](#chaining-allocations)
 
 ## Chaining Allocations
 In this tutorial, we demonstrate the deferred allocation strategy by

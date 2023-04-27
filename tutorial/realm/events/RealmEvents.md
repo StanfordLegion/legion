@@ -1,13 +1,5 @@
 # Realm Events
 
-* [Introduction](#introduction)
-* [Events Basics](#events-basics)
-* [Creating Events](#creating-events)
-* [Triggering Events](#trigerring-events)
-* [Creating Control Dependencies](#creating-control-dependencies)
-* [References](#references)
-
-
 ## Introduction
 Realm is a fully asynchronous, event-based runtime, and events form
 the backbone of Realm's programming model, describing the dependencies
@@ -22,6 +14,14 @@ communications are required.
 In this tutorial, we'll demonstrate how to use events to take 
 advantage of Realm's deferred execution model when writing asynchronous 
 applications.
+
+Here is a list of covered topics:
+
+* [Events Basics](#events-basics)
+* [Creating Events](#creating-events)
+* [Triggering Events](#trigerring-events)
+* [Creating Control Dependencies](#creating-control-dependencies)
+* [References](#references)
 
 ## Events Basics
 Usually, Realm creates Events as part of handling application requests

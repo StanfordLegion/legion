@@ -1,11 +1,5 @@
 # Reductions
 
-* [Introduction](#introduction)
-* [Basics of Reductions](#basics-of-reductions)
-* [Registering Reduction Operators](#registering-reduction-operators)
-* [Performing Reduction Copies](#performing-reduction-copies)
-* [What's Next?](#what's-next?)
-
 ## Introduction
 Reductions are an important concept in parallel programming. 
 They combine multiple values into a single value,
@@ -15,6 +9,13 @@ In this tutorial, we will walk through an example of using reductions in
 Realm. We will begin by discussing the basics of reductions, then move
 on to the example code, which demonstrates how to perform reductions
 through the copy interface provided by index spaces.
+
+Here is a list of covered topics:
+
+* [Basics of Reductions](#basics-of-reductions)
+* [Registering Reduction Operators](#registering-reduction-operators)
+* [Performing Reduction Copies](#performing-reduction-copies)
+* [What's Next?](#what's-next?)
 
 ## Basics of Reductions
 Reductions are used to combine multiple values into a single value.

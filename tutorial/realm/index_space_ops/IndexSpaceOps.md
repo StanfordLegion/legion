@@ -1,16 +1,17 @@
 # Index Spaces
 
-* [Introduction](#introduction)
-* [Creating Index Spaces](#creating-index-spaces)
-* [Set Operations](#set-operations)
-* [Iterating Over Index Spaces](#iterating-over-index-spaces)
-* [Managing Memory In Index Spaces](#managing-memory-in-index-spaces)
-
 ## Introduction
 Index space is a core data structure offered by Realm to applications
 as part of it's public interface. This tutorial introduces the basic 
 knowledge necessary to work with index spaces and discusses how to 
 manage index spaces in the application code.
+
+Here is a list of covered topics:
+
+* [Creating Index Spaces](#creating-index-spaces)
+* [Set Operations](#set-operations)
+* [Iterating Over Index Spaces](#iterating-over-index-spaces)
+* [Managing Memory In Index Spaces](#managing-memory-in-index-spaces)
 
 ## Index Space Basics
 An IndexSpace (index space) is a Plain Old Data (POD) structure in

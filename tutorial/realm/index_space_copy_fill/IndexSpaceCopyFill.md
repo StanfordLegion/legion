@@ -1,17 +1,18 @@
-# Realm Copies
+# Realm Copies and Fills
 
-* [Introduction](#introduction)
+## Introduction
+In this example, we will discuss how to perform operations such
+as filling and copying data stored in region instances while
+exploring the features of index spaces.
+
+Here is a list of covered topics:
+
 * [DMA Sytem](#dma-system)
 * [Structured And Unstructured
   Copies](#structured-and-unstructured-copies)
 * [Filling Region Instances](#filling-region-instances)
 * [Copying Region Instances](#copying-region-instances)
 * [References](#references)
-
-## Introduction
-In this example, we will discuss how to perform operations such
-as filling and copying data stored in region instances while
-exploring the features of index spaces.
 
 ## DMA System
 In Realm, data is stored inside region instances. The region instances

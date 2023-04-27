@@ -1,16 +1,17 @@
 # Region Instances
 
-* [Introduction](#introduction)
+## Introduction
+This tutorial will cover how to manage application data in
+Realm. Specifically, we will show how to allocate a blob of data in
+system memory and create writer and reader tasks to access this data.
+
+Here is a list of covered topics:
+
 * [Data Layouts](#data-layouts)
 * [Creating Instances](#creating-instances)
 * [Accessing Instances](#accessing-intances)
 * [Best Practices](#best-practices)
 * [References](#references)
-
-## Introduction
-This tutorial will cover how to manage application data in
-Realm. Specifically, we will show how to allocate a blob of data in
-system memory and create writer and reader tasks to access this data.
 
 ## Data Layouts
 Before diving into the specifics of using Realm for data management,
