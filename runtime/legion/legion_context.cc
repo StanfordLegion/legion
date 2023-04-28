@@ -695,7 +695,7 @@ namespace Legion {
             // fields where they haven't been made visible yet
             CreationOp *creator = runtime->get_available_creation_op();
             creator->initialize_fence(ctx, precondition, provenance);
-            add_to_dependence_queue(creator);
+            ctx->add_to_dependence_queue(creator);
           }
           else
             precondition.wait();
@@ -755,7 +755,7 @@ namespace Legion {
             InnerContext *ctx = static_cast<InnerContext*>(this);
             CreationOp *creator = runtime->get_available_creation_op();
             creator->initialize_fence(ctx, precondition, provenance);
-            add_to_dependence_queue(creator);
+            ctx->add_to_dependence_queue(creator);
           }
           else
             precondition.wait();
@@ -2798,7 +2798,8 @@ namespace Legion {
         full_inner_context(finner),
         concurrent_context(concurrent), finished_execution(false),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped),
-        total_children_count(0), total_summary_count(0),
+        total_children_count(0), executing_children_count(0),
+        executed_children_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false),
         ready_comp_queue(CompletionQueue::NO_QUEUE),
@@ -3730,31 +3731,17 @@ namespace Legion {
       std::set<ApEvent> previous_events;
       {
         AutoLock child_lock(child_op_lock,1,false/*exclusive*/); 
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executing_children.begin(); it != executing_children.end(); it++)
+        for (std::deque<ReorderBufferEntry>::const_iterator it =
+              reorder_buffer.begin(); it != reorder_buffer.end(); it++)
         {
-          if (it->first->get_generation() != it->second)
+          if ((it->stage == COMPLETED_STAGE) || (it->stage == COMMITTED_STAGE))
             continue;
-          const size_t op_index = it->first->get_ctx_index();
           // If it's younger than our deletion we don't care
-          if (op_index >= return_index)
+          if (it->operation_index >= return_index)
             continue;
-          dependences.insert(*it);
-          previous_events.insert(it->first->get_completion_event());
+          dependences[it->operation] = it->operation->get_generation();
+          previous_events.insert(it->operation->get_completion_event());
         }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executed_children.begin(); it != executed_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's younger than our deletion we don't care
-          if (op_index >= return_index)
-            continue;
-          dependences.insert(*it);
-          previous_events.insert(it->first->get_completion_event());
-        }
-        // We know that any complete children are done
       }
       // Do not check the current execution fence as it may have come after us
       if (!previous_events.empty())
@@ -7983,12 +7970,16 @@ namespace Legion {
       {
         AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-        assert(executing_children.find(op) == executing_children.end());
-        assert(executed_children.find(op) == executed_children.end());
-        assert(complete_children.find(op) == complete_children.end());
-        outstanding_children[op->get_ctx_index()] = op;
-#endif       
-        executing_children[op] = op->get_generation();
+        assert(reorder_buffer.empty() ||
+            (reorder_buffer.back().operation_index < op->get_ctx_index()));
+#endif
+        // Pad the reorder buffer for missing entries if necessary
+        while (!reorder_buffer.empty() &&
+            ((reorder_buffer.back().operation_index+1) < op->get_ctx_index()))
+          reorder_buffer.emplace_back(
+              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+        reorder_buffer.emplace_back(ReorderBufferEntry(op));
+        executing_children_count++;
         // Bump our priority if the context is not active as it means
         // that the runtime is currently not ahead of execution
         if (!currently_active_context)
@@ -8745,14 +8736,19 @@ namespace Legion {
       for (std::list<Operation*>::const_iterator it = 
             unordered_ops.begin(); it != unordered_ops.end(); it++)
       {
-        (*it)->set_tracking_parent(total_children_count++);
+        const size_t op_index = total_children_count++;
+        (*it)->set_tracking_parent(op_index);
 #ifdef DEBUG_LEGION
-        assert(executing_children.find(*it) == executing_children.end());
-        assert(executed_children.find(*it) == executed_children.end());
-        assert(complete_children.find(*it) == complete_children.end());
-        outstanding_children[(*it)->get_ctx_index()] = (*it);
+        assert(reorder_buffer.empty() || 
+            (reorder_buffer.back().operation_index < op_index));
 #endif       
-        executing_children[*it] = (*it)->get_generation();
+        // Pad the reorder buffer for missing entries if necessary
+        while (!reorder_buffer.empty() &&
+            ((reorder_buffer.back().operation_index+1) < op_index))
+          reorder_buffer.emplace_back(
+              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+        reorder_buffer.emplace_back(ReorderBufferEntry(*it));
+        executing_children_count++;
         dependence_queue.push_back(*it);
       }
       outstanding_children_count.fetch_add(unordered_ops.size());
@@ -8785,9 +8781,36 @@ namespace Legion {
     {
       AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
-      assert(executing_children.find(op) == executing_children.end());
+      assert(reorder_buffer.empty() ||
+          (reorder_buffer.back().operation_index < op->get_ctx_index()));
 #endif
-      executing_children[op] = op->get_generation();
+      // Pad the reorder buffer for missing entries if necessary
+      while (!reorder_buffer.empty() &&
+          ((reorder_buffer.back().operation_index+1) < op->get_ctx_index()))
+        reorder_buffer.emplace_back(
+            ReorderBufferEntry(reorder_buffer.back().operation_index+1));
+      reorder_buffer.emplace_back(ReorderBufferEntry(op));
+      executing_children_count++;
+    }
+
+    //--------------------------------------------------------------------------
+    InnerContext::ReorderBufferEntry& InnerContext::find_rob_entry(
+                                                                  Operation *op)
+    //--------------------------------------------------------------------------
+    {
+      ReorderBufferEntry &head = reorder_buffer.front();
+#ifdef DEBUG_LEGION
+      assert(head.operation_index <= op->get_ctx_index());
+#endif
+      size_t offset = op->get_ctx_index() - head.operation_index;
+#ifdef DEBUG_LEGION
+      assert(offset < reorder_buffer.size());
+#endif
+      ReorderBufferEntry &entry = reorder_buffer[offset];
+#ifdef DEBUG_LEGION
+      assert(entry.operation == op);
+#endif
+      return entry;
     }
 
     //--------------------------------------------------------------------------
@@ -8797,18 +8820,14 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock child_lock(child_op_lock);
-        std::map<Operation*,GenerationID>::iterator 
-          finder = executing_children.find(op);
+        ReorderBufferEntry &entry = find_rob_entry(op);
 #ifdef DEBUG_LEGION
-        assert(finder != executing_children.end());
-        assert(executed_children.find(op) == executed_children.end());
-        assert(complete_children.find(op) == complete_children.end());
+        assert(entry.stage == EXECUTING_STAGE);
+        assert(executing_children_count > 0);
 #endif
-        // Now put it in the list of executing operations
-        // Note this doesn't change the number of active children
-        // so there's no need to trigger any window waits
-        executed_children.insert(*finder);
-        executing_children.erase(finder);
+        entry.stage = EXECUTED_STAGE;
+        executing_children_count--;
+        executed_children_count++;
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
         int outstanding_count = outstanding_children_count.fetch_sub(1) - 1;
@@ -8836,19 +8855,17 @@ namespace Legion {
       std::set<ApEvent> child_completion_events;
       {
         AutoLock child_lock(child_op_lock);
-        std::map<Operation*,GenerationID>::iterator finder = 
-          executed_children.find(op);
+        ReorderBufferEntry &entry = find_rob_entry(op);
 #ifdef DEBUG_LEGION
-        assert(finder != executed_children.end());
-        assert(complete_children.find(op) == complete_children.end());
-        assert(executing_children.find(op) == executing_children.end());
+        assert(entry.stage == EXECUTED_STAGE);
+        assert(executed_children_count > 0);
 #endif
-        // Put it on the list of complete children to complete
-        complete_children.insert(*finder);
-        executed_children.erase(finder);
+        entry.stage = COMPLETED_STAGE;
+        executed_children_count--;
         // See if we need to trigger the all children complete call
-        if (task_executed && (owner_task != NULL) && executing_children.empty()
-            && executed_children.empty() && !children_complete_invoked)
+        if (task_executed && (owner_task != NULL) && 
+            (executing_children_count == 0) && (executed_children_count == 0) &&
+            !children_complete_invoked)
         {
           needs_trigger = true;
           children_complete_invoked = true;
@@ -8858,10 +8875,16 @@ namespace Legion {
               cummulative_child_completion_events.end());
           cummulative_child_completion_events.clear();
 #endif
-          for (LegionMap<Operation*,GenerationID,
-                COMPLETE_CHILD_ALLOC>::const_iterator it =
-                complete_children.begin(); it != complete_children.end(); it++)
-            it->first->find_completion_effects(child_completion_events);
+          for (std::deque<ReorderBufferEntry>::const_iterator it =
+                reorder_buffer.begin(); it != reorder_buffer.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(it->stage != EXECUTING_STAGE);
+            assert(it->stage != EXECUTED_STAGE);
+#endif
+            if (it->stage == COMPLETED_STAGE)
+              it->operation->find_completion_effects(child_completion_events);
+          }
         }
 #ifdef LEGION_SPY
         else
@@ -8897,19 +8920,16 @@ namespace Legion {
       bool needs_trigger = false;
       {
         AutoLock child_lock(child_op_lock);
-        std::map<Operation*,GenerationID>::iterator finder = 
-          complete_children.find(op);
+        ReorderBufferEntry &entry = find_rob_entry(op);
 #ifdef DEBUG_LEGION
-        assert(finder != complete_children.end());
-        assert(executing_children.find(op) == executing_children.end());
-        assert(executed_children.find(op) == executed_children.end());
-        outstanding_children.erase(op->get_ctx_index());
+        assert(entry.stage == COMPLETED_STAGE);
 #endif
-        complete_children.erase(finder);
+        entry.stage = COMMITTED_STAGE;
+        while (!reorder_buffer.empty() && 
+            (reorder_buffer.front().stage == COMMITTED_STAGE))
+          reorder_buffer.pop_front();
         // See if we need to trigger the all children commited call
-        if (task_executed && executing_children.empty() && 
-            executed_children.empty() && complete_children.empty() &&
-            !children_commit_invoked)
+        if (task_executed && reorder_buffer.empty() && !children_commit_invoked)
         {
           needs_trigger = true;
           children_commit_invoked = true;
@@ -9308,23 +9328,34 @@ namespace Legion {
     {
       // Don't both taking the lock since this is for debugging
       // and isn't actually called anywhere
-      for (std::map<Operation*,GenerationID>::const_iterator it =
-            executing_children.begin(); it != executing_children.end(); it++)
+      for (std::deque<ReorderBufferEntry>::const_iterator it =
+            reorder_buffer.begin(); it != reorder_buffer.end(); it++)
       {
-        Operation *op = it->first;
-        printf("Executing Child %p\n",op);
-      }
-      for (std::map<Operation*,GenerationID>::const_iterator it =
-            executed_children.begin(); it != executed_children.end(); it++)
-      {
-        Operation *op = it->first;
-        printf("Executed Child %p\n",op);
-      }
-      for (std::map<Operation*,GenerationID>::const_iterator it =
-            complete_children.begin(); it != complete_children.end(); it++)
-      {
-        Operation *op = it->first;
-        printf("Complete Child %p\n",op);
+        switch (it->stage)
+        {
+          case EXECUTING_STAGE:
+            {
+              printf("Executing Child %p\n", it->operation);
+              break;
+            }
+          case EXECUTED_STAGE:
+            {
+              printf("Executed Child %p\n", it->operation);
+              break;
+            }
+          case COMPLETED_STAGE:
+            {
+              printf("Completed Child %p\n", it->operation);
+              break;
+            }
+          case COMMITTED_STAGE:
+            {
+              printf("Committed Child %p\n", it->operation);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
     }
 
@@ -9447,7 +9478,7 @@ namespace Legion {
                (op_kind == Operation::TRACE_SUMMARY_OP_KIND));
       }
 #endif
-      std::map<Operation*,GenerationID> previous_operations;
+      std::vector<std::pair<Operation*,GenerationID> > previous_operations;
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
@@ -9458,143 +9489,83 @@ namespace Legion {
       {
         // Mapping analysis only
         AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executing_children.begin(); it != executing_children.end(); it++)
+        for (std::deque<ReorderBufferEntry>::const_reverse_iterator it =
+              reorder_buffer.crbegin(); it != reorder_buffer.crend(); it++)
         {
-          if (it->first->get_generation() != it->second)
+          if (it->operation_index < current_mapping_fence_index)
+            break;
+          // If it came after this fence we skip it
+          if (next_fence_index <= it->operation_index)
             continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's older than the previous fence then we don't care
-          if (op_index < current_mapping_fence_index)
+          if (it->stage == COMMITTED_STAGE)
             continue;
-          // Record a dependence if it didn't come after our fence
-          if (op_index < next_fence_index)
-            previous_operations.insert(*it);
+          previous_operations.emplace_back(
+              std::make_pair(it->operation, it->operation->get_generation()));
         }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executed_children.begin(); it != executed_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's older than the previous fence then we don't care
-          if (op_index < current_mapping_fence_index)
-            continue;
-          // Record a dependence if it didn't come after our fence
-          if (op_index < next_fence_index)
-            previous_operations.insert(*it);
-        }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              complete_children.begin(); it != complete_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's older than the previous fence then we don't care
-          if (op_index < current_mapping_fence_index)
-            continue;
-          // Record a dependence if it didn't come after our fence
-          if (op_index < next_fence_index)
-            previous_operations.insert(*it);
-        }
+        // We can update the current mapping fence index since it only
+        // needs to be referred to here as the previous "upward" facing fence
+        current_mapping_fence_index = next_fence_index;
       }
       else if (!mapping)
       {
         // Execution analysis only
         AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executing_children.begin(); it != executing_children.end(); it++)
+        for (std::deque<ReorderBufferEntry>::const_reverse_iterator it =
+              reorder_buffer.crbegin(); it != reorder_buffer.crend(); it++)
         {
-          if (it->first->get_generation() != it->second)
+          if (it->operation_index < current_execution_fence_index)
+            break;
+          if (next_fence_index <= it->operation_index)
             continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's older than the previous fence then we don't care
-          if (op_index < current_execution_fence_index)
+          if (it->stage == COMMITTED_STAGE)
             continue;
-          // Record a dependence if it didn't come after our fence
-          if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+          if (it->stage == COMPLETED_STAGE)
+            it->operation->find_completion_effects(previous_events);
+          else
+            previous_events.insert(it->operation->get_completion_event());
         }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executed_children.begin(); it != executed_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's older than the previous fence then we don't care
-          if (op_index < current_execution_fence_index)
-            continue;
-          // Record a dependence if it didn't come after our fence
-          if (op_index < next_fence_index)
-            previous_events.insert(it->first->get_completion_event());
-        }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              complete_children.begin(); it != complete_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's older than the previous fence then we don't care
-          if (op_index < current_execution_fence_index)
-            continue;
-          // Record a dependence if it didn't come after our fence
-          if (op_index < next_fence_index)
-            it->first->find_completion_effects(previous_events);
-        }
+        // We can update the current execution fence index since it only
+        // needs to be referred to here as the previous "upward" facing fence
+        current_execution_fence_index = next_fence_index;
       }
       else
       {
         // Both mapping and execution analysis at the same time
         AutoLock child_lock(child_op_lock,1,false/*exclusive*/);
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executing_children.begin(); it != executing_children.end(); it++)
+        for (std::deque<ReorderBufferEntry>::const_reverse_iterator it =
+              reorder_buffer.crbegin(); it != reorder_buffer.crend(); it++)
         {
-          if (it->first->get_generation() != it->second)
+          if ((it->operation_index < current_mapping_fence_index) &&
+              (it->operation_index < current_execution_fence_index))
+            break;
+          if (next_fence_index <= it->operation_index)
             continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's younger than our fence we don't care
-          if (op_index >= next_fence_index)
+          if (it->stage == COMMITTED_STAGE)
             continue;
-          if (op_index >= current_mapping_fence_index)
-            previous_operations.insert(*it);
-          if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
+          if (current_mapping_fence_index <= it->operation_index)
+            previous_operations.emplace_back(
+                std::make_pair(it->operation, it->operation->get_generation()));
+          if (current_execution_fence_index <= it->operation_index)
+          {
+            if (it->stage == COMPLETED_STAGE)
+              it->operation->find_completion_effects(previous_events);
+            else
+              previous_events.insert(it->operation->get_completion_event());
+          }
         }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executed_children.begin(); it != executed_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's younger than our fence we don't care
-          if (op_index >= next_fence_index)
-            continue;
-          if (op_index >= current_mapping_fence_index)
-            previous_operations.insert(*it);
-          if (op_index >= current_execution_fence_index)
-            previous_events.insert(it->first->get_completion_event());
-        }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              complete_children.begin(); it != complete_children.end(); it++)
-        {
-          if (it->first->get_generation() != it->second)
-            continue;
-          const size_t op_index = it->first->get_ctx_index();
-          // If it's younger than our fence we don't care
-          if (op_index >= next_fence_index)
-            continue;
-          if (op_index >= current_mapping_fence_index)
-            previous_operations.insert(*it);
-          if (op_index >= current_execution_fence_index)
-            it->first->find_completion_effects(previous_events);
-        }
+        // We can update the current mapping and execution fence indexes since
+        // they only need to be referred to here as the previous "upward" 
+        // facing fences
+        current_mapping_fence_index = next_fence_index;
+        current_execution_fence_index = next_fence_index;
       }
 
       // Now record the dependences
       if (!previous_operations.empty())
       {
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-             previous_operations.begin(); it != previous_operations.end(); it++)
+        for (std::vector<std::pair<Operation*,GenerationID> >::const_iterator
+              it = previous_operations.begin(); 
+              it != previous_operations.end(); it++)
           op->register_dependence(it->first, it->second);
       }
 
@@ -11513,8 +11484,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock child_lock(child_op_lock);
-      if (task_executed && executing_children.empty() && 
-          executed_children.empty() && !children_complete_invoked)
+      if (task_executed && (executing_children_count == 0) && 
+          (executed_children_count == 0) && !children_complete_invoked)
       {
         children_complete_invoked = true;
         return true;
@@ -11527,9 +11498,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock child_lock(child_op_lock);
-      if (task_executed && executing_children.empty() && 
-          executed_children.empty() && complete_children.empty() && 
-          !children_commit_invoked)
+      if (task_executed && reorder_buffer.empty() && !children_commit_invoked)
       {
         children_commit_invoked = true;
         return true;
@@ -11750,24 +11719,17 @@ namespace Legion {
         AutoLock child_lock(child_op_lock);
         // Only need to do this for executing and executed children
         // We know that any complete children are done
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executing_children.begin(); it != 
-              executing_children.end(); it++)
-        {
-          preconditions.insert(it->first->get_mapped_event());
-        }
-        for (std::map<Operation*,GenerationID>::const_iterator it = 
-              executed_children.begin(); it != executed_children.end(); it++)
-        {
-          preconditions.insert(it->first->get_mapped_event());
-        }
+        for (std::deque<ReorderBufferEntry>::const_iterator it =
+              reorder_buffer.begin(); it != reorder_buffer.end(); it++)
+          if ((it->stage == EXECUTING_STAGE) || (it->stage == EXECUTED_STAGE))
+            preconditions.insert(it->operation->get_mapped_event());
 #ifdef DEBUG_LEGION
         assert(!task_executed);
 #endif
         // Now that we know the last registration has taken place we
         // can mark that we are done executing
         task_executed = true;
-        if (executing_children.empty() && executed_children.empty())
+        if ((executing_children_count == 0) && (executed_children_count == 0))
         {
           if (!children_complete_invoked)
           {
@@ -11779,13 +11741,18 @@ namespace Legion {
                 cummulative_child_completion_events.end());
             cummulative_child_completion_events.clear();
 #endif
-            for (LegionMap<Operation*,GenerationID,
-                  COMPLETE_CHILD_ALLOC>::const_iterator it =
-                 complete_children.begin(); it != complete_children.end(); it++)
-              it->first->find_completion_effects(child_completion_events);
+            for (std::deque<ReorderBufferEntry>::const_iterator it =
+                  reorder_buffer.begin(); it != reorder_buffer.end(); it++)
+            {
+#ifdef DEBUG_LEGION
+              assert(it->stage != EXECUTING_STAGE);
+              assert(it->stage != EXECUTED_STAGE);
+#endif
+              if (it->stage == COMPLETED_STAGE)
+                it->operation->find_completion_effects(child_completion_events);
+            }
           }
-          if (complete_children.empty() && 
-              !children_commit_invoked)
+          if (reorder_buffer.empty() && !children_commit_invoked)
           {
             need_commit = true;
             children_commit_invoked = true;
@@ -12198,23 +12165,9 @@ namespace Legion {
     Operation* InnerContext::get_earliest(void) const
     //--------------------------------------------------------------------------
     {
-      Operation *result = NULL;
-      unsigned index = 0;
-      for (std::map<Operation*,GenerationID>::const_iterator it = 
-            executing_children.begin(); it != executing_children.end(); it++)
-      {
-        if (result == NULL)
-        {
-          result = it->first;
-          index = result->get_ctx_index();
-        }
-        else if (it->first->get_ctx_index() < index)
-        {
-          result = it->first;
-          index = result->get_ctx_index();
-        }
-      }
-      return result;
+      if (reorder_buffer.empty())
+        return NULL;
+      return reorder_buffer.front().operation;
     }
 #endif
 
@@ -17926,14 +17879,14 @@ namespace Legion {
         for (std::vector<Operation*>::const_iterator it = 
               ready_ops.begin(); it != ready_ops.end(); it++)
         {
-          (*it)->set_tracking_parent(total_children_count++);
+          const size_t op_index = total_children_count++;
+          (*it)->set_tracking_parent(op_index);
 #ifdef DEBUG_LEGION
-          assert(executing_children.find(*it) == executing_children.end());
-          assert(executed_children.find(*it) == executed_children.end());
-          assert(complete_children.find(*it) == complete_children.end());
-          outstanding_children[(*it)->get_ctx_index()] = (*it);
+          assert(reorder_buffer.empty() || 
+            ((reorder_buffer.back().operation_index+1) == op_index));
 #endif       
-          executing_children[*it] = (*it)->get_generation();
+          reorder_buffer.emplace_back(ReorderBufferEntry(*it));
+          executing_children_count++;
         }
       }
       // Reacquire the lock and handle the operations
@@ -23507,13 +23460,7 @@ namespace Legion {
                                          TaskTreeCoordinates &coordinates) const
     //--------------------------------------------------------------------------
     {
-      TaskContext *owner_ctx = owner_task->get_context();
-#ifdef DEBUG_LEGION
-      InnerContext *parent_ctx = dynamic_cast<InnerContext*>(owner_ctx);
-      assert(parent_ctx != NULL);
-#else
-      InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
-#endif
+      InnerContext *parent_ctx = owner_task->get_context();
       parent_ctx->compute_task_tree_coordinates(coordinates);
       coordinates.push_back(ContextCoordinate(
             owner_task->get_context_index(), owner_task->index_point));
@@ -24976,109 +24923,6 @@ namespace Legion {
       else // should never get here, all predicates should be eagerly evaluated
         assert(false);
       return Future();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t LeafContext::register_new_child_operation(Operation *op,
-        RtUserEvent &resolved, const std::vector<StaticDependence> *dependences)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op->get_operation_kind() == Operation::TASK_OP_KIND);
-#endif
-      return ++inlined_tasks;
-    }
-
-    //--------------------------------------------------------------------------
-    size_t LeafContext::register_new_summary_operation(TraceSummaryOp *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return 0;
-    }
-
-    //--------------------------------------------------------------------------
-    bool LeafContext::add_to_dependence_queue(Operation *op, 
-                                              bool unordered, bool block)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_executing_child(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_child_executed(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_child_complete(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::register_child_commit(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      // Nothing to do
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent LeafContext::register_implicit_dependences(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::perform_fence_analysis(Operation *op,
-                 std::set<ApEvent> &preconditions, bool mapping, bool execution)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::update_current_fence(FenceOp *op, 
-                                           bool mapping, bool execution)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::update_current_implicit(Operation *op) 
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent LeafContext::get_current_mapping_fence_event(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent LeafContext::get_current_execution_fence_event(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------

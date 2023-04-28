@@ -440,6 +440,15 @@ void preregister_kokkos_task(TaskID task_id, const char *name)
       PORTABLE_KOKKOS_TASK<Kokkos::Cuda>::task_body >(registrar, name);
   }
 #endif
+#if defined(KOKKOS_ENABLE_HIP) and defined(REALM_USE_HIP)
+  // register a serial version on the CPU
+  {
+    TaskVariantRegistrar registrar(task_id, name);
+    registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+    Runtime::preregister_task_variant<
+      PORTABLE_KOKKOS_TASK<Kokkos::HIP>::task_body >(registrar, name);
+  }
+#endif
 }
 
 // for tasks with a non-void return value
@@ -479,6 +488,15 @@ void preregister_kokkos_task(TaskID task_id, const char *name)
     registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
     Runtime::preregister_task_variant<
       RV, PORTABLE_KOKKOS_TASK<Kokkos::Cuda>::task_body >(registrar, name);
+  }
+#endif
+#if defined(KOKKOS_ENABLE_HIP) and defined(REALM_USE_HIP)
+  // register a serial version on the CPU
+  {
+    TaskVariantRegistrar registrar(task_id, name);
+    registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+    Runtime::preregister_task_variant<
+      RV, PORTABLE_KOKKOS_TASK<Kokkos::HIP>::task_body >(registrar, name);
   }
 #endif
 }
