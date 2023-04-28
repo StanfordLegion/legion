@@ -7860,7 +7860,7 @@ namespace Legion {
         AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
         assert(reorder_buffer.empty() ||
-            ((reorder_buffer.back().operation_index+1) == op->get_ctx_index()));
+            (reorder_buffer.back().operation_index < op->get_ctx_index()));
 #endif
         reorder_buffer.emplace_back(ReorderBufferEntry(op));
         executing_children_count++;
@@ -8631,7 +8631,7 @@ namespace Legion {
         (*it)->set_tracking_parent(op_index);
 #ifdef DEBUG_LEGION
         assert(reorder_buffer.empty() || 
-            ((reorder_buffer.back().operation_index+1) == op_index));
+            (reorder_buffer.back().operation_index < op_index));
 #endif       
         reorder_buffer.emplace_back(ReorderBufferEntry(*it));
         executing_children_count++;
@@ -8680,7 +8680,7 @@ namespace Legion {
       AutoLock child_lock(child_op_lock);
 #ifdef DEBUG_LEGION
       assert(reorder_buffer.empty() ||
-          ((reorder_buffer.back().operation_index+1) == op->get_ctx_index()));
+          (reorder_buffer.back().operation_index < op->get_ctx_index()));
 #endif
       reorder_buffer.emplace_back(ReorderBufferEntry(op));
       executing_children_count++;
