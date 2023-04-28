@@ -551,19 +551,39 @@ impl Proc {
                 all_points.push(ProcPoint::new(ready.unwrap(), prof_uid, true, start.0));
                 all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             } else {
-                all_points.push(ProcPoint::new(start, prof_uid, true, 0));
+                all_points.push(ProcPoint::new(
+                    start,
+                    prof_uid,
+                    true,
+                    std::u64::MAX - stop.0,
+                ));
                 all_points.push(ProcPoint::new(stop, prof_uid, false, 0));
             }
 
-            points.push(ProcPoint::new(start, prof_uid, true, 0));
+            points.push(ProcPoint::new(
+                start,
+                prof_uid,
+                true,
+                std::u64::MAX - stop.0,
+            ));
             points.push(ProcPoint::new(stop, prof_uid, false, 0));
 
-            util_points.push(ProcPoint::new(start, prof_uid, true, 0));
+            util_points.push(ProcPoint::new(
+                start,
+                prof_uid,
+                true,
+                std::u64::MAX - stop.0,
+            ));
             util_points.push(ProcPoint::new(stop, prof_uid, false, 0));
         }
         fn add_waiters(waiters: &Waiters, prof_uid: ProfUID, util_points: &mut Vec<ProcPoint>) {
             for wait in &waiters.wait_intervals {
-                util_points.push(ProcPoint::new(wait.start, prof_uid, false, 0));
+                util_points.push(ProcPoint::new(
+                    wait.start,
+                    prof_uid,
+                    false,
+                    std::u64::MAX - wait.end.0,
+                ));
                 util_points.push(ProcPoint::new(wait.end, prof_uid, true, 0));
             }
         }
@@ -648,7 +668,7 @@ impl Container for Proc {
 
 pub type MemEntry = Inst;
 
-pub type MemPoint = TimePoint<InstUID, ()>;
+pub type MemPoint = TimePoint<InstUID, u64>;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, LowerHex)]
 pub struct MemID(pub u64);
@@ -709,27 +729,18 @@ impl Mem {
                 inst.time_range.start.unwrap(),
                 *key,
                 true,
-                (),
+                std::u64::MAX - inst.time_range.stop.unwrap().0,
             ));
-            self.time_points.push(MemPoint::new(
-                inst.time_range.stop.unwrap(),
-                *key,
-                false,
-                (),
-            ));
+            self.time_points
+                .push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
 
             time_points_level.push(MemPoint::new(
                 inst.time_range.create.unwrap(),
                 *key,
                 true,
-                (),
+                std::u64::MAX - inst.time_range.stop.unwrap().0,
             ));
-            time_points_level.push(MemPoint::new(
-                inst.time_range.stop.unwrap(),
-                *key,
-                false,
-                (),
-            ));
+            time_points_level.push(MemPoint::new(inst.time_range.stop.unwrap(), *key, false, 0));
         }
         self.time_points.sort_by_key(|a| a.time_key());
         time_points_level.sort_by_key(|a| a.time_key());
@@ -763,7 +774,7 @@ impl Mem {
 
 impl Container for Mem {
     type E = InstUID;
-    type S = ();
+    type S = u64;
     type Entry = Inst;
 
     fn max_levels(&self) -> usize {
@@ -880,17 +891,19 @@ impl ContainerEntry for ChanEntry {
                 let nreqs = copy.copy_inst_infos.len();
                 if nreqs > 0 {
                     format!(
-                        "{}: size={}, num reqs={}{}",
+                        "{}: size={}, num reqs={}, num hops={}{}",
                         copy.copy_kind.unwrap(),
                         SizePretty(copy.size.unwrap()),
                         nreqs,
+                        copy.num_hops.unwrap(),
                         CopyInstInfoVec(&copy.copy_inst_infos, state)
                     )
                 } else {
                     format!(
-                        "Copy: size={}, num reqs={}",
+                        "Copy: size={}, num reqs={}, num hops={}",
                         SizePretty(copy.size.unwrap()),
-                        nreqs
+                        nreqs,
+                        copy.num_hops.unwrap()
                     )
                 }
             }
@@ -921,7 +934,7 @@ impl ContainerEntry for ChanEntry {
     }
 }
 
-pub type ChanPoint = TimePoint<ProfUID, ()>;
+pub type ChanPoint = TimePoint<ProfUID, u64>;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, TryFromPrimitive)]
 #[repr(u32)]
@@ -1054,8 +1067,13 @@ impl Chan {
         fn add(time: &TimeRange, prof_uid: ProfUID, points: &mut Vec<ChanPoint>) {
             let start = time.start.unwrap();
             let stop = time.stop.unwrap();
-            points.push(ChanPoint::new(start, prof_uid, true, ()));
-            points.push(ChanPoint::new(stop, prof_uid, false, ()));
+            points.push(ChanPoint::new(
+                start,
+                prof_uid,
+                true,
+                std::u64::MAX - stop.0,
+            ));
+            points.push(ChanPoint::new(stop, prof_uid, false, 0));
         }
 
         let mut points = Vec::new();
@@ -1093,7 +1111,7 @@ impl Chan {
 
 impl Container for Chan {
     type E = ProfUID;
-    type S = ();
+    type S = u64;
     type Entry = ChanEntry;
 
     fn max_levels(&self) -> usize {
@@ -3506,7 +3524,14 @@ fn process_record(
             gpu_stop,
             ..
         } => {
-            let time_range = TimeRange::new_full(*create, *ready, *gpu_start, *gpu_stop);
+            // it is possible that gpu_start is larger than gpu_stop when cuda hijack is disabled,
+            // because the cuda event completions of these two timestamp may be out of order when
+            // they are not in the same stream. Usually, when it happened, it means the GPU task is tiny.
+            let mut gpu_start = *gpu_start;
+            if gpu_start > *gpu_stop {
+                gpu_start.0 = gpu_stop.0 - 1;
+            }
+            let time_range = TimeRange::new_full(*create, *ready, gpu_start, *gpu_stop);
             state.create_task(*op_id, *proc_id, *task_id, *variant_id, time_range);
             state.update_last_time(*gpu_stop);
         }

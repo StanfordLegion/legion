@@ -29414,12 +29414,6 @@ namespace Legion {
           return "Detach Op";
         case MESSAGE_BUFFER_ALLOC:
           return "Message Buffer";
-        case EXECUTING_CHILD_ALLOC:
-          return "Executing Children";
-        case EXECUTED_CHILD_ALLOC:
-          return "Executed Children";
-        case COMPLETE_CHILD_ALLOC:
-          return "Complete Children";
         case LOGICAL_VIEW_ALLOC:
           return "Logical Views";
         case LOGICAL_FIELD_VERSIONS_ALLOC:

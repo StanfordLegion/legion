@@ -104,10 +104,6 @@ class LegionDeserializer(ABC):
         return True
 
 @typecheck
-def read_time(string: str) -> float:
-    return int(string) / 1000
-
-@typecheck
 def read_max_dim(string: str) -> int:
     global max_dim_val
     max_dim_val = int(string)
@@ -217,17 +213,17 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "inst_uid": lambda x: int(x, 16),
         "fevent": lambda x: int(x, 16),
         "indirect": int, 
-        "create": read_time,
-        "destroy": read_time,
-        "start": read_time,
-        "ready": read_time,
-        "stop": read_time,
-        "end": read_time,
-        "gpu_start": read_time,
-        "gpu_stop": read_time,
-        "wait_start": read_time,
-        "wait_ready": read_time,
-        "wait_end": read_time,
+        "create": int,
+        "destroy": int,
+        "start": int,
+        "ready": int,
+        "stop": int,
+        "end": int,
+        "gpu_start": int,
+        "gpu_stop": int,
+        "wait_start": int,
+        "wait_ready": int,
+        "wait_end": int,
         "align_desc": int,
         "eqk": int,
         "dim_kind": int,
@@ -397,8 +393,6 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                 global max_dim_val
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
-                if param_type == "timestamp_t":
-                    val = val / 1000
                 if param_type == "maxdim":
                     max_dim_val = val
                 return val
