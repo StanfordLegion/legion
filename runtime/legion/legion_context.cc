@@ -7862,6 +7862,11 @@ namespace Legion {
         assert(reorder_buffer.empty() ||
             (reorder_buffer.back().operation_index < op->get_ctx_index()));
 #endif
+        // Pad the reorder buffer for missing entries if necessary
+        while (!reorder_buffer.empty() &&
+            ((reorder_buffer.back().operation_index+1) < op->get_ctx_index()))
+          reorder_buffer.emplace_back(
+              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
         reorder_buffer.emplace_back(ReorderBufferEntry(op));
         executing_children_count++;
         // Bump our priority if the context is not active as it means
@@ -8633,6 +8638,11 @@ namespace Legion {
         assert(reorder_buffer.empty() || 
             (reorder_buffer.back().operation_index < op_index));
 #endif       
+        // Pad the reorder buffer for missing entries if necessary
+        while (!reorder_buffer.empty() &&
+            ((reorder_buffer.back().operation_index+1) < op_index))
+          reorder_buffer.emplace_back(
+              ReorderBufferEntry(reorder_buffer.back().operation_index+1));
         reorder_buffer.emplace_back(ReorderBufferEntry(*it));
         executing_children_count++;
         dependence_queue.push_back(*it);
@@ -8682,6 +8692,11 @@ namespace Legion {
       assert(reorder_buffer.empty() ||
           (reorder_buffer.back().operation_index < op->get_ctx_index()));
 #endif
+      // Pad the reorder buffer for missing entries if necessary
+      while (!reorder_buffer.empty() &&
+          ((reorder_buffer.back().operation_index+1) < op->get_ctx_index()))
+        reorder_buffer.emplace_back(
+            ReorderBufferEntry(reorder_buffer.back().operation_index+1));
       reorder_buffer.emplace_back(ReorderBufferEntry(op));
       executing_children_count++;
     }

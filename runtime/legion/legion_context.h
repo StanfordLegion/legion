@@ -782,6 +782,8 @@ namespace Legion {
       };
       struct ReorderBufferEntry {
       public:
+        inline ReorderBufferEntry(size_t index)
+          : operation(NULL), operation_index(index), stage(COMMITTED_STAGE) { }
         inline ReorderBufferEntry(Operation *op)
           : operation(op), operation_index(op->get_ctx_index()),
             stage(EXECUTING_STAGE) { }
