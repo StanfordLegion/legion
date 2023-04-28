@@ -18,7 +18,11 @@
 
 #include <assert.h>
 #include <unistd.h>
+#ifdef REALM_ON_MACOS
+#include <pthread.h>
+#else
 #include <syscall.h>
+#endif
 
 using namespace Realm;
 
@@ -72,7 +76,14 @@ void writer_task(const void *args, size_t arglen,
   int num_iters = task_args.num_iters;
   Barrier writer_b = task_args.writer_barrier;
   Barrier reader_b = task_args.reader_barrier;
-  log_app.print("start writer task %d on Processor %llx, tid %ld", idx, p.id, syscall(SYS_gettid));
+#ifdef REALM_ON_MACOS
+  uint64_t tid64;
+  pthread_threadid_np(NULL, &tid64);
+  pid_t tid = static_cast<pid_t>(tid64);
+#else
+  pid_t tid = syscall(SYS_gettid);
+#endif
+  log_app.print("start writer task %d on Processor %llx, tid %d", idx, p.id, tid);
   for (int i = 0; i < num_iters; i++) {
     usleep(10000);
     int reduce_val = (i + 1) * idx;
@@ -93,7 +104,14 @@ void reader_task(const void *args, size_t arglen,
   int num_tasks = task_args.num_tasks;
   Barrier writer_b = task_args.writer_barrier;
   Barrier reader_b = task_args.reader_barrier;
-  log_app.print("start reader task %d on Processor %llx, tid %ld", idx, p.id, syscall(SYS_gettid));
+#ifdef REALM_ON_MACOS
+  uint64_t tid64;
+  pthread_threadid_np(NULL, &tid64);
+  pid_t tid = static_cast<pid_t>(tid64);
+#else
+  pid_t tid = syscall(SYS_gettid);
+#endif
+  log_app.print("start reader task %d on Processor %llx, tid %d", idx, p.id, tid);
   for (int i = 0; i < num_iters; i++) {
     writer_b.wait();
     int result = 0;
@@ -111,7 +129,14 @@ void reader_task(const void *args, size_t arglen,
 void main_task(const void *args, size_t arglen, 
                     const void *userdata, size_t userlen, Processor p)
 {
-  log_app.print("start top task on Processor %llx, tid %ld", p.id, syscall(SYS_gettid));
+#ifdef REALM_ON_MACOS
+  uint64_t tid64;
+  pthread_threadid_np(NULL, &tid64);
+  pid_t tid = static_cast<pid_t>(tid64);
+#else
+  pid_t tid = syscall(SYS_gettid);
+#endif
+  log_app.print("start top task on Processor %llx, tid %d", p.id, tid);
 
   Machine machine = Machine::get_machine();
   Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine).only_kind(Processor::LOC_PROC);
