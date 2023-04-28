@@ -74,7 +74,6 @@ ifeq ($(shell uname -s),Darwin)
   ifeq ($(findstring Apple,$(shell $(CXX) --version)),Apple)
     APPLECLANG = 1
     REALM_LIMIT_SYMBOL_VISIBILITY=0
-    $(warning "Apple Clang is a weird compiler and untested by Legion CI. Tread lightly...")
   else
     APPLECLANG = 0
   endif
