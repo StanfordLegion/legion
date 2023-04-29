@@ -1054,6 +1054,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace RegionTreeForest::instantiate_subspace(IndexPartition parent,
+                                                      const void *realm_color,
+                                                      TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *parent_node = get_node(parent);
+      LegionColor child_color = 
+        parent_node->color_space->linearize_color(realm_color, type_tag);
+      IndexSpaceNode *child_node = parent_node->create_child(child_color);
+      return child_node->handle;
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::get_index_space_domain(IndexSpace handle,
                                                void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -9599,6 +9612,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpaceNode* IndexPartNode::create_child(const LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner() || ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space)));
+#endif
+      IndexSpace is(context->runtime->get_unique_index_space_id(),
+                    handle.get_tree_id(), handle.get_type_tag());
+      DistributedID did = 
+        context->runtime->get_available_distributed_id();
+      IndexSpaceNode *result = NULL;
+      if (partial_pending.exists())
+      {
+        ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
+        result = context->create_node(is, NULL/*realm is*/, *this, color, did,
+                                      initialized,provenance,partial_event);
+        Runtime::phase_barrier_arrive(partial_pending, 
+                                      1/*count*/, partial_event);
+      }
+      else
+        // Make a new index space node ready when the partition is ready
+        result = context->create_node(is, NULL/*realm is*/, false, this, color,
+                            did, initialized, provenance, partition_ready);
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_index_subspace(handle.id, is.id, 
+            runtime->address_space, result->get_domain_point_color());
+      if (runtime->profiler != NULL)
+        runtime->profiler->record_index_subspace(handle.id, is.id,
+            result->get_domain_point_color());
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceNode* IndexPartNode::get_child(const LegionColor c,RtEvent *defer)
     //--------------------------------------------------------------------------
     {
@@ -9622,35 +9669,28 @@ namespace Legion {
         // we need to send a message to the owner node to get the child
         if (is_owner())
         {
-          // We're the owner so we can just try to make the node and see
-          // if we win the race to create it
-          IndexSpace is(context->runtime->get_unique_index_space_id(),
-                        handle.get_tree_id(), handle.get_type_tag());
-          DistributedID did = 
-            context->runtime->get_available_distributed_id();
-          IndexSpaceNode *result = NULL;
-          if (partial_pending.exists())
+          RtUserEvent ready_event;
           {
-            ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
-            result = context->create_node(is, NULL/*realm is*/, *this, c, did,
-                                        initialized,provenance,partial_event);
-            if (result->handle == is)
-              Runtime::phase_barrier_arrive(partial_pending, 
-                                            1/*count*/, partial_event);
-            else
-              Runtime::trigger_event(NULL, partial_event);
+            AutoLock n_lock(node_lock);
+            // Make sure we didn't lose the race
+            std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+              color_map.find(c);
+            if (finder != color_map.end())
+              return finder->second;
+            ready_event = Runtime::create_rt_user_event();
+            pending_child_map.emplace(std::make_pair(c,
+                  PendingRequest(NULL, local_space, ready_event)));
+          }
+          if (defer != NULL)
+          {
+            (*defer) = ready_event;
+            return NULL;
           }
           else
-            // Make a new index space node ready when the partition is ready
-            result = context->create_node(is, NULL/*realm is*/, false, this,
-                          c, did, initialized, provenance, partition_ready);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_index_subspace(handle.id, is.id, 
-                runtime->address_space, result->get_domain_point_color());
-          if (runtime->profiler != NULL)
-            runtime->profiler->record_index_subspace(handle.id, is.id,
-                result->get_domain_point_color());
-          return result; 
+          {
+            ready_event.wait();
+            return get_child(c); 
+          }
         }
         else
         {
@@ -9716,8 +9756,8 @@ namespace Legion {
           context->runtime->send_index_partition_child_request(root, rez);
         }
         else // We can start the search here
-          find_collective_child(c, &child_id, local_space, ready_event,
-                                local_space, ready_event);
+          find_child(c, &child_id, local_space, ready_event,
+                     local_space, ready_event);
         if (defer == NULL)
         {
           ready_event.wait();
@@ -9737,56 +9777,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::find_collective_child(const LegionColor child_color,
+    void IndexPartNode::find_child(const LegionColor child_color,
         IndexSpaceID *target, AddressSpaceID target_space, RtUserEvent ready,
         AddressSpaceID root_space, RtEvent prune_event)
     //--------------------------------------------------------------------------
     {
+      if (collective_mapping == NULL)
+      {
 #ifdef DEBUG_LEGION
-      assert(collective_mapping != NULL);
-      assert(collective_mapping->contains(local_space));
+        assert(is_owner());
 #endif
-      IndexSpaceNode *child = NULL;
-      {
-        AutoLock n_lock(node_lock);
-        // See if we have the node here already
-        std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
-          color_map.find(child_color);
-        if (finder == color_map.end())
-          // Save this result for later
-          pending_child_map.emplace(std::make_pair(child_color,
-                PendingRequest(target, target_space, ready)));
-        else
-          child = finder->second;
-      }
-      // Check to see if found the child
-      if (child != NULL)
-      {
-        // Only one node can send the response to trigger the ready event
-        // so we need to handle the case where the child is replicated
-        bool send_response = (child->is_owner() || (root_space == local_space));
-        if (!send_response)
+        IndexSpaceNode *child = NULL;
         {
-          // See if the child owner space is in our sub-tree in which
-          // case we can send the response now
-          AddressSpaceID child_space = child->owner_space;
-          while (child_space != root_space)
-          {
-            child_space = 
-              collective_mapping->get_parent(root_space, child_space);
-            if (child_space == local_space)
-            {
-              send_response = true;
-              break;
-            }
-          }
+          AutoLock n_lock(node_lock);
+          std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+              color_map.find(child_color);
+          if (finder == color_map.end())
+            // Save it for later
+            pending_child_map.emplace(std::make_pair(child_color,
+                  PendingRequest(target, target_space, ready)));
+          else
+            child = finder->second;
         }
-        if (send_response)
+        if (child != NULL)
         {
+          // Send the response
           if (target_space == local_space)
           {
             if (target != NULL)
-              (*target) = child->handle.get_id();
+              *target = child->handle.get_id();
             Runtime::trigger_event(ready);
           }
           else
@@ -9805,30 +9824,94 @@ namespace Legion {
       }
       else
       {
-        // Launch the task that will prune out the pending request in the
-        // case that it isn't found on this node
-        DeferChildArgs args(this, child_color); 
-        RtEvent local_prune = runtime->issue_runtime_meta_task(args,
-            LG_THROUGHPUT_WORK_PRIORITY, prune_event);
-        // Then forward on the search to all the children
-        std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(root_space, local_space, children);
-        if (!children.empty())
+#ifdef DEBUG_LEGION
+        assert(collective_mapping->contains(local_space));
+#endif
+        IndexSpaceNode *child = NULL;
         {
-          Serializer rez;
+          AutoLock n_lock(node_lock);
+          // See if we have the node here already
+          std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+            color_map.find(child_color);
+          if (finder == color_map.end())
+            // Save this result for later
+            pending_child_map.emplace(std::make_pair(child_color,
+                  PendingRequest(target, target_space, ready)));
+          else
+            child = finder->second;
+        }
+        // Check to see if found the child
+        if (child != NULL)
+        {
+          // Only one node can send the response to trigger the ready event
+          // so we need to handle the case where the child is replicated
+          bool send_response = 
+            (child->is_owner() || (root_space == local_space));
+          if (!send_response)
           {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize(child_color);
-            rez.serialize(target);
-            rez.serialize(ready);
-            rez.serialize(target_space);
-            rez.serialize(root_space);
-            rez.serialize(local_prune);
+            // See if the child owner space is in our sub-tree in which
+            // case we can send the response now
+            AddressSpaceID child_space = child->owner_space;
+            while (child_space != root_space)
+            {
+              child_space = 
+                collective_mapping->get_parent(root_space, child_space);
+              if (child_space == local_space)
+              {
+                send_response = true;
+                break;
+              }
+            }
           }
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            context->runtime->send_index_partition_child_request(*it, rez);
+          if (send_response)
+          {
+            if (target_space == local_space)
+            {
+              if (target != NULL)
+                (*target) = child->handle.get_id();
+              Runtime::trigger_event(ready);
+            }
+            else
+            {
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(child->handle);
+                rez.serialize(target);
+                rez.serialize(ready);
+              }
+              context->runtime->send_index_partition_child_response(
+                                                  target_space, rez);
+            }
+          }
+        }
+        else
+        {
+          // Launch the task that will prune out the pending request in the
+          // case that it isn't found on this node
+          DeferChildArgs args(this, child_color); 
+          RtEvent local_prune = runtime->issue_runtime_meta_task(args,
+              LG_THROUGHPUT_WORK_PRIORITY, prune_event);
+          // Then forward on the search to all the children
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(root_space, local_space, children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize(child_color);
+              rez.serialize(target);
+              rez.serialize(ready);
+              rez.serialize(target_space);
+              rez.serialize(root_space);
+              rez.serialize(local_prune);
+            }
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              context->runtime->send_index_partition_child_request(*it, rez);
+          }
         }
       }
     }
@@ -10908,29 +10991,20 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *parent = forest->get_node(handle);
-      if (parent->collective_mapping == NULL)
-      {
-        // We can just the result right away and send the response back
-        IndexSpaceNode *child = parent->get_child(child_color);
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(child->handle);
-          rez.serialize(target);
-          rez.serialize(to_trigger);
-        }
-        forest->runtime->send_index_partition_child_response(source, rez);
-      }
-      else
+
+      if (parent->collective_mapping != NULL)
       {
         AddressSpaceID target_space, root_space;
         derez.deserialize(target_space);
         derez.deserialize(root_space);
         RtEvent prune_event;
         derez.deserialize(prune_event);
-        parent->find_collective_child(child_color, target, target_space,
-                                    to_trigger, root_space, prune_event);
+        parent->find_child(child_color, target, target_space,
+                           to_trigger, root_space, prune_event);
       }
+      else
+        parent->find_child(child_color, target, source, to_trigger,
+                           source, to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -21064,7 +21138,7 @@ namespace Legion {
       }
       // If we get here we didn't immediately have it so try
       // to make it through the proper channels
-      IndexSpaceNode *index_node = row_source->get_child(c);
+      IndexSpaceNode *index_node = row_source->get_child(c, NULL);
 #ifdef DEBUG_LEGION
       assert(index_node != NULL);
 #endif

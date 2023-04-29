@@ -325,6 +325,9 @@ namespace Legion {
       IndexSpace get_index_subspace(IndexPartition parent, 
                                     const void *realm_color,
                                     TypeTag type_tag);
+      IndexSpace instantiate_subspace(IndexPartition parent, 
+                                      const void *realm_color,
+                                      TypeTag type_tag);
       void get_index_space_domain(IndexSpace handle, 
                                   void *realm_is, TypeTag type_tag);
       IndexSpace get_index_partition_color_space(IndexPartition p);
@@ -3195,12 +3198,11 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       bool has_color(const LegionColor c);
+      IndexSpaceNode* create_child(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void find_collective_child(const LegionColor c, IndexSpaceID *target,
-                                 AddressSpaceID target_space,
-                                 RtUserEvent ready_event,
-                                 AddressSpaceID root_space,
-                                 RtEvent prune_event);
+      void find_child(const LegionColor c, IndexSpaceID *target,
+                      AddressSpaceID target_space, RtUserEvent ready_event,
+                      AddressSpaceID root_space, RtEvent prune_event);
       void prune_requests(const LegionColor color);
       void add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 

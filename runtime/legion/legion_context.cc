@@ -5307,7 +5307,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handles, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5331,7 +5331,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handle, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5356,7 +5356,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handles, prov);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5381,7 +5381,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handle, prov);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5407,7 +5407,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_difference(this, result, initial,
                                                  handles, provenance);
       // Now we can add the operation to the queue
@@ -15737,7 +15737,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handles, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -15775,7 +15775,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handle, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -15815,7 +15815,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handles,
                                                    provenance);
       // Now we can add the operation to the queue
@@ -15854,7 +15854,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handle,
                                                    provenance);
       // Now we can add the operation to the queue
@@ -15897,7 +15897,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_difference(this, result, initial,
                                                  handles, provenance);
       // Now we can add the operation to the queue
