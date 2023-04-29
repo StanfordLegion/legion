@@ -14198,7 +14198,6 @@ namespace Legion {
       const bool is_owner = (collective.second == owner_shard->shard_id);
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
-      ShardMapping &shard_mapping = shard_manager->get_mapping();
       const RtBarrier creation_bar = creation_barrier.next(this);
       if (is_owner)
       {
@@ -14211,9 +14210,8 @@ namespace Legion {
                                            color_space, partition_color, 
                                            part_kind,value.did, provenance,
                                            disjoint_result, partition_ready,
-                                           &collective_mapping, &shard_mapping,
-                                           creation_bar, (op == NULL) ? 
-                                            partition_ready : 
+                                           &collective_mapping, creation_bar,
+                                           (op == NULL) ?  partition_ready : 
                                             ApBarrier::NO_AP_BARRIER);
         // Broadcast the color if we have to generate it
         if (color_generated)
@@ -14259,9 +14257,8 @@ namespace Legion {
                                          color_space, partition_color, 
                                          part_kind, value.did, provenance,
                                          disjoint_result, partition_ready,
-                                         &collective_mapping, &shard_mapping,
-                                         creation_bar, (op == NULL) ?
-                                          partition_ready :
+                                         &collective_mapping, creation_bar,
+                                         (op == NULL) ? partition_ready :
                                           ApBarrier::NO_AP_BARRIER);
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
@@ -16088,7 +16085,6 @@ namespace Legion {
         *creator = collective.first->origin;
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
-      ShardMapping &shard_mapping = shard_manager->get_mapping();
       const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
@@ -16097,7 +16093,7 @@ namespace Legion {
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_bar);
+                                      &collective_mapping, creation_bar);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
@@ -16125,7 +16121,7 @@ namespace Legion {
         assert(space.exists());
 #endif
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_bar);
+                                      &collective_mapping, creation_bar);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }

@@ -476,7 +476,6 @@ namespace Legion {
                                               ValueBroadcast<bool> *part_result,
                                               ApEvent partition_ready,
                                               CollectiveMapping *mapping,
-                                              ShardMapping *shard_mapping,
                                               RtEvent creation_ready,
                                               ApBarrier partial_pending)
     //--------------------------------------------------------------------------
@@ -541,7 +540,7 @@ namespace Legion {
                           (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, provenance, partition_ready,
-            partial_pending, creation_ready, mapping, shard_mapping);
+            partial_pending, creation_ready, mapping);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
                 complete, partition_color, runtime->address_space,
@@ -559,8 +558,7 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did, provenance,
                                   partition_ready, partial_pending,
-                                  creation_ready, mapping, 
-                                  shard_mapping);
+                                  creation_ready, mapping); 
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
                 complete, partition_color, runtime->address_space,
@@ -620,7 +618,7 @@ namespace Legion {
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
             disjoint, complete, did, provenance, partition_ready,
-            partial_pending, creation_ready, mapping, shard_mapping);
+            partial_pending, creation_ready, mapping);
         }
         else
         {
@@ -631,7 +629,7 @@ namespace Legion {
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did, provenance,
                                   partition_ready, partial_pending,
-                                  creation_ready, mapping, shard_mapping);
+                                  creation_ready, mapping);
         }
         if (disjointness_event.exists())
         {
@@ -1225,12 +1223,10 @@ namespace Legion {
                                                     DistributedID did,
                                                     Provenance *provenance,
                                                     CollectiveMapping *mapping,
-                                                    ShardMapping *shard_mapping,
                                                     RtEvent initialized)
     //--------------------------------------------------------------------------
     {
-      return create_node(handle, did, initialized, provenance, 
-                         mapping, shard_mapping);
+      return create_node(handle, did, initialized, provenance, mapping);
     }
 
     //--------------------------------------------------------------------------
@@ -3457,13 +3453,12 @@ namespace Legion {
                                                  ApEvent part_ready,
                                                  ApBarrier pending,
                                                  RtEvent initialized,
-                                                 CollectiveMapping *mapping,
-                                                 ShardMapping *shard_mapping)
+                                                 CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, color, disjoint,
                                complete, did, part_ready, pending, initialized,
-                               mapping, shard_mapping, provenance);
+                               mapping, provenance);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3515,14 +3510,12 @@ namespace Legion {
                                                  ApEvent part_ready,
                                                  ApBarrier pending,
                                                  RtEvent initialized,
-                                                 CollectiveMapping *mapping,
-                                                 ShardMapping *shard_mapping)
+                                                 CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartCreator creator(this, p, parent, color_space, color, 
                                disjointness_ready, complete, did, part_ready, 
-                               pending, initialized, mapping, shard_mapping,
-                               provenance);
+                               pending, initialized, mapping, provenance);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
       IndexPartNode *result = creator.result;
 #ifdef DEBUG_LEGION
@@ -3568,12 +3561,11 @@ namespace Legion {
                                                   DistributedID did,
                                                   RtEvent initialized,
                                                   Provenance *provenance,
-                                                  CollectiveMapping *mapping,
-                                                  ShardMapping *shard_mapping)
+                                                  CollectiveMapping *mapping)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *result = new FieldSpaceNode(space, this, did,
-          initialized, mapping, shard_mapping, provenance);
+          initialized, mapping, provenance);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -9276,17 +9268,15 @@ namespace Legion {
                                  LegionColor c, bool dis, int comp, 
                                  DistributedID did, ApEvent part_ready, 
                                  ApBarrier partial, RtEvent init,
-                                 CollectiveMapping *mapping, ShardMapping *map,
-                                 Provenance *prov)
+                                 CollectiveMapping *mapping, Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
                       init, mapping, prov, true/*tree valid*/),
         handle(p), parent(par), color_space(color_sp), 
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
-        partition_ready(part_ready), partial_pending(partial),
-        shard_mapping(map), disjoint(dis), has_complete(comp >= 0),
-        complete(comp != 0), first_entry(NULL)
+        partition_ready(part_ready), partial_pending(partial), disjoint(dis),
+        has_complete(comp >= 0), complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
@@ -9298,8 +9288,6 @@ namespace Legion {
       }
       else
         union_expr.store(NULL);
-      if (shard_mapping != NULL)
-        shard_mapping->add_reference();
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
@@ -9318,7 +9306,7 @@ namespace Legion {
                                  int comp, DistributedID did,
                                  ApEvent part_ready, ApBarrier part,
                                  RtEvent init, CollectiveMapping *map,
-                                 ShardMapping *shard_map, Provenance *prov)
+                                 Provenance *prov)
       : IndexTreeNode(ctx, par->depth+1, c,
                       LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_PART_NODE_DC),
                       init, map, prov, true/*tree valid*/),
@@ -9326,9 +9314,8 @@ namespace Legion {
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part),
-        shard_mapping(shard_map), disjoint_ready(dis_ready), disjoint(false), 
-        has_complete(comp >= 0), complete(comp != 0),
-        first_entry(NULL)
+        disjoint_ready(dis_ready), disjoint(false), has_complete(comp >= 0),
+        complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
@@ -9340,8 +9327,6 @@ namespace Legion {
       }
       else
         union_expr.store(NULL);
-      if (shard_mapping != NULL)
-        shard_mapping->add_reference();
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
@@ -9373,8 +9358,6 @@ namespace Legion {
         delete parent;
       if (color_space->remove_nested_resource_ref(did))
         delete color_space; 
-      if ((shard_mapping != NULL) && shard_mapping->remove_reference())
-        delete shard_mapping;
     }
 
     //--------------------------------------------------------------------------
@@ -9627,65 +9610,20 @@ namespace Legion {
         if (finder != color_map.end())
           return finder->second;
       }
-      // TODO: Remove this check here, it is not precise
       if (!color_space->contains_color(c, false/*report error*/))
         REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
                             "Invalid color space color for child %lld "
                             "of partition %d", c, handle.get_id())
-      // Check to see if we're the owner space this child, in the
-      // common case the owner space is whichever node made the 
-      // partition, but in the control replication case, we use the
-      // shard mapping to determine which node owns the given child
-      const AddressSpaceID owner_space = 
-        (shard_mapping == NULL) ? get_owner_space() :
-        (*shard_mapping)[c % shard_mapping->size()];
-      const AddressSpaceID local_space = context->runtime->address_space;
-      // If we own the index partition, create a new subspace here
-      if (owner_space == local_space)
+      if (collective_mapping == NULL)
       {
-        // First do a check to see someone else is already making
-        // the child in which case we should just wait for it to
-        // be ready
-        RtEvent wait_on;
+        // If there's no collective mapping then we know all the children
+        // are going to be made on the owner node so if we're there we
+        // can just record ourselves and get the waiting event, otherwise
+        // we need to send a message to the owner node to get the child
+        if (is_owner())
         {
-          AutoLock n_lock(node_lock);
-          // Check to make sure we didn't loose the race
-          std::map<LegionColor,IndexSpaceNode*>::const_iterator child_finder =
-            color_map.find(c);
-          if (child_finder != color_map.end())
-            return child_finder->second;
-          // Didn't loose the race so we can keep going
-          std::map<LegionColor,RtUserEvent>::const_iterator finder = 
-            pending_child_map.find(c);
-          if (finder == pending_child_map.end())
-            pending_child_map[c] = Runtime::create_rt_user_event();
-          else
-            wait_on = finder->second;
-        }
-        if (wait_on.exists())
-        {
-          // Someone else is already making it so just wait
-          if (defer == NULL)
-          {
-            wait_on.wait();
-            AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
-              color_map.find(c);
-#ifdef DEBUG_LEGION
-            // It better be here when we wake up
-            assert(finder != color_map.end());
-#endif
-            return finder->second;
-          }
-          else
-          {
-            *defer = wait_on;
-            return NULL;
-          }
-        }
-        else
-        {
-          // We're making this so just do it
+          // We're the owner so we can just try to make the node and see
+          // if we win the race to create it
           IndexSpace is(context->runtime->get_unique_index_space_id(),
                         handle.get_tree_id(), handle.get_type_tag());
           DistributedID did = 
@@ -9695,44 +9633,95 @@ namespace Legion {
           {
             ApUserEvent partial_event = Runtime::create_ap_user_event(NULL);
             result = context->create_node(is, NULL/*realm is*/, *this, c, did,
-                                          initialized,provenance,partial_event);
-            Runtime::phase_barrier_arrive(partial_pending, 
-                                          1/*count*/, partial_event);
+                                        initialized,provenance,partial_event);
+            if (result->handle == is)
+              Runtime::phase_barrier_arrive(partial_pending, 
+                                            1/*count*/, partial_event);
+            else
+              Runtime::trigger_event(NULL, partial_event);
           }
           else
             // Make a new index space node ready when the partition is ready
-            result = context->create_node(is, NULL/*realm is*/, false, this, c,
-                                did, initialized, provenance, partition_ready);
+            result = context->create_node(is, NULL/*realm is*/, false, this,
+                          c, did, initialized, provenance, partition_ready);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                 runtime->address_space, result->get_domain_point_color());
           if (runtime->profiler != NULL)
-	    runtime->profiler->record_index_subspace(handle.id, is.id,
+            runtime->profiler->record_index_subspace(handle.id, is.id,
                 result->get_domain_point_color());
           return result; 
         }
+        else
+        {
+          // We're not the owner so we need to send a message to the owner
+          // in order to get the name of the child
+          IndexSpaceID child_id = 0;
+          RtUserEvent ready_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(c);
+            if (defer == NULL)
+              rez.serialize(&child_id);
+            else
+              rez.serialize<IndexSpaceID*>(NULL);
+            rez.serialize(ready_event);
+          }
+          context->runtime->send_index_partition_child_request(owner_space, rez);
+          if (defer == NULL)
+          {
+            ready_event.wait();
+            IndexSpace child_handle(child_id,
+                handle.get_tree_id(), handle.get_type_tag());
+#ifdef DEBUG_LEGION
+            assert(child_handle.exists());
+#endif
+            return context->get_node(child_handle);
+          }
+          else
+          {
+            *defer = ready_event;
+            return NULL;
+          }
+        }
       }
-      // Otherwise, request a child node from the owner node
       else
       {
-        std::atomic<IndexSpaceID> child_id(0);
+        // In this case this is a collective index partition which means we
+        // don't know which node is ultimately going to be the one to create
+        // the child index space so we have to perform a search to find it
+        IndexSpaceID child_id = 0;
         RtUserEvent ready_event = Runtime::create_rt_user_event();
-        Serializer rez;
+        if (!collective_mapping->contains(local_space))
         {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(c);
-          if (defer == NULL)
-            rez.serialize(&child_id);
-          else
-            rez.serialize<std::atomic<IndexSpaceID>*>(NULL);
-          rez.serialize(ready_event);
+          // Send a message to the nearest node to start the search
+          const AddressSpaceID root = 
+            collective_mapping->find_nearest(local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(c);
+            if (defer == NULL)
+              rez.serialize(&child_id);
+            else
+              rez.serialize<IndexSpaceID*>(NULL);
+            rez.serialize(ready_event);
+            rez.serialize(local_space);
+            rez.serialize(root);
+            rez.serialize(ready_event);
+          }
+          context->runtime->send_index_partition_child_request(root, rez);
         }
-        context->runtime->send_index_partition_child_request(owner_space, rez);
+        else // We can start the search here
+          find_collective_child(c, &child_id, local_space, ready_event,
+                                local_space, ready_event);
         if (defer == NULL)
         {
           ready_event.wait();
-          IndexSpace child_handle(child_id.load(),
+          IndexSpace child_handle(child_id,
               handle.get_tree_id(), handle.get_type_tag());
 #ifdef DEBUG_LEGION
           assert(child_handle.exists());
@@ -9748,13 +9737,110 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::find_collective_child(const LegionColor child_color,
+        IndexSpaceID *target, AddressSpaceID target_space, RtUserEvent ready,
+        AddressSpaceID root_space, RtEvent prune_event)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(collective_mapping != NULL);
+      assert(collective_mapping->contains(local_space));
+#endif
+      IndexSpaceNode *child = NULL;
+      {
+        AutoLock n_lock(node_lock);
+        // See if we have the node here already
+        std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+          color_map.find(child_color);
+        if (finder == color_map.end())
+          // Save this result for later
+          pending_child_map.emplace(std::make_pair(child_color,
+                PendingRequest(target, target_space, ready)));
+        else
+          child = finder->second;
+      }
+      // Check to see if found the child
+      if (child != NULL)
+      {
+        // Only one node can send the response to trigger the ready event
+        // so we need to handle the case where the child is replicated
+        bool send_response = (child->is_owner() || (root_space == local_space));
+        if (!send_response)
+        {
+          // See if the child owner space is in our sub-tree in which
+          // case we can send the response now
+          AddressSpaceID child_space = child->owner_space;
+          while (child_space != root_space)
+          {
+            child_space = 
+              collective_mapping->get_parent(root_space, child_space);
+            if (child_space == local_space)
+            {
+              send_response = true;
+              break;
+            }
+          }
+        }
+        if (send_response)
+        {
+          if (target_space == local_space)
+          {
+            if (target != NULL)
+              (*target) = child->handle.get_id();
+            Runtime::trigger_event(ready);
+          }
+          else
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(child->handle);
+              rez.serialize(target);
+              rez.serialize(ready);
+            }
+            context->runtime->send_index_partition_child_response(
+                                                target_space, rez);
+          }
+        }
+      }
+      else
+      {
+        // Launch the task that will prune out the pending request in the
+        // case that it isn't found on this node
+        DeferChildArgs args(this, child_color); 
+        RtEvent local_prune = runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_WORK_PRIORITY, prune_event);
+        // Then forward on the search to all the children
+        std::vector<AddressSpaceID> children;
+        collective_mapping->get_children(root_space, local_space, children);
+        if (!children.empty())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(child_color);
+            rez.serialize(target);
+            rez.serialize(ready);
+            rez.serialize(target_space);
+            rez.serialize(root_space);
+            rez.serialize(local_prune);
+          }
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            context->runtime->send_index_partition_child_request(*it, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::add_child(IndexSpaceNode *child) 
     //--------------------------------------------------------------------------
     {
       // This child should live as long as we are alive
       child->add_nested_resource_ref(did);
       child->add_nested_valid_ref(did);
-      RtUserEvent to_trigger;
+      std::vector<PendingRequest> to_send;
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -9762,14 +9848,54 @@ namespace Legion {
         assert(color_map.find(child->color) == color_map.end());
 #endif
         color_map[child->color] = child;
-        std::map<LegionColor,RtUserEvent>::iterator finder = 
-          pending_child_map.find(child->color);
-        if (finder == pending_child_map.end())
-          return;
-        to_trigger = finder->second;
-        pending_child_map.erase(finder);
+        for (std::multimap<LegionColor,PendingRequest>::iterator it =
+              pending_child_map.lower_bound(child->color); it !=
+              pending_child_map.upper_bound(child->color); /*nothing*/)
+        {
+          // Only send if we're the actual owner of the child to avoid
+          // duplicate triggers of the to_trigger events
+          if (child->is_owner())
+            to_send.push_back(it->second);
+          std::multimap<LegionColor,PendingRequest>::iterator to_delete = it++;
+          pending_child_map.erase(to_delete);
+        }
       }
-      Runtime::trigger_event(to_trigger);
+      for (std::vector<PendingRequest>::const_iterator it =
+            to_send.begin(); it != to_send.end(); it++)
+      {
+        if (it->target_space == local_space)
+        {
+          if (it->target != NULL)
+            (*it->target) = child->handle.get_id();
+          Runtime::trigger_event(it->to_trigger);
+        }
+        else
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(child->handle);
+            rez.serialize(it->target);
+            rez.serialize(it->to_trigger);
+          }
+          context->runtime->send_index_partition_child_response(
+                                          it->target_space, rez);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::prune_requests(const LegionColor color)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      for (std::multimap<LegionColor,PendingRequest>::iterator it =
+            pending_child_map.lower_bound(color); it !=
+            pending_child_map.upper_bound(color); /*nothing*/)
+      {
+        std::multimap<LegionColor,PendingRequest>::iterator to_delete = it++;
+        pending_child_map.erase(to_delete);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9809,15 +9935,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexPartNode::RemoteDisjointnessFunctor::RemoteDisjointnessFunctor(
-                        Serializer &r, Runtime *rt, ShardMapping *shard_mapping)
-      : rez(r), runtime(rt)
+                        Serializer &r, Runtime *rt, CollectiveMapping *mapping)
+      : rez(r), runtime(rt), collective_mapping(mapping)
     //--------------------------------------------------------------------------
     {
-      if (shard_mapping != NULL)
-      {
-        for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
-          skip_shard_spaces.insert((*shard_mapping)[idx]);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -9825,8 +9946,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if ((target != runtime->address_space) && 
-          (skip_shard_spaces.empty() ||
-           (skip_shard_spaces.find(target) == skip_shard_spaces.end())))
+          ((collective_mapping == NULL) || 
+           !collective_mapping->contains(target)))
         runtime->send_index_partition_disjoint_update(target, rez);
     }
 
@@ -9910,8 +10031,8 @@ namespace Legion {
           // requests can record themselves so we need to do it 
           // while we are holding the lock
           if (has_remote_instances() && 
-              ((shard_mapping == NULL) || 
-               (count_remote_instances() > shard_mapping->size())))
+              ((collective_mapping == NULL) || 
+               (count_remote_instances() > collective_mapping->size())))
           {
             Serializer rez;
             {
@@ -9920,7 +10041,7 @@ namespace Legion {
               rez.serialize<bool>(disjoint);
             }
             RemoteDisjointnessFunctor functor(rez, 
-                  context->runtime, shard_mapping);
+                  context->runtime, collective_mapping);
             map_over_remote_instances(functor);
           }
         }
@@ -10644,14 +10765,6 @@ namespace Legion {
         collective_mapping->pack(rez);
       else
         rez.serialize<size_t>(0); // total spaces
-      if (shard_mapping != NULL)
-      {
-        rez.serialize(shard_mapping->size());
-        for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
-          rez.serialize((*shard_mapping)[idx]);
-      }
-      else
-        rez.serialize<size_t>(0);
       if (provenance != NULL)
         provenance->serialize(rez);
       else
@@ -10699,16 +10812,6 @@ namespace Legion {
       CollectiveMapping *mapping = NULL;
       if (num_spaces > 0)
         mapping = new CollectiveMapping(derez, num_spaces);
-      size_t num_shard_mapping;
-      derez.deserialize(num_shard_mapping);
-      ShardMapping *shard_mapping = NULL;
-      if (num_shard_mapping > 0)
-      {
-        shard_mapping = new ShardMapping();
-        shard_mapping->resize(num_shard_mapping);
-        for (unsigned idx = 0; idx < num_shard_mapping; idx++)
-          derez.deserialize((*shard_mapping)[idx]);
-      }
       AutoProvenance provenance(Provenance::deserialize(derez));
       IndexSpaceNode *parent_node = context->get_node(parent);
       IndexSpaceNode *color_space_node = context->get_node(color_space);
@@ -10722,10 +10825,10 @@ namespace Legion {
       IndexPartNode *node = has_disjoint ?
         context->create_node(handle, parent_node, color_space_node, color, 
                disjoint, complete, did, provenance, ready_event, 
-               partial_pending, initialized, mapping, shard_mapping) :
+               partial_pending, initialized, mapping) :
         context->create_node(handle, parent_node, color_space_node, color,
                dis_ready, complete, did, provenance, ready_event,
-               partial_pending, initialized, mapping, shard_mapping);
+               partial_pending, initialized, mapping);
       if (!has_disjoint)
         node->record_remote_disjoint_ready(dis_ready);
 #ifdef DEBUG_LEGION
@@ -10800,23 +10903,15 @@ namespace Legion {
       derez.deserialize(handle);
       LegionColor child_color;
       derez.deserialize(child_color);
-      std::atomic<IndexSpaceID> *target;
+      IndexSpaceID *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexPartNode *parent = forest->get_node(handle);
-      RtEvent defer;
-      IndexSpaceNode *child = parent->get_child(child_color, &defer);
-      // If we got a deferral event then we need to make a continuation
-      // to avoid blocking the virtual channel for nested index tree requests
-      if (defer.exists())
+      if (parent->collective_mapping == NULL)
       {
-        DeferChildArgs args(parent, child_color, target, to_trigger, source);
-        forest->runtime->issue_runtime_meta_task(args, 
-            LG_LATENCY_DEFERRED_PRIORITY, defer);
-      }
-      else
-      {
+        // We can just the result right away and send the response back
+        IndexSpaceNode *child = parent->get_child(child_color);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -10826,6 +10921,16 @@ namespace Legion {
         }
         forest->runtime->send_index_partition_child_response(source, rez);
       }
+      else
+      {
+        AddressSpaceID target_space, root_space;
+        derez.deserialize(target_space);
+        derez.deserialize(root_space);
+        RtEvent prune_event;
+        derez.deserialize(prune_event);
+        parent->find_collective_child(child_color, target, target_space,
+                                    to_trigger, root_space, prune_event);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10833,16 +10938,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferChildArgs *dargs = (const DeferChildArgs*)args;
-      IndexSpaceNode *child = dargs->proxy_this->get_child(dargs->child_color);
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(child->handle);
-        rez.serialize(dargs->target);
-        rez.serialize(dargs->to_trigger);
-      }
-      Runtime *runtime = dargs->proxy_this->context->runtime;
-      runtime->send_index_partition_child_response(dargs->source, rez);
+      dargs->proxy_this->prune_requests(dargs->child_color);
+      if (dargs->proxy_this->remove_base_resource_ref(META_TASK_REF))
+        delete dargs->proxy_this;
     }
 
     //--------------------------------------------------------------------------
@@ -10853,7 +10951,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpace handle;
       derez.deserialize(handle);
-      std::atomic<IndexSpaceID> *target;
+      IndexSpaceID *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -10865,7 +10963,7 @@ namespace Legion {
       }
       else
       {
-        target->store(handle.get_id());
+        (*target) = handle.get_id();
         Runtime::trigger_event(to_trigger);
       }
     }
@@ -10909,7 +11007,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_mapping != NULL);
+      assert(collective_mapping != NULL);
 #endif
       AutoLock n_lock(node_lock);
       if (shard_rects_ready.exists())
@@ -10917,9 +11015,6 @@ namespace Legion {
       shard_rects_ready = Runtime::create_rt_user_event();
       // Add a reference to keep this node alive until this all done
       add_base_resource_ref(RUNTIME_REF);
-#ifdef DEBUG_LEGION
-      assert(collective_mapping != NULL);
-#endif
       // Figure out how many downstream requests we have
       std::vector<AddressSpaceID> children;
       collective_mapping->get_children(owner_space, local_space, children);
@@ -10968,7 +11063,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(shard_mapping != NULL);
+      assert(collective_mapping != NULL);
 #endif
       bool up;
       derez.deserialize<bool>(up);
@@ -10982,9 +11077,6 @@ namespace Legion {
           shard_rects_ready = Runtime::create_rt_user_event();
           // Add a reference to keep this node alive until this all done
           add_base_resource_ref(RUNTIME_REF);
-#ifdef DEBUG_LEGION
-          assert(collective_mapping != NULL);
-#endif
           // Figure out how many downstream requests we have
           collective_mapping->get_children(owner_space, local_space, children);
 #ifdef DEBUG_LEGION
@@ -11083,7 +11175,6 @@ namespace Legion {
         unpack_shard_rects(derez);
 #ifdef DEBUG_LEGION
         assert(shard_rects_ready.exists());
-        assert(collective_mapping != NULL);
 #endif
         std::vector<AddressSpaceID> children;
         collective_mapping->get_children(owner_space, local_space, children);
@@ -11329,12 +11420,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                    DistributedID did, RtEvent init, CollectiveMapping *map,
-                   ShardMapping *shard_mapping, Provenance *prov)
+                   Provenance *prov)
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           false/*register with runtime*/, map),
         handle(sp), context(ctx), provenance(prov), initialized(init), 
-        allocation_state((shard_mapping != NULL) ? FIELD_ALLOC_COLLECTIVE :
+        allocation_state((map != NULL) ? FIELD_ALLOC_COLLECTIVE :
             is_owner() ? FIELD_ALLOC_READ_ONLY : FIELD_ALLOC_INVALID), 
         outstanding_allocators(0), outstanding_invalidations(0)
     //--------------------------------------------------------------------------
@@ -11344,9 +11435,9 @@ namespace Legion {
         unallocated_indexes = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         local_index_infos.resize(runtime->max_local_fields, 
             std::pair<size_t,CustomSerdezID>(0, 0));
-        if (shard_mapping != NULL)
+        if (collective_mapping != NULL)
         {
-          const ShardMapping &mapping = *shard_mapping;
+          const CollectiveMapping &mapping = *collective_mapping;
           for (unsigned idx = 0; idx < mapping.size(); idx++)
           {
             const AddressSpaceID space = mapping[idx];

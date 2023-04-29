@@ -206,7 +206,6 @@ namespace Legion {
                                              ValueBroadcast<bool> *part_result,
                                              ApEvent partition_ready,
                                              CollectiveMapping *mapping,
-                                             ShardMapping *shard_mapping,
                                              RtEvent creation_ready,
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source,
@@ -347,7 +346,6 @@ namespace Legion {
       FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
                                    Provenance *provenance,
                                    CollectiveMapping *mapping = NULL,
-                                   ShardMapping *shard_mapping = NULL,
                                    RtEvent initialized = RtEvent::NO_RT_EVENT);
       void destroy_field_space(FieldSpace handle,
                                std::set<RtEvent> &applied,
@@ -735,8 +733,7 @@ namespace Legion {
                                   DistributedID did, Provenance *provenance,
                                   ApEvent partition_ready, 
                                   ApBarrier partial_pending, RtEvent init,
-                                  CollectiveMapping *mapping = NULL,
-                                  ShardMapping *shard_mapping = NULL);
+                                  CollectiveMapping *mapping = NULL);
       // Give the event for when the disjointness information is ready
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space,LegionColor color,
@@ -744,12 +741,10 @@ namespace Legion {
                                   DistributedID did, Provenance *provenance,
                                   ApEvent partition_ready, 
                                   ApBarrier partial_pending, RtEvent init,
-                                  CollectiveMapping *mapping = NULL,
-                                  ShardMapping *shard_mapping = NULL);
+                                  CollectiveMapping *mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent init, Provenance *provenance,
-                                  CollectiveMapping *mapping = NULL,
-                                  ShardMapping *shard_mapping = NULL);
+                                  CollectiveMapping *mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
                                   Deserializer &derez);
@@ -3111,27 +3106,24 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_CHILD_TASK_ID;
       public:
-        DeferChildArgs(IndexPartNode *proxy, LegionColor child,
-            std::atomic<IndexSpaceID> *tar, RtUserEvent trig, AddressSpaceID src)
+        DeferChildArgs(IndexPartNode *proxy, LegionColor child)
           : LgTaskArgs<DeferChildArgs>(implicit_provenance),
-            proxy_this(proxy), child_color(child), target(tar),
-            to_trigger(trig), source(src) { }
+            proxy_this(proxy), child_color(child)
+          { proxy_this->add_base_resource_ref(META_TASK_REF); }
       public:
         IndexPartNode *const proxy_this;
         const LegionColor child_color;
-        std::atomic<IndexSpaceID> *const target;
-        const RtUserEvent to_trigger;
-        const AddressSpaceID source;
       };
       class RemoteDisjointnessFunctor {
       public:
-        RemoteDisjointnessFunctor(Serializer &r, Runtime *rt, ShardMapping *m);
+        RemoteDisjointnessFunctor(Serializer &r, Runtime *rt,
+                                  CollectiveMapping *m);
       public:
         void apply(AddressSpaceID target);
       public:
         Serializer &rez;
         Runtime *const runtime;
-        std::set<AddressSpaceID> skip_shard_spaces;
+        CollectiveMapping *const collective_mapping;
       };
     protected:
       class InterferenceEntry {
@@ -3164,15 +3156,14 @@ namespace Legion {
                     LegionColor c, bool disjoint, int complete,
                     DistributedID did, ApEvent partition_ready, 
                     ApBarrier partial_pending, RtEvent initialized,
-                    CollectiveMapping *mapping, ShardMapping *shard_map,
-                    Provenance *provenance);
+                    CollectiveMapping *mapping, Provenance *provenance);
       IndexPartNode(RegionTreeForest *ctx, IndexPartition p,
                     IndexSpaceNode *par, IndexSpaceNode *color_space,
                     LegionColor c, RtEvent disjointness_ready,
                     int complete, DistributedID did,
                     ApEvent partition_ready, ApBarrier partial_pending,
                     RtEvent initialized, CollectiveMapping *mapping,
-                    ShardMapping *shard_mapping, Provenance *provenance);
+                    Provenance *provenance);
       IndexPartNode(const IndexPartNode &rhs) = delete;
       virtual ~IndexPartNode(void);
     public:
@@ -3205,6 +3196,12 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
+      void find_collective_child(const LegionColor c, IndexSpaceID *target,
+                                 AddressSpaceID target_space,
+                                 RtUserEvent ready_event,
+                                 AddressSpaceID root_space,
+                                 RtEvent prune_event);
+      void prune_requests(const LegionColor color);
       void add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
@@ -3299,12 +3296,20 @@ namespace Legion {
       const LegionColor max_linearized_color;
       const ApEvent partition_ready;
       const ApBarrier partial_pending;
-      ShardMapping *const shard_mapping;
     protected:
       // Must hold the node lock when accessing these data structures
       // the remaining data structures
       std::map<LegionColor,IndexSpaceNode*> color_map;
-      std::map<LegionColor,RtUserEvent> pending_child_map;
+      struct PendingRequest {
+      public:
+        PendingRequest(IndexSpaceID *t, AddressSpaceID sp, RtUserEvent trigger)
+          : target(t), target_space(sp), to_trigger(trigger) { }
+      public:
+        IndexSpaceID *target;
+        AddressSpaceID target_space;
+        RtUserEvent to_trigger;
+      };
+      std::multimap<LegionColor,PendingRequest> pending_child_map;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
       std::list<PartitionTracker*> partition_trackers;
@@ -3390,15 +3395,14 @@ namespace Legion {
                      LegionColor c, bool disjoint, int complete,
                      DistributedID did, ApEvent partition_ready, 
                      ApBarrier pending, RtEvent initialized,
-                     CollectiveMapping *mapping, ShardMapping *shard_map,
-                     Provenance *provenance);
+                     CollectiveMapping *mapping, Provenance *provenance);
       IndexPartNodeT(RegionTreeForest *ctx, IndexPartition p,
                      IndexSpaceNode *par, IndexSpaceNode *color_space,
                      LegionColor c, RtEvent disjointness_ready,
                      int complete, DistributedID did,
                      ApEvent partition_ready, ApBarrier pending,
                      RtEvent initialized, CollectiveMapping *mapping,
-                     ShardMapping *shard_mapping, Provenance *provenance);
+                     Provenance *provenance);
       IndexPartNodeT(const IndexPartNodeT &rhs) = delete;
       virtual ~IndexPartNodeT(void);
     public:
@@ -3429,19 +3433,19 @@ namespace Legion {
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, bool d, int k, DistributedID id,
                        ApEvent r, ApBarrier pend, RtEvent initialized, 
-                       CollectiveMapping *m, ShardMapping *sm, Provenance *prov)
+                       CollectiveMapping *m, Provenance *prov)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(d), complete(k), did(id), ready(r), pending(pend),
-          init(initialized), mapping(m), shard_mapping(sm), provenance(prov) { }
+          init(initialized), mapping(m), provenance(prov) { }
       IndexPartCreator(RegionTreeForest *f, IndexPartition p,
                        IndexSpaceNode *par, IndexSpaceNode *cs,
                        LegionColor c, RtEvent d, int k, DistributedID id,
                        ApEvent r, ApBarrier pend, RtEvent initialized,
-                       CollectiveMapping *m, ShardMapping *sm, Provenance *prov)
+                       CollectiveMapping *m, Provenance *prov)
         : forest(f), partition(p), parent(par), color_space(cs),
           color(c), disjoint(false), complete(k), disjoint_ready(d),
           did(id), ready(r), pending(pend), init(initialized), 
-          mapping(m), shard_mapping(sm), provenance(prov) { }
+          mapping(m), provenance(prov) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexPartCreator *creator)
@@ -3451,13 +3455,13 @@ namespace Legion {
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint_ready, creator->complete, 
               creator->did, creator->ready, creator->pending, creator->init,
-              creator->mapping, creator->shard_mapping, creator->provenance);
+              creator->mapping, creator->provenance);
         else
           creator->result = new IndexPartNodeT<N::N,T>(creator->forest,
               creator->partition, creator->parent, creator->color_space,
               creator->color, creator->disjoint, creator->complete,
               creator->did, creator->ready, creator->pending, creator->init,
-              creator->mapping, creator->shard_mapping, creator->provenance);
+              creator->mapping, creator->provenance);
       }
     public:
       RegionTreeForest *const forest;
@@ -3473,7 +3477,6 @@ namespace Legion {
       const ApBarrier pending;
       const RtEvent init;
       CollectiveMapping *const mapping;
-      ShardMapping *const shard_mapping;
       Provenance *const provenance;
       IndexPartNode *result;
     };
@@ -3576,7 +3579,7 @@ namespace Legion {
     public:
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
                      RtEvent initialized, CollectiveMapping *mapping,
-                     ShardMapping *shard_mapping, Provenance *provenance);
+                     Provenance *provenance);
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
                      RtEvent initialized, Provenance *provenance,
                      Deserializer &derez);

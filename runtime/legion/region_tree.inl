@@ -7253,10 +7253,9 @@ namespace Legion {
                                         int complete, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, CollectiveMapping *map,
-                                        ShardMapping *shard_map, 
                                         Provenance *prov)
       : IndexPartNode(ctx, p, par, cs, c, disjoint, complete, did,
-          partition_ready, pend, init, map, shard_map, prov), kd_root(NULL),
+          partition_ready, pend, init, map, prov), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
@@ -7271,10 +7270,9 @@ namespace Legion {
                                         int comp, DistributedID did,
                                         ApEvent partition_ready, ApBarrier pend,
                                         RtEvent init, CollectiveMapping *map,
-                                        ShardMapping *shard_map,
                                         Provenance *prov)
       : IndexPartNode(ctx, p, par, cs, c, disjoint_event, comp, did,
-          partition_ready, pend, init, map, shard_map, prov), kd_root(NULL),
+          partition_ready, pend, init, map, prov), kd_root(NULL),
         kd_remote(NULL), dense_shard_rects(NULL), sparse_shard_rects(NULL)
     //--------------------------------------------------------------------------
     {
@@ -7309,7 +7307,7 @@ namespace Legion {
         const TypeTag type_tag = handle.get_type_tag();
         const ApEvent parent_ready = 
          parent->get_expr_index_space(&parent_space, type_tag, true/*tight*/); 
-        if (shard_mapping == NULL)
+        if (collective_mapping == NULL)
         {
           // No shard mapping so we can build the full kd-tree here
           std::vector<std::pair<Rect<DIM,T>,LegionColor> > bounds;
