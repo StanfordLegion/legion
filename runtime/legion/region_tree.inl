@@ -3166,7 +3166,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->create_child(*itr));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < subspaces.size());
 #endif
@@ -3210,7 +3210,7 @@ namespace Legion {
           granularity, color_offset, subspace, requests, 
           index_space_ready));
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->create_child(*itr));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspace))
           assert(false); // should never hit this
@@ -3286,7 +3286,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->create_child(*itr));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < subspaces.size());
 #endif
@@ -3363,7 +3363,7 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
-                partition->create_child(colors[idx]));
+                partition->get_child(colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -3435,7 +3435,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->create_child(*itr));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < subspaces.size());
 #endif
@@ -3512,7 +3512,7 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
-                partition->create_child(colors[idx]));
+                partition->get_child(colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -3592,7 +3592,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->create_child(*itr));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < subspaces.size());
 #endif
@@ -3678,7 +3678,7 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
-                partition->create_child(colors[idx]));
+                partition->get_child(colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -3750,7 +3750,7 @@ namespace Legion {
       for (ColorSpaceIterator itr(partition); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->create_child(*itr));
+          static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(subspace_index < subspaces.size());
 #endif
@@ -3827,7 +3827,7 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(
-                partition->create_child(colors[idx]));
+                partition->get_child(colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -3906,7 +3906,7 @@ namespace Legion {
                               extent + transform * color_itr.p);
           // Get the appropriate child
           IndexSpaceNodeT<M,T> *child = 
-            static_cast<IndexSpaceNodeT<M,T>*>(partition->create_child(color));
+            static_cast<IndexSpaceNodeT<M,T>*>(partition->get_child(color));
           // Then set the new index space
           if (child->set_realm_index_space(context->runtime->address_space, 
                                            child_is))
@@ -4027,7 +4027,7 @@ namespace Legion {
           LegionColor child_color = color_space->linearize_color(&point,
                                         color_space->handle.get_type_tag());
           IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
-                                          partition->create_child(child_color));
+                                          partition->get_child(child_color));
           size_t future_size = 0;
           const Domain *domain = static_cast<const Domain*>(it->second->
                         find_internal_buffer(op->get_context(), future_size));
@@ -4093,7 +4093,7 @@ namespace Legion {
                                           color_space->handle.get_type_tag());
             IndexSpaceNodeT<DIM,T> *child = 
               static_cast<IndexSpaceNodeT<DIM,T>*>(
-                  partition->create_child(child_color));
+                  partition->get_child(child_color));
             Realm::IndexSpace<DIM,T> child_space;
             if (future != NULL)
             {
@@ -4236,7 +4236,7 @@ namespace Legion {
         {
           IndexSpaceNodeT<DIM,T> *child = 
               static_cast<IndexSpaceNodeT<DIM,T>*>(
-                  partition->create_child(child_colors[idx]));
+                  partition->get_child(child_colors[idx]));
           if (child->set_realm_index_space(context->runtime->address_space,
                                            subspaces[idx]))
               assert(false); // should never hit this
@@ -4334,7 +4334,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < child_colors.size(); idx++)
       {
         IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
-                                  partition->create_child(child_colors[idx]));
+                                  partition->get_child(child_colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -4464,7 +4464,7 @@ namespace Legion {
         // Get the child of the projection partition
         IndexSpaceNodeT<DIM1,T1> *child = 
           static_cast<IndexSpaceNodeT<DIM1,T1>*>(
-              partition->create_child(child_colors[idx]));
+              partition->get_child(child_colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -4594,7 +4594,7 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM1,T1> *child = 
            static_cast<IndexSpaceNodeT<DIM1,T1>*>(
-               partition->create_child(child_colors[idx]));
+               partition->get_child(child_colors[idx]));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          subspaces[idx]))
           assert(false); // should never hit this
@@ -4706,7 +4706,7 @@ namespace Legion {
       {
         // Get the child of the projection partition
         IndexSpaceNodeT<DIM1,T1> *child = 
-         static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->create_child(*itr));
+         static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(index < subspaces.size());
 #endif
@@ -4822,7 +4822,7 @@ namespace Legion {
       {
         // Get the child of the projection partition
         IndexSpaceNodeT<DIM1,T1> *child = 
-         static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->create_child(*itr));
+         static_cast<IndexSpaceNodeT<DIM1,T1>*>(partition->get_child(*itr));
 #ifdef DEBUG_LEGION
         assert(index < subspaces.size());
 #endif

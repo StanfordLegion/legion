@@ -3109,13 +3109,16 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_CHILD_TASK_ID;
       public:
-        DeferChildArgs(IndexPartNode *proxy, LegionColor child)
+        DeferChildArgs(IndexPartNode *proxy, LegionColor child,
+            RtUserEvent trig, AddressSpaceID src)
           : LgTaskArgs<DeferChildArgs>(implicit_provenance),
-            proxy_this(proxy), child_color(child)
-          { proxy_this->add_base_resource_ref(META_TASK_REF); }
+            proxy_this(proxy), child_color(child),
+            to_trigger(trig), source(src) { }
       public:
         IndexPartNode *const proxy_this;
         const LegionColor child_color;
+        const RtUserEvent to_trigger;
+        const AddressSpaceID source;
       };
       class RemoteDisjointnessFunctor {
       public:
@@ -3198,12 +3201,7 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       bool has_color(const LegionColor c);
-      IndexSpaceNode* create_child(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void find_child(const LegionColor c, IndexSpaceID *target,
-                      AddressSpaceID target_space, RtUserEvent ready_event,
-                      AddressSpaceID root_space, RtEvent prune_event);
-      void prune_requests(const LegionColor color);
       void add_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
@@ -3302,16 +3300,7 @@ namespace Legion {
       // Must hold the node lock when accessing these data structures
       // the remaining data structures
       std::map<LegionColor,IndexSpaceNode*> color_map;
-      struct PendingRequest {
-      public:
-        PendingRequest(IndexSpaceID *t, AddressSpaceID sp, RtUserEvent trigger)
-          : target(t), target_space(sp), to_trigger(trigger) { }
-      public:
-        IndexSpaceID *target;
-        AddressSpaceID target_space;
-        RtUserEvent to_trigger;
-      };
-      std::multimap<LegionColor,PendingRequest> pending_child_map;
+      std::map<LegionColor,RtUserEvent> pending_child_map;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
       std::list<PartitionTracker*> partition_trackers;
