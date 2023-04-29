@@ -465,7 +465,8 @@ before_script:
     fi
   - |
     if [[ "$TEST_JUPYTER" -eq 1 ]]; then
-      pip3 install notebook==6.4.10
+      # IPython is a transitive dependency here, pin for stability
+      pip3 install ipython==8.12.1 notebook==6.4.10
     fi
   - |
     if [[ "$USE_PROF" -eq 1 ]]; then
