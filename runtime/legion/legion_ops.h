@@ -2913,11 +2913,7 @@ namespace Legion {
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest) = 0;
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
-        virtual bool need_all_futures(void) const { return false; }
       };
       class EqualPartitionThunk : public PendingPartitionThunk {
       public:
@@ -2928,11 +2924,6 @@ namespace Legion {
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_equal_partition(op, pid, granularity); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_equal_partition(op, pid, granularity,
-                                                shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
@@ -2948,13 +2939,7 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_weights(op, pid, 
                                         weights, granularity); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_weights(op, pid, weights,
-                                      granularity, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp *op);
-        virtual bool need_all_futures(void) const { return true; }
       protected:
         IndexPartition pid;
         FutureMap weights;
@@ -2970,11 +2955,6 @@ namespace Legion {
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_union(op, pid, handle1, handle2); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_union(op, pid, handle1, handle2,
-                                                   shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
@@ -2992,11 +2972,6 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_intersection(op, pid, handle1,
                                                           handle2); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_intersection(op, pid, handle1,
-                                              handle2, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
@@ -3013,11 +2988,6 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_intersection(op, pid, 
                                                           part, dominates); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_intersection(op, pid, part,
-                                              dominates, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
@@ -3035,11 +3005,6 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_difference(op, pid, handle1,
                                                         handle2); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_difference(op, pid, handle1, 
-                                          handle2, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition pid;
@@ -3059,11 +3024,6 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_restriction(pid, 
                                               transform, extent); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_restriction(pid, transform,
-                                            extent, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp *op);
       protected:
         IndexPartition pid;
@@ -3080,11 +3040,6 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_domain(op, pid, future_map,
                                               perform_intersections); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_partition_by_domain(op, pid, future_map,
-                            perform_intersections, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp *op);
       protected:
         IndexPartition pid;
@@ -3101,11 +3056,6 @@ namespace Legion {
                                 RegionTreeForest *forest)
         { return forest->create_cross_product_partitions(op, base, source, 
                                                          part_color); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->create_cross_product_partitions(op, base, source,
-                                        part_color, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition base;
@@ -3128,15 +3078,6 @@ namespace Legion {
           else
             return forest->compute_pending_space(op, target, 
                                                  handles, is_union); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { if (is_partition)
-            return forest->compute_pending_space(op, target, handle, is_union,
-                                                 shard, total_shards);
-          else
-            return forest->compute_pending_space(op, target, handles, 
-                                               is_union, shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         bool is_union, is_partition;
@@ -3242,7 +3183,8 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
     protected:
-      virtual void populate_sources(const FutureMap &fm);
+      virtual void populate_sources(const FutureMap &fm,
+          IndexPartition pid, bool need_all_futures);
       void request_future_buffers(std::set<RtEvent> &mapped_events,
                                   std::set<RtEvent> &ready_events);
     protected:

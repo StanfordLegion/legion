@@ -172,7 +172,7 @@ namespace Legion {
                               RtEvent initialized = RtEvent::NO_RT_EVENT,
                               CollectiveMapping *mapping = NULL,
                               IndexSpaceExprID expr_id = 0);
-      RtEvent create_pending_partition(TaskContext *ctx,
+      RtEvent create_pending_partition(InnerContext *ctx,
                                        IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
@@ -181,8 +181,9 @@ namespace Legion {
                                        DistributedID did,
                                        Provenance *provenance,
                                        ApEvent partition_ready,
+                                       CollectiveMapping *mapping = NULL,
                   ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
-      void create_pending_cross_product(TaskContext *ctx,
+      void create_pending_cross_product(InnerContext *ctx,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
@@ -192,7 +193,7 @@ namespace Legion {
                                         ApEvent domain_ready,
                                         std::set<RtEvent> &safe_events,
                                         ShardID shard = 0,
-                                        size_t total_shards = 1);
+                                        const ShardMapping *mapping = NULL);
       // For control replication contexts
       RtEvent create_pending_partition_shard(ShardID owner_shard,
                                              ReplicateContext *ctx,
@@ -217,55 +218,39 @@ namespace Legion {
     public:
       ApEvent create_equal_partition(Operation *op, 
                                      IndexPartition pid, 
-                                     size_t granularity,
-                                     ShardID shard = 0,
-                                     size_t total_shards = 1);
+                                     size_t granularity);
       ApEvent create_partition_by_weights(Operation *op,
                                           IndexPartition pid,
                                           const FutureMap &map,
-                                          size_t granularity,
-                                          ShardID shard = 0,
-                                          size_t total_shards = 1);
+                                          size_t granularity);
       ApEvent create_partition_by_union(Operation *op,
                                         IndexPartition pid,
                                         IndexPartition handle1,
-                                        IndexPartition handle2,
-                                        ShardID shard = 0, 
-                                        size_t total_shards = 1);
+                                        IndexPartition handle2);
       ApEvent create_partition_by_intersection(Operation *op,
                                                IndexPartition pid,
                                                IndexPartition handle1,
-                                               IndexPartition handle2,
-                                               ShardID shard = 0,
-                                               size_t total_shards = 1);
+                                               IndexPartition handle2);
       ApEvent create_partition_by_intersection(Operation *op,
                                                IndexPartition pid,
                                                IndexPartition part,
-                                               const bool dominates,
-                                               ShardID shard = 0,
-                                               size_t total_shards = 1);
+                                               const bool dominates);
       ApEvent create_partition_by_difference(Operation *op,
                                            IndexPartition pid,
                                            IndexPartition handle1,
-                                           IndexPartition handle2,
-                                           ShardID shard = 0,
-                                           size_t total_shards = 1);
+                                           IndexPartition handle2);
       ApEvent create_partition_by_restriction(IndexPartition pid,
                                               const void *transform,
-                                              const void *extent,
-                                              ShardID shard = 0,
-                                              size_t total_shards = 1);
+                                              const void *extent);
       ApEvent create_partition_by_domain(Operation *op, IndexPartition pid,
                                          const FutureMap &future_map,
-                                         bool perform_intersections,
-                                         ShardID shard = 0,
-                                         size_t total_shards = 1);
+                                         bool perform_intersections);
       ApEvent create_cross_product_partitions(Operation *op,
                                               IndexPartition base,
                                               IndexPartition source,
                                               LegionColor part_color,
                                               ShardID shard = 0,
-                                              size_t total_shards = 1);
+                                              const ShardMapping *mapping=NULL);
     public:  
       ApEvent create_partition_by_field(Operation *op,
                                         IndexPartition pending,
@@ -2209,72 +2194,36 @@ namespace Legion {
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
                                             size_t granularity) = 0;
-      virtual ApEvent create_equal_children(Operation *op,
-                                            IndexPartNode *partition, 
-                                            size_t granularity,
-                                            ShardID shard,
-                                            size_t total_shards) = 0;
       virtual ApEvent create_by_union(Operation *op,
                                       IndexPartNode *partition,
                                       IndexPartNode *left,
                                       IndexPartNode *right) = 0;
-      virtual ApEvent create_by_union(Operation *op,
-                                      IndexPartNode *partition,
-                                      IndexPartNode *left,
-                                      IndexPartNode *right,
-                                      ShardID shard,
-                                      size_t total_shards) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              IndexPartNode *left,
                                              IndexPartNode *right) = 0;
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
-                                             IndexPartNode *left,
-                                             IndexPartNode *right,
-                                             ShardID shard,
-                                             size_t total_shards) = 0;
-      virtual ApEvent create_by_intersection(Operation *op,
-                                             IndexPartNode *partition,
                                              // Left is implicit "this"
                                              IndexPartNode *right,
-                                             const bool dominates = false) = 0;
-      virtual ApEvent create_by_intersection(Operation *op,
-                                             IndexPartNode *partition,
-                                             // Left is implicit "this"
-                                             IndexPartNode *right,
-                                             ShardID shard,
-                                             size_t total_shards,
                                              const bool dominates = false) = 0;
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right) = 0;
-      virtual ApEvent create_by_difference(Operation *op,
-                                           IndexPartNode *partition,
-                                           IndexPartNode *left,
-                                           IndexPartNode *right,
-                                           ShardID shard,
-                                           size_t total_shards) = 0;
       // Called on color space and not parent
       virtual ApEvent create_by_restriction(IndexPartNode *partition,
                                             const void *transform,
                                             const void *extent,
-                                            int partition_dim,
-                                            ShardID shard,
-                                            size_t total_shards) = 0;
+                                            int partition_dim) = 0;
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
                                        FutureMapImpl *future_map,
-                                       bool perform_intersections,
-                                       ShardID shard,
-                                       size_t total_shards) = 0;
+                                       bool perform_intersections) = 0;
       virtual ApEvent create_by_weights(Operation *op,
                                         IndexPartNode *partition,
                                         FutureMapImpl *future_map,
-                                        size_t granularity,
-                                        ShardID shard,
-                                        size_t total_shards) = 0;
+                                        size_t granularity) = 0;
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2444,87 +2393,50 @@ namespace Legion {
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
                                             size_t granularity);
-      virtual ApEvent create_equal_children(Operation *op,
-                                            IndexPartNode *partition, 
-                                            size_t granularity,
-                                            ShardID shard,
-                                            size_t total_shards);
       virtual ApEvent create_by_union(Operation *op,
                                       IndexPartNode *partition,
                                       IndexPartNode *left,
                                       IndexPartNode *right);
-      virtual ApEvent create_by_union(Operation *op,
-                                      IndexPartNode *partition,
-                                      IndexPartNode *left,
-                                      IndexPartNode *right,
-                                      ShardID shard, 
-                                      size_t total_shards);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              IndexPartNode *left,
                                              IndexPartNode *right);
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
-                                             IndexPartNode *left,
-                                             IndexPartNode *right,
-                                             ShardID shard,
-                                             size_t total_shards);
-      virtual ApEvent create_by_intersection(Operation *op,
-                                             IndexPartNode *partition,
                                              // Left is implicit "this"
                                              IndexPartNode *right,
-                                             const bool dominates = false);
-      virtual ApEvent create_by_intersection(Operation *op,
-                                             IndexPartNode *partition,
-                                             // Left is implicit "this"
-                                             IndexPartNode *right,
-                                             ShardID shard,
-                                             size_t total_shards,
                                              const bool dominates = false);
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
-      virtual ApEvent create_by_difference(Operation *op,
-                                           IndexPartNode *partition,
-                                           IndexPartNode *left,
-                                           IndexPartNode *right,
-                                           ShardID shard,
-                                           size_t total_shards);
       // Called on color space and not parent
       virtual ApEvent create_by_restriction(IndexPartNode *partition,
                                             const void *transform,
                                             const void *extent,
-                                            int partition_dim,
-                                            ShardID shard,
-                                            size_t total_shards);
+                                            int partition_dim);
       template<int N>
       ApEvent create_by_restriction_helper(IndexPartNode *partition,
                                    const Realm::Matrix<N,DIM,T> &transform,
-                                   const Realm::Rect<N,T> &extent,
-                                   ShardID shard, size_t total_shards);
+                                   const Realm::Rect<N,T> &extent);
       virtual ApEvent create_by_domain(Operation *op,
                                        IndexPartNode *partition,
                                        FutureMapImpl *future_map,
-                                       bool perform_intersections,
-                                       ShardID shard, size_t total_shards);
+                                       bool perform_intersections);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_domain_helper(Operation *op,
                                       IndexPartNode *partition,
                                       FutureMapImpl *future_map,
-                                      bool perform_intersections,
-                                      ShardID shard, size_t total_shards);
+                                      bool perform_intersections);
       virtual ApEvent create_by_weights(Operation *op,
                                         IndexPartNode *partition,
                                         FutureMapImpl *future_map,
-                                        size_t granularity,
-                                        ShardID shard, size_t total_shards);
+                                        size_t granularity);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_weight_helper(Operation *op,
                                       IndexPartNode *partition,
                                       FutureMapImpl *future_map,
-                                      size_t granularity,
-                                      ShardID shard, size_t total_shards);
+                                      size_t granularity);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
@@ -2684,26 +2596,21 @@ namespace Legion {
       public:
         CreateByDomainHelper(IndexSpaceNodeT<DIM,T> *n,
                              IndexPartNode *p, Operation *o,
-                             FutureMapImpl *fm, bool inter,
-                             ShardID s, size_t total)
-          : node(n), partition(p), op(o), future_map(fm), 
-            shard(s), total_shards(total), intersect(inter) { }
+                             FutureMapImpl *fm, bool inter)
+          : node(n), partition(p), op(o), future_map(fm), intersect(inter) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByDomainHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_domain_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->intersect,
-                creator->shard, creator->total_shards);
+                creator->partition, creator->future_map, creator->intersect);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
         IndexPartNode *const partition;
         Operation *const op;
         FutureMapImpl *const future_map;
-        const ShardID shard;
-        const size_t total_shards;
         const bool intersect;
         ApEvent result;
       };
@@ -2711,18 +2618,15 @@ namespace Legion {
       public:
         CreateByWeightHelper(IndexSpaceNodeT<DIM,T> *n,
                              IndexPartNode *p, Operation *o,
-                             FutureMapImpl *fm, size_t g,
-                             ShardID s, size_t total)
-          : node(n), partition(p), op(o), future_map(fm), 
-            granularity(g), shard(s), total_shards(total) { }
+                             FutureMapImpl *fm, size_t g)
+          : node(n), partition(p), op(o), future_map(fm), granularity(g) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByWeightHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_weight_helper<COLOR_DIM::N,COLOR_T>(creator->op,
-                creator->partition, creator->future_map, creator->granularity,
-                creator->shard, creator->total_shards);
+                creator->partition, creator->future_map, creator->granularity);
         }
       public:
         IndexSpaceNodeT<DIM,T> *const node;
@@ -2730,8 +2634,6 @@ namespace Legion {
         Operation *const op;
         FutureMapImpl *const future_map;
         const size_t granularity;
-        const ShardID shard;
-        const size_t total_shards;
         ApEvent result;
       };
       struct CreateByFieldHelper {
@@ -2983,8 +2885,9 @@ namespace Legion {
      */
     class ColorSpaceIterator {
     public:
-      ColorSpaceIterator(IndexPartNode *partition,
-          ShardID shard = 0, size_t total_shards = 1);
+      ColorSpaceIterator(IndexPartNode *partition, bool local_only = false);
+      ColorSpaceIterator(IndexPartNode *partition, 
+                         ShardID local_shard, size_t total_shards);
     public:
       operator bool(void) const;
       LegionColor operator*(void) const;
@@ -3219,24 +3122,18 @@ namespace Legion {
       void record_remote_disjoint_ready(RtUserEvent ready);
       void record_remote_disjoint_result(const bool disjoint_result);
     public:
-      ApEvent create_equal_children(Operation *op, size_t granularity,
-                                    ShardID shard, size_t total_shards);
+      ApEvent create_equal_children(Operation *op, size_t granularity);
       ApEvent create_by_weights(Operation *op, const FutureMap &weights,
-                  size_t granularity, ShardID shard, size_t total_shards);
+                                size_t granularity);
       ApEvent create_by_union(Operation *Op,
-                              IndexPartNode *left, IndexPartNode *right,
-                              ShardID shard, size_t total_shards);
+                              IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
-                              IndexPartNode *left, IndexPartNode *right,
-                              ShardID shard, size_t total_shards);
+                              IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op, IndexPartNode *original,
-                                     const bool dominates,
-                                     ShardID shard, size_t total_shards);
+                                     const bool dominates);
       ApEvent create_by_difference(Operation *op,
-                              IndexPartNode *left, IndexPartNode *right,
-                              ShardID shard, size_t total_shards);
-      ApEvent create_by_restriction(const void *transform, const void *extent,
-                                    ShardID shard, size_t total_shards);
+                              IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_restriction(const void *transform, const void *extent);
       ApEvent create_by_domain(FutureMapImpl *future_map);
     public:
       bool compute_complete(void);

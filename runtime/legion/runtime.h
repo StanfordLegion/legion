@@ -686,9 +686,7 @@ namespace Legion {
       virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
     public:
-      // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(ShardID shard,
-                                                  const DomainPoint &point);
+      virtual FutureImpl* find_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
@@ -746,9 +744,7 @@ namespace Legion {
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
     public:
-      // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(ShardID shard,
-                                                  const DomainPoint &point);
+      virtual FutureImpl* find_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
@@ -792,8 +788,6 @@ namespace Legion {
                                     const char *warning_string = NULL);
     public:
       // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(ShardID shard,
-                                                  const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:

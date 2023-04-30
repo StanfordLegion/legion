@@ -2265,7 +2265,7 @@ namespace Legion {
           {
             const size_t max_check = children.size();
             for (ColorSpaceIterator itr(index_part,
-                  repl_ctx->owner_shard->shard_id, 
+                  repl_ctx->owner_shard->shard_id,
                   repl_ctx->total_shards); itr; itr++)
             {
               RegionNode *child = part_node->get_child(*itr);
@@ -4519,7 +4519,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplPendingPartitionOp::populate_sources(const FutureMap &fm)
+    void ReplPendingPartitionOp::populate_sources(const FutureMap &fm,
+                                     IndexPartition pid, bool needs_all_futures)
     //--------------------------------------------------------------------------
     {
       future_map = fm;
@@ -4529,18 +4530,23 @@ namespace Legion {
 #endif
       if (future_map.impl != NULL)
       {
-        if (!thunk->need_all_futures())
+        if (needs_all_futures)
         {
-#ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx = 
-            dynamic_cast<ReplicateContext*>(parent_ctx);
-          assert(repl_ctx != NULL);
-#else
-          ReplicateContext *repl_ctx =
-            static_cast<ReplicateContext*>(parent_ctx);
-#endif
-          future_map.impl->get_shard_local_futures(
-              repl_ctx->owner_shard->shard_id, sources);
+          IndexPartNode *partition = runtime->forest->get_node(pid);
+          const Domain future_map_domain = future_map.impl->get_domain();
+          for (ColorSpaceIterator itr(partition,true/*local only*/); itr; itr++)
+          {
+            const DomainPoint point = 
+              partition->color_space->delinearize_color_to_point(*itr);
+            if (!future_map_domain.contains(point))
+              REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MAP_POINT,
+                  "Future map does not have a corresponding point from "
+                  "color space for pending partition operation (%lld) in "
+                  "parent task %s (UID %lld\n", unique_op_id,
+                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+            Future f = future_map.impl->get_future(point, true/*internal*/);
+            sources[point] = f.impl;
+          }
         }
         else
           future_map.impl->get_all_futures(sources);
@@ -4559,8 +4565,10 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Perform the partitioning operation
-      const ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
-        repl_ctx->owner_shard->shard_id, repl_ctx->shard_manager->total_shards);
+      ApEvent ready_event;
+      // One the first shard will perform the pending partition computations
+      if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+        ready_event = thunk->perform(this, runtime->forest);
       if (ready_event.exists())
         record_completion_effect(ready_event);
       complete_execution();
@@ -16571,6 +16579,74 @@ namespace Legion {
     {
       concurrent_processors.swap(processors);
       perform_collective_async();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Cross Product Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CrossProductExchange::CrossProductExchange(ReplicateContext *ctx,
+                                               CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(child_ids.size());
+      for (std::map<LegionColor,std::pair<IndexPartition,DistributedID> >::
+            const_iterator it = child_ids.begin(); it != child_ids.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second.first);
+        rez.serialize(it->second.second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::unpack_collective_stage(Deserializer &derez,
+                                                       int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_ids;
+      derez.deserialize(num_ids);
+      for (unsigned idx = 0; idx < num_ids; idx++)
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        std::pair<IndexPartition,DistributedID> &ids = child_ids[color];
+        derez.deserialize(ids.first);
+        derez.deserialize(ids.second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::exchange_ids(LegionColor color,
+                                          DistributedID did, IndexPartition pid)
+    //--------------------------------------------------------------------------
+    {
+      child_ids.emplace(std::make_pair(color, std::make_pair(pid, did)));
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::sync_child_ids(LegionColor color, 
+                                        DistributedID &did, IndexPartition &pid)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_sync();
+      std::map<LegionColor,std::pair<IndexPartition,DistributedID> >::iterator
+        finder = child_ids.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != child_ids.end());
+#endif
+      pid = finder->second.first;
+      did = finder->second.second;
     }
 
     /////////////////////////////////////////////////////////////

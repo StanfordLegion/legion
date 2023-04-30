@@ -16026,7 +16026,7 @@ namespace Legion {
 #endif
       thunk = new WeightPartitionThunk(pid, weights, granularity);
       // Also save this locally for analysis
-      populate_sources(weights);
+      populate_sources(weights, pid, true/*needs all futures*/);
       if (runtime->legion_spy_enabled)
         perform_logging();
     }
@@ -16135,7 +16135,7 @@ namespace Legion {
 #endif
       thunk = new FutureMapThunk(pid, fm, perform_intersections);
       // Also save this locally for analysis
-      populate_sources(fm);
+      populate_sources(fm, pid, false/*needs all futures*/);
 
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -16266,7 +16266,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::populate_sources(const FutureMap &fm)
+    void PendingPartitionOp::populate_sources(const FutureMap &fm,
+                                     IndexPartition pid, bool needs_all_futures)
     //--------------------------------------------------------------------------
     {
       future_map = fm;

@@ -248,7 +248,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_pending_partition(TaskContext *ctx,
+    RtEvent RegionTreeForest::create_pending_partition(InnerContext *ctx,
                                                        IndexPartition pid,
                                                        IndexSpace parent,
                                                        IndexSpace color_space,
@@ -257,6 +257,7 @@ namespace Legion {
                                                        DistributedID did,
                                                        Provenance *provenance,
                                                        ApEvent partition_ready,
+                                                     CollectiveMapping *mapping,
                                                      ApBarrier partial_pending)
     //--------------------------------------------------------------------------
     {
@@ -273,7 +274,10 @@ namespace Legion {
       // owner node about the existence of this partition
       RtEvent parent_notified;
       const AddressSpaceID parent_owner = parent_node->get_owner_space();
-      if (parent_owner != runtime->address_space)
+      if ((parent_owner != runtime->address_space) &&
+          ((mapping == NULL) || !mapping->contains(parent_owner)) &&
+          ((mapping == NULL) || 
+           (mapping->find_nearest(parent_owner) == runtime->address_space)))
       {
         RtUserEvent notified_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -298,7 +302,7 @@ namespace Legion {
                          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
         IndexPartNode *node = create_node(pid, parent_node, color_node, 
             partition_color, disjointness_event, complete, did, provenance,
-            partition_ready, partial_pending, RtEvent::NO_RT_EVENT); 
+            partition_ready, partial_pending, RtEvent::NO_RT_EVENT, mapping); 
         // Get a reference for the node to hold until disjointness is computed
         node->add_base_valid_ref(APPLICATION_REF);
         IndexPartNode::DisjointnessArgs args(pid, NULL, true/*owner*/);
@@ -324,7 +328,7 @@ namespace Legion {
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
         create_node(pid, parent_node, color_node, partition_color, disjoint,
                     complete, did, provenance, partition_ready, partial_pending,
-                    RtEvent::NO_RT_EVENT);
+                    RtEvent::NO_RT_EVENT, mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
@@ -338,7 +342,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_pending_cross_product(TaskContext *ctx,
+    void RegionTreeForest::create_pending_cross_product(InnerContext *ctx,
                                                  IndexPartition handle1,
                                                  IndexPartition handle2,
                              std::map<IndexSpace,IndexPartition> &user_handles,
@@ -347,8 +351,8 @@ namespace Legion {
                                                  LegionColor &part_color,
                                                  ApEvent domain_ready,
                                                  std::set<RtEvent> &safe_events,
-                                                 ShardID shard,
-                                                 size_t total_shards)
+                                                 ShardID local_shard,
+                                              const ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
@@ -443,22 +447,125 @@ namespace Legion {
         }
       }
       // Iterate over all our sub-regions and generate partitions
-      for (ColorSpaceIterator itr(base, shard, total_shards); itr; itr++)
+      if (shard_mapping == NULL)
       {
-        IndexSpaceNode *child_node = base->get_child(*itr);
-        IndexPartition pid(runtime->get_unique_index_partition_id(),
-                           handle1.get_tree_id(), handle1.get_type_tag());
-        DistributedID did =
-          runtime->get_available_distributed_id();
-        const RtEvent safe =
-          create_pending_partition(ctx, pid, child_node->handle,
-                                   source->color_space->handle,
-                                   part_color, kind, did,
-                                   provenance, domain_ready);
-        // If the user requested the handle for this point return it
-        user_handles[child_node->handle] = pid;
-        if (safe.exists())
-          safe_events.insert(safe);
+        for (ColorSpaceIterator itr(base); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base->get_child(*itr);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag());
+          DistributedID did =
+            runtime->get_available_distributed_id();
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle,
+                                     source->color_space->handle,
+                                     part_color, kind, did,
+                                     provenance, domain_ready);
+          // If the user requested the handle for this point return it
+          user_handles[child_node->handle] = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
+        }
+      }
+      else if (shard_mapping->size() <= base->total_children)
+      {
+        // There are more subregions than shards so we can shard the
+        // children over all the shards to make the partitions
+        for (ColorSpaceIterator itr(base, local_shard, 
+              shard_mapping->size()); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base->get_child(*itr);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag());
+          DistributedID did =
+            runtime->get_available_distributed_id();
+          const RtEvent safe =
+            create_pending_partition(ctx, pid, child_node->handle,
+                                     source->color_space->handle,
+                                     part_color, kind, did,
+                                     provenance, domain_ready);
+          // If the user requested the handle for this point return it
+          user_handles[child_node->handle] = pid;
+          if (safe.exists())
+            safe_events.insert(safe);
+        }
+      }
+      else
+      {
+        // There are fewer subregions than shards, so we can actually
+        // have multiple shards collaborating to create each partition 
+        // Round-robin the shards over the children partitions to compute
+        const unsigned color_index = local_shard % base->total_children; 
+        LegionColor child_color = color_index;
+        if (base->total_children < base->max_linearized_color)
+        {
+          unsigned index = 0;
+          for (ColorSpaceIterator itr(base); itr; itr++, index++)
+          {
+            if (index != color_index)
+              continue;
+            child_color = *itr;
+            break;
+          }
+        }
+        IndexSpaceNode *child_node = base->get_child(child_color);
+        // Figure out how many shards are participating on this child 
+        // and what their address spaces are so we can make a collective
+        // mapping for the new partition. Also tracke if we're the first
+        // shard on this address space.
+        bool first_local_shard = true;
+        std::vector<AddressSpaceID> child_spaces;
+        for (ShardID shard = color_index; 
+              shard < shard_mapping->size(); shard += base->total_children)
+        {
+          const AddressSpaceID space = (*shard_mapping)[shard];
+          if (std::binary_search(child_spaces.begin(),child_spaces.end(),space))
+          {
+            if (shard == local_shard)
+              first_local_shard = false;
+            continue;
+          }
+          child_spaces.push_back(space);
+          std::sort(child_spaces.begin(), child_spaces.end());
+        }
+#ifdef DEBUG_LEGION
+        assert(!child_spaces.empty());
+        ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+#endif
+        CrossProductExchange exchange(repl_ctx, COLLECTIVE_LOC_50);
+        if (first_local_shard)
+        {
+          // If we're the first space for this child then make the 
+          // distributed ID and index partition name for the new partition
+          // and then exchange in the collective
+          if (child_spaces.front() == runtime->address_space)
+          {
+            IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag());
+            exchange.exchange_ids(child_color,
+                runtime->get_available_distributed_id(), pid);
+          }
+          else
+            exchange.perform_collective_async();
+          DistributedID child_did = 0;
+          IndexPartition child_pid = IndexPartition::NO_PART;
+          exchange.sync_child_ids(child_color, child_did, child_pid);
+          const RtEvent safe = create_pending_partition(ctx, child_pid, 
+              child_node->handle, source->color_space->handle,
+              part_color, kind, child_did, provenance, domain_ready,
+              new CollectiveMapping(child_spaces,
+                runtime->legion_collective_radix));
+          if (safe.exists())
+            safe_events.insert(safe);
+        }
+        else
+        {
+          // Still need to participate in the collective exchange
+          exchange.perform_collective_sync();
+        }
       }
     }
 
@@ -705,118 +812,96 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_equal_partition(Operation *op,
                                                      IndexPartition pid,
-                                                     size_t granularity,
-                                                     ShardID shard,
-                                                     size_t total_shards)
+                                                     size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_equal_children(op, granularity, 
-                                             shard, total_shards);
+      return new_part->create_equal_children(op, granularity); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_weights(Operation *op,
                                                        IndexPartition pid,
                                                        const FutureMap &weights,
-                                                       size_t granularity,
-                                                       ShardID shard,
-                                                       size_t total_shards)
+                                                       size_t granularity)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_by_weights(op, weights, granularity, 
-                                         shard, total_shards);
+      return new_part->create_by_weights(op, weights, granularity); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_union(Operation *op,
                                                         IndexPartition pid,
                                                         IndexPartition handle1,
-                                                        IndexPartition handle2,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                                        IndexPartition handle2)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_union(op, node1, node2, shard, total_shards);
+      return new_part->create_by_union(op, node1, node2);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                          IndexPartition pid,
                                                          IndexPartition handle1,
-                                                         IndexPartition handle2,
-                                                         ShardID shard,
-                                                         size_t total_shards)
+                                                         IndexPartition handle2)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_intersection(op, node1, node2, 
-                                              shard, total_shards);
+      return new_part->create_by_intersection(op, node1, node2); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
                                                            IndexPartition pid,
                                                            IndexPartition part,
-                                                           const bool dominates,
-                                                           ShardID shard,
-                                                           size_t total_shards)
+                                                           const bool dominates)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node = get_node(part);
-      return new_part->create_by_intersection(op, node, dominates,
-                                              shard, total_shards); 
+      return new_part->create_by_intersection(op, node, dominates);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
-                                                       IndexPartition handle2,
-                                                       ShardID shard,
-                                                       size_t total_shards)
+                                                       IndexPartition handle2)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       IndexPartNode *node1 = get_node(handle1);
       IndexPartNode *node2 = get_node(handle2);
-      return new_part->create_by_difference(op, node1, node2, 
-                                            shard, total_shards);
+      return new_part->create_by_difference(op, node1, node2); 
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_restriction(
                                                         IndexPartition pid,
                                                         const void *transform,
-                                                        const void *extent,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                                        const void *extent)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
-      return new_part->create_by_restriction(transform, extent, 
-                                             shard, total_shards); 
+      return new_part->create_by_restriction(transform, extent);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_domain(Operation *op,
                                                     IndexPartition pid,
                                                     const FutureMap &future_map,
-                                                    bool perform_intersections,
-                                                    ShardID shard,
-                                                    size_t total_shards) 
+                                                    bool perform_intersections)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *new_part = get_node(pid);
       return new_part->parent->create_by_domain(op, new_part, future_map.impl, 
-                                  perform_intersections, shard, total_shards);
+                                                perform_intersections);
     }
 
     //--------------------------------------------------------------------------
@@ -824,20 +909,70 @@ namespace Legion {
                                                          IndexPartition base,
                                                          IndexPartition source,
                                                          LegionColor part_color,
-                                                         ShardID shard,
-                                                         size_t total_shards)
+                                                         ShardID local_shard,
+                                              const ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base_node = get_node(base);
       IndexPartNode *source_node = get_node(source);
       std::set<ApEvent> ready_events;
-      for (ColorSpaceIterator itr(base_node, shard, total_shards); itr; itr++)
+      if (shard_mapping == NULL)
       {
-        IndexSpaceNode *child_node = base_node->get_child(*itr);
-        IndexPartNode *part_node = child_node->get_child(part_color);
-        ApEvent ready = 
-          child_node->create_by_intersection(op, part_node, source_node);
-        ready_events.insert(ready);
+        for (ColorSpaceIterator itr(base_node); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base_node->get_child(*itr);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
+          ready_events.insert(ready);
+        }
+      }
+      else if (shard_mapping->size() <= base_node->total_children)
+      {
+        for (ColorSpaceIterator itr(base_node, local_shard,
+              shard_mapping->size()); itr; itr++)
+        {
+          IndexSpaceNode *child_node = base_node->get_child(*itr);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
+          ready_events.insert(ready);
+        }
+      }
+      else
+      {
+        const unsigned color_index = local_shard % base_node->total_children; 
+        // See if we're the first local shard on this address space
+        bool first_local_shard = true;
+        for (ShardID shard = color_index;
+              shard < shard_mapping->size(); shard += base_node->total_children)
+        {
+          const AddressSpaceID space = (*shard_mapping)[shard];
+          if (space != runtime->address_space)
+            continue;
+          first_local_shard = (shard == local_shard);
+          break;
+        }
+        if (first_local_shard)
+        {
+          LegionColor child_color = color_index;
+          if (base_node->total_children < base_node->max_linearized_color)
+          {
+            unsigned index = 0;
+            for (ColorSpaceIterator itr(base_node); itr; itr++, index++)
+            {
+              if (index != color_index)
+                continue;
+              child_color = *itr;
+              break;
+            }
+          }
+          IndexSpaceNode *child_node = base_node->get_child(child_color);
+          IndexPartNode *part_node = child_node->get_child(part_color);
+          ApEvent ready = 
+            child_node->create_by_intersection(op, part_node, source_node);
+          ready_events.insert(ready);
+        }
       }
       return Runtime::merge_events(NULL, ready_events);
     } 
@@ -10205,98 +10340,63 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_equal_children(Operation *op,
-                                                 size_t granularity, 
-                                                 ShardID shard, 
-                                                 size_t total_shards)
+                                                 size_t granularity) 
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_equal_children(op, this, granularity,
-                                             shard, total_shards); 
-      else
-        return parent->create_equal_children(op, this, granularity);
+      return parent->create_equal_children(op, this, granularity);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_weights(Operation *op, 
-                                   const FutureMap &weights, size_t granularity,
-                                   ShardID shard, size_t total_shards)
+                                   const FutureMap &weights, size_t granularity)
     //--------------------------------------------------------------------------
     {
-      return parent->create_by_weights(op, this, weights.impl, granularity,
-                                       shard, total_shards); 
+      return parent->create_by_weights(op, this, weights.impl, granularity);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_union(Operation *op, 
                                            IndexPartNode *left, 
-                                           IndexPartNode *right,
-                                           ShardID shard,
-                                           size_t total_shards)
+                                           IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_union(op, this, left, right, 
-                                       shard, total_shards); 
-      else
-        return parent->create_by_union(op, this, left, right);
+      return parent->create_by_union(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_intersection(Operation *op,
                                                   IndexPartNode *left,
-                                                  IndexPartNode *right,
-                                                  ShardID shard,
-                                                  size_t total_shards)
+                                                  IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_intersection(op, this, left, right,
-                                              shard, total_shards);
-      else
-        return parent->create_by_intersection(op, this, left, right);
+      return parent->create_by_intersection(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_intersection(Operation *op,
                                                   IndexPartNode *original,
-                                                  const bool dominates,
-                                                  ShardID shard,
-                                                  size_t total_shards)
+                                                  const bool dominates)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_intersection(op, this, original,
-                                              shard, total_shards, dominates);
-      else
-        return parent->create_by_intersection(op, this, original, dominates);
+      return parent->create_by_intersection(op, this, original, dominates);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_difference(Operation *op,
                                                 IndexPartNode *left,
-                                                IndexPartNode *right,
-                                                ShardID shard,
-                                                size_t total_shards)
+                                                IndexPartNode *right)
     //--------------------------------------------------------------------------
     {
-      if (total_shards > 1)
-        return parent->create_by_difference(op, this, left, right,
-                                            shard, total_shards);
-      else
-        return parent->create_by_difference(op, this, left, right);
+      return parent->create_by_difference(op, this, left, right);
     }
 
     //--------------------------------------------------------------------------
     ApEvent IndexPartNode::create_by_restriction(const void *transform,
-                                                 const void *extent,
-                                                 ShardID shard,
-                                                 size_t total_shards)
+                                                 const void *extent)
     //--------------------------------------------------------------------------
     {
       return color_space->create_by_restriction(this, transform, extent,
-                     NT_TemplateHelper::get_dim(handle.get_type_tag()),
-                     shard, total_shards);
+                     NT_TemplateHelper::get_dim(handle.get_type_tag()));
     }
 
     //--------------------------------------------------------------------------
@@ -11238,6 +11338,58 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // Color Space Iterator
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ColorSpaceIterator::ColorSpaceIterator(IndexPartNode *partition,
+                                           bool local_only)
+      : color_space(partition->color_space)
+    //--------------------------------------------------------------------------
+    {
+      simple_step = 
+            (partition->total_children == partition->max_linearized_color);
+      if (local_only && (partition->collective_mapping != NULL))
+      {
+#ifdef DEBUG_LEGION
+        assert(partition->collective_mapping->contains(
+              partition->local_space));
+#endif
+        const unsigned index = 
+          partition->collective_mapping->find_index(partition->local_space);
+        if (partition->collective_mapping->size() < partition->total_children)
+        {
+          // Just a single color to handle here
+          current = 0;
+          end = partition->max_linearized_color;
+          const unsigned offset = index % partition->total_children;
+          for (unsigned idx = 0; idx < offset; idx++)
+            step();
+#ifdef DEBUG_LEGION
+          assert(current < end);
+#endif
+          end = current+1;
+        }
+        else
+        {
+          const LegionColor chunk = 
+            compute_chunk(partition->max_linearized_color, 
+                          partition->collective_mapping->size());
+          current = index * chunk;
+          end = ((current + chunk) < partition->max_linearized_color) ?
+            (current + chunk) : partition->max_linearized_color;
+          if (!simple_step && (current < end) &&
+              !color_space->contains_color(current))
+            step();       
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!local_only || partition->is_owner());
+#endif
+        current = 0;
+        end = partition->max_linearized_color;
+      }
+    }
 
     //--------------------------------------------------------------------------
     ColorSpaceIterator::ColorSpaceIterator(IndexPartNode *partition,

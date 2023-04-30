@@ -4016,8 +4016,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* FutureMapImpl::find_shard_local_future(ShardID shard,
-                                                       const DomainPoint &point)
+    FutureImpl* FutureMapImpl::find_local_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4329,7 +4328,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* TransformFutureMapImpl::find_shard_local_future(ShardID shard,
+    FutureImpl* TransformFutureMapImpl::find_local_future(
                                                        const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
@@ -4346,7 +4345,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(previous->future_map_domain->contains_point(transformed));
 #endif
-        return previous->find_shard_local_future(shard, transformed);
+        return previous->find_local_future(transformed);
       }
       else
       {
@@ -4354,7 +4353,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(previous->future_map_domain->contains_point(transformed));
 #endif
-        return previous->find_shard_local_future(shard, transformed);
+        return previous->find_local_future(transformed);
       } 
     }
 
@@ -4655,26 +4654,6 @@ namespace Legion {
         wait_bar.wait();
     }
 
-    //--------------------------------------------------------------------------
-    FutureImpl* ReplFutureMapImpl::find_shard_local_future(ShardID local_shard,
-                                                       const DomainPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      Domain domain;
-      shard_domain->get_launch_space_domain(domain);
-      if (sharding_function == NULL)
-      {
-        RtEvent wait_on = get_sharding_function_ready();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
-      // Check to see if we own this point or not
-      const ShardID shard = sharding_function.load()->find_owner(point, domain);
-      if (shard != local_shard)
-        return NULL;
-      return FutureMapImpl::find_shard_local_future(local_shard, point);
-    }
-    
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::get_shard_local_futures(ShardID local_shard,
                                       std::map<DomainPoint,FutureImpl*> &others)

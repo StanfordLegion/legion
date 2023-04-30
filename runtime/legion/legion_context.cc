@@ -5274,7 +5274,8 @@ namespace Legion {
                      Realm::Barrier::create_barrier(color_space_size));
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,
                             parent, color_space, part_color, part_kind,
-                            did, provenance, partition_ready, partition_ready);
+                            did, provenance, partition_ready,
+                            NULL/*collective mapping*/, partition_ready);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -14799,11 +14800,13 @@ namespace Legion {
       {
         // Do the call on the owner node
         std::set<RtEvent> safe_events;
+        ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         runtime->forest->create_pending_cross_product(this, handle1, handle2, 
                                            handles, kind, provenance, 
                                            partition_color, 
                                            term_event, safe_events, 
-                                           owner_shard->shard_id, total_shards);
+                                           owner_shard->shard_id,
+                                           &shard_manager->get_mapping());
         // We need to wait on the safe event here to make sure effects
         // have been broadcast before letting the other shard to their part
         if (!safe_events.empty())
@@ -14813,7 +14816,6 @@ namespace Legion {
             wait_on.wait();
         }
         // Now broadcast the chosen color to all the other shards
-        ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
         // Wait for the creation to be done
@@ -14834,7 +14836,8 @@ namespace Legion {
                                            handles, kind, provenance,
                                            partition_color, 
                                            term_event, safe_events, 
-                                           owner_shard->shard_id, total_shards);
+                                           owner_shard->shard_id,
+                                           &shard_manager->get_mapping());
         // Signal that we're done with our creation
         RtEvent safe_event;
         if (!safe_events.empty())
@@ -15912,8 +15915,7 @@ namespace Legion {
     {
       IndexPartNode *node = runtime->forest->get_node(pid);
       // Check containment first
-      for (ColorSpaceIterator itr(node, 
-            owner_shard->shard_id, total_shards); itr; itr++)
+      for (ColorSpaceIterator itr(node, true/*local only*/); itr; itr++) 
       {
         IndexSpaceNode *child_node = node->get_child(*itr);
         IndexSpaceExpression *diff = 

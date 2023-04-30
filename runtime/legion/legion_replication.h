@@ -1327,6 +1327,30 @@ namespace Legion {
     };
 
     /**
+     * \class CrossProductExchange
+     * This all-gather exchanges IDs for the creation of replicated
+     * partitions when performing a cross-product partition
+     */
+    class CrossProductExchange : public AllGatherCollective<false> {
+    public:
+      CrossProductExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      CrossProductExchange(const CrossProductExchange &rhs) = delete;
+      virtual ~CrossProductExchange(void) { }
+    public:
+      CrossProductExchange& operator=(const CrossProductExchange &rhs) = delete;
+    public:
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_ids(LegionColor color,DistributedID did,IndexPartition pid);
+      void sync_child_ids(LegionColor color, DistributedID &did, 
+                          IndexPartition &pid);
+    protected:
+      std::map<LegionColor,std::pair<IndexPartition,DistributedID> > child_ids;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -1873,7 +1897,8 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
-      virtual void populate_sources(const FutureMap &fm);
+      virtual void populate_sources(const FutureMap &fm,
+          IndexPartition pid, bool needs_all_futures);
       virtual void trigger_execution(void);
     };
 
