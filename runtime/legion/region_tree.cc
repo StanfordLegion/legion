@@ -9787,7 +9787,7 @@ namespace Legion {
         else
           pending_child_map[c] = RtUserEvent::NO_RT_USER_EVENT;
       }
-      if (!ready_event.exists())
+      if (ready_event.exists())
       {
         if (defer != NULL)
         {
