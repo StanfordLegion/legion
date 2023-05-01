@@ -9558,7 +9558,7 @@ namespace Legion {
         delete expr;
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
             color_map.begin(); it != color_map.end(); it++)
-        if (it->second->remove_nested_resource_ref(did))
+        if (it->second->remove_nested_gc_ref(did))
           delete it->second;
       color_map.clear();
     }
@@ -9906,7 +9906,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This child should live as long as we are alive
-      child->add_nested_resource_ref(did);
+      child->add_nested_gc_ref(did);
       child->add_nested_valid_ref(did);
       RtUserEvent to_trigger;
       {
