@@ -4539,11 +4539,7 @@ namespace Legion {
             const DomainPoint point = 
               partition->color_space->delinearize_color_to_point(*itr);
             if (!future_map_domain.contains(point))
-              REPORT_LEGION_ERROR(ERROR_INVALID_FUTURE_MAP_POINT,
-                  "Future map does not have a corresponding point from "
-                  "color space for pending partition operation (%lld) in "
-                  "parent task %s (UID %lld\n", unique_op_id,
-                  parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+              continue;
             Future f = future_map.impl->get_future(point, true/*internal*/);
             sources[point] = f.impl;
           }

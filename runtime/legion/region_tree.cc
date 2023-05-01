@@ -467,7 +467,7 @@ namespace Legion {
             safe_events.insert(safe);
         }
       }
-      else if (shard_mapping->size() <= base->total_children)
+      else if (((LegionColor)shard_mapping->size()) <= base->total_children)
       {
         // There are more subregions than shards so we can shard the
         // children over all the shards to make the partitions
@@ -927,7 +927,8 @@ namespace Legion {
           ready_events.insert(ready);
         }
       }
-      else if (shard_mapping->size() <= base_node->total_children)
+      else if (((LegionColor)shard_mapping->size()) <= 
+                  base_node->total_children)
       {
         for (ColorSpaceIterator itr(base_node, local_shard,
               shard_mapping->size()); itr; itr++)
@@ -9810,7 +9811,7 @@ namespace Legion {
       else
       {
         // See whether the children are sharded or replicated
-        if (collective_mapping->size() <= total_children)
+        if (((LegionColor)collective_mapping->size()) <= total_children)
         {
           // Sharded, so figure out which space to send the request to
           const size_t chunk = (max_linearized_color + 
@@ -11355,7 +11356,8 @@ namespace Legion {
 #endif
         const unsigned index = 
           partition->collective_mapping->find_index(partition->local_space);
-        if (partition->collective_mapping->size() < partition->total_children)
+        const LegionColor total_spaces = partition->collective_mapping->size();
+        if (total_spaces < partition->total_children)
         {
           // Just a single color to handle here
           current = 0;
@@ -11371,8 +11373,7 @@ namespace Legion {
         else
         {
           const LegionColor chunk = 
-            compute_chunk(partition->max_linearized_color, 
-                          partition->collective_mapping->size());
+            compute_chunk(partition->max_linearized_color, total_spaces);
           current = index * chunk;
           end = ((current + chunk) < partition->max_linearized_color) ?
             (current + chunk) : partition->max_linearized_color;

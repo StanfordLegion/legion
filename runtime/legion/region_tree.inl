@@ -3669,39 +3669,45 @@ namespace Legion {
             parent_ready = op->get_execution_fence_event();
         }
       }
+      const Domain future_map_domain = future_map->get_domain();
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
         const DomainPoint color = delinearize_color_to_point(*itr);
-        FutureImpl *future = future_map->find_local_future(color);
-#ifdef DEBUG_LEGION
-        assert(future != NULL);
-#endif
-        IndexSpaceNodeT<DIM,T> *child = 
-          static_cast<IndexSpaceNodeT<DIM,T>*>(
-              partition->get_child(*itr));
         Realm::IndexSpace<DIM,T> child_space;
-        size_t future_size = 0;
-        const Domain *domain = static_cast<const Domain*>(
-            future->find_internal_buffer(op->get_context(), future_size));
-        if (future_size != sizeof(Domain))
-          REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
-              "An invalid future size was found in a partition by domain "
-              "call. All futures must contain Domain objects.")
-        const DomainT<DIM,T> domaint = *domain;
-        child_space = domaint;
-        if (perform_intersections)
+        if (future_map_domain.contains(color))
         {
-          Realm::ProfilingRequestSet requests;
-          if (context->runtime->profiler != NULL)
-            context->runtime->profiler->add_partition_request(requests,
-                                            op, DEP_PART_INTERSECTIONS);
-          Realm::IndexSpace<DIM,T> result;
-          ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
-              parent_space, child_space, result, requests, parent_ready));
-          child_space = result;
-          if (ready.exists())
-            result_events.insert(ready);
+          FutureImpl *future = future_map->find_local_future(color);
+#ifdef DEBUG_LEGION
+          assert(future != NULL);
+#endif
+          size_t future_size = 0;
+          const Domain *domain = static_cast<const Domain*>(
+              future->find_internal_buffer(op->get_context(), future_size));
+          if (future_size != sizeof(Domain))
+            REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_BY_DOMAIN_VALUE,
+                "An invalid future size was found in a partition by domain "
+                "call. All futures must contain Domain objects.")
+          const DomainT<DIM,T> domaint = *domain;
+          child_space = domaint;
+          if (perform_intersections)
+          {
+            Realm::ProfilingRequestSet requests;
+            if (context->runtime->profiler != NULL)
+              context->runtime->profiler->add_partition_request(requests,
+                                              op, DEP_PART_INTERSECTIONS);
+            Realm::IndexSpace<DIM,T> result;
+            ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
+                parent_space, child_space, result, requests, parent_ready));
+            child_space = result;
+            if (ready.exists())
+              result_events.insert(ready);
+          }
         }
+        else
+          child_space = Realm::IndexSpace<DIM,T>::make_empty();
+        IndexSpaceNodeT<DIM,T> *child = 
+            static_cast<IndexSpaceNodeT<DIM,T>*>(
+                partition->get_child(*itr));
         if (child->set_realm_index_space(context->runtime->address_space,
                                          child_space))
           assert(false); // should never hit this
