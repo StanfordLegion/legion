@@ -3226,9 +3226,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(partition->parent == this);
 #endif
-      const size_t count = partition->total_children;
-      std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces(count);
-      std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces;
+      std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces;
       std::set<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
@@ -3645,9 +3644,6 @@ namespace Legion {
                           bool perform_intersections) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(partition->color_space == this);
-#endif
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
        static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
       // Enumerate the color space
@@ -3672,7 +3668,8 @@ namespace Legion {
       const Domain future_map_domain = future_map->get_domain();
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
-        const DomainPoint color = delinearize_color_to_point(*itr);
+        const DomainPoint color = 
+          partition->color_space->delinearize_color_to_point(*itr);
         Realm::IndexSpace<DIM,T> child_space;
         if (future_map_domain.contains(color))
         {

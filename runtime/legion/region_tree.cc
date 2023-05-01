@@ -10288,20 +10288,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<IndexSpaceExpression*> child_spaces;
-      if (total_children == max_linearized_color)
-      {
-        for (LegionColor color = 0; color < total_children; color++)
-          child_spaces.insert(get_child(color));
-      }
-      else
-      {
-        for (LegionColor color = 0; color < max_linearized_color; color++)
-        {
-          if (!color_space->contains_color(color))
-            continue;
-          child_spaces.insert(get_child(color));
-        }
-      }
+      for (ColorSpaceIterator itr(this); itr; itr++)
+        child_spaces.insert(get_child(*itr));
       return context->union_index_spaces(child_spaces);
     }
 
