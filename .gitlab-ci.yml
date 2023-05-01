@@ -21,6 +21,9 @@ cache: &global_cache
 
 
 # Local variables (included on a case-by-case basis in each job):
+.no_ccache: &no_ccache
+  USE_CCACHE: "0"
+
 .gcc8: &gcc8
   CC:  "gcc-8"
   CXX: "g++-8"
@@ -77,6 +80,9 @@ cache: &global_cache
   CC: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icc"
   CXX: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/icpc"
   F90: "/opt/intel/oneapi/compiler/2021.2.0/linux/bin/intel64/ifort"
+.macos_clang: &macos_clang # on macOS, we don't control the compiler version
+  CC:  "clang"
+  CXX: "clang++"
 
 .terra70: &terra70
   LLVM_CONFIG: "llvm-config-7"
@@ -459,7 +465,8 @@ before_script:
     fi
   - |
     if [[ "$TEST_JUPYTER" -eq 1 ]]; then
-      pip3 install notebook==6.4.10
+      # IPython is a transitive dependency here, pin for stability
+      pip3 install ipython==8.12.1 notebook==6.4.10
     fi
   - |
     if [[ "$USE_PROF" -eq 1 ]]; then
@@ -588,7 +595,7 @@ before_script:
         export OMPI_CXX=`pwd`/tools/cxx_defcheck
         export MPICH_CXX=`pwd`/tools/cxx_defcheck
       fi
-    - free
+    - free || true
     - |
       if [[ -z "$TEST_PYTHON_EXE" ]]; then
         export TEST_PYTHON_EXE=`which python3 python | head -1`
@@ -1138,11 +1145,15 @@ clang12_cxx11_debug_maxdim4_external2:
   variables:
     <<: [*clang12, *terra12, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2]
 
-# # macOS with Clang 3.5
-# macos_clang12_cxx11_debug:
-#   <<: [*macos, *tests]
-#   variables:
-#     <<: [*clang12, *debug, *cxx11_normal]
+# macOS with Clang
+macos_clang_cxx11_debug:
+  <<: [*macos, *tests]
+  variables:
+    <<: [*macos_clang, *debug, *cxx11_normal, *legion, *short, *no_ccache]
+macos_clang_cxx14_release:
+  <<: [*macos, *tests]
+  variables:
+    <<: [*macos_clang, *release, *cxx14_normal, *legion, *short, *no_ccache]
 
 # Run minimal tests on other compilers.
 

@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2023 Los Alamos National Security, LLC
+# Copyright 2023 NVIDIA Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,26 +14,17 @@
 # limitations under the License.
 #------------------------------------------------------------------------------#
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.1)
+project(RealmExample_profiling)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-# enable build warnings for all tutorials/examples/tests/etc.
-add_compile_options(${CXX_BUILD_WARNING_FLAGS})
+add_executable(realm_profiling profiling.cc)
+target_link_libraries(realm_profiling Legion::Realm)
 
-add_subdirectory(00_hello_world)
-add_subdirectory(01_tasks_and_futures)
-add_subdirectory(02_index_tasks)
-add_subdirectory(03_global_vars)
-add_subdirectory(04_logical_regions)
-add_subdirectory(05_physical_regions)
-add_subdirectory(06_privileges)
-add_subdirectory(07_partitioning)
-add_subdirectory(08_multiple_partitions)
-add_subdirectory(09_custom_mapper)
-add_subdirectory(realm)
-if(Legion_USE_Fortran)
-  add_subdirectory(fortran)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME realm_profiling COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:realm_profiling> ${Legion_TEST_ARGS})
 endif()
