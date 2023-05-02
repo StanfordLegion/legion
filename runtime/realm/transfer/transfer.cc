@@ -2972,7 +2972,6 @@ namespace Realm {
     bool oor_possible;
     bool aliasing_possible;
     size_t subfield_offset;
-  public:
     std::vector<RegionInstance> insts;
   };
 
@@ -3680,6 +3679,8 @@ namespace Realm {
 
     virtual RegionInstance get_pointer_instance(void) const;
 
+    virtual const std::vector<RegionInstance>* get_instances(void) const;
+
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const;
 
     virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
@@ -3759,6 +3760,12 @@ namespace Realm {
   RegionInstance IndirectionInfoTyped<N,T,N2,T2>::get_pointer_instance(void) const
   {
     return inst;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  const std::vector<RegionInstance>* IndirectionInfoTyped<N,T,N2,T2>::get_instances(void) const
+  {
+    return &insts;
   }
   
   template <int N, typename T, int N2, typename T2>
@@ -4379,16 +4386,18 @@ namespace Realm {
             prof_usage.source = src_mem;
             prof_usage.target = Memory::NO_MEMORY;
             prof_usage.size += domain_size * combined_field_size;
-	    IndirectionInfoBase *scatter_info_base = dynamic_cast<IndirectionInfoBase *>(scatter_info);
-	    assert(scatter_info_base);
 	    std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	    std::vector<RegionInstance> instinfo_dst_insts;
+	    if (scatter_info->get_instances()) {
+	      instinfo_dst_insts = *(scatter_info->get_instances());
+	    }
 	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
                  srcs[i].inst,
                  RegionInstance::NO_INST,
 		 instinfo_src_insts,
-		 scatter_info_base->insts,
+		 instinfo_dst_insts,
                  1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
@@ -4417,15 +4426,17 @@ namespace Realm {
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = dst_mem;
             prof_usage.size += domain_size * combined_field_size;
-	    IndirectionInfoBase *gather_info_base = dynamic_cast<IndirectionInfoBase *>(gather_info);
-	    assert(gather_info_base);
+	    std::vector<RegionInstance> instinfo_src_insts;
+	    if (gather_info->get_instances()) {
+	      instinfo_src_insts = *(gather_info->get_instances());
+	    }
 	    std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
 	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
                  RegionInstance::NO_INST,
                  dsts[i].inst,
-		 gather_info_base->insts,
+		 instinfo_src_insts,
 		 instinfo_dst_insts,
                  1 /*num_fields*/,
 		 instinfo_src_field_ids,
@@ -4475,16 +4486,21 @@ namespace Realm {
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = Memory::NO_MEMORY;
             prof_usage.size += domain_size * combined_field_size;
-	    IndirectionInfoBase *gather_info_base = dynamic_cast<IndirectionInfoBase *>(gather_info);
-	    IndirectionInfoBase *scatter_info_base = dynamic_cast<IndirectionInfoBase *>(scatter_info);
-	    assert(gather_info_base && scatter_info_base);
+	    std::vector<RegionInstance> instinfo_src_insts;
+	    if (gather_info->get_instances()) {
+	      instinfo_src_insts = *(gather_info->get_instances());
+	    }
+	    std::vector<RegionInstance> instinfo_dst_insts;
+	    if (scatter_info->get_instances()) {
+	      instinfo_dst_insts = *(scatter_info->get_instances());
+	    }
 	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
                  RegionInstance::NO_INST,
                  RegionInstance::NO_INST,
-		 gather_info_base->insts,
-		 scatter_info_base->insts,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
                  1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
