@@ -414,15 +414,6 @@ Event DistributedData<N,T>::fill(IndexSpace<N,T> is, FieldID fid, LAMBDA filler,
   return Event::merge_events(events);
 }
 
-std::string vec2str(const std::vector<RegionInstance>& v)
-{
-  std::ostringstream oss;
-  for (std::vector<RegionInstance>::const_iterator it = v.cbegin(); it != v.cend(); it++) {
-    oss << std::hex << it->id << " ";
-  }
-  return oss.str();
-}
-
 void indirect_prof_task(const void *args, size_t arglen, 
 			const void *userdata, size_t userlen, Processor p)
 {
@@ -442,14 +433,11 @@ void indirect_prof_task(const void *args, size_t arglen,
     for (size_t i = 0; i < result->dst_insts_size; i++) {
       assert(result->dst_insts[i] == copy_info.inst_info[0].dst_inst_ids[i]);
     }
-//     log_app.print("copy type %d, src_insts %zu, dst_insts %zu, src_fid %d, dst_fid %d", 
-//       result->copy_type, copy_info.inst_info[0].src_inst_ids.size(), copy_info.inst_info[0].dst_inst_ids.size(),
-//       copy_info.inst_info[0].src_field_ids[0], copy_info.inst_info[0].dst_field_ids[0]);
     log_app.print() << "copy type " << result->copy_type
-                    << ", src_insts (" << vec2str(copy_info.inst_info[0].src_inst_ids) << ") size " << copy_info.inst_info[0].src_inst_ids.size()
-		    << ", dst_insts (" << vec2str(copy_info.inst_info[0].dst_inst_ids) << ") size " << copy_info.inst_info[0].dst_inst_ids.size()
-		    << ", src_fid " << copy_info.inst_info[0].src_field_ids[0]
-		    << ", dst_fid " << copy_info.inst_info[0].dst_field_ids[0];
+                    << ", src_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].src_inst_ids) << ") size " << copy_info.inst_info[0].src_inst_ids.size()
+                    << ", dst_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].dst_inst_ids) << ") size " << copy_info.inst_info[0].dst_inst_ids.size()
+                    << ", src_fid " << copy_info.inst_info[0].src_field_ids[0]
+                    << ", dst_fid " << copy_info.inst_info[0].dst_field_ids[0];
     result->profile_done_event.trigger();
   }
 }
