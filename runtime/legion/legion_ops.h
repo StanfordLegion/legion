@@ -3048,19 +3048,23 @@ namespace Legion {
       };
       class CrossProductThunk : public PendingPartitionThunk {
       public:
-        CrossProductThunk(IndexPartition b, IndexPartition s, LegionColor c)
-          : base(b), source(s), part_color(c) { }
+        CrossProductThunk(IndexPartition b, IndexPartition s, LegionColor c,
+                          ShardID local, const ShardMapping *mapping)
+          : base(b), source(s), part_color(c), local_shard(local),
+            shard_mapping(mapping) { }
         virtual ~CrossProductThunk(void) { }
       public:
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_cross_product_partitions(op, base, source, 
-                                                         part_color); }
+                                part_color, local_shard, shard_mapping); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexPartition base;
         IndexPartition source;
         LegionColor part_color;
+        ShardID local_shard;
+        const ShardMapping *shard_mapping;
       };
       class ComputePendingSpace : public PendingPartitionThunk {
       public:
@@ -3150,7 +3154,9 @@ namespace Legion {
                                 Provenance *provenance);
       void initialize_cross_product(InnerContext *ctx, IndexPartition base, 
                                     IndexPartition source, LegionColor color,
-                                    Provenance *provenance);
+                                    Provenance *provenance,
+                                    ShardID local_shard = 0,
+                                    const ShardMapping *shard_mapping = NULL);
       void initialize_index_space_union(InnerContext *ctx, IndexSpace target, 
                                         const std::vector<IndexSpace> &handles,
                                         Provenance *provenance);

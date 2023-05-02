@@ -16146,14 +16146,16 @@ namespace Legion {
                                                       IndexPartition base,
                                                       IndexPartition source,
                                                       LegionColor part_color,
-                                                      Provenance *provenance)
+                                                      Provenance *provenance,
+                                                      ShardID shard,
+                                                    const ShardMapping *mapping)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new CrossProductThunk(base, source, part_color);
+      thunk = new CrossProductThunk(base, source, part_color, shard, mapping);
       if (runtime->legion_spy_enabled)
         perform_logging();
     }

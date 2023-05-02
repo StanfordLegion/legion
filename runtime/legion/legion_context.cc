@@ -14847,8 +14847,8 @@ namespace Legion {
         // any shard can handle requests for any cross-product partition
         creation_bar.wait();
       }
-      part_op->initialize_cross_product(this, handle1, handle2,
-                                        partition_color, provenance);
+      part_op->initialize_cross_product(this, handle1, handle2, partition_color,
+          provenance, owner_shard->shard_id, &shard_manager->get_mapping());
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Perform the exchange of all the handle names so that we can record

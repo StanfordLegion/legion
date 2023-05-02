@@ -9872,8 +9872,8 @@ namespace Legion {
       // If we get here then we're the ones to actually make the name of the
       // index subspace and instantiate the node
 #ifdef DEBUG_LEGION
-      assert(is_owner() || ((collective_mapping != NULL) && 
-            (local_space == collective_mapping->get_origin())));
+      assert(is_owner() || ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space)));
 #endif
       IndexSpace is(context->runtime->get_unique_index_space_id(),
                     handle.get_tree_id(), handle.get_type_tag());
@@ -10943,7 +10943,8 @@ namespace Legion {
       derez.deserialize(to_trigger);
       RtEvent defer;
       forest->get_node(handle, &defer);
-      Runtime::trigger_event(to_trigger, defer);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger, defer);
     }
 
     //--------------------------------------------------------------------------
