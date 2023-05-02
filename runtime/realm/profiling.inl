@@ -34,7 +34,6 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::CachePerfCounters<_ID>);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::IPCPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::TLBPerfCounters);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::BranchPredictionPerfCounters);
-//TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationCopyInfo::RequestType);
 
 #include "realm/timers.h"
@@ -208,36 +207,44 @@ namespace Realm {
     //
 
     template <typename S>
-    bool serdez(S& serdez, const OperationCopyInfo& c)
+    bool serialize(S& ser, const OperationCopyInfo& c)
     {
       bool success = false;
-      OperationCopyInfo& copy_info = const_cast<OperationCopyInfo&>(c);
-      bool is_ser = std::is_same<S, Serialization::FixedBufferSerializer>::value ||
-                    std::is_same<S, Serialization::DynamicBufferSerializer>::value ||
-                    std::is_same<S, Serialization::ByteCountSerializer>::value;
-      if (is_ser) {
-        // serdez is a serializer
-        success = (serdez & copy_info.inst_info.size());
-        if (!success) return false;
-      } else {
-        // serdez is a de-serializer
-        size_t len = 0;
-        success = (serdez & len);
-        if (!success) return false;
-        copy_info.inst_info.resize(len);
+      success = (ser & c.inst_info.size());
+      if (!success) return false;
+      for (size_t i = 0; i < c.inst_info.size(); i++) {
+        success = (ser & c.inst_info[i].src_inst_id) &&
+                  (ser & c.inst_info[i].dst_inst_id) &&
+                  (ser & c.inst_info[i].src_inst_ids) &&
+                  (ser & c.inst_info[i].dst_inst_ids) &&
+                  (ser & c.inst_info[i].num_fields) &&
+                  (ser & c.inst_info[i].src_field_ids) &&
+                  (ser & c.inst_info[i].dst_field_ids) &&
+                  (ser & c.inst_info[i].request_type) &&
+                  (ser & c.inst_info[i].num_hops);
       }
-      for (size_t i = 0; i < copy_info.inst_info.size(); i++) {
-        success = (serdez & copy_info.inst_info[i].src_inst_id) &&
-                  (serdez & copy_info.inst_info[i].dst_inst_id) &&
-                  (serdez & copy_info.inst_info[i].src_inst_ids) &&
-                  (serdez & copy_info.inst_info[i].dst_inst_ids) &&
-                  (serdez & copy_info.inst_info[i].num_fields) &&
-                  (serdez & copy_info.inst_info[i].src_field_ids) &&
-                  (serdez & copy_info.inst_info[i].dst_field_ids) &&
-                  (serdez & copy_info.inst_info[i].request_type) &&
-                  (serdez & copy_info.inst_info[i].num_hops);
+      return success;
+    }
+
+    template <typename S>
+    bool deserialize(S& dez, OperationCopyInfo& c)
+    {
+      bool success = false;
+      size_t len = 0;
+      success = (dez & len);
+      if (!success) return false;
+      c.inst_info.resize(len);
+      for (size_t i = 0; i < c.inst_info.size(); i++) {
+        success = (dez & c.inst_info[i].src_inst_id) &&
+                  (dez & c.inst_info[i].dst_inst_id) &&
+                  (dez & c.inst_info[i].src_inst_ids) &&
+                  (dez & c.inst_info[i].dst_inst_ids) &&
+                  (dez & c.inst_info[i].num_fields) &&
+                  (dez & c.inst_info[i].src_field_ids) &&
+                  (dez & c.inst_info[i].dst_field_ids) &&
+                  (dez & c.inst_info[i].request_type) &&
+                  (dez & c.inst_info[i].num_hops);
       }
-      // assert(success);
       return success;
     }
 
