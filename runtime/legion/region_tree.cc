@@ -9919,11 +9919,16 @@ namespace Legion {
         std::map<LegionColor,RtUserEvent>::iterator finder =
           pending_child_map.find(child->color);
 #ifdef DEBUG_LEGION
-        assert(finder != pending_child_map.end());
+        assert((finder != pending_child_map.end()) || 
+            (!is_owner() && ((collective_mapping == NULL) ||
+                             !collective_mapping->contains(local_space))));
 #endif
-        if (finder->second.exists())
-          to_trigger = finder->second; 
-        pending_child_map.erase(finder);
+        if (finder != pending_child_map.end())
+        {
+          if (finder->second.exists())
+            to_trigger = finder->second; 
+          pending_child_map.erase(finder);
+        }
       }
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
@@ -11346,7 +11351,7 @@ namespace Legion {
         const unsigned index = 
           partition->collective_mapping->find_index(partition->local_space);
         const LegionColor total_spaces = partition->collective_mapping->size();
-        if (total_spaces < partition->total_children)
+        if (partition->total_children < total_spaces)
         {
           // Just a single color to handle here
           current = 0;
