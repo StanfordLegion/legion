@@ -2619,10 +2619,7 @@ namespace Legion {
       registered_with_runtime = true;
       RtEvent result;
       if (!is_owner())
-      {
-        update_remote_instances(owner_space);
         result = send_remote_registration();
-      }
       return result;
     }
 
@@ -4076,10 +4073,7 @@ namespace Legion {
       registered_with_runtime = true;
       RtEvent result;
       if (!is_owner())
-      {
-        update_remote_instances(owner_space);
         result = send_remote_registration();
-      }
       return result;
     }
 
