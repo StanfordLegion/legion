@@ -9772,7 +9772,7 @@ namespace Legion {
                   "Domain.", parent_ctx->get_task_name(), 
                   parent_ctx->get_unique_id(), sizeof(Domain))
             if (owner && index_space_node->set_domain(*domain, 
-                  runtime->address_space, mapping))
+                  runtime->address_space))
               delete index_space_node;
             break;      
           }

@@ -2896,8 +2896,7 @@ namespace Legion {
       bool create_shard_partition(Operation *op, IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
           PartitionKind part_kind, LegionColor partition_color,
-          bool color_generated, ApBarrier partition_ready,
-          ValueBroadcast<bool> *disjoint_result = NULL);
+          bool color_generated, ApBarrier partition_ready);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc,

@@ -12187,7 +12187,8 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_CHILD_RESPONSE:
             {
-              runtime->handle_index_partition_child_response(derez);
+              runtime->handle_index_partition_child_response(derez,
+                                                          remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
@@ -23975,10 +23976,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_child_response(Deserializer &derez)
+    void Runtime::handle_index_partition_child_response(Deserializer &derez,
+                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_child_response(forest, derez);
+      IndexPartNode::handle_node_child_response(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

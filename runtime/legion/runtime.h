@@ -3544,7 +3544,8 @@ namespace Legion {
                                          AddressSpaceID source);
       void handle_index_partition_child_request(Deserializer &derez,
                                                 AddressSpaceID source);
-      void handle_index_partition_child_response(Deserializer &derez);
+      void handle_index_partition_child_response(Deserializer &derez,
+                                                 AddressSpaceID source);
       void handle_index_partition_disjoint_update(Deserializer &derez);
       void handle_index_partition_shard_rects_request(Deserializer &derez);
       void handle_index_partition_shard_rects_response(Deserializer &derez,

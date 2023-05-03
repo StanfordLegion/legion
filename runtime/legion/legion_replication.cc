@@ -1676,9 +1676,6 @@ namespace Legion {
       if (!repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
         return;
       RegionTreeForest *forest = runtime->forest;
-      const CollectiveMapping &mapping =
-        repl_ctx->shard_manager->get_collective_mapping();
-
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
         const OutputOptions &options = output_region_options[idx];
@@ -1704,14 +1701,14 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain, runtime->address_space, &mapping))
+          if (parent->set_domain(root_domain, runtime->address_space))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
         else if (parent->set_output_union(all_output_sizes[idx],
-                              runtime->address_space, &mapping))
+                              runtime->address_space))
           delete parent;
       }
     }
