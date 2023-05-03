@@ -202,6 +202,8 @@ namespace Realm {
         unsigned num_fields; // num fields TODO: remove it
         std::vector<FieldID> src_field_ids;  // src fields
         std::vector<FieldID> dst_field_ids;  // dst fields
+        FieldID src_indirection_field;  // field of indirection points
+        FieldID dst_indirection_field;  // field of indirection points
         RequestType request_type; // fill, reduce, copy
         unsigned int num_hops; // num_hops for each request
       };

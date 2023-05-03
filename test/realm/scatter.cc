@@ -93,6 +93,8 @@ struct IndirectCopyProfResult {
   FieldID dst_fid;
   RegionInstance src_indirection_inst = RegionInstance::NO_INST;
   RegionInstance dst_indirection_inst = RegionInstance::NO_INST;
+  FieldID src_indirect_fid = 0;
+  FieldID dst_indirect_fid = 0;
   int copy_type; // 0: gather, 1: scatter, 2: range_copy
 };
 
@@ -437,11 +439,15 @@ void indirect_prof_task(const void *args, size_t arglen,
     }
     assert(result->src_indirection_inst == copy_info.inst_info[0].src_indirection_inst);
     assert(result->dst_indirection_inst == copy_info.inst_info[0].dst_indirection_inst);
+    assert(result->src_indirect_fid == copy_info.inst_info[0].src_indirection_field);
+    assert(result->dst_indirect_fid == copy_info.inst_info[0].dst_indirection_field);
     log_app.print() << "copy type " << result->copy_type
                     << ", src_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].src_inst_ids) << ") size " << copy_info.inst_info[0].src_inst_ids.size()
                     << ", dst_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].dst_inst_ids) << ") size " << copy_info.inst_info[0].dst_inst_ids.size()
                     << ", src_fid " << copy_info.inst_info[0].src_field_ids[0]
-                    << ", dst_fid " << copy_info.inst_info[0].dst_field_ids[0];
+                    << ", dst_fid " << copy_info.inst_info[0].dst_field_ids[0]
+                    << ", src_indirect_inst " << copy_info.inst_info[0].src_indirection_inst << " fid " << copy_info.inst_info[0].src_indirection_field
+                    << ", dst_indirect_inst " << copy_info.inst_info[0].dst_indirection_inst << " fid " << copy_info.inst_info[0].dst_indirection_field;
     result->profile_done_event.trigger();
   }
 }
@@ -505,6 +511,7 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
         result.src_fid = src_id;
         result.dst_fid = dst_id;
         result.src_indirection_inst = it->inst;
+        result.src_indirect_fid = ptr_id;
         result.copy_type = 0;
         ProfilingRequestSet prs;
         prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -536,6 +543,7 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
       result.src_fid = src_id;
       result.dst_fid = dst_id;
       result.src_indirection_inst = it->inst;
+      result.src_indirect_fid = ptr_id;
       result.copy_type = 0;
       ProfilingRequestSet prs;
       prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -628,6 +636,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
         result.src_fid = src_id;
         result.dst_fid = dst_id;
         result.dst_indirection_inst = it->inst;
+        result.dst_indirect_fid = ptr_id;
         result.copy_type = 0;
         ProfilingRequestSet prs;
         prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -659,6 +668,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
       result.src_fid = src_id;
       result.dst_fid = dst_id;
       result.dst_indirection_inst = it->inst;
+      result.dst_indirect_fid = ptr_id;
       result.copy_type = 1;
       ProfilingRequestSet prs;
       prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -787,6 +797,8 @@ Event DistributedData<N,T>::range_copy(IndexSpace<N,T> is, FieldID srcptr_id,
       result.dst_fid = dst_id;
       result.src_indirection_inst = it->inst;
       result.dst_indirection_inst = it2->inst;
+      result.src_indirect_fid = srcptr_id;
+      result.dst_indirect_fid = dstptr_id;
       result.copy_type = 2;
       ProfilingRequestSet prs;
       prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))

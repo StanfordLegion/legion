@@ -222,6 +222,8 @@ namespace Realm {
                   (ser & c.inst_info[i].num_fields) &&
                   (ser & c.inst_info[i].src_field_ids) &&
                   (ser & c.inst_info[i].dst_field_ids) &&
+                  (ser & c.inst_info[i].src_indirection_field) &&
+                  (ser & c.inst_info[i].dst_indirection_field) &&
                   (ser & c.inst_info[i].request_type) &&
                   (ser & c.inst_info[i].num_hops);
       }
@@ -246,6 +248,8 @@ namespace Realm {
                   (dez & c.inst_info[i].num_fields) &&
                   (dez & c.inst_info[i].src_field_ids) &&
                   (dez & c.inst_info[i].dst_field_ids) &&
+                  (dez & c.inst_info[i].src_indirection_field) &&
+                  (dez & c.inst_info[i].dst_indirection_field) &&
                   (dez & c.inst_info[i].request_type) &&
                   (dez & c.inst_info[i].num_hops);
       }

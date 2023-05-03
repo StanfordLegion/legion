@@ -3681,6 +3681,8 @@ namespace Realm {
 
     virtual const std::vector<RegionInstance>* get_instances(void) const;
 
+    virtual FieldID get_field(void) const;
+
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const;
 
     virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
@@ -3766,6 +3768,12 @@ namespace Realm {
   const std::vector<RegionInstance>* IndirectionInfoTyped<N,T,N2,T2>::get_instances(void) const
   {
     return &insts;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  FieldID IndirectionInfoTyped<N,T,N2,T2>::get_field(void) const
+  {
+    return field_id;
   }
   
   template <int N, typename T, int N2, typename T2>
@@ -4149,6 +4157,8 @@ namespace Realm {
           1 /*num_fields*/,
 	  instinfo_src_field_ids,
 	  instinfo_dst_field_ids,
+	  0,
+	  0,
           ProfilingMeasurements::OperationCopyInfo::REDUCE,
           unsigned(pathlen) });
         fld_start += 1;
@@ -4236,6 +4246,8 @@ namespace Realm {
               1 /*num_fields*/,
 	      instinfo_src_field_ids,
 	      instinfo_dst_field_ids,
+	      0,
+	      0,
               ProfilingMeasurements::OperationCopyInfo::FILL,
               unsigned(pathlen) });
         fld_start += 1;
@@ -4369,6 +4381,8 @@ namespace Realm {
                  num_fields,
 		 src_field_ids,
 		 dst_field_ids,
+		 0,
+		 0,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(pathlen) });
             fld_start += num_fields;
@@ -4409,6 +4423,8 @@ namespace Realm {
                  1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
+		 0,
+		 scatter_info->get_field(),
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
             fld_start += 1;
@@ -4451,6 +4467,8 @@ namespace Realm {
                  1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
+		 gather_info->get_field(),
+		 0,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
             fld_start += 1;
@@ -4516,6 +4534,8 @@ namespace Realm {
                  1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
+		 gather_info->get_field(),
+		 scatter_info->get_field(),
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
             fld_start += 1;
