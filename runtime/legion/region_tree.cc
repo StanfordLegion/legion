@@ -8624,7 +8624,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Quick out if we've already sent this
-      if (has_remote_instance(target))
+      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
         return;
       // Send our parent first if necessary
       if (recurse && (parent != NULL))
@@ -10700,7 +10701,8 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       // Quick out if we've already sent this
-      if (has_remote_instance(target))
+      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
         return;
       parent->send_node(target, true/*recurse*/);
       color_space->send_node(target, true/*recurse*/);
@@ -14610,7 +14612,8 @@ namespace Legion {
 #endif
       // See if this is in our creation set, if not, send it and all the fields
       AutoLock n_lock(node_lock);
-      if (!has_remote_instance(target))
+      if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
       {
         // First send the node info and then send all the fields
         Serializer rez;
@@ -19909,7 +19912,8 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!has_remote_instance(target))
+        if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
+              collective_mapping->contains(target)))
         {
           continue_up = true;
           update_remote_instances(target);
@@ -21339,7 +21343,8 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!has_remote_instance(target))
+        if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
+              collective_mapping->contains(target)))
         {
           continue_up = true;
           update_remote_instances(target);
