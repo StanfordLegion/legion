@@ -3308,13 +3308,14 @@ namespace Legion {
                 rect_space, constraints, dim_order);
         // If it is not an external allocation then ignore suggested_memory
         // because we know we're making this on top of an existing instance
+        Realm::ProfilingRequestSet requests;
+        if (runtime->profiler != NULL)
+          runtime->profiler->add_inst_request(requests, 
+                      implicit_provenance, ready_event);
         PhysicalInstance result;
-        // Note we don't do a profiling request here because this is a
-        // short-lived instance just for this copy and is represented by
-        // a different instance anwyway
         const RtEvent inst_ready(PhysicalInstance::create_external_instance(
              result, external_allocation ? alt_resource->suggested_memory() :
-              memory, ilg, *alt_resource, Realm::ProfilingRequestSet()));
+              memory, ilg, *alt_resource, requests));
         own_inst = true;
         if (resource == NULL)
           delete alt_resource;
