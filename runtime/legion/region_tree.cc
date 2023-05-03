@@ -14280,20 +14280,6 @@ namespace Legion {
           mask_index_map, unique_event, region_node, serdez,
           runtime->get_available_distributed_id(), collective_mapping);
       
-      if (collective_mapping != NULL)
-      {
-        // Since we're the owner address space, record that we have 
-        // instances on all other address spaces in the control
-        // replicated parent task's collective mapping
-        for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
-        {
-          const AddressSpaceID space = (*collective_mapping)[idx];
-          if (space == manager->owner_space)
-            continue;
-          manager->update_remote_instances(space);
-        }
-      }
-
       Serializer rez;
       {
         RezCheck z2(rez);
