@@ -197,6 +197,8 @@ namespace Realm {
         RegionInstance dst_inst_id; // TODO: remove it
         std::vector<RegionInstance> src_inst_ids;   // src instances
         std::vector<RegionInstance> dst_inst_ids;   // dst instances
+        RegionInstance src_indirection_inst; // src indirection instance
+        RegionInstance dst_indirection_inst; // dst indirection instance
         unsigned num_fields; // num fields TODO: remove it
         std::vector<FieldID> src_field_ids;  // src fields
         std::vector<FieldID> dst_field_ids;  // dst fields

@@ -217,6 +217,8 @@ namespace Realm {
                   (ser & c.inst_info[i].dst_inst_id) &&
                   (ser & c.inst_info[i].src_inst_ids) &&
                   (ser & c.inst_info[i].dst_inst_ids) &&
+                  (ser & c.inst_info[i].src_indirection_inst) &&
+                  (ser & c.inst_info[i].dst_indirection_inst) &&
                   (ser & c.inst_info[i].num_fields) &&
                   (ser & c.inst_info[i].src_field_ids) &&
                   (ser & c.inst_info[i].dst_field_ids) &&
@@ -239,6 +241,8 @@ namespace Realm {
                   (dez & c.inst_info[i].dst_inst_id) &&
                   (dez & c.inst_info[i].src_inst_ids) &&
                   (dez & c.inst_info[i].dst_inst_ids) &&
+                  (dez & c.inst_info[i].src_indirection_inst) &&
+                  (dez & c.inst_info[i].dst_indirection_inst) &&
                   (dez & c.inst_info[i].num_fields) &&
                   (dez & c.inst_info[i].src_field_ids) &&
                   (dez & c.inst_info[i].dst_field_ids) &&
