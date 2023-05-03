@@ -504,7 +504,7 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
         result.dst_insts_size = 1;
         result.src_fid = src_id;
         result.dst_fid = dst_id;
-        result.dst_indirection_inst = it->inst;
+        result.src_indirection_inst = it->inst;
         result.copy_type = 0;
         ProfilingRequestSet prs;
         prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -535,7 +535,7 @@ Event DistributedData<N,T>::gather(IndexSpace<N,T> is, FieldID ptr_id, const SRC
       result.dst_insts_size = 1;
       result.src_fid = src_id;
       result.dst_fid = dst_id;
-      result.dst_indirection_inst = it->inst;
+      result.src_indirection_inst = it->inst;
       result.copy_type = 0;
       ProfilingRequestSet prs;
       prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -627,7 +627,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
         result.dst_insts_size = 1;
         result.src_fid = src_id;
         result.dst_fid = dst_id;
-        result.src_indirection_inst = it->inst;
+        result.dst_indirection_inst = it->inst;
         result.copy_type = 0;
         ProfilingRequestSet prs;
         prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
@@ -658,7 +658,7 @@ Event DistributedData<N,T>::scatter(IndexSpace<N,T> is, FieldID ptr_id, DST& dst
       result.src_insts_size = 1;
       result.src_fid = src_id;
       result.dst_fid = dst_id;
-      result.src_indirection_inst = it->inst;
+      result.dst_indirection_inst = it->inst;
       result.copy_type = 1;
       ProfilingRequestSet prs;
       prs.add_request(p, INDIRECT_PROF_TASK, &result, sizeof(IndirectCopyProfResult))
