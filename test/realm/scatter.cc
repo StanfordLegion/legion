@@ -427,25 +427,25 @@ void indirect_prof_task(const void *args, size_t arglen,
 
   ProfilingMeasurements::OperationCopyInfo copy_info;
   if(resp.get_measurement(copy_info)) {
-    assert(result->src_fid == copy_info.inst_info[0].src_field_ids[0]);
-    assert(result->dst_fid == copy_info.inst_info[0].dst_field_ids[0]);
-    assert(result->src_insts_size == copy_info.inst_info[0].src_inst_ids.size());
+    assert(result->src_fid == copy_info.inst_info[0].src_fields[0]);
+    assert(result->dst_fid == copy_info.inst_info[0].dst_fields[0]);
+    assert(result->src_insts_size == copy_info.inst_info[0].src_insts.size());
     for (size_t i = 0; i < result->src_insts_size; i++) {
-      assert(result->src_insts[i] == copy_info.inst_info[0].src_inst_ids[i]);
+      assert(result->src_insts[i] == copy_info.inst_info[0].src_insts[i]);
     }
-    assert(result->dst_insts_size == copy_info.inst_info[0].dst_inst_ids.size());
+    assert(result->dst_insts_size == copy_info.inst_info[0].dst_insts.size());
     for (size_t i = 0; i < result->dst_insts_size; i++) {
-      assert(result->dst_insts[i] == copy_info.inst_info[0].dst_inst_ids[i]);
+      assert(result->dst_insts[i] == copy_info.inst_info[0].dst_insts[i]);
     }
     assert(result->src_indirection_inst == copy_info.inst_info[0].src_indirection_inst);
     assert(result->dst_indirection_inst == copy_info.inst_info[0].dst_indirection_inst);
     assert(result->src_indirect_fid == copy_info.inst_info[0].src_indirection_field);
     assert(result->dst_indirect_fid == copy_info.inst_info[0].dst_indirection_field);
     log_app.print() << "copy type " << result->copy_type
-                    << ", src_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].src_inst_ids) << ") size " << copy_info.inst_info[0].src_inst_ids.size()
-                    << ", dst_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].dst_inst_ids) << ") size " << copy_info.inst_info[0].dst_inst_ids.size()
-                    << ", src_fid " << copy_info.inst_info[0].src_field_ids[0]
-                    << ", dst_fid " << copy_info.inst_info[0].dst_field_ids[0]
+                    << ", src_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].src_insts) << ") size " << copy_info.inst_info[0].src_insts.size()
+                    << ", dst_insts (" << PrettyVector<RegionInstance>(copy_info.inst_info[0].dst_insts) << ") size " << copy_info.inst_info[0].dst_insts.size()
+                    << ", src_fid " << copy_info.inst_info[0].src_fields[0]
+                    << ", dst_fid " << copy_info.inst_info[0].dst_fields[0]
                     << ", src_indirect_inst " << copy_info.inst_info[0].src_indirection_inst << " fid " << copy_info.inst_info[0].src_indirection_field
                     << ", dst_indirect_inst " << copy_info.inst_info[0].dst_indirection_inst << " fid " << copy_info.inst_info[0].dst_indirection_field;
     result->profile_done_event.trigger();

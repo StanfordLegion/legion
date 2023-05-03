@@ -146,12 +146,12 @@ void copy_prof_task(const void *args, size_t arglen,
     assert(result->inst_size == copy_info.inst_info.size());
     metrics->inst_info.resize(result->inst_size);
     for (size_t i = 0; i < result->inst_size; i++) {
-      metrics->inst_info[i].src_insts = copy_info.inst_info[i].src_inst_ids;
-      metrics->inst_info[i].dst_insts = copy_info.inst_info[i].dst_inst_ids;
+      metrics->inst_info[i].src_insts = copy_info.inst_info[i].src_insts;
+      metrics->inst_info[i].dst_insts = copy_info.inst_info[i].dst_insts;
       metrics->inst_info[i].request_type = copy_info.inst_info[i].request_type;
       metrics->inst_info[i].num_hops = copy_info.inst_info[i].num_hops;
-      metrics->inst_info[i].src_fids = copy_info.inst_info[i].src_field_ids;
-      metrics->inst_info[i].dst_fids = copy_info.inst_info[i].dst_field_ids;
+      metrics->inst_info[i].src_fids = copy_info.inst_info[i].src_fields;
+      metrics->inst_info[i].dst_fids = copy_info.inst_info[i].dst_fields;
       // fill has no src insts
       if (metrics->inst_info[i].request_type == ProfilingMeasurements::OperationCopyInfo::FILL) {
         assert(metrics->inst_info[i].src_insts.size() == 0);

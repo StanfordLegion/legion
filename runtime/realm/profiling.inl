@@ -215,13 +215,13 @@ namespace Realm {
       for (size_t i = 0; i < c.inst_info.size(); i++) {
         success = (ser & c.inst_info[i].src_inst_id) &&
                   (ser & c.inst_info[i].dst_inst_id) &&
-                  (ser & c.inst_info[i].src_inst_ids) &&
-                  (ser & c.inst_info[i].dst_inst_ids) &&
+                  (ser & c.inst_info[i].src_insts) &&
+                  (ser & c.inst_info[i].dst_insts) &&
                   (ser & c.inst_info[i].src_indirection_inst) &&
                   (ser & c.inst_info[i].dst_indirection_inst) &&
                   (ser & c.inst_info[i].num_fields) &&
-                  (ser & c.inst_info[i].src_field_ids) &&
-                  (ser & c.inst_info[i].dst_field_ids) &&
+                  (ser & c.inst_info[i].src_fields) &&
+                  (ser & c.inst_info[i].dst_fields) &&
                   (ser & c.inst_info[i].src_indirection_field) &&
                   (ser & c.inst_info[i].dst_indirection_field) &&
                   (ser & c.inst_info[i].request_type) &&
@@ -241,13 +241,13 @@ namespace Realm {
       for (size_t i = 0; i < c.inst_info.size(); i++) {
         success = (dez & c.inst_info[i].src_inst_id) &&
                   (dez & c.inst_info[i].dst_inst_id) &&
-                  (dez & c.inst_info[i].src_inst_ids) &&
-                  (dez & c.inst_info[i].dst_inst_ids) &&
+                  (dez & c.inst_info[i].src_insts) &&
+                  (dez & c.inst_info[i].dst_insts) &&
                   (dez & c.inst_info[i].src_indirection_inst) &&
                   (dez & c.inst_info[i].dst_indirection_inst) &&
                   (dez & c.inst_info[i].num_fields) &&
-                  (dez & c.inst_info[i].src_field_ids) &&
-                  (dez & c.inst_info[i].dst_field_ids) &&
+                  (dez & c.inst_info[i].src_fields) &&
+                  (dez & c.inst_info[i].dst_fields) &&
                   (dez & c.inst_info[i].src_indirection_field) &&
                   (dez & c.inst_info[i].dst_indirection_field) &&
                   (dez & c.inst_info[i].request_type) &&
