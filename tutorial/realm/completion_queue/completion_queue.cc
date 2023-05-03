@@ -69,7 +69,6 @@ void cleancq_task(const void *args, size_t arglen, const void *userdata,
   std::vector<Event> popped(task_args.num_tasks, Event::NO_EVENT);
   while (num_finished_task < task_args.num_tasks) {
     // try to pop an event
-    popped.clear();
     size_t count = completion_queue.pop_events(&popped[0], task_args.num_tasks);
     if(count > 0) {
       log_app.info("clean up %zu tasks", count);
