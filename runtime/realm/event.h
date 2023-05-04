@@ -52,6 +52,11 @@ namespace Realm {
       bool operator==(const Event& rhs) const;
       bool operator!=(const Event& rhs) const;
 
+
+      /**
+       * \brief The value should be usued to initialize an event
+       * handle. NO_EVENT is always in has triggered state .
+       */
       static const Event NO_EVENT;
 
       /**
