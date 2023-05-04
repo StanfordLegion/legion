@@ -686,6 +686,7 @@ pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_dst
     pub InstUID,          // src_inst_uid
     pub InstUID,          // dst_inst_uid
+    pub u32,              // num_hops
 );
 
 impl fmt::Display for CopyInstInfoDisplay<'_> {
@@ -709,8 +710,8 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
             (_, _) => {
                 write!(
                     f,
-                    "src_inst=0x{:x}, dst_inst=0x{:x}",
-                    src_inst_id, dst_inst_id
+                    "src_inst=0x{:x}, dst_inst=0x{:x}, num_hops={}",
+                    src_inst_id, dst_inst_id, self.4
                 )
             }
         }
@@ -729,7 +730,13 @@ impl fmt::Display for CopyInstInfoVec<'_> {
                 f,
                 "$req[{}]: {}",
                 i,
-                CopyInstInfoDisplay(src_inst, dst_inst, elt.src_inst_uid, elt.dst_inst_uid)
+                CopyInstInfoDisplay(
+                    src_inst,
+                    dst_inst,
+                    elt.src_inst_uid,
+                    elt.dst_inst_uid,
+                    elt.num_hops
+                )
             )?;
         }
         Ok(())
@@ -744,25 +751,31 @@ impl fmt::Display for CopyInstInfoDumpInstVec<'_> {
         // remove duplications
         let mut insts_set = BTreeSet::new();
         for elt in self.0.iter() {
-            if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
-                insts_set.insert(src_inst);
-            } else {
-                conditional_assert!(
-                    false,
-                    Config::all_logs(),
-                    "Copy can not find src_inst:0x{:x}",
-                    elt.src_inst_uid.0
-                );
+            // src_inst_uid = 0 means scatter (indirection inst)
+            if elt.src_inst_uid != InstUID(0) {
+                if let Some(src_inst) = self.1.find_inst(elt.src_inst_uid) {
+                    insts_set.insert(src_inst);
+                } else {
+                    conditional_assert!(
+                        false,
+                        Config::all_logs(),
+                        "Copy can not find src_inst:0x{:x}",
+                        elt.src_inst_uid.0
+                    );
+                }
             }
-            if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
-                insts_set.insert(dst_inst);
-            } else {
-                conditional_assert!(
-                    false,
-                    Config::all_logs(),
-                    "Copy can not find dst_inst:0x{:x}",
-                    elt.dst_inst_uid.0
-                );
+            // dst_inst_uid = 0 means gather (indirection inst)
+            if elt.dst_inst_uid != InstUID(0) {
+                if let Some(dst_inst) = self.1.find_inst(elt.dst_inst_uid) {
+                    insts_set.insert(dst_inst);
+                } else {
+                    conditional_assert!(
+                        false,
+                        Config::all_logs(),
+                        "Copy can not find dst_inst:0x{:x}",
+                        elt.dst_inst_uid.0
+                    );
+                }
             }
         }
         write!(f, "[")?;
