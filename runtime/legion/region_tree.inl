@@ -126,8 +126,13 @@ namespace Legion {
         priority =
           trace_info.op->add_copy_profiling_request(trace_info, requests, true);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_fill_request(requests, trace_info.op);
-      ApEvent result; LgEvent fevent;
+      {
+        InstanceNameClosure *closure = new InstanceNameClosure();
+        closure->record_instance_name(dst_fields.front().inst, unique_event);
+        forest->runtime->profiler->add_fill_request(requests, closure,
+                                                    trace_info.op);
+      }
+      ApEvent result;
       if (pred_guard.exists())
       {
         ApEvent pred_pre = 
@@ -137,14 +142,12 @@ namespace Legion {
                                           ApEvent(pred_guard));
         result = ApEvent(space.fill(dst_fields, requests,
               fill_value, fill_size, pred_pre, priority));
-        fevent = result;
         result = Runtime::ignorefaults(result);
       }
       else
       {
         result = ApEvent(space.fill(dst_fields, requests,
               fill_value, fill_size, precondition, priority));
-        fevent = result;
       }
 #ifdef LEGION_DISABLE_EVENT_PRUNING
       if (!result.exists())
@@ -154,13 +157,6 @@ namespace Legion {
         result = new_result;
       }
 #endif
-      if (forest->runtime->profiler != NULL)
-      {
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          forest->runtime->profiler->record_fill_instance(
-              dst_fields[idx].field_id, dst_fields[idx].inst,
-              unique_event, fevent);
-      }
 #ifdef LEGION_SPY
       assert(trace_info.op != NULL);
       LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
@@ -208,8 +204,14 @@ namespace Legion {
         priority =
           trace_info.op->add_copy_profiling_request(trace_info, requests,false);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_copy_request(requests, trace_info.op);
-      ApEvent result; LgEvent fevent;
+      {
+        InstanceNameClosure *closure = new InstanceNameClosure();
+        closure->record_instance_name(src_fields.front().inst, src_unique);
+        closure->record_instance_name(dst_fields.front().inst, dst_unique);
+        forest->runtime->profiler->add_copy_request(requests, closure,
+                                                    trace_info.op);
+      }
+      ApEvent result;
       if (pred_guard.exists())
       {
         // No need for tracing to know about the precondition or reservations
@@ -234,7 +236,6 @@ namespace Legion {
         }
         result = ApEvent(space.copy(src_fields, dst_fields, 
                                     requests, pred_pre, priority));
-        fevent = result;
         result = Runtime::ignorefaults(result);
       }
       else
@@ -247,7 +248,6 @@ namespace Legion {
                                           true/*exclusive*/, copy_pre);
         result = ApEvent(space.copy(src_fields, dst_fields, requests, 
                           copy_pre, priority));
-        fevent = result;
       }
       // Release any reservations
       for (std::vector<Reservation>::const_iterator it =
@@ -269,14 +269,6 @@ namespace Legion {
         result = new_result;
       }
 #endif
-      if (forest->runtime->profiler != NULL)
-      {
-        for (unsigned idx = 0; idx < src_fields.size(); idx++)
-          forest->runtime->profiler->record_copy_instances(
-              src_fields[idx].field_id, dst_fields[idx].field_id,
-              src_fields[idx].inst, dst_fields[idx].inst,
-              src_unique, dst_unique, fevent);
-      }
 #ifdef LEGION_SPY
       assert(trace_info.op != NULL);
       LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
@@ -5351,10 +5343,9 @@ namespace Legion {
       if (!replay)
         priority = op->add_copy_profiling_request(trace_info, requests,
                                           false/*fill*/, total_copies);
-      // TODO: need to log unique IDs for instances here for copy indirections
-      // The code right now is only correct for straight copy across
       if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, op, total_copies);
+        runtime->profiler->add_copy_request(requests, this,
+                                            op, total_copies);
       if (pred_guard.exists())
       {
         // No need for tracing to know about the precondition or reservations
@@ -5383,8 +5374,6 @@ namespace Legion {
           {
             last_copy = ApEvent(copy_domain.copy(src_fields,
                   dst_fields, indirections, requests, pred_pre, priority));
-            if (runtime->profiler != NULL)
-              log_across_profiling(last_copy);
             last_copy = Runtime::ignorefaults(last_copy);
           }
           else
@@ -5395,8 +5384,6 @@ namespace Legion {
         {
           last_copy = ApEvent(copy_domain.copy(src_fields,
                               dst_fields, requests, pred_pre, priority));
-          if (runtime->profiler != NULL)
-            log_across_profiling(last_copy);
           last_copy = Runtime::ignorefaults(last_copy);
         }
       }
@@ -5413,8 +5400,6 @@ namespace Legion {
           {
             last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
                   indirections, requests, copy_precondition, priority));
-            if (runtime->profiler != NULL)
-              log_across_profiling(last_copy);
           }
           else
             last_copy = issue_individual_copies(copy_precondition, requests);
@@ -5424,8 +5409,6 @@ namespace Legion {
         {
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
                 requests, copy_precondition, priority));
-          if (runtime->profiler != NULL)
-            log_across_profiling(last_copy);
         }
       }
       // Release any reservations
@@ -5526,8 +5509,6 @@ namespace Legion {
                             indirections, requests, precondition, priority));
         if (post.exists())
           postconditions.push_back(post);
-        if (runtime->profiler != NULL)
-          log_across_profiling(post, idx);
       }
       if (postconditions.empty())
         return ApEvent::NO_AP_EVENT;

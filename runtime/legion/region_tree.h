@@ -21,6 +21,7 @@
 #include "legion/legion_utilities.h"
 #include "legion/legion_allocation.h"
 #include "legion/legion_analysis.h"
+#include "legion/legion_profiling.h"
 #include "legion/garbage_collection.h"
 #include "legion/field_tree.h"
 
@@ -987,7 +988,7 @@ namespace Legion {
      * two different fields including with lots of different kinds
      * of indirections and transforms.
      */
-    class CopyAcrossExecutor : public Collectable {
+    class CopyAcrossExecutor : public InstanceNameClosure {
     public:
       struct DeferCopyAcrossArgs : public LgTaskArgs<DeferCopyAcrossArgs> {
       public:
@@ -1029,7 +1030,7 @@ namespace Legion {
     public:
       static void handle_deferred_copy_across(const void *args);
     public:
-      Runtime *const runtime;
+      Runtime *const runtime; 
       // Reservations that must be acquired for performing this copy
       // across and whether they need to be acquired with exclusive
       // permissions or not
@@ -1093,13 +1094,12 @@ namespace Legion {
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
                                     const bool exclusive_redop);
-      void log_across_profiling(LgEvent copy_post, int preimage = -1) const;
     public:
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
       std::vector<CopySrcDstField> src_fields, dst_fields;
-      std::vector<LgEvent> src_unique_events, dst_unique_events;
 #ifdef LEGION_SPY
+      std::vector<LgEvent> src_unique_events, dst_unique_events;
       RegionTreeID src_tree_id, dst_tree_id;
       unsigned unique_indirections_identifier;
 #endif
@@ -1109,7 +1109,9 @@ namespace Legion {
       std::vector<IndirectRecord> src_indirections, dst_indirections;
       FieldID src_indirect_field, dst_indirect_field;
       PhysicalInstance src_indirect_instance, dst_indirect_instance;
+#ifdef LEGION_SPY
       LgEvent src_indirect_instance_event, dst_indirect_instance_event;
+#endif
       TypeTag src_indirect_type, dst_indirect_type;
       std::vector<unsigned> nonempty_indexes;
     public:
