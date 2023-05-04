@@ -706,6 +706,36 @@ namespace Legion {
           info.inst_infos.resize(offset + (it->src_insts.size() * 
                 it->src_fields.size() * it->dst_insts.size() *
                 it->dst_fields.size()) + 1/*extra for indirection*/);
+          // Finally log the indirection instance(s)
+          CopyInstInfo &indirect = info.inst_infos[offset++];
+          indirect.indirect = true;
+          indirect.num_hops = it->num_hops;
+          if (it->src_indirection_inst.exists())
+          {
+            indirect.src = it->src_indirection_inst.get_location().id;
+            indirect.src_fid = it->src_indirection_field;
+            indirect.src_inst_uid = 
+              closure->find_instance_name(it->src_indirection_inst);
+          }
+          else
+          {
+            indirect.src = 0;
+            indirect.src_fid = 0;
+            indirect.src_inst_uid = LgEvent::NO_LG_EVENT;
+          }
+          if (it->dst_indirection_inst.exists())
+          {
+            indirect.dst = it->dst_indirection_inst.get_location().id;
+            indirect.dst_fid = it->dst_indirection_field;
+            indirect.dst_inst_uid =
+              closure->find_instance_name(it->dst_indirection_inst);
+          }
+          else
+          {
+            indirect.dst = 0;
+            indirect.dst_fid = 0;
+            indirect.dst_inst_uid = LgEvent::NO_LG_EVENT;
+          }
           for (unsigned idx1 = 0; idx1 < it->src_insts.size(); idx1++)
           {
             PhysicalInstance src_inst = it->src_insts[idx1];
@@ -734,36 +764,6 @@ namespace Legion {
                 }
               }
             }
-          }
-          // Finally log the indirection instance(s)
-          CopyInstInfo &indirect = info.inst_infos[offset];
-          indirect.indirect = true;
-          indirect.num_hops = it->num_hops;
-          if (it->src_indirection_inst.exists())
-          {
-            indirect.src = it->src_indirection_inst.get_location().id;
-            indirect.src_fid = it->src_indirection_field;
-            indirect.src_inst_uid = 
-              closure->find_instance_name(it->src_indirection_inst);
-          }
-          else
-          {
-            indirect.src = 0;
-            indirect.src_fid = 0;
-            indirect.src_inst_uid = LgEvent::NO_LG_EVENT;
-          }
-          if (it->dst_indirection_inst.exists())
-          {
-            indirect.dst = it->dst_indirection_inst.get_location().id;
-            indirect.dst_fid = it->dst_indirection_field;
-            indirect.dst_inst_uid =
-              closure->find_instance_name(it->dst_indirection_inst);
-          }
-          else
-          {
-            indirect.dst = 0;
-            indirect.dst_fid = 0;
-            indirect.dst_inst_uid = LgEvent::NO_LG_EVENT;
           }
         }
         else

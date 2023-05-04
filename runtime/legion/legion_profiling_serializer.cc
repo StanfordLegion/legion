@@ -1762,7 +1762,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_prof.print("Prof Copy Inst Info " IDFMT " " IDFMT " %d %d " IDFMT " " 
-                     IDFMT " " IDFMT " %u, %u", copy_inst.src, copy_inst.dst,
+                     IDFMT " " IDFMT " %u %u", copy_inst.src, copy_inst.dst,
                      copy_inst.src_fid, copy_inst.dst_fid,
                      copy_inst.src_inst_uid.id, copy_inst.dst_inst_uid.id,
                      copy_info.fevent.id, copy_inst.num_hops,
