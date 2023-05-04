@@ -6604,9 +6604,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       src_fields.reserve(indexes.size());
-#ifdef LEGION_SPY
       src_unique_events.reserve(indexes.size());
-#endif
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -6623,11 +6621,8 @@ namespace Legion {
           copy_mask.set_bit(*it);
           views[idx]->copy_from(copy_mask, src_fields);
           PhysicalManager *manager = ref.get_physical_manager();
-          const LgEvent unique_event = manager->get_unique_event(); 
-          record_instance_name(src_fields.back().inst, unique_event);
-#ifdef LEGION_SPY
+          const LgEvent unique_event = manager->get_unique_event();
           src_unique_events.push_back(unique_event);
-#endif
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -6653,9 +6648,7 @@ namespace Legion {
       std::vector<unsigned> indexes(req.instance_fields.size());
       fs->get_field_indexes(req.instance_fields, indexes);
       dst_fields.reserve(indexes.size());
-#ifdef LEGION_SPY
       dst_unique_events.reserve(indexes.size());
-#endif
       for (std::vector<unsigned>::const_iterator it =
             indexes.begin(); it != indexes.end(); it++)
       {
@@ -6673,10 +6666,7 @@ namespace Legion {
           views[idx]->copy_to(copy_mask, dst_fields);
           PhysicalManager *manager = ref.get_physical_manager();
           const LgEvent unique_event = manager->get_unique_event();
-          record_instance_name(dst_fields.back().inst, unique_event);
-#ifdef LEGION_SPY
           dst_unique_events.push_back(unique_event);
-#endif
 #ifdef DEBUG_LEGION
           found = true;
 #endif
@@ -6710,10 +6700,7 @@ namespace Legion {
       PhysicalManager *manager = indirect_instance.get_physical_manager();
       src_indirect_instance = manager->get_instance(point);
       LgEvent unique_event = manager->get_unique_event();
-      record_instance_name(src_indirect_instance, unique_event);
-#ifdef LEGION_SPY
       src_indirect_instance_event = unique_event; 
-#endif
       src_indirect_type = src_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_src_out_of_range = possible_out_of_range;
@@ -6745,10 +6732,7 @@ namespace Legion {
       PhysicalManager *manager = indirect_instance.get_physical_manager();
       dst_indirect_instance = manager->get_instance(point);
       LgEvent unique_event = manager->get_unique_event();
-      record_instance_name(dst_indirect_instance, unique_event);
-#ifdef LEGION_SPY
       dst_indirect_instance_event = unique_event; 
-#endif
       dst_indirect_type = dst_req.region.get_index_space().get_type_tag();
       both_are_range = are_range;
       possible_dst_out_of_range = possible_out_of_range;
@@ -6764,6 +6748,36 @@ namespace Legion {
           dst_fields[idx].set_redop(dst_req.redop, 
                     false/*fold*/, exclusive_redop);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    LgEvent CopyAcrossUnstructured::find_instance_name(
+                                                PhysicalInstance instance) const
+    //--------------------------------------------------------------------------
+    {
+      if (instance == src_indirect_instance)
+        return src_indirect_instance_event;
+      if (instance == dst_indirect_instance)
+        return dst_indirect_instance_event;
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        if (src_fields[idx].inst == instance)
+          return src_unique_events[idx];
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        if (dst_fields[idx].inst == instance)
+          return dst_unique_events[idx];
+      for (std::vector<IndirectRecord>::const_iterator it =
+            src_indirections.begin(); it != src_indirections.end(); it++)
+        for (unsigned idx = 0; idx < it->instances.size(); idx++)
+          if (it->instances[idx] == instance)
+            return it->instance_events[idx];
+      for (std::vector<IndirectRecord>::const_iterator it =
+            dst_indirections.begin(); it != dst_indirections.end(); it++)
+        for (unsigned idx = 0; idx < it->instances.size(); idx++)
+          if (it->instances[idx] == instance)
+            return it->instance_events[idx];
+      // Should always have found it before this
+      assert(false);
+      return src_indirect_instance_event;
     }
 
     /////////////////////////////////////////////////////////////

@@ -50,26 +50,38 @@ namespace Legion {
 
     class LegionProfSerializer; // forward declaration
 
-    /**
-     * This class provides a way of mapping physical instance names
+    /*
+     * This class provides an interface for mapping physical instance names
      * back to their unique event names for the profiler
      */
     class InstanceNameClosure : public Collectable {
     public:
-      InstanceNameClosure(void);
-      InstanceNameClosure(const InstanceNameClosure &rhs) = delete;
       virtual ~InstanceNameClosure(void) { }
     public:
-      InstanceNameClosure& operator=(const InstanceNameClosure &rhs) = delete;
+      virtual LgEvent find_instance_name(PhysicalInstance inst) const = 0;
+    };
+
+    /*
+     * This class provides an instantiation for a fixed number of names
+     * Currently we just instantiate it for sizes of 1 and 2 for 
+     * fills and normal copies respectively
+     */
+    template<size_t ENTRIES>
+    class SmallNameClosure : public InstanceNameClosure {
+    public:
+      SmallNameClosure(void);
+      SmallNameClosure(const SmallNameClosure &rhs) = delete;
+      virtual ~SmallNameClosure(void) { }
+    public:
+      SmallNameClosure& operator=(const SmallNameClosure &rhs) = delete;
     public:
       void record_instance_name(PhysicalInstance inst, LgEvent name);
-      LgEvent find_instance_name(PhysicalInstance inst) const;
+      virtual LgEvent find_instance_name(PhysicalInstance inst) const;
     private:
+      static_assert(ENTRIES > 0, "Must be positive");
       // Optimize for the common case of there being one or two entries
-      static constexpr size_t SHORT_NAMES = 2;
-      PhysicalInstance instances[SHORT_NAMES];
-      LgEvent names[SHORT_NAMES];
-      std::map<PhysicalInstance,LgEvent> other_names;
+      PhysicalInstance instances[ENTRIES];
+      LgEvent names[ENTRIES];
     };
 
     class LegionProfMarker {

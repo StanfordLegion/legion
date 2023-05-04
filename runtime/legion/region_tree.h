@@ -1018,6 +1018,9 @@ namespace Legion {
           compute_preimages(preimages) { }
       virtual ~CopyAcrossExecutor(void) { }
     public:
+      // From InstanceNameClosure
+      virtual LgEvent find_instance_name(PhysicalInstance inst) const = 0;
+    public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
                               ApEvent copy_precondition,
                               ApEvent src_indirect_precondition, 
@@ -1054,6 +1057,9 @@ namespace Legion {
           src_indirect_instance(PhysicalInstance::NO_INST),
           dst_indirect_instance(PhysicalInstance::NO_INST) { }
       virtual ~CopyAcrossUnstructured(void) { }
+    public:
+      // From InstanceNameClosure
+      virtual LgEvent find_instance_name(PhysicalInstance inst) const;
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
                               ApEvent copy_precondition,
@@ -1098,8 +1104,8 @@ namespace Legion {
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements
       std::vector<CopySrcDstField> src_fields, dst_fields;
-#ifdef LEGION_SPY
       std::vector<LgEvent> src_unique_events, dst_unique_events;
+#ifdef LEGION_SPY
       RegionTreeID src_tree_id, dst_tree_id;
       unsigned unique_indirections_identifier;
 #endif
@@ -1109,9 +1115,7 @@ namespace Legion {
       std::vector<IndirectRecord> src_indirections, dst_indirections;
       FieldID src_indirect_field, dst_indirect_field;
       PhysicalInstance src_indirect_instance, dst_indirect_instance;
-#ifdef LEGION_SPY
       LgEvent src_indirect_instance_event, dst_indirect_instance_event;
-#endif
       TypeTag src_indirect_type, dst_indirect_type;
       std::vector<unsigned> nonempty_indexes;
     public:

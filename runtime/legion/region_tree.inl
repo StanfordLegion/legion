@@ -127,7 +127,7 @@ namespace Legion {
           trace_info.op->add_copy_profiling_request(trace_info, requests, true);
       if (forest->runtime->profiler != NULL)
       {
-        InstanceNameClosure *closure = new InstanceNameClosure();
+        SmallNameClosure<1> *closure = new SmallNameClosure<1>();
         closure->record_instance_name(dst_fields.front().inst, unique_event);
         forest->runtime->profiler->add_fill_request(requests, closure,
                                                     trace_info.op);
@@ -205,7 +205,7 @@ namespace Legion {
           trace_info.op->add_copy_profiling_request(trace_info, requests,false);
       if (forest->runtime->profiler != NULL)
       {
-        InstanceNameClosure *closure = new InstanceNameClosure();
+        SmallNameClosure<2> *closure = new SmallNameClosure<2>();
         closure->record_instance_name(src_fields.front().inst, src_unique);
         closure->record_instance_name(dst_fields.front().inst, dst_unique);
         forest->runtime->profiler->add_copy_request(requests, closure,

@@ -35,19 +35,21 @@ namespace Legion {
 
 
     //--------------------------------------------------------------------------
-    InstanceNameClosure::InstanceNameClosure(void)
+    template<size_t ENTRIES>
+    SmallNameClosure<ENTRIES>::SmallNameClosure(void)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < SHORT_NAMES; idx++)
+      for (unsigned idx = 0; idx < ENTRIES; idx++)
         instances[idx] = PhysicalInstance::NO_INST;
     }
 
     //--------------------------------------------------------------------------
-    void InstanceNameClosure::record_instance_name(PhysicalInstance instance,
-                                                   LgEvent name)
+    template<size_t ENTRIES>
+    void SmallNameClosure<ENTRIES>::record_instance_name(
+                                        PhysicalInstance instance, LgEvent name)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < SHORT_NAMES; idx++)
+      for (unsigned idx = 0; idx < ENTRIES; idx++)
       {
         if (!instances[idx].exists())
         {
@@ -63,27 +65,27 @@ namespace Legion {
           return;
         }
       }
-#ifdef DEBUG_LEGION
-      assert((other_names.find(instance) == other_names.end()) ||
-          (other_names[instance] == name));
-#endif
-      other_names[instance] = name;
+      // Should not run out of space
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
-    LgEvent InstanceNameClosure::find_instance_name(PhysicalInstance inst) const
+    template<size_t ENTRIES>
+    LgEvent SmallNameClosure<ENTRIES>::find_instance_name(
+                                                    PhysicalInstance inst) const
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < SHORT_NAMES; idx++)
+      for (unsigned idx = 0; idx < ENTRIES; idx++)
         if (instances[idx] == inst)
           return names[idx];
-      std::map<PhysicalInstance,LgEvent>::const_iterator finder =
-        other_names.find(inst);
-#ifdef DEBUG_LEGION
-      assert(finder != other_names.end());
-#endif
-      return finder->second;
+      // Should always find it before this
+      assert(false);
+      return names[0];
     }
+
+    // Explicit instantiations for 1 and 2
+    template class SmallNameClosure<1>;
+    template class SmallNameClosure<2>;
 
     //--------------------------------------------------------------------------
     LegionProfMarker::LegionProfMarker(const char* _name)
