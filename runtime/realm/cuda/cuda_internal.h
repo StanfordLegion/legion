@@ -721,11 +721,7 @@ namespace Realm {
       void device_synchronize(void);
 
 #ifdef REALM_USE_CUDART_HIJACK
-      void event_create(CUevent *event, int flags);
-      void event_destroy(CUevent event);
       void event_record(CUevent event, CUstream stream);
-      void event_synchronize(CUevent event);
-      void event_elapsed_time(float *ms, CUevent start, CUevent end);
       
       void configure_call(dim3 grid_dim, dim3 block_dim,
 			  size_t shared_memory, CUstream stream);

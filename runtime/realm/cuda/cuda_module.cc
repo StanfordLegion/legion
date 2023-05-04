@@ -1257,10 +1257,8 @@ namespace Realm {
       current_size = init_size;
       total_size = init_size;
 
-      // TODO: measure how much benefit is derived from CU_EVENT_DISABLE_TIMING and
-      //  consider using them for completion callbacks
       for(int i = 0; i < init_size; i++)
-	CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DEFAULT) );
+	CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DISABLE_TIMING) );
     }
 
     void GPUEventPool::empty_pool(void)
@@ -1295,7 +1293,7 @@ namespace Realm {
 	available_events.resize(total_size);
 
 	for(int i = 0; i < batch_size; i++)
-	  CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DEFAULT) );
+	  CHECK_CU( CUDA_DRIVER_FNPTR(cuEventCreate)(&available_events[i], CU_EVENT_DISABLE_TIMING) );
       }
 
       if(external)
@@ -2961,48 +2959,12 @@ namespace Realm {
     }
     
 #ifdef REALM_USE_CUDART_HIJACK
-    void GPUProcessor::event_create(CUevent *event, int flags)
-    {
-      // int cu_flags = CU_EVENT_DEFAULT;
-      // if((flags & cudaEventBlockingSync) != 0)
-      // 	cu_flags |= CU_EVENT_BLOCKING_SYNC;
-      // if((flags & cudaEventDisableTiming) != 0)
-      // 	cu_flags |= CU_EVENT_DISABLE_TIMING;
-
-      // get an event from our event pool (ignoring the flags for now)
-      CUevent e = gpu->event_pool.get_event(true/*external*/);
-      *event = e;
-    }
-
-    void GPUProcessor::event_destroy(CUevent event)
-    {
-      // assume the event is one of ours and put it back in the pool
-      CUevent e = event;
-      if(e)
-	gpu->event_pool.return_event(e, true/*external*/);
-    }
-
     void GPUProcessor::event_record(CUevent event, CUstream stream)
     {
       CUevent e = event;
       if(IS_DEFAULT_STREAM(stream))
         stream = ThreadLocal::current_gpu_stream->get_stream();
       CHECK_CU( CUDA_DRIVER_FNPTR(cuEventRecord)(e, stream) );
-    }
-
-    void GPUProcessor::event_synchronize(CUevent event)
-    {
-      // TODO: consider suspending task rather than busy-waiting here...
-      CUevent e = event;
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventSynchronize)(e) );
-    }
-      
-    void GPUProcessor::event_elapsed_time(float *ms, CUevent start, CUevent end)
-    {
-      // TODO: consider suspending task rather than busy-waiting here...
-      CUevent e1 = start;
-      CUevent e2 = end;
-      CHECK_CU( CUDA_DRIVER_FNPTR(cuEventElapsedTime)(ms, e1, e2) );
     }
       
     GPUProcessor::LaunchConfig::LaunchConfig(dim3 _grid, dim3 _block, size_t _shared)
