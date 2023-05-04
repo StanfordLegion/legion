@@ -2090,12 +2090,12 @@ class CopyInstInfo(object):
             dst_inst_id = hex(self.dst_instance.inst_id)
         if self.indirect == False:
             assert (self.src_inst_uid != 0) and (self.dst_inst_uid != 0)
-            return 'src_inst=%s, dst_inst=%s, num_hops=%s' % (src_inst_id, dst_inst_id, self.num_hops)
+            return 'src_inst=%s, src_fid=%s, dst_inst=%s, dst_fid=%s, num_hops=%s' % (src_inst_id, self.src_fid, dst_inst_id, self.dst_fid, self.num_hops)
         else:
             if self.src_inst_uid == 0:
-                return 'Scatter: dst_indirect_inst=%s' % (dst_inst_id)
+                return 'Scatter: dst_indirect_inst=%s, fid=%s' % (dst_inst_id, self.dst_fid)
             elif self.dst_inst_uid == 0:
-                return 'Gather: src_indirect_inst=%s' % (src_inst_id)
+                return 'Gather: src_indirect_inst=%s, fid=%s' % (src_inst_id, self.src_fid)
             else:
                 print(self.src_inst_uid, self.dst_inst_uid)
                 assert 0

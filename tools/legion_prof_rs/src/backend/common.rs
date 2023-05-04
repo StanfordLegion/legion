@@ -686,6 +686,8 @@ pub struct CopyInstInfoDisplay<'a>(
     pub Option<&'a Inst>, // src_dst
     pub InstUID,          // src_inst_uid
     pub InstUID,          // dst_inst_uid
+    pub FieldID,          // src_fid
+    pub FieldID,          // dst_fid
     pub u32,              // num_hops
 );
 
@@ -702,16 +704,24 @@ impl fmt::Display for CopyInstInfoDisplay<'_> {
         match (self.2 .0, self.3 .0) {
             (0, 0) => unreachable!(),
             (0, _) => {
-                write!(f, "Scatter: dst_indirect_inst=0x{:x}", dst_inst_id)
+                write!(
+                    f,
+                    "Scatter: dst_indirect_inst=0x{:x}, fid={}",
+                    dst_inst_id, self.5 .0
+                )
             }
             (_, 0) => {
-                write!(f, "Gather: src_indirect_inst=0x{:x}", src_inst_id)
+                write!(
+                    f,
+                    "Gather: src_indirect_inst=0x{:x}, fid={}",
+                    src_inst_id, self.4 .0
+                )
             }
             (_, _) => {
                 write!(
                     f,
-                    "src_inst=0x{:x}, dst_inst=0x{:x}, num_hops={}",
-                    src_inst_id, dst_inst_id, self.4
+                    "src_inst=0x{:x}, src_fid={}, dst_inst=0x{:x}, dst_fid={}, num_hops={}",
+                    src_inst_id, self.4 .0, dst_inst_id, self.5 .0, self.6
                 )
             }
         }
@@ -735,6 +745,8 @@ impl fmt::Display for CopyInstInfoVec<'_> {
                     dst_inst,
                     elt.src_inst_uid,
                     elt.dst_inst_uid,
+                    elt.src_fid,
+                    elt.dst_fid,
                     elt.num_hops
                 )
             )?;
