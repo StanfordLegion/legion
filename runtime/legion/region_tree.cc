@@ -9792,7 +9792,7 @@ namespace Legion {
         // the volumes together, otherwise we need to keep them separte
         // so we can deduplicate the volumes across nodes
         if ((collective_mapping == NULL) || 
-            (collective_mapping->size() <= total_children))
+            (((LegionColor)collective_mapping->size()) <= total_children))
         {
           // Children are sharded so no need to worry about uniqueness
           uint64_t children_volume = 0;
@@ -9832,7 +9832,7 @@ namespace Legion {
         // Try drawing yourself n-way venn diagrams to convince yourself 
         // this is correct and will count all overlapping points exactly once.
         if ((collective_mapping == NULL) ||
-            (collective_mapping->size() <= total_children))
+            (((LegionColor)collective_mapping->size()) <= total_children))
         {
           // Children are sharded so no need to worry about uniqueness
           uint64_t children_volume = 0;
