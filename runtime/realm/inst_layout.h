@@ -166,7 +166,7 @@ namespace Realm {
 
     /**
      * Adjusts offsets of all pieces by 'adjust_amt'
-     * @param adjust_amt
+     * \param adjust_amt
      */
     virtual void relocate(size_t adjust_amt) = 0;
 
@@ -176,10 +176,10 @@ namespace Realm {
      * Create an affine layout using the bounds of 'is' (i.e. one piece)
      * using the requested dimension ordering and respecting the field
      * size/alignment constraints provided.
-     * @param is Index space to use for layout creation.
-     * @param ilc Layout constraints to use for layout creation.
-     * @param dim_order Dimension ordering to use for layout creation.
-     * @return InstanceLayoutGeneric* Pointer to the created layout.
+     * \param is Index space to use for layout creation.
+     * \param ilc Layout constraints to use for layout creation.
+     * \param dim_order Dimension ordering to use for layout creation.
+     * \return InstanceLayoutGeneric* Pointer to the created layout.
      */
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
@@ -190,11 +190,11 @@ namespace Realm {
      * Create a multi-affine layout using one piece for each rectangle in
      * 'covering' using the requested dimension ordering and respecting the
      * field size/alignment constraints provided.
-     * @param is Index space to use for layout creation.
-     * @param covering Rectangles to use for layout creation.
-     * @param ilc Layout constraints to use for layout creation.
-     * @param dim_order Dimension ordering to use for layout creation.
-     * @return InstanceLayoutGeneric* Pointer to the created layout.
+     * \param is Index space to use for layout creation.
+     * \param covering Rectangles to use for layout creation.
+     * \param ilc Layout constraints to use for layout creation.
+     * \param dim_order Dimension ordering to use for layout creation.
+     * \return InstanceLayoutGeneric* Pointer to the created layout.
      */
     template <int N, typename T>
     static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
@@ -308,8 +308,8 @@ namespace Realm {
     /**
      * Calculate the offset of a point within the affine piece.
      * The offet is calculated as: offset + sum(strides[i] * p[i]).
-     * @param p Point to calculate offset for.
-     * @return size_t Offset of point.
+     * \param p Point to calculate offset for.
+     * \return size_t Offset of point.
      */
     virtual size_t calculate_offset(const Point<N,T>& p) const;
 
@@ -376,7 +376,7 @@ namespace Realm {
 
     /**
      * Adjust offsets of pieces to start from 'base_offset'.
-     * @param base_offset Offset to start from.
+     * \param base_offset Offset to start from.
      */
     virtual void relocate(size_t base_offset);
 
@@ -388,9 +388,9 @@ namespace Realm {
     /**
      * Compute the offset of the specified field for an element - this
      * is generally much less efficient than using a layout-specific accessor.
-     * @param p Point to calculate offset for.
-     * @param fid FieldID of field to calculate offset for.
-     * @return size_t Offset of field.
+     * \param p Point to calculate offset for.
+     * \param fid FieldID of field to calculate offset for.
+     * \return size_t Offset of field.
      */
     size_t calculate_offset(Point<N,T> p, FieldID fid) const;
 
@@ -492,9 +492,9 @@ namespace Realm {
     /**
      * Construct a GenericAccessor for the specified instance and field.
      * Implicitly tries to cover the entire instance's domain.
-     * @param inst RegionInstance to construct accessor for.
-     * @param field_id FieldID of field to construct accessor for.
-     * @param subfield_offset Offset of subfield to construct accessor for.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subfield_offset Offset of subfield to construct accessor for.
      */
     GenericAccessor(RegionInstance inst,
 		   FieldID field_id, size_t subfield_offset = 0);
@@ -502,10 +502,10 @@ namespace Realm {
     /**
      * Construct a GenericAccessor for the specified instance and field.
      * Limits the domain to the specified subrectangle.
-     * @param inst RegionInstance to construct accessor for.
-     * @param field_id FieldID of field to construct accessor for.
-     * @param subrect Subrectangle to limit domain to.
-     * @param subfield_offset Offset of subfield to construct accessor for.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subrect Subrectangle to limit domain to.
+     * \param subfield_offset Offset of subfield to construct accessor for.
      */
     GenericAccessor(RegionInstance inst,
 		   FieldID field_id, const Rect<N,T>& subrect,
@@ -530,8 +530,8 @@ namespace Realm {
     /**
      * Return a reference that can be used to read or write a single
      * element.
-     * @param p Point to read/write.
-     * @return Reference to element at p.
+     * \param p Point to read/write.
+     * \return Reference to element at p.
      */
     AccessorRefHelper<FT> operator[](const Point<N,T>& p);
 
@@ -577,9 +577,9 @@ namespace Realm {
      * NOTE: this constructor will die if the instance is not compatible
      * with AffineAccessor. Call is_compatible(...) first if you're not
      * sure.
-     * @param inst RegionInstance to construct accessor for.
-     * @param field_id FieldID of field to construct accessor for.
-     * @param subfield_offset Offset of subfield to construct accessor for.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subfield_offset Offset of subfield to construct accessor for.
      */
     AffineAccessor(RegionInstance inst,
 		   FieldID field_id, size_t subfield_offset = 0);
@@ -589,10 +589,10 @@ namespace Realm {
      * NOTE: this constructor will die if the instance is not compatible
      * with AffineAccessor. Call is_compatible(...) first if you're not
      * sure.
-     * @param inst RegionInstance to construct accessor for.
-     * @param field_id FieldID of field to construct accessor for.
-     * @param subrect Subrectangle to limit domain to.
-     * @param subfield_offset Offset of subfield to construct accessor for.
+     * \param inst RegionInstance to construct accessor for.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subrect Subrectangle to limit domain to.
+     * \param subfield_offset Offset of subfield to construct accessor for.
      */
     AffineAccessor(RegionInstance inst,
 		   FieldID field_id, const Rect<N,T>& subrect,
@@ -602,11 +602,11 @@ namespace Realm {
     /**
      * Construct an AffineAccessor for the specified instance, field, 
      * and coordinate transform.
-     * @param inst RegionInstance to construct accessor for.
-     * @param transform Affine transform to apply to coordinates.
-     * @param offset Offset to apply to coordinates.
-     * @param field_id FieldID of field to construct accessor for.
-     * @param subfield_offset Offset of subfield to construct accessor for.
+     * \param inst RegionInstance to construct accessor for.
+     * \param transform Affine transform to apply to coordinates.
+     * \param offset Offset to apply to coordinates.
+     * \param field_id FieldID of field to construct accessor for.
+     * \param subfield_offset Offset of subfield to construct accessor for.
      */
     template <int N2, typename T2>
     AffineAccessor(RegionInstance inst,
@@ -749,9 +749,9 @@ namespace Realm {
      * The accessor will implicitly try to cover the entire instance's domain.
      * NOTE: This constructor will crash if the conversion is not
      * allowed - call is_compatible(...) first if you're not sure.
-     * @param inst The instance to access.
-     * @param field_id The field to access.
-     * @param subfield_offset The offset of the subfield to access.
+     * \param inst The instance to access.
+     * \param field_id The field to access.
+     * \param subfield_offset The offset of the subfield to access.
      */
     MultiAffineAccessor(RegionInstance inst,
 			FieldID field_id, size_t subfield_offset = 0);
@@ -761,10 +761,10 @@ namespace Realm {
      * Limits the domain to the given subrectangle. (NOTE: subrect need not be
      * entirely covered by the instance - a legal access must be both within
      * the subrect AND within the coverage of the instance.)
-     * @param inst The instance to access.
-     * @param field_id The field to access.
-     * @param subrect The subrectangle to limit the domain to.
-     * @param subfield_offset The offset of the subfield to access.
+     * \param inst The instance to access.
+     * \param field_id The field to access.
+     * \param subrect The subrectangle to limit the domain to.
+     * \param subfield_offset The offset of the subfield to access.
      */
     MultiAffineAccessor(RegionInstance inst,
 			FieldID field_id, const Rect<N,T>& subrect,
@@ -790,8 +790,8 @@ namespace Realm {
     /**
      * Return a pointer to the given point in the instance. Nonconst version
      * is allowed to remember the most-recently-accessed piece.
-     * @param p The point to access.
-     * @return A pointer to the given point.
+     * \param p The point to access.
+     * \return A pointer to the given point.
      */
     REALM_CUDA_HD
     FT *ptr(const Point<N,T>& p) const;
