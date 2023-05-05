@@ -61,13 +61,13 @@ namespace Realm {
 
       /**
        * Check whether an event has a valid ID.
-       * @return true if the event has a valid ID, false otherwise
+       * \return true if the event has a valid ID, false otherwise
        */
       bool exists(void) const;
 
       /**
        * Test whether an event has triggered without waiting.
-       * @return true if the event has triggered, false otherwise
+       * \return true if the event has triggered, false otherwise
        */
       bool has_triggered(void) const;
 
@@ -85,39 +85,39 @@ namespace Realm {
       /**
        * External wait with a timeout - returns true if event triggers, false
        * if the maximum delay occurs first
-       * @param max_ns the maximum number of nanoseconds to wait
-       * @return true if the event has triggered, false if the timeout occurred
+       * \param max_ns the maximum number of nanoseconds to wait
+       * \return true if the event has triggered, false if the timeout occurred
        */
       bool external_timedwait(long long max_ns) const;
 
       /**
        * Fault-aware versions of the above (the above versions will cause the
        * caller to fault as well if a poisoned event is queried).
-       * @param poisoned set to true if the event is poisoned
-       * @return true if the event has triggered, false otherwise
+       * \param poisoned set to true if the event is poisoned
+       * \return true if the event has triggered, false otherwise
        */
       bool has_triggered_faultaware(bool& poisoned) const;
 
 
       /**
        * Fault-aware versions of the wait function.
-       * @param poisoned set to true if the event is poisoned
-       * @return true if the event has triggered, false otherwise
+       * \param poisoned set to true if the event is poisoned
+       * \return true if the event has triggered, false otherwise
        */
       void wait_faultaware(bool& poisoned) const;
 
       /**
        * Fault-aware versions of the external wait function.
-       * @param poisoned set to true if the event is poisoned
-       * @return true if the event has triggered, false otherwise
+       * \param poisoned set to true if the event is poisoned
+       * \return true if the event has triggered, false otherwise
        */
       void external_wait_faultaware(bool& poisoned) const;
 
       /**
        * Fault-aware versions of the external timed wait function.
-       * @param poisoned set to true if the event is poisoned
-       * @param max_ns the maximum number of nanoseconds to wait
-       * @return true if the event has triggered, false if the timeout occurred
+       * \param poisoned set to true if the event is poisoned
+       * \param max_ns the maximum number of nanoseconds to wait
+       * \return true if the event has triggered, false if the timeout occurred
        */
       bool external_timedwait_faultaware(bool& poisoned, long long max_ns) const;
 
@@ -130,15 +130,15 @@ namespace Realm {
 
       /**
        * Attempt to cancel the operation associated with this event.
-       * @param reason_data will be provided to any profilers of the operation
-       * @param reason_size the size of the reason data
+       * \param reason_data will be provided to any profilers of the operation
+       * \param reason_size the size of the reason data
        */
       void cancel_operation(const void *reason_data, size_t reason_size) const;
 
       /**
        * Attempt to change the priority of the operation associated with this
        * event.
-       * @param new_priority the new priority.
+       * \param new_priority the new priority.
        */
       void set_operation_priority(int new_priority) const;
 
@@ -146,8 +146,8 @@ namespace Realm {
       /**
        * Create an event that won't trigger until all input events
        * have.
-       * @param wait_for the events to wait for
-       * @return the event that will trigger when all input events
+       * \param wait_for the events to wait for
+       * \return the event that will trigger when all input events
        * have.
        */
       static Event merge_events(const std::set<Event>& wait_for);
@@ -160,8 +160,8 @@ namespace Realm {
       /**
        * Create an event that won't trigger until all input events
        * have, ignoring any poison on the input events.
-       * @param wait_for the events to wait for
-       * @return the event that will trigger when all input events
+       * \param wait_for the events to wait for
+       * \return the event that will trigger when all input events
        * have.
        */
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
@@ -173,8 +173,8 @@ namespace Realm {
        * will be triggered.  In addition to being useful for diagnostic purposes
        * (e.g. detecting event cycles), having a "happens_before" allows Realm
        * to judge that the UserEvent trigger is "in flight".
-       * @param happens_before the event that must occur before the UserEvent
-       * @param happens_after the event that must occur after the UserEvent
+       * \param happens_before the event that must occur before the UserEvent
+       * \param happens_after the event that must occur after the UserEvent
        */
       static void advise_event_ordering(Event happens_before, Event happens_after);
       static void advise_event_ordering(const std::set<Event>& happens_before,
@@ -194,15 +194,15 @@ namespace Realm {
 
       /**
        * Create a new user event.
-       * @return the new user event
+       * \return the new user event
        */
       static UserEvent create_user_event(void);
 
       /**
        * Trigger the user event.
-       * @param wait_on an event that must trigger before this user event
+       * \param wait_on an event that must trigger before this user event
        * can.
-       * @param ignore_faults if true, the user event will be triggered even if
+       * \param ignore_faults if true, the user event will be triggered even if
        * the event it is waiting on is poisoned.
        */
       void trigger(Event wait_on = Event::NO_EVENT,
@@ -241,33 +241,33 @@ namespace Realm {
        * Advance a barrier to the next phase, returning a new barrier
        * handle. Attemps to advance beyond the last phase return NO_BARRIER
        * instead.
-       * @return the new barrier handle.
+       * \return the new barrier handle.
        */
       Barrier advance_barrier(void) const;
 
       /*
        * Alter the arrival count of a barrier.
-       * @param delta the amount to adjust the arrival count by
-       * @return the new barrier handle.
+       * \param delta the amount to adjust the arrival count by
+       * \return the new barrier handle.
        */
       Barrier alter_arrival_count(int delta) const;
 
       /*
        * Get the previous phase of a barrier.
-       * @return the previous phase of the barrier
+       * \return the previous phase of the barrier
        */
       Barrier get_previous_phase(void) const;
 
       /*
        * Adjust the arrival count of a barrier.
-       * @param count the amount to adjust the arrival count by
-       * @param wait_on an event that must trigger before the arrival count
+       * \param count the amount to adjust the arrival count by
+       * \param wait_on an event that must trigger before the arrival count
        * can be adjusted.
-       * @param ignore_faults if true, the arrival count will be adjusted even
+       * \param ignore_faults if true, the arrival count will be adjusted even
        * if the event it is waiting on is poisoned.
-       * @param reduce_value if non-null, the value will be used to update the
+       * \param reduce_value if non-null, the value will be used to update the
        * reduction value associated with the barrier.
-       * @param reduce_value_size the size of the reduction value
+       * \param reduce_value_size the size of the reduction value
        */
       void arrive(unsigned count = 1, Event wait_on = Event::NO_EVENT,
                   const void* reduce_value = 0,
@@ -276,9 +276,9 @@ namespace Realm {
 
       /*
        * Get the resulting barrier value.
-       * @param value the resulting value
-       * @param value_size the size of the resulting value
-       * @return true if the value was successfully retrieved,
+       * \param value the resulting value
+       * \param value_size the size of the resulting value
+       * \return true if the value was successfully retrieved,
        * generation hasn't triggered yet.
        */
       bool get_result(void *value, size_t value_size) const;
@@ -309,14 +309,14 @@ namespace Realm {
        * triggered events (at the moment, overflow is a fatal error).
        * A 'max_size' of 0 allows for arbitrary queue growth, at the cost
        * of additional overhead.
-       * @param max_size the maximum size of the queue
-       * @return the completion queue
+       * \param max_size the maximum size of the queue
+       * \return the completion queue
        */
       static CompletionQueue create_completion_queue(size_t max_size);
 
       /**
        * Destroy a completion queue.
-       * @param wait_on an event to wait on before destroying the
+       * \param wait_on an event to wait on before destroying the
        * queue.
        */
       void destroy(Event wait_on = Event::NO_EVENT);
@@ -326,7 +326,7 @@ namespace Realm {
        * Add an event to the completion queue (once it triggers).
        * non-faultaware version raises a fatal error if the specified 'event'
        * is poisoned
-       * @param event the event to add
+       * \param event the event to add
        */
       void add_event(Event event);
       void add_event_faultaware(Event event);
@@ -341,9 +341,9 @@ namespace Realm {
        * When 'add_event_faultaware' is used, any poisoning of the returned
        * events is not signalled explicitly - the caller is expected to
        * check via 'has_triggered_faultaware' itself.
-       * @param events the array to store the events in
-       * @param max_events the maximum number of events to pop
-       * @return the number of events popped
+       * \param events the array to store the events in
+       * \param max_events the maximum number of events to pop
+       * \return the number of events popped
        */
       size_t pop_events(Event *events, size_t max_events);
 
@@ -360,7 +360,7 @@ namespace Realm {
        * round-trip network communication latency to deal with) - if polling
        * on the completion queue is unavoidable, the loop should poll on
        * pop_events directly.
-       * @return the non-empty event
+       * \return the non-empty event
        */
       Event get_nonempty_event(void);
     };
