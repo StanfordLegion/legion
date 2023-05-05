@@ -56,7 +56,6 @@ namespace UCP {
 #ifdef REALM_USE_CUDA
   static constexpr size_t   ZCOPY_THRESH_DEV  = 0;
 #endif
-  static constexpr char     TLS_HOST[]        = "^dc_mlx5";
 
   namespace ThreadLocal {
     REALM_THREAD_LOCAL const TimeLimit *ucp_work_until = nullptr;
@@ -505,7 +504,7 @@ err:
     init_params.prog_boff_max            = config.prog_boff_max;
 
     read_env_var_update_map("UCX_NET_DEVICES", "", &config.host_nics, &ev_map);
-    read_env_var_update_map("UCX_TLS", TLS_HOST, &config.tls_host, &ev_map);
+    read_env_var_update_map("UCX_TLS", "", &config.tls_host, &ev_map);
     read_env_var_update_map("UCX_IB_SEG_SIZE",
         std::to_string(IB_SEG_SIZE), &config.ib_seg_size, &ev_map);
     read_env_var_update_map("UCX_ZCOPY_THRESH",
