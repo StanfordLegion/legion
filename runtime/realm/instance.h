@@ -84,10 +84,10 @@ namespace Realm {
     ///@{
     /**
      * Return a compiled piece lookup program for a given field.
-     * @param field_id The field ID to look up.
-     * @param allowed_mask A mask of allowed piece types.
-     * @param field_offset The offset of the field within the piece.
-     * @return A pointer to the compiled piece lookup program.
+     * \param field_id The field ID to look up.
+     * \param allowed_mask A mask of allowed piece types.
+     * \param field_offset The offset of the field within the piece.
+     * \return A pointer to the compiled piece lookup program.
      */
     template <int N, typename T>
     REALM_INTERNAL_API_EXTERNAL_LINKAGE
@@ -106,9 +106,9 @@ namespace Realm {
      * Read data from an instance.
      * Users are encouraged to use the various accessors which make repeated
      * accesses much more efficient.
-     * @param offset The offset into the instance to read from.
-     * @param data A pointer to the data to read into.
-     * @param datalen The number of bytes to read.
+     * \param offset The offset into the instance to read from.
+     * \param data A pointer to the data to read into.
+     * \param datalen The number of bytes to read.
      */
     void read_untyped(size_t offset, void* data, size_t datalen) const;
 
@@ -125,9 +125,9 @@ namespace Realm {
      * Return a pointer to the instance data.
      * Returns a null pointer if the instance storage cannot be directly
      * accessed via load/store instructions.
-     * @param offset The offset into the instance to read from.
-     * @param datalen The number of bytes to read.
-     * @return A pointer to the instance data.
+     * \param offset The offset into the instance to read from.
+     * \param datalen The number of bytes to read.
+     * \return A pointer to the instance data.
      */
     void *pointer_untyped(size_t offset, size_t datalen) const;
 
@@ -149,12 +149,12 @@ namespace Realm {
      * Create a new region instance. Calls to create_instance return immediately
      * with a handle, but also return an event that must be used as a
      * precondition for any use (or destruction) of the instance.
-     * @param inst The handle to the new instance.
-     * @param memory The memory to create the instance in.
-     * @param ilg The layout of the instance.
-     * @param prs The profiling requests for the instance.
-     * @param wait_on The event to wait on before creating the instance.
-     * @return The event to wait on before using the instance.
+     * \param inst The handle to the new instance.
+     * \param memory The memory to create the instance in.
+     * \param ilg The layout of the instance.
+     * \param prs The profiling requests for the instance.
+     * \param wait_on The event to wait on before creating the instance.
+     * \return The event to wait on before using the instance.
      */
     static Event create_instance(RegionInstance& inst,
 				 Memory memory,
@@ -166,13 +166,13 @@ namespace Realm {
      * Create a new region instance backed by an external resource.
      * Realm performs no allocation, but allows access and copies as with
      * normal instances.
-     * @param inst The handle to the new instance.
-     * @param memory The memory to create the instance in.
-     * @param ilg The layout of the instance.
-     * @param resource The external resource to back the instance.
-     * @param prs The profiling requests for the instance.
-     * @param wait_on The event to wait on before creating the instance.
-     * @return The event to wait on before using the instance.
+     * \param inst The handle to the new instance.
+     * \param memory The memory to create the instance in.
+     * \param ilg The layout of the instance.
+     * \param resource The external resource to back the instance.
+     * \param prs The profiling requests for the instance.
+     * \param wait_on The event to wait on before creating the instance.
+     * \return The event to wait on before using the instance.
      */
     static Event create_external_instance(RegionInstance& inst,
 					  Memory memory,
@@ -186,14 +186,14 @@ namespace Realm {
      * Create a new region instance based on an index space.
      * block_size=0 means SOA, block_size=1 means AOS, block_size>1 means
      * hybrid (block_size fields per block).
-     * @param inst The handle to the new instance.
-     * @param memory The memory to create the instance in.
-     * @param space The index space to create the instance for.
-     * @param field_sizes The size of each field in the instance.
-     * @param block_size The block size to use for the instance.
-     * @param prs The profiling requests for the instance.
-     * @param wait_on The event to wait on before creating the instance.
-     * @return The event to wait on before using the instance.
+     * \param inst The handle to the new instance.
+     * \param memory The memory to create the instance in.
+     * \param space The index space to create the instance for.
+     * \param field_sizes The size of each field in the instance.
+     * \param block_size The block size to use for the instance.
+     * \param prs The profiling requests for the instance.
+     * \param wait_on The event to wait on before creating the instance.
+     * \return The event to wait on before using the instance.
      */
     template <int N, typename T>
     static Event create_instance(RegionInstance& inst,
@@ -287,8 +287,8 @@ namespace Realm {
      * and/or completion of the actual allocation, so an event is returned
      * and (as always) the application must decide when/where to handle this
      * precondition.
-     * @param target The processor to fetch the metadata for.
-     * @return The event to wait on before using the instance.
+     * \param target The processor to fetch the metadata for.
+     * \return The event to wait on before using the instance.
      */
     Event fetch_metadata(Processor target) const;
 
@@ -323,9 +323,9 @@ namespace Realm {
      * which can provide a different view on the same bits. The returned object
      * should be deleted by the caller when no longer needed.
      *
-     * @param read_only A flag indicating whether the instance will be used
+     * \param read_only A flag indicating whether the instance will be used
      * read-only.
-     * @return An ExternalInstanceResource object for this instance, or null if
+     * \return An ExternalInstanceResource object for this instance, or null if
      *         the instance does not support re-registration.
      */
     ExternalInstanceResource* generate_resource_info(bool read_only) const;
