@@ -11973,6 +11973,8 @@ namespace Legion {
             else
               reduce_pre = local_events[it->first];
           }
+          // Set the redop on dst fields
+          set_redop(local_fields[it->first]);
           // Issue the copy
           local_events[it->second] = copy_expression->issue_copy(
               op, trace_info, local_fields[it->first], local_fields[it->second],
@@ -11982,6 +11984,8 @@ namespace Legion {
 #endif
                 reduce_pre, predicate_guard, src_manager->get_unique_event(),
                 local_manager->get_unique_event(), collective_kind);
+          // Clear the redop in case we're reading them next
+          clear_redop(local_fields[it->first]);
           // Save the state for later
           if (local_events[it->second].exists())
           {
