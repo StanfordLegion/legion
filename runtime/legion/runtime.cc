@@ -32185,16 +32185,6 @@ namespace Legion {
             IndexPartNode::handle_disjointness_computation(args, forest);
             break;
           }
-        case LG_PART_INDEPENDENCE_TASK_ID:
-          {
-            IndexSpaceNode::handle_disjointness_test(args);
-            break;
-          }
-        case LG_SPACE_INDEPENDENCE_TASK_ID:
-          {
-            IndexPartNode::handle_disjointness_test(args);
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 

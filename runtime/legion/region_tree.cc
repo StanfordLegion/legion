@@ -8231,102 +8231,30 @@ namespace Legion {
       if (c1 == c2)
         return false;
       if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
-      // Do the test with read-only mode first
-      RtEvent ready;
-      bool issue_dynamic_test = false;
-      std::pair<LegionColor,LegionColor> key(c1,c2);
+        std::swap(c1, c2);
+      const std::pair<LegionColor,LegionColor> key(c1,c2);
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         if (disjoint_subsets.find(key) != disjoint_subsets.end())
           return true;
         else if (aliased_subsets.find(key) != aliased_subsets.end())
           return false;
-        else
-        {
-          std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-            finder = pending_tests.find(key);
-          if (finder != pending_tests.end())
-            ready = finder->second;
-          else
-          {
-            if (!implicit_runtime->disable_independence_tests)
-              issue_dynamic_test = true;
-            else
-            {
-              aliased_subsets.insert(key);
-              return false;
-            }
-          }
-        }
       }
-      if (issue_dynamic_test)
-      {
-        IndexPartNode *left = get_child(c1);
-        const bool left_complete = left->is_complete(false, true);
-        IndexPartNode *right = get_child(c2);
-        const bool right_complete = right->is_complete(false, true);
-        AutoLock n_lock(node_lock);
-        // If either one is known to be complete then we know that they
-        // must be aliased with each other
-        if (left_complete || right_complete)
-        {
-          aliased_subsets.insert(key);
-          return false;
-        }
-        // Test again to make sure we didn't lose the race
-        std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-          finder = pending_tests.find(key);
-        if (finder == pending_tests.end())
-        {
-          DynamicIndependenceArgs args(this, left, right);
-          // Get the preconditions for domains 
-          RtEvent pre = Runtime::protect_event(
-              Runtime::merge_events(NULL,
-                left->partition_ready, right->partition_ready));
-          ready = context->runtime->issue_runtime_meta_task(args,
-                                      LG_LATENCY_WORK_PRIORITY, pre);
-          pending_tests[key] = ready;
-        }
-        else
-          ready = finder->second;
-      }
-      // Wait for the ready event and then get the result
-      ready.wait();
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      if (disjoint_subsets.find(key) != disjoint_subsets.end())
-        return true;
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::record_disjointness(bool disjoint, 
-                                             LegionColor c1, LegionColor c2)
-    //--------------------------------------------------------------------------
-    {
-      if (c1 == c2)
-        return;
-      if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
+      IndexPartNode *left = get_child(c1);
+      IndexPartNode *right = get_child(c2);
+      const bool intersects = left->intersects_with(right,
+            !context->runtime->disable_independence_tests);
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(color_map.find(c1) != color_map.end());
-      assert(color_map.find(c2) != color_map.end());
-#endif
-      if (disjoint)
-        disjoint_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+      if (intersects)
+      {
+        aliased_subsets.insert(key);
+        return false;
+      }
       else
-        aliased_subsets.insert(std::pair<LegionColor,LegionColor>(c1,c2));
-      pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
+      {
+        disjoint_subsets.insert(key);
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8395,35 +8323,6 @@ namespace Legion {
       if (target == runtime->address_space)
         return;
       runtime->send_index_space_set(target, rez);
-    } 
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
-                        IndexSpaceNode *par, IndexPartNode *l, IndexPartNode *r)
-      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
-        parent(par), left(l), right(r)
-    //--------------------------------------------------------------------------
-    {
-      left->add_base_resource_ref(META_TASK_REF);
-      right->add_base_resource_ref(META_TASK_REF);
-      parent->add_base_resource_ref(META_TASK_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void IndexSpaceNode::handle_disjointness_test(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DynamicIndependenceArgs *dargs =
-        (const DynamicIndependenceArgs*)args;
-      const bool disjoint = !dargs->left->intersects_with(dargs->right);
-      dargs->parent->record_disjointness(disjoint, dargs->left->color,
-                                         dargs->right->color);
-      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->left;
-      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->right;
-      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->parent;
     } 
 
     //--------------------------------------------------------------------------
@@ -9676,11 +9575,6 @@ namespace Legion {
         color_map[child->color] = child;
         std::map<LegionColor,RtUserEvent>::iterator finder =
           pending_child_map.find(child->color);
-#ifdef DEBUG_LEGION
-        assert((finder != pending_child_map.end()) || 
-            (!is_owner() && ((collective_mapping == NULL) ||
-                             !collective_mapping->contains(local_space))));
-#endif
         if (finder != pending_child_map.end())
         {
           if (finder->second.exists())
@@ -10268,90 +10162,31 @@ namespace Legion {
       if (!force_compute && is_disjoint(false/*appy query*/))
         return true;
       if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
-      bool issue_dynamic_test = false;
-      std::pair<LegionColor,LegionColor> key(c1,c2);
-      RtEvent ready_event;
+        std::swap(c1, c2);
+      const std::pair<LegionColor,LegionColor> key(c1,c2);
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
           return true;
         else if (aliased_subspaces.find(key) != aliased_subspaces.end())
           return false;
-        else
-        {
-          std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-            finder = pending_tests.find(key);
-          if (finder != pending_tests.end())
-            ready_event = finder->second;
-          else
-          {
-            if (!implicit_runtime->disable_independence_tests)
-              issue_dynamic_test = true;
-            else
-            {
-              aliased_subspaces.insert(key);
-              return false;
-            }
-          }
-        }
       }
-      if (issue_dynamic_test)
-      {
-        IndexSpaceNode *left = get_child(c1);
-        IndexSpaceNode *right = get_child(c2);
-        ApEvent left_pre = left->index_space_ready;
-        ApEvent right_pre = right->index_space_ready;
-        AutoLock n_lock(node_lock);
-        // Test again to see if we lost the race
-        std::map<std::pair<LegionColor,LegionColor>,RtEvent>::const_iterator
-          finder = pending_tests.find(key);
-        if (finder == pending_tests.end())
-        {
-          DynamicIndependenceArgs args(this, left, right);
-          ApEvent pre = Runtime::merge_events(NULL, left_pre, right_pre);
-          ready_event = context->runtime->issue_runtime_meta_task(args, 
-                  LG_LATENCY_WORK_PRIORITY, Runtime::protect_event(pre));
-          pending_tests[key] = ready_event;
-        }
-        else
-          ready_event = finder->second;
-      }
-      ready_event.wait();
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
-        return true;
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::record_disjointness(bool result,
-                                            LegionColor c1, LegionColor c2)
-    //--------------------------------------------------------------------------
-    {
-      if (c1 == c2)
-        return;
-      if (c1 > c2)
-      {
-        LegionColor t = c1;
-        c1 = c2;
-        c2 = t;
-      }
+      // Perform the test
+      IndexSpaceNode *left = get_child(c1);
+      IndexSpaceNode *right = get_child(c2);
+      const bool intersects = left->intersects_with(right,   
+            !context->runtime->disable_independence_tests);
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(color_map.find(c1) != color_map.end());
-      assert(color_map.find(c2) != color_map.end());
-#endif
-      if (result)
-        disjoint_subspaces.insert(std::pair<LegionColor,LegionColor>(c1,c2));
+      if (intersects)
+      {
+        aliased_subspaces.insert(key);
+        return false;
+      }
       else
-        aliased_subspaces.insert(std::pair<LegionColor,LegionColor>(c1,c2));
-      pending_tests.erase(std::pair<LegionColor,LegionColor>(c1,c2));
+      {
+        disjoint_subspaces.insert(key);
+        return true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10709,35 +10544,6 @@ namespace Legion {
           last_entry->newer->older = NULL;
         interference_cache.erase(last_entry->expr_id);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    IndexPartNode::DynamicIndependenceArgs::DynamicIndependenceArgs(
-                       IndexPartNode *par, IndexSpaceNode *l, IndexSpaceNode *r)
-      : LgTaskArgs<DynamicIndependenceArgs>(implicit_provenance),
-        parent(par), left(l), right(r)
-    //--------------------------------------------------------------------------
-    {
-      left->add_base_resource_ref(META_TASK_REF);
-      right->add_base_resource_ref(META_TASK_REF);
-      parent->add_base_resource_ref(META_TASK_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/void IndexPartNode::handle_disjointness_test(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DynamicIndependenceArgs *dargs =
-        (const DynamicIndependenceArgs*)args;
-      bool disjoint = !dargs->left->intersects_with(dargs->right);
-      dargs->parent->record_disjointness(disjoint, dargs->left->color,
-                                         dargs->right->color);
-      if (dargs->left->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->left;
-      if (dargs->right->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->right;
-      if (dargs->parent->remove_base_resource_ref(META_TASK_REF))
-        delete dargs->parent;
     }
 
     //--------------------------------------------------------------------------

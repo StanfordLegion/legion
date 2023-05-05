@@ -1948,8 +1948,6 @@ namespace Legion {
       std::map<IndexTreeNode*,bool> dominators;
     protected:
       LegionMap<SemanticTag,SemanticInfo> semantic_info;
-    protected:
-      std::map<std::pair<LegionColor,LegionColor>,RtEvent> pending_tests;
     };
 
     /**
@@ -1959,17 +1957,6 @@ namespace Legion {
     class IndexSpaceNode : 
       public IndexTreeNode, public IndexSpaceExpression {
     public:
-      struct DynamicIndependenceArgs : 
-        public LgTaskArgs<DynamicIndependenceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_PART_INDEPENDENCE_TASK_ID;
-      public:
-        DynamicIndependenceArgs(IndexSpaceNode *par, 
-                                IndexPartNode *l, IndexPartNode *r);
-      public:
-        IndexSpaceNode *const parent;
-        IndexPartNode *const left, *const right;
-      };
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
         static const LgTaskID TASK_ID = 
@@ -2061,11 +2048,7 @@ namespace Legion {
       size_t get_num_children(void) const;
     public:
       bool are_disjoint(LegionColor c1, LegionColor c2); 
-      void record_disjointness(bool disjoint, 
-                               LegionColor c1, LegionColor c2);
       void record_remote_child(IndexPartition pid, LegionColor part_color);
-    public:
-      static void handle_disjointness_test(const void *args);
     public:
       void send_node(AddressSpaceID target, bool recurse, bool valid = true);
       void pack_node(Serializer &rez, AddressSpaceID target, 
@@ -2964,17 +2947,6 @@ namespace Legion {
         IndexPartNode *const proxy_this;
       };
     public:
-      struct DynamicIndependenceArgs : 
-        public LgTaskArgs<DynamicIndependenceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_SPACE_INDEPENDENCE_TASK_ID;
-      public:
-        DynamicIndependenceArgs(IndexPartNode *par, 
-                                IndexSpaceNode *l, IndexSpaceNode *r);
-      public:
-        IndexPartNode *const parent;
-        IndexSpaceNode *const left, *const right;
-      };
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
         static const LgTaskID TASK_ID = LG_INDEX_PART_SEMANTIC_INFO_REQ_TASK_ID;
@@ -3100,8 +3072,6 @@ namespace Legion {
       bool is_disjoint(bool from_app = false, bool false_if_not_ready = false);
       bool are_disjoint(LegionColor c1, LegionColor c2,
                         bool force_compute = false);
-      void record_disjointness(bool disjoint,
-                               LegionColor c1, LegionColor c2);
       bool is_complete(bool from_app = false, bool false_if_not_ready = false);
       bool handle_disjointness_update(Deserializer &derez);
     public:
@@ -3128,7 +3098,6 @@ namespace Legion {
     public:
       static void handle_disjointness_computation(const void *args, 
                                                   RegionTreeForest *forest);
-      static void handle_disjointness_test(const void *args);
     public:
       void send_node(AddressSpaceID target, bool recurse);
       void pack_node(Serializer &rez, AddressSpaceID target);
