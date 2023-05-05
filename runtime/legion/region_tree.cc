@@ -252,7 +252,7 @@ namespace Legion {
                                                        IndexPartition pid,
                                                        IndexSpace parent,
                                                        IndexSpace color_space,
-                                                    LegionColor partition_color,
+                                                   LegionColor &partition_color,
                                                        PartitionKind part_kind,
                                                        DistributedID did,
                                                        Provenance *provenance,
@@ -368,7 +368,8 @@ namespace Legion {
       // If the source dominates the base then we know that all the
       // partitions that we are about to make will be complete
       if (((kind == LEGION_DISJOINT_KIND) || (kind == LEGION_ALIASED_KIND) || 
-            (kind == LEGION_COMPUTE_KIND)) && source->dominates(base)) 
+            (kind == LEGION_COMPUTE_KIND)) && 
+          source->is_complete() && source->parent->dominates(base->parent))
       {
         if (kind == LEGION_DISJOINT_KIND)
           kind = LEGION_DISJOINT_COMPLETE_KIND;
@@ -9103,6 +9104,8 @@ namespace Legion {
           return false;
         // Otherwise fall through and do the expensive test
       }
+      if (!compute)
+        return true;
       IndexSpaceExpression *intersect = 
         context->intersect_index_spaces(this, rhs);
       return !intersect->is_empty();
@@ -9112,42 +9115,7 @@ namespace Legion {
     bool IndexSpaceNode::intersects_with(IndexPartNode *rhs, bool compute)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      // A very simple test but an obvious one
-      if ((rhs->parent == this) || (parent == rhs))
-          return true;
-      // We're about to do something expensive so if these are both
-      // in the same index space tree then walk up to a common partition
-      // if one exists and see if it is disjoint
-      if (handle.get_tree_id() == rhs->handle.get_tree_id())
-      {
-        IndexSpaceNode *one = this;
-        IndexSpaceNode *two = rhs->parent;
-        // Get them at the same depth
-        while (one->depth > two->depth)
-          one = one->parent->parent;
-        while (one->depth < two->depth)
-          two = two->parent->parent;
-        // Handle the case where one dominates the other
-        if (one == two)
-          return true;
-        // Now walk up until their parent is the same
-        while (one->parent != two->parent)
-        {
-          one = one->parent->parent;
-          two = two->parent->parent;
-        }
-        // If they have the same parent and it's not NULL and 
-        // it is disjoint then they don't intersect if they are different
-        if ((one->parent != NULL) && (one != two) && one->parent->is_disjoint())
-          return false;
-        // Otherwise fall through and do the expensive test
-      }
-      IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(this, rhs->get_union_expression());
-      return !intersect->is_empty();
+      return rhs->intersects_with(this, compute);
     }
 
     //--------------------------------------------------------------------------
@@ -9184,41 +9152,6 @@ namespace Legion {
       return diff->is_empty();
     }
 
-    //--------------------------------------------------------------------------
-    bool IndexSpaceNode::dominates(IndexPartNode *rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      // A simple but common case
-      if (rhs->parent == this)
-        return true;
-      // We're about to do something expensive so use the region tree
-      // as an acceleration data structure to try to make our tests
-      // more efficient. If these are in the same tree, see if we can
-      // walk up the tree from rhs and find ourself
-      if (handle.get_tree_id() == rhs->handle.get_tree_id())
-      {
-        // If we're the root of the tree we also trivially domainate
-        if (depth == 0)
-          return true;
-        if (rhs->depth > depth)
-        {
-          IndexSpaceNode *temp = rhs->parent;
-          while (depth < temp->depth)
-            temp = temp->parent->parent;
-          // If we find ourself at the same depth then we dominate
-          if (temp == this)
-            return true;
-        }
-        // Otherwise we fall through and do the expensive test
-      }
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(rhs->get_union_expression(), this);
-      return diff->is_empty();
-    }
-
     /////////////////////////////////////////////////////////////
     // Index Partition Node 
     /////////////////////////////////////////////////////////////
@@ -9237,19 +9170,17 @@ namespace Legion {
         total_children(color_sp->get_volume()), 
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(partial), 
+        total_children_volume(0), total_intersection_volume(0),
         has_disjoint(true), disjoint(dis),
         has_complete(comp >= 0), complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     { 
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
-      if (has_complete && complete)
-      {
-        parent->add_nested_expression_reference(did);
-        union_expr.store(parent);
-      }
-      else
-        union_expr.store(NULL);
+      // We know if we're disjoint or not but if we're not complete we might 
+      // still be getting notifications to compute the complete
+      if (comp < 0)
+        initialize_disjoint_complete_notifications();
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
@@ -9275,38 +9206,14 @@ namespace Legion {
         total_children(color_sp->get_volume()),
         max_linearized_color(color_sp->get_max_linearized_color()),
         partition_ready(part_ready), partial_pending(part),
-        total_children_volume(0), has_disjoint(false), disjoint(true),
+        total_children_volume(0), total_intersection_volume(0),
+        has_disjoint(false), disjoint(true),
         has_complete(comp >= 0), complete(comp != 0), first_entry(NULL)
     //--------------------------------------------------------------------------
     {
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
-      if (has_complete && complete)
-      {
-        parent->add_nested_expression_reference(did);
-        union_expr.store(parent);
-      }
-      else
-        union_expr.store(NULL);
-      // Figure out how many notifications we're waiting for
-      if (is_owner() || ((collective_mapping != NULL) && 
-            collective_mapping->contains(local_space)))
-      {
-        remaining_local_disjoint_notifications = 0;
-        // Count how many locat notifications we're going to get
-        for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
-          remaining_local_disjoint_notifications++;
-        // One for the disjointness task that will run
-        remaining_global_disjoint_notifications = 1;
-        // More notifications from any remote nodes
-        if (collective_mapping != NULL)
-          remaining_global_disjoint_notifications +=
-            collective_mapping->count_children(owner_space, local_space);
-      }
-      else
-        remaining_global_disjoint_notifications = 0;
-      // Add a reference to be removed only after the disjointness is set
-      add_base_gc_ref(REGION_TREE_REF);
+      initialize_disjoint_complete_notifications();
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
@@ -9316,6 +9223,32 @@ namespace Legion {
       log_garbage.info("GC Index Partition %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space, handle.id);
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::initialize_disjoint_complete_notifications(void)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out how many notifications we're waiting for
+      if (is_owner() || ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space)))
+      {
+        remaining_local_disjoint_complete_notifications = 0;
+        // Count how many locat notifications we're going to get
+        for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          remaining_local_disjoint_complete_notifications++;
+        // One for the disjointness task that will run
+        remaining_global_disjoint_complete_notifications = 1;
+        // More notifications from any remote nodes
+        if (collective_mapping != NULL)
+          remaining_global_disjoint_complete_notifications +=
+            collective_mapping->count_children(owner_space, local_space);
+      }
+      else
+        remaining_global_disjoint_complete_notifications = 0;
+      // Add a reference to be removed only after both the disjointness 
+      // and the completeness is set
+      add_base_gc_ref(REGION_TREE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -9381,10 +9314,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       parent->remove_child(color);  
-      // Remove the reference on our union expression if we have one
-      IndexSpaceExpression *expr = union_expr.load();
-      if ((expr != NULL) && expr->remove_nested_expression_reference(did))
-        delete expr;
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
             color_map.begin(); it != color_map.end(); it++)
         if (it->second->remove_nested_gc_ref(did))
@@ -9768,15 +9697,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      if (!has_disjoint)
+      if (!has_disjoint || !has_complete)
       {
 #ifdef DEBUG_LEGION
-        assert(remaining_local_disjoint_notifications > 0);
-        assert(remaining_global_disjoint_notifications > 0);
+        assert(remaining_local_disjoint_complete_notifications > 0);
+        assert(remaining_global_disjoint_complete_notifications > 0);
 #endif
-        if (--remaining_local_disjoint_notifications == 0)
+        if (--remaining_local_disjoint_complete_notifications == 0)
         {
-          // Launch the task to perform the local disjointness tests
+          // Launch the task to perform the local disjointness 
+          // and completeness tests
           DisjointnessArgs args(this);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY);
@@ -9836,82 +9766,275 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::compute_disjointness(void)
+    bool IndexPartNode::compute_disjointness_and_completeness(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner() || ((collective_mapping != NULL) &&
             collective_mapping->contains(local_space)));
 #endif
-      if (is_complete(false/*from app*/, true/*false if not ready*/))
+      if (is_complete(false/*from app*/, true/*false if not ready*/) ||
+          is_disjoint(false/*from app*/, true/*false if not ready*/))
       {
-        // If we're complete we can check this using a linear algorithm
-        // by suming up the volumes of all the children
-        uint64_t children_volume = 0;
-        for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+        // If we know we're complete, then we can check disjointness
+        // simply by summing up the volume of all the children and 
+        // seeing if it equals the total volume of the parent. If it
+        // does then we must be disjoint since any aliasing would result
+        // in a volume that is larger than the volume of the parent.
+        //
+        // If we know we're disjoint, then we can check completeness
+        // simply by summing up the volume of all the children and seeing
+        // if it equals the the total volume of the parent. If it does then
+        // we must be complete because there is no aliasing of the subspaces.
+        //
+        // If we have no collective mapping or the number of children is
+        // larger than the collective mapping then we can eagerly sum
+        // the volumes together, otherwise we need to keep them separte
+        // so we can deduplicate the volumes across nodes
+        if ((collective_mapping == NULL) || 
+            (collective_mapping->size() <= total_children))
         {
-          IndexSpaceNode *child = get_child(*itr);
-          children_volume += child->get_volume();
-        }
-        return update_disjointness_volume(children_volume); 
-      }
-      else
-      {
-        bool local_disjoint = disjoint.load();
-        if (local_disjoint)
-        {
+          // Children are sharded so no need to worry about uniqueness
+          uint64_t children_volume = 0;
           for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
           {
             IndexSpaceNode *child = get_child(*itr);
+            children_volume += child->get_volume();
+          }
+          return update_disjoint_complete_result(children_volume);
+        }
+        else
+        {
+          // Worry about uniqueness of children in this case
+          std::map<LegionColor,uint64_t> children_volumes;
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          {
+            IndexSpaceNode *child = get_child(*itr);
+            children_volumes[*itr] = child->get_volume();
+          }
+          return update_disjoint_complete_result(children_volumes);
+        }
+      }
+      else
+      {
+        // In this case we don't know anything so we're computing both
+        // disjointness and completeness at the same time. 
+        // To check for disjointness we look for any neighboring 
+        // children that alias. If we find any then we know that we
+        // are not disjoint. To check for completeness, we count the
+        // total volume of all the children and then subtract off the
+        // volumes of the intersections from any interfering children
+        // with a lower legion color to deduplicate counts. To compute
+        // this difference for a given color C we first compute the union
+        // of all the interfering children with colors <C and then subtract
+        // that off the C to create a differende D, then we sum the 
+        // intersection of all the remaining interfering children with D
+        // Try drawing yourself n-way venn diagrams to convince yourself 
+        // this is correct and will count all overlapping points exactly once.
+        if ((collective_mapping == NULL) ||
+            (collective_mapping->size() <= total_children))
+        {
+          // Children are sharded so no need to worry about uniqueness
+          uint64_t children_volume = 0;
+          uint64_t intersection_volume = 0;
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          {
+            IndexSpaceNode *child = get_child(*itr);
+            children_volume += child->get_volume();
             std::vector<LegionColor> interfering;
             if (!find_interfering_children_kd(child, interfering))
             {
               // Not enough entries for a kd-tree so do it locally
+              IndexSpaceExpression *difference = NULL;
+              std::set<IndexSpaceExpression*> previous;
               for (ColorSpaceIterator itr2(this); itr2; itr2++)
               {
-                if ((*itr) != (*itr2))
+                if ((*itr) == (*itr2))
+                {
+                  if (previous.empty())
+                    difference = child;
+                  else
+                    difference = 
+                      context->subtract_index_spaces(child,
+                          context->union_index_spaces(previous));
+                }
+                else
                 {
                   IndexSpaceNode *other = get_child(*itr2);
-                  IndexSpaceExpression *intersection = 
-                    context->intersect_index_spaces(child, other);
-                  if (!intersection->is_empty())
-                    interfering.push_back(*itr2);
+                  if ((*itr) < (*itr2))
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(difference, other);
+                    intersection_volume += intersection->get_volume();
+                  }
+                  else
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(child, other);
+                    if (!intersection->is_empty())
+                      previous.insert(intersection);
+                  }
                 }
-                else // always interfere with ourselves
-                  interfering.push_back(*itr2);
               }
             }
+            else
+            {
 #ifdef DEBUG_LEGION
-            assert(!interfering.empty());
-            std::sort(interfering.begin(), interfering.end());
-            assert(std::binary_search(interfering.begin(),
-                  interfering.end(), *itr));
+              assert(!interfering.empty());
+              std::sort(interfering.begin(), interfering.end());
+              assert(std::binary_search(interfering.begin(),
+                    interfering.end(), *itr));
 #endif
-            if (interfering.size() == 1)
-              continue;
-            local_disjoint = false;
-            break;
+              if (interfering.size() > 1)
+              {
+                IndexSpaceExpression *difference = NULL;
+                std::set<IndexSpaceExpression*> previous;
+                for (std::vector<LegionColor>::const_iterator it =
+                      interfering.begin(); it != interfering.end(); it++)
+                {
+                  if ((*itr) == (*it))
+                  {
+                    IndexSpaceNode *child = get_child(*it);
+                    if (previous.empty())
+                      difference = child;
+                    else
+                      difference =
+                        context->subtract_index_spaces(child,
+                            context->union_index_spaces(previous));
+                  }
+                  else
+                  {
+                    IndexSpaceNode *other = get_child(*it);
+                    if ((*itr) < (*it))
+                    {
+                      IndexSpaceExpression *intersection =
+                        context->intersect_index_spaces(difference, other);
+                      intersection_volume += intersection->get_volume();
+                    }
+                    else
+                      previous.insert(other);
+                  }
+                }
+              }
+            }
           }
+          return update_disjoint_complete_result(children_volume,
+                                            intersection_volume);
         }
-        return update_disjointness_result(local_disjoint);
+        else
+        {
+          std::map<LegionColor,uint64_t> children_volumes;
+          std::map<
+            std::pair<LegionColor,LegionColor>,uint64_t> intersection_volumes;
+          // Children are not sharded so we need to worry about aliasing
+          // across the nodes for the same children
+          for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
+          {
+            IndexSpaceNode *child = get_child(*itr);
+            children_volumes[*itr] = child->get_volume();
+            std::vector<LegionColor> interfering;
+            if (!find_interfering_children_kd(child, interfering))
+            {
+              // Not enough entries for a kd-tree so do it locally
+              IndexSpaceExpression *difference = NULL;
+              std::set<IndexSpaceExpression*> previous;
+              for (ColorSpaceIterator itr2(this); itr2; itr2++)
+              {
+                if ((*itr) == (*itr2))
+                {
+                  if (previous.empty())
+                    difference = child;
+                  else
+                    difference = 
+                      context->subtract_index_spaces(child,
+                          context->union_index_spaces(previous));
+                }
+                else
+                {
+                  IndexSpaceNode *other = get_child(*itr2);
+                  if ((*itr) < (*itr2))
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(difference, other);
+                    if (!intersection->is_empty())
+                      intersection_volumes[std::make_pair(*itr,*itr2)] =
+                        intersection->get_volume();
+                  }
+                  else
+                  {
+                    IndexSpaceExpression *intersection = 
+                      context->intersect_index_spaces(child, other);
+                    if (!intersection->is_empty())
+                      previous.insert(intersection);
+                  }
+                }
+              }
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(!interfering.empty());
+              std::sort(interfering.begin(), interfering.end());
+              assert(std::binary_search(interfering.begin(),
+                    interfering.end(), *itr));
+#endif
+              if (interfering.size() > 1)
+              {
+                IndexSpaceExpression *difference = NULL;
+                std::set<IndexSpaceExpression*> previous;
+                for (std::vector<LegionColor>::const_iterator it =
+                      interfering.begin(); it != interfering.end(); it++)
+                {
+                  if ((*itr) == (*it))
+                  {
+                    IndexSpaceNode *child = get_child(*it);
+                    if (previous.empty())
+                      difference = child;
+                    else
+                      difference =
+                        context->subtract_index_spaces(child,
+                            context->union_index_spaces(previous));
+                  }
+                  else
+                  {
+                    IndexSpaceNode *other = get_child(*it);
+                    if ((*itr) < (*it))
+                    {
+                      IndexSpaceExpression *intersection =
+                        context->intersect_index_spaces(difference, other);
+                      if (!intersection->is_empty())
+                        intersection_volumes[std::make_pair(*itr,*it)] =
+                          intersection->get_volume();
+                    }
+                    else
+                      previous.insert(other);
+                  }
+                }
+              }
+            }
+          }
+          return update_disjoint_complete_result(children_volumes,
+                                            &intersection_volumes);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::update_disjointness_result(bool result)
+    bool IndexPartNode::update_disjoint_complete_result(
+                         uint64_t children_volume, uint64_t intersection_volume)
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      if (!result)
-        disjoint.store(false);
+      total_children_volume += children_volume;
+      total_intersection_volume += intersection_volume;
       // Check to see if we've seen all our arrivals
 #ifdef DEBUG_LEGION
-      assert(remaining_global_disjoint_notifications > 0);
+      assert(remaining_global_disjoint_complete_notifications > 0);
 #endif
-      if (--remaining_global_disjoint_notifications == 0)
+      if (--remaining_global_disjoint_complete_notifications == 0)
       {
         if (is_owner())
-          return finalize_disjointness();
+          return finalize_disjoint_complete();
         else
         {
           // Send the result up the tree
@@ -9921,8 +10044,9 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            rez.serialize<bool>(true); // up
-            rez.serialize<bool>(disjoint.load());
+            rez.serialize<int>(1); // up and compressed
+            rez.serialize(total_children_volume);
+            rez.serialize(total_intersection_volume);
           }
           runtime->send_index_partition_disjoint_update(target, rez);
         }
@@ -9931,51 +10055,150 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::update_disjointness_volume(uint64_t children_volume)
+    bool IndexPartNode::update_disjoint_complete_result(
+                              std::map<LegionColor,uint64_t> &children_volumes,
+                              std::map<std::pair<LegionColor,LegionColor>,
+                                       uint64_t> *intersection_volumes)
     //--------------------------------------------------------------------------
     {
-      const size_t parent_volume = parent->get_volume();
       AutoLock n_lock(node_lock);
-      total_children_volume += children_volume; 
+      if (!total_children_volumes.empty())
+      {
+        for (std::map<LegionColor,uint64_t>::const_iterator it =
+              children_volumes.begin(); it != children_volumes.end(); it++)
+          total_children_volumes.insert(*it);
+      }
+      else
+        total_children_volumes.swap(children_volumes);
+      if (intersection_volumes != NULL)
+      {
+        if (!total_intersection_volumes.empty())
+        {
+          for (std::map<std::pair<LegionColor,LegionColor>,
+                        uint64_t>::const_iterator it =
+                intersection_volumes->begin(); it != 
+                intersection_volumes->end(); it++)
+            total_intersection_volumes.insert(*it);
+        }
+        else
+          total_intersection_volumes.swap(*intersection_volumes);
+      }
       // Check to see if we've seen all our arrivals
 #ifdef DEBUG_LEGION
-      assert(remaining_global_disjoint_notifications > 0);
+      assert(remaining_global_disjoint_complete_notifications > 0);
 #endif
-      if (--remaining_global_disjoint_notifications == 0)
+      if (--remaining_global_disjoint_complete_notifications == 0)
       {
         if (is_owner())
+        {
+          // We can now compute the final sums
+#ifdef DEBUG_LEGION
+          assert(total_children_volume == 0);
+          assert(total_intersection_volume == 0);
+#endif
+          for (std::map<LegionColor,uint64_t>::const_iterator it =
+                total_children_volumes.begin(); it !=
+                total_children_volumes.end(); it++)
+            total_children_volume += it->second;
+          total_children_volumes.clear();
+          for (std::map<std::pair<LegionColor,LegionColor>,
+                          uint64_t>::const_iterator it =
+                total_intersection_volumes.begin(); it !=
+                total_intersection_volumes.end(); it++)
+            total_intersection_volume += it->second;
+          total_intersection_volumes.clear();
+          return finalize_disjoint_complete();
+        }
+        else
+        {
+          // Send the result up the tree
+          const AddressSpaceID target =
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<int>(-1); // up and not compressed
+            rez.serialize<size_t>(total_children_volumes.size());
+            for (std::map<LegionColor,uint64_t>::const_iterator it =
+                  total_children_volumes.begin(); it !=
+                  total_children_volumes.end(); it++)
+            {
+              rez.serialize(it->first);
+              rez.serialize(it->second);
+            }
+            rez.serialize<size_t>(total_intersection_volumes.size());
+            for (std::map<std::pair<LegionColor,LegionColor>,uint64_t>::
+                  const_iterator it = total_intersection_volumes.begin();
+                  it != total_intersection_volumes.end(); it++)
+            {
+              rez.serialize(it->first.first);
+              rez.serialize(it->first.second);
+              rez.serialize(it->second);
+            }
+          }
+          runtime->send_index_partition_disjoint_update(target, rez);
+          total_children_volumes.clear();
+          total_intersection_volumes.clear();
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::finalize_disjoint_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_owner())
+      {
+        const size_t parent_volume = parent->get_volume();
+        // We can now tell what our status is
+        if (is_complete(false/*from app*/, true/*false if not ready*/))
         {
 #ifdef DEBUG_LEGION
           assert(parent_volume <= total_children_volume);
 #endif
-          disjoint.store(parent_volume == total_children_volume);
-          return finalize_disjointness();
+          disjoint.store((parent_volume == total_children_volume));
+        }
+        else if (is_disjoint(false/*from app*/, true/*false if not ready*/))
+        {
+#ifdef DEBUG_LEGION
+          assert(total_children_volume <= parent_volume);
+#endif
+          complete.store((parent_volume == total_children_volume));
         }
         else
         {
-          // Send the result up the tree
-          const AddressSpaceID target =
-            collective_mapping->get_parent(owner_space, local_space);
-          Serializer rez;
+#ifdef DEBUG_LEGION
+          assert((total_children_volume - total_intersection_volume) <=
+                  parent_volume);
+#endif
+          if (total_intersection_volume == 0)
           {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize<bool>(true); // up
-            rez.serialize(total_children_volume);
+            disjoint.store(true);
+#ifdef DEBUG_LEGION
+            assert((total_children_volume <= parent_volume));
+#endif
+            complete.store((total_children_volume == parent_volume));
           }
-          runtime->send_index_partition_disjoint_update(target, rez);
+          else
+          {
+            disjoint.store(false);
+#ifdef DEBUG_LEGION
+            assert(total_intersection_volume < total_children_volume);
+#endif
+            total_children_volume -= total_intersection_volume;
+#ifdef DEBUG_LEGION
+            assert(total_children_volume <= parent_volume);
+#endif
+            complete.store((parent_volume == total_children_volume));
+          }
         }
       }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::finalize_disjointness(void)
-    //--------------------------------------------------------------------------
-    {
       has_disjoint.store(true);
-      if (disjoint_ready.exists())
-        Runtime::trigger_event(disjoint_ready);
+      has_complete.store(true);
+      if (disjoint_complete_ready.exists())
+        Runtime::trigger_event(disjoint_complete_ready);
       if ((collective_mapping != NULL) && 
           collective_mapping->contains(local_space))
       {
@@ -9987,21 +10210,23 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(handle);
-          rez.serialize<bool>(false); // up
+          rez.serialize<int>(0); // down
           rez.serialize<bool>(disjoint.load());
+          rez.serialize<bool>(complete.load());
         }
         for (std::vector<AddressSpaceID>::const_iterator it =
               children.begin(); it != children.end(); it++)
           runtime->send_index_partition_disjoint_update(*it, rez);
       }
-      if (is_owner() && has_remote_instances())
+      if (has_remote_instances())
       {
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(handle);
-          rez.serialize<bool>(false); // up
+          rez.serialize<int>(0); // down
           rez.serialize<bool>(disjoint.load());
+          rez.serialize<bool>(complete.load());
         }
         RemoteDisjointnessFunctor functor(rez, context->runtime);
         map_over_remote_instances(functor);
@@ -10010,21 +10235,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::is_disjoint(bool app_query)
+    bool IndexPartNode::is_disjoint(bool app_query, bool false_if_not_ready)
     //--------------------------------------------------------------------------
     {
       if (has_disjoint.load())
         return disjoint.load();
+      if (false_if_not_ready)
+        return false;
       RtEvent wait_on;
       {
         AutoLock n_lock(node_lock);
         if (has_disjoint.load())
           return disjoint.load();
-        if (!disjoint_ready.exists())
-          disjoint_ready = Runtime::create_rt_user_event();
-        wait_on = disjoint_ready;
+        if (!disjoint_complete_ready.exists())
+          disjoint_complete_ready = Runtime::create_rt_user_event();
+        wait_on = disjoint_complete_ready;
       }
-      disjoint_ready.wait();
+      wait_on.wait();
 #ifdef DEBUG_LEGION
       assert(has_disjoint.load());
 #endif
@@ -10132,129 +10359,81 @@ namespace Legion {
                                     bool false_if_not_ready/*=false*/)
     //--------------------------------------------------------------------------
     {
-      // If we've cached the value then we are good to go
+      if (has_complete.load())
+        return complete.load();
+      if (false_if_not_ready)
+        return false;
+      RtEvent wait_on;
       {
-        AutoLock n_lock(node_lock, 1, false/*exclusive*/);
-        if (has_complete)
-          return complete;
-        if (false_if_not_ready)
-          return false;
+        AutoLock n_lock(node_lock);
+        if (has_complete.load())
+          return complete.load();
+        if (!disjoint_complete_ready.exists())
+          disjoint_complete_ready = Runtime::create_rt_user_event();
+        wait_on = disjoint_complete_ready;
       }
-      bool result = false;
-      // Otherwise compute it 
-      if (is_disjoint(from_app))
-      {
-	// if the partition is disjoint, we can determine completeness by
-	//  seeing if the total volume of the child domains matches the volume
-	//  of the parent domains
-	const size_t parent_volume = parent->get_volume();
-	size_t child_volume = 0;
-        if (total_children == max_linearized_color)
-        {
-          for (LegionColor c = 0; c < max_linearized_color; c++)
-          {
-            IndexSpaceNode *child = get_child(c);
-            child_volume += child->get_volume();
-          }
-        }
-        else
-        {
-          for (LegionColor c = 0; c < max_linearized_color; c++)
-          {
-            if (!color_space->contains_color(c))
-              continue;
-            IndexSpaceNode *child = get_child(c);
-            child_volume += child->get_volume();
-          }
-        }
-	result = (child_volume == parent_volume);
-      } 
-      else 
-      {
-	// if not disjoint, we have to do a considerably-more-expensive test
-	//  that handles overlap (i.e. double-counting) in the child domains
-	result = compute_complete();
-      }
-      // Save the result for the future
-      AutoLock n_lock(node_lock);
-      // See if we lost the race
-      complete = result;
-      has_complete = true;
-      return complete;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* IndexPartNode::get_union_expression(
-                                                            bool check_complete)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceExpression *result = union_expr.load();
-      if (result != NULL)
-        return result;
-      // If we're complete then we can use the parent index space expresion
-      if (!check_complete || !is_complete())
-      {
-        // We can always write the result immediately since we know
-        // that the common sub-expression code will give the same
-        // result if there is a race
-        IndexSpaceExpression *expr = compute_union_expression();
-        expr->add_nested_expression_reference(did);
-        union_expr.store(expr);
-      }
-      else // if we're complete the parent is our expression
-      {
-        parent->add_nested_expression_reference(did);
-        union_expr.store(parent);
-      }
-      return union_expr.load();
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceExpression* IndexPartNode::compute_union_expression(void)
-    //--------------------------------------------------------------------------
-    {
-      std::set<IndexSpaceExpression*> child_spaces;
-      for (ColorSpaceIterator itr(this); itr; itr++)
-        child_spaces.insert(get_child(*itr));
-      return context->union_index_spaces(child_spaces);
+      wait_on.wait();
+#ifdef DEBUG_LEGION
+      assert(has_complete.load());
+#endif
+      return complete.load();
     }
 
     //--------------------------------------------------------------------------
     bool IndexPartNode::handle_disjointness_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!has_disjoint.load());
-#endif
-      bool up;
-      derez.deserialize<bool>(up);
-      if (up)
+      int mode;
+      derez.deserialize(mode);
+      if (mode < 0)
       {
-        if (is_complete(false/*from app*/, true/*false if not ready*/))
+        // up and not compressed
+        std::map<LegionColor,uint64_t> children_volumes;
+        size_t num_children;
+        derez.deserialize(num_children);
+        for (unsigned idx = 0; idx < num_children; idx++)
         {
-          uint64_t children_volume;
-          derez.deserialize(children_volume);
-          return update_disjointness_volume(children_volume);
+          LegionColor color;
+          derez.deserialize(color);
+          derez.deserialize(children_volumes[color]);
         }
-        else
+        size_t num_intersections;
+        derez.deserialize(num_intersections);
+        std::map<std::pair<LegionColor,LegionColor>,
+                  uint64_t> intersection_volumes;
+        for (unsigned idx = 0; idx < num_intersections; idx++)
         {
-          bool result;
-          derez.deserialize(result);
-          return update_disjointness_result(result);
+          std::pair<LegionColor,LegionColor> key;
+          derez.deserialize(key.first);
+          derez.deserialize(key.second);
+          derez.deserialize(intersection_volumes[key]);
         }
+        return update_disjoint_complete_result(children_volumes,
+                                               &intersection_volumes);
+      }
+      else if (mode > 0)
+      {
+        // up and already compressed
+        uint64_t children_volume, intersection_volume;
+        derez.deserialize(children_volume);
+        derez.deserialize(intersection_volume);
+        return update_disjoint_complete_result(children_volume,
+                                               intersection_volume);
       }
       else
       {
-        bool result;
-        derez.deserialize(result);
+        // sending back down to the children
+        bool is_disjoint, is_complete;
+        derez.deserialize(is_disjoint);
+        derez.deserialize(is_complete);
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-        assert(remaining_global_disjoint_notifications == 0);
+        assert(remaining_global_disjoint_complete_notifications == 0);
 #endif
-        disjoint.store(result);
-        return finalize_disjointness();
+        disjoint.store(is_disjoint);
+        complete.store(is_complete);
+        return finalize_disjoint_complete();
       }
-      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10335,20 +10514,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DisjointnessArgs *dargs = (const DisjointnessArgs*)args;
-      if (dargs->proxy_this->compute_disjointness())
+      if (dargs->proxy_this->compute_disjointness_and_completeness())
         delete dargs->proxy_this;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::compute_complete(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_disjoint());
-#endif
-      IndexSpaceExpression *diff = context->subtract_index_spaces(parent, 
-                            get_union_expression(false/*check complete*/));
-      return diff->is_empty();
     }
 
     //--------------------------------------------------------------------------
@@ -10388,9 +10555,20 @@ namespace Legion {
           return false;
         // Otherwise fall through and do the expensive test
       }
-      IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(get_union_expression(), rhs);
-      return !intersect->is_empty();
+      if (!compute)
+        return true;
+      std::vector<LegionColor> interfering;
+      if (find_interfering_children_kd(rhs, interfering))
+        return !interfering.empty();
+      for (ColorSpaceIterator itr(this); itr; itr++)
+      {
+        IndexSpaceNode *child = get_child(*itr);
+        IndexSpaceExpression *intersect = 
+          context->intersect_index_spaces(child, rhs);
+        if (!intersect->is_empty())
+          return true;
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -10436,68 +10614,17 @@ namespace Legion {
           return false;
         // Otherwise we fall through and do the expensive test
       }
-      IndexSpaceExpression *intersect = 
-        context->intersect_index_spaces(get_union_expression(),
-                                        rhs->get_union_expression());
-      return !intersect->is_empty();
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::dominates(IndexSpaceNode *rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      // A simple but common case
-      if (rhs->parent == this)
+      if (!compute)
         return true;
-      // We're about to do something expensive, so use the region tree
-      // as an acceleration data structure to try to make our tests
-      // more efficient
-      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) && 
-          (rhs->depth > depth))
+      if (parent != rhs->parent)
       {
-        IndexPartNode *temp = rhs->parent;
-        while (depth < temp->depth)
-          temp = temp->parent->parent;
-        // If we find ourselves at the same depth then we dominate
-        if (temp == this)
-          return true;
-        // Otherwise we fall through and do the expensive test
+        IndexSpaceExpression *intersect = 
+          context->intersect_index_spaces(parent, rhs->parent);
+        if (intersect->is_empty())
+          return false;
       }
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(rhs, get_union_expression());
-      return diff->is_empty();
-    }
-    
-    //--------------------------------------------------------------------------
-    bool IndexPartNode::dominates(IndexPartNode *rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(rhs->handle.get_type_tag() == handle.get_type_tag());
-#endif
-      if (rhs == this)
-        return true;
-      // We're about to do something expensive, so use the region tree
-      // as an acceleration data structure and try to make our tests
-      // more efficient
-      if ((handle.get_tree_id() == rhs->handle.get_tree_id()) &&
-          (rhs->depth > depth))
-      {
-        IndexPartNode *temp = rhs;
-        while (depth < temp->depth)
-          temp = temp->parent->parent;
-        // If we find ourselves at the same depth then we dominate
-        if (temp == this)
-          return true;
-        // Otherwise we fall through and do the expensive test
-      }
-      IndexSpaceExpression *diff = 
-        context->subtract_index_spaces(rhs->get_union_expression(),
-                                       get_union_expression());
-      return diff->is_empty();
+      // TODO::intersect KD-trees?
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -10652,17 +10779,14 @@ namespace Legion {
       // Check to see if we have computed the disjointness result
       // If not we'll record that we need to do it and then when it 
       // is computed we'll send out the result to all the remote copies
-      const bool has_disjoint = 
-        (!disjoint_ready.exists() || disjoint_ready.has_triggered());
-      const bool disjoint_result = has_disjoint ? is_disjoint() : false;
       RezCheck z(rez);
       rez.serialize(handle);
       rez.serialize(did);
       rez.serialize(parent->handle); 
       rez.serialize(color_space->handle);
       rez.serialize(color);
-      rez.serialize<bool>(has_disjoint);
-      rez.serialize<bool>(disjoint_result);
+      rez.serialize<bool>(has_disjoint.load());
+      rez.serialize<bool>(disjoint.load());
       if (has_complete)
       {
         if (complete)
@@ -19594,13 +19718,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionNode::get_index_space_expression(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source;
-    }
-
-    //--------------------------------------------------------------------------
     RegionTreeID RegionNode::get_tree_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -19796,18 +19913,6 @@ namespace Legion {
       else
         return row_source->intersects_with(
                   other->as_partition_node()->row_source, compute);
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionNode::dominates(RegionTreeNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      if (other->is_region())
-        return row_source->dominates(other->as_region_node()->row_source);
-      else
-        return row_source->dominates(other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------
@@ -21050,13 +21155,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* PartitionNode::get_index_space_expression(void) const
-    //--------------------------------------------------------------------------
-    {
-      return row_source->get_union_expression();
-    }
-
-    //--------------------------------------------------------------------------
     RegionTreeID PartitionNode::get_tree_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -21227,18 +21325,6 @@ namespace Legion {
       else
         return row_source->intersects_with(
                     other->as_partition_node()->row_source, compute);
-    }
-
-    //--------------------------------------------------------------------------
-    bool PartitionNode::dominates(RegionTreeNode *other)
-    //--------------------------------------------------------------------------
-    {
-      if (other == this)
-        return true;
-      if (other->is_region())
-        return row_source->dominates(other->as_region_node()->row_source);
-      else
-        return row_source->dominates(other->as_partition_node()->row_source);
     }
 
     //--------------------------------------------------------------------------

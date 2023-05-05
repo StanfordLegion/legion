@@ -176,7 +176,7 @@ namespace Legion {
                                        IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
-                                       LegionColor partition_color,
+                                       LegionColor &partition_color,
                                        PartitionKind part_kind,
                                        DistributedID did,
                                        Provenance *provenance,
@@ -195,23 +195,6 @@ namespace Legion {
                                         std::set<RtEvent> &safe_events,
                                         ShardID shard = 0,
                                         const ShardMapping *mapping = NULL);
-#if 0
-      // For control replication contexts
-      RtEvent create_pending_partition_shard(ShardID owner_shard,
-                                             ReplicateContext *ctx,
-                                             IndexPartition pid,
-                                             IndexSpace parent,
-                                             IndexSpace color_space,
-                                             LegionColor &partition_color,
-                                             PartitionKind part_kind,
-                                             DistributedID did,
-                                             Provenance *provenance,
-                                             ValueBroadcast<bool> *part_result,
-                                             ApEvent partition_ready,
-                                             CollectiveMapping *mapping,
-                                             RtEvent creation_ready,
-                   ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
-#endif
       void destroy_index_space(IndexSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &applied_events,
                                const CollectiveMapping *mapping = NULL);
@@ -2186,7 +2169,6 @@ namespace Legion {
       bool intersects_with(IndexSpaceNode *rhs,bool compute = true);
       bool intersects_with(IndexPartNode *rhs, bool compute = true);
       bool dominates(IndexSpaceNode *rhs);
-      bool dominates(IndexPartNode *rhs);
     public:
       virtual void pack_index_space(Serializer &rez, 
                                     bool include_size) const = 0;
@@ -3104,20 +3086,23 @@ namespace Legion {
       void set_child(IndexSpaceNode *child);
       void add_tracker(PartitionTracker *tracker); 
       size_t get_num_children(void) const;
-      bool compute_disjointness(void);
-      bool update_disjointness_result(bool result);
-      bool update_disjointness_volume(uint64_t children_volume);
-      bool finalize_disjointness(void);
+      bool compute_disjointness_and_completeness(void);
+      bool update_disjoint_complete_result(uint64_t children_volume,
+                                           uint64_t intersection_volume = 0);
+      bool update_disjoint_complete_result(
+          std::map<LegionColor,uint64_t> &children_volumes,
+          std::map<std::pair<LegionColor,LegionColor>,
+                   uint64_t> *intersection_volumes = NULL);
+      bool finalize_disjoint_complete(void);
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
-      bool is_disjoint(bool from_app = false);
+      void initialize_disjoint_complete_notifications(void);
+      bool is_disjoint(bool from_app = false, bool false_if_not_ready = false);
       bool are_disjoint(LegionColor c1, LegionColor c2,
                         bool force_compute = false);
       void record_disjointness(bool disjoint,
                                LegionColor c1, LegionColor c2);
       bool is_complete(bool from_app = false, bool false_if_not_ready = false);
-      IndexSpaceExpression* get_union_expression(bool check_complete=true);
-      IndexSpaceExpression* compute_union_expression(void);
       bool handle_disjointness_update(Deserializer &derez);
     public:
       ApEvent create_equal_children(Operation *op, size_t granularity);
@@ -3134,11 +3119,8 @@ namespace Legion {
       ApEvent create_by_restriction(const void *transform, const void *extent);
       ApEvent create_by_domain(FutureMapImpl *future_map);
     public:
-      bool compute_complete(void);
       bool intersects_with(IndexSpaceNode *other, bool compute = true);
       bool intersects_with(IndexPartNode *other, bool compute = true); 
-      bool dominates(IndexSpaceNode *other);
-      bool dominates(IndexPartNode *other);
       void find_interfering_children(IndexSpaceExpression *expr,
                                      std::vector<LegionColor> &colors);
       virtual bool find_interfering_children_kd(IndexSpaceExpression *expr,
@@ -3201,14 +3183,16 @@ namespace Legion {
       std::list<PartitionTracker*> partition_trackers;
     protected:
       // Support for computing disjointness locally
-      RtUserEvent disjoint_ready;
-      uint64_t total_children_volume;
-      unsigned remaining_local_disjoint_notifications;
-      unsigned remaining_global_disjoint_notifications;
-      std::atomic<bool> has_disjoint, disjoint;
+      uint64_t total_children_volume, total_intersection_volume;
+      std::map<LegionColor,uint64_t> total_children_volumes;
+      std::map<std::pair<LegionColor,LegionColor>,
+               uint64_t> total_intersection_volumes;
+      unsigned remaining_local_disjoint_complete_notifications;
+      unsigned remaining_global_disjoint_complete_notifications;
     protected:
-      bool has_complete, complete;
-      std::atomic<IndexSpaceExpression*> union_expr;
+      std::atomic<bool> has_disjoint, disjoint;
+      std::atomic<bool> has_complete, complete;
+      RtUserEvent disjoint_complete_ready;
     protected:
       // Members for the interference cache
       static const size_t MAX_INTERFERENCE_CACHE_SIZE = 64;
@@ -3897,7 +3881,6 @@ namespace Legion {
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
-      virtual IndexSpaceExpression* get_index_space_expression(void) const = 0;
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
       virtual RegionTreeNode* get_tree_child(const LegionColor c) = 0; 
@@ -3921,7 +3904,6 @@ namespace Legion {
       virtual bool is_complete(void) = 0;
       virtual bool intersects_with(RegionTreeNode *other, 
                                    bool compute = true) = 0;
-      virtual bool dominates(RegionTreeNode *other) = 0;
     public:
       virtual size_t get_num_children(void) const = 0;
       virtual void send_node(Serializer &rez, AddressSpaceID target) = 0;
@@ -4050,7 +4032,6 @@ namespace Legion {
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
-      virtual IndexSpaceExpression* get_index_space_expression(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
@@ -4071,7 +4052,6 @@ namespace Legion {
       virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
-      virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(Serializer &rez, AddressSpaceID target);
       static void handle_node_creation(RegionTreeForest *context,
@@ -4208,7 +4188,6 @@ namespace Legion {
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
       virtual IndexTreeNode *get_row_source(void) const;
-      virtual IndexSpaceExpression* get_index_space_expression(void) const;
       virtual RegionTreeID get_tree_id(void) const;
       virtual RegionTreeNode* get_parent(void) const;
       virtual RegionTreeNode* get_tree_child(const LegionColor c);
@@ -4230,7 +4209,6 @@ namespace Legion {
       virtual void unpack_global_reference(bool need_root);
       virtual bool is_complete(void);
       virtual bool intersects_with(RegionTreeNode *other, bool compute = true);
-      virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(Serializer &rez, AddressSpaceID target);
     public:
