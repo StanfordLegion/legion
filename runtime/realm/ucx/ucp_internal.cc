@@ -2022,7 +2022,7 @@ err:
 
   bool UCPMessageImpl::commit_multicast(size_t act_payload_size)
   {
-    size_t pending = 0;
+    size_t to_submit = targets.size();
     Request *req_prim, *req;
 
     req_prim = make_request(act_payload_size);
@@ -2048,6 +2048,8 @@ err:
         log_ucp.error() << "failed to send multicast am request";
         goto err_update_pending;
       }
+
+      to_submit--;
     }
 
     internal->request_release(req_prim);
@@ -2055,10 +2057,9 @@ err:
     return true;
 
 err_update_pending:
-    req->am_send.mc_desc->local_pending.fetch_sub(targets.size() - pending);
+    req->am_send.mc_desc->local_pending.fetch_sub(to_submit);
     if (remote_comp != nullptr) {
-      ucp_msg_hdr.remote_comp->remote_pending.fetch_sub(
-          targets.size() - pending);
+      ucp_msg_hdr.remote_comp->remote_pending.fetch_sub(to_submit);
     }
     UCPMessageImpl::am_local_failure_handler(req, internal);
 err:
