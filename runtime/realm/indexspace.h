@@ -122,8 +122,8 @@ namespace Realm {
      * Apply the translation transform to a point in the domain
      * source coordinate space to produce a point in the destination
      * coordinate space. Adds the offset to the point.
-     * @param point The point in the source coordinate space.
-     * @return The point in the destination coordinate space.
+     * \param point The point in the source coordinate space.
+     * \return The point in the destination coordinate space.
      */
     template <typename T2>
     Realm::Point<N, T> operator[](const Realm::Point<N, T2>& point) const;
@@ -149,8 +149,8 @@ namespace Realm {
      * Apply the affine transform to a point in the domain
      * source coordinate space to produce a point in the destination
      * coordinate space.
-     * @param point The point in the source coordinate space.
-     * @return The point in the destination coordinate space.
+     * \param point The point in the source coordinate space.
+     * \return The point in the destination coordinate space.
      */
     template <typename T2>
     Realm::Point<M, T> operator[](const Realm::Point<N, T2>& point) const;
@@ -185,8 +185,8 @@ namespace Realm {
      * Apply the structured transform to a point in the domain
      * source coordinate space to produce a point in the destination
      * coordinate space.
-     * @param point The point in the source coordinate space.
-     * @return The point in the destination coordinate space.
+     * \param point The point in the source coordinate space.
+     * \return The point in the destination coordinate space.
      */
     Point<N, T> operator[](const Point<N2, T>& point) const;
 
@@ -313,8 +313,8 @@ namespace Realm {
      * Construct an index space from a list of points or rects
      *  this construction can be significantly faster if the caller promises
      *  that all of the 'points' or 'rects' are disjoint.
-     *  @param points list of points to include in the index space.
-     *  @param disjoint true if the points are guaranteed to be disjoint.
+     *  \param points list of points to include in the index space.
+     *  \param disjoint true if the points are guaranteed to be disjoint.
      */
     explicit IndexSpace(const std::vector<Point<N,T> >& points,
                         bool disjoint = false);
@@ -326,7 +326,7 @@ namespace Realm {
     ///@{
     /**
      * Construct a guaranteed-empty index space.
-     * @return an empty index space.
+     * \return an empty index space.
      */
     static IndexSpace<N,T> make_empty(void);
     ///@}
@@ -335,7 +335,7 @@ namespace Realm {
     /**
      * Reclaim any physical resources associated with this index space.
      * It will clear the sparsity map of this index space if it exists.
-     * @param wait_on event to wait on before destroying the index space.
+     * \param wait_on event to wait on before destroying the index space.
      */
     void destroy(Event wait_on = Event::NO_EVENT);
     ///@}
@@ -344,7 +344,7 @@ namespace Realm {
     /**
      * Retrun true if there are no points in the space
      * (may be imprecise due to lazy loading of sparsity data).
-     * @return true if the index space is empty.
+     * \return true if the index space is empty.
      */
     bool empty(void) const;
     ///@}
@@ -353,7 +353,7 @@ namespace Realm {
     /**
      * Return true if there is no sparsity map (i.e. the bounds fully
      * define the domain).
-     * @return true if the index space is dense.
+     * \return true if the index space is dense.
      */
     REALM_CUDA_HD
     bool dense(void) const;
@@ -368,9 +368,9 @@ namespace Realm {
      * By default, the sparsity map is computed precisely, but if
      * performance is a concern, an approximate map can be computed 
      * by setting the \p precise parameter to \c false.
-     * @param precise false is the sparsity map may be preserved even
+     * \param precise false is the sparsity map may be preserved even
      * for dense spaces.
-     * @return event to wait on before using the sparsity map.
+     * \return event to wait on before using the sparsity map.
      */
     Event make_valid(bool precise = true) const;
 
@@ -380,9 +380,9 @@ namespace Realm {
     ///@{
     /**
      * Return the tightest description possible of the index space.
-     * @param precise false is the sparsity map may be preserved even
+     * \param precise false is the sparsity map may be preserved even
      * for dense spaces.
-     * @return the tightest index space possible.
+     * \return the tightest index space possible.
      */
     IndexSpace<N,T> tighten(bool precise = true) const;
     ///@}
@@ -390,9 +390,9 @@ namespace Realm {
     ///@{
     /**
      * Query for individual points or rectangles.
-     * @param p point to query
-     * @param r rectangle to query
-     * @return true if the point or rectangle is contained in the index space.
+     * \param p point to query
+     * \param r rectangle to query
+     * \return true if the point or rectangle is contained in the index space.
      */
     bool contains(const Point<N,T>& p) const;
     bool contains_all(const Rect<N,T>& r) const;
@@ -405,7 +405,7 @@ namespace Realm {
     /**
      * Return actual number of points in index space (may be less than
      * volume of bounding box).
-     * @return the number of points in the index space.
+     * \return the number of points in the index space.
      */
     size_t volume(void) const;
     ///@}
@@ -417,9 +417,9 @@ namespace Realm {
      * approximately contained in the index space. The approximation 
      * is guaranteed to be a superset, so if \c contains_approx
      * returns \c false, then \c contains.
-     * @param p point to query
-     * @param r rectangle to query
-     * @return true if the point or rectangle is contained in the index space.
+     * \param p point to query
+     * \param r rectangle to query
+     * \return true if the point or rectangle is contained in the index space.
      */
     bool contains_approx(const Point<N,T>& p) const;
     bool contains_all_approx(const Rect<N,T>& r) const;
@@ -432,7 +432,7 @@ namespace Realm {
     /**
      * Approximate number of points in index space (may be less than
      * volume of bounding box, but larger than actual volume).
-     * @return the approximate number of points in the index space.
+     * \return the approximate number of points in the index space.
      */
     size_t volume_approx(void) const;
     ///@}
@@ -480,11 +480,11 @@ namespace Realm {
      * case that requires better results and/or admits specific optimizations
      * will need to compute its own coverings.
      *
-     * @param max_rects Maximum number of rectangles to use (0 = no limit).
-     * @param max_overhead Maximum relative storage overhead (0 = no limit).
-     * @param covering Vector to fill in with covering rectangles.
+     * \param max_rects Maximum number of rectangles to use (0 = no limit).
+     * \param max_overhead Maximum relative storage overhead (0 = no limit).
+     * \param covering Vector to fill in with covering rectangles.
      *
-     * @return True if successful, false if not.
+     * \return True if successful, false if not.
      */
     bool compute_covering(size_t max_rects, int max_overhead,
                           std::vector<Rect<N, T>>& covering) const;
@@ -496,9 +496,9 @@ namespace Realm {
      * lambda for each point in each subrectangle, providing an alternative to
      * using IndexSpaceIterator's.
      *
-     * @param lambda A callable or lambda function that takes a Rect<N,T> and a
+     * \param lambda A callable or lambda function that takes a Rect<N,T> and a
      * Point<N,T> as input parameters.
-     * @param restriction An optional restriction on the subrectangles to
+     * \param restriction An optional restriction on the subrectangles to
      * iterate over. Only points and subrectangles within this restriction will
      * be visited.
      */
@@ -521,14 +521,14 @@ namespace Realm {
      * Fill values into the specified destination fields in the index
      * space.
      *
-     * @param dsts Vector of CopySrcDstField's describing the destination
+     * \param dsts Vector of CopySrcDstField's describing the destination
      * fields.
-     * @param requests Set of profiling requests.
-     * @param fill_value Pointer to the fill value.
-     * @param fill_value_size Size of the fill value in bytes.
-     * @param wait_on Event to wait on before performing the fill operation.
-     * @param priority Task priority.
-     * @return Event representing the fill operation.
+     * \param requests Set of profiling requests.
+     * \param fill_value Pointer to the fill value.
+     * \param fill_value_size Size of the fill value in bytes.
+     * \param wait_on Event to wait on before performing the fill operation.
+     * \param priority Task priority.
+     * \return Event representing the fill operation.
      *
      * Note: This version of fill() does not support indirection. Use explicit
      * arguments for fill values and reduction operation info.
@@ -544,13 +544,13 @@ namespace Realm {
      * Copy data from source fields to destination fields in the index
      * space.
      *
-     * @param srcs Vector of CopySrcDstField's describing the source fields.
-     * @param dsts Vector of CopySrcDstField's describing the destination
+     * \param srcs Vector of CopySrcDstField's describing the source fields.
+     * \param dsts Vector of CopySrcDstField's describing the destination
      * fields.
-     * @param requests Set of profiling requests.
-     * @param wait_on Event to wait on before performing the copy operation.
-     * @param priority Task priority.
-     * @return Event representing the copy operation.
+     * \param requests Set of profiling requests.
+     * \param wait_on Event to wait on before performing the copy operation.
+     * \param priority Task priority.
+     * \return Event representing the copy operation.
      */
     Event copy(const std::vector<CopySrcDstField>& srcs,
                const std::vector<CopySrcDstField>& dsts,
@@ -563,15 +563,15 @@ namespace Realm {
      * Copy data from source fields to destination fields in the index
      * space with indirection.
      *
-     * @param srcs Vector of CopySrcDstField's describing the source fields.
-     * @param dsts Vector of CopySrcDstField's describing the destination
+     * \param srcs Vector of CopySrcDstField's describing the source fields.
+     * \param dsts Vector of CopySrcDstField's describing the destination
      * fields.
-     * @param indirects Vector of pointers to the base class of the
+     * \param indirects Vector of pointers to the base class of the
      * indirections.
-     * @param requests Set of profiling requests.
-     * @param wait_on Event to wait on before performing the copy operation.
-     * @param priority Task priority.
-     * @return Event representing the copy operation.
+     * \param requests Set of profiling requests.
+     * \param wait_on Event to wait on before performing the copy operation.
+     * \param priority Task priority.
+     * \return Event representing the copy operation.
      */
     Event copy(const std::vector<CopySrcDstField>& srcs,
                const std::vector<CopySrcDstField>& dsts,
@@ -587,14 +587,14 @@ namespace Realm {
     /**
      * Create equal index spaces from this index space.
      *
-     * @param count Number of subspaces to create.
-     * @param granularity Granularity of the subspaces.
-     * @param index Index of the subspace to create.
-     * @param subspace Index space to fill in with the result.
-     * @param reqs Set of profiling requests.
-     * @param wait_on Event to wait on before performing the partitioning
+     * \param count Number of subspaces to create.
+     * \param granularity Granularity of the subspaces.
+     * \param index Index of the subspace to create.
+     * \param subspace Index space to fill in with the result.
+     * \param reqs Set of profiling requests.
+     * \param wait_on Event to wait on before performing the partitioning
      * operation.
-     * @return Event representing the partitioning operation.
+     * \return Event representing the partitioning operation.
      * */
     Event create_equal_subspace(size_t count, size_t granularity,
                                 unsigned index, IndexSpace<N,T> &subspace,
@@ -611,14 +611,14 @@ namespace Realm {
     /**
      * Create index spaces from this index space based on the specified weights.
      *
-     * @param count Number of subspaces to create.
-     * @param granularity Granularity of the subspaces.
-     * @param weights Vector of weights for each subspace.
-     * @param subspace Index space to fill in with the result.
-     * @param reqs Set of profiling requests.
-     * @param wait_on Event to wait on before performing the partitioning
+     * \param count Number of subspaces to create.
+     * \param granularity Granularity of the subspaces.
+     * \param weights Vector of weights for each subspace.
+     * \param subspace Index space to fill in with the result.
+     * \param reqs Set of profiling requests.
+     * \param wait_on Event to wait on before performing the partitioning
      * operation.
-     * @return Event representing the partitioning operation.
+     * \return Event representing the partitioning operation.
      * */
     Event create_weighted_subspaces(size_t count, size_t granularity,
 				    const std::vector<int>& weights,
@@ -655,13 +655,13 @@ namespace Realm {
      * second (computable) function before matching the colors - the second
      * function is provided via a CodeDescriptor object and should have the type
      * FT->FT2.
-     * @param field_data the field data to use for the computation
-     * @param codedesc the code descriptor for the second function
-     * @param color the color to match
-     * @param subspace the resulting subspace
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting.
-     * @return an event that will trigger when the operation is
+     * \param field_data the field data to use for the computation
+     * \param codedesc the code descriptor for the second function
+     * \param color the color to match
+     * \param subspace the resulting subspace
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting.
+     * \return an event that will trigger when the operation is
      * complete.
      */
     template <typename FT, typename FT2>
@@ -690,12 +690,12 @@ namespace Realm {
      * return (and waiting for the finish event), the following
      * invariant holds: images[i] = { y | exists x, x in
      * transform(sources[i]) = y }
-     *  @param transform the transformation to apply
-     *  @param source the source index space
-     *  @param image the resulting image index space
-     *  @param reqs profiling requests
-     *  @param wait_on event to wait on before starting
-     *  @return an event that will trigger when the operation is
+     *  \param transform the transformation to apply
+     *  \param source the source index space
+     *  \param image the resulting image index space
+     *  \param reqs profiling requests
+     *  \param wait_on event to wait on before starting
+     *  \return an event that will trigger when the operation is
      *  complete
      */
     template <int N2, typename T2, typename TRANSFORM>
@@ -729,12 +729,12 @@ namespace Realm {
      * following invariant holds: images[i] = { y | exists x, x in sources[i] ^
      * field_data(x) = y
      *  }
-     *  @param field_data the field data to use for the computation
-     *  @param source the source index space
-     *  @param image the resulting image index space
-     *  @param reqs profiling requests
-     *  @param wait_on event to wait on before starting.
-     *  @return an event that will trigger when the operation is
+     *  \param field_data the field data to use for the computation
+     *  \param source the source index space
+     *  \param image the resulting image index space
+     *  \param reqs profiling requests
+     *  \param wait_on event to wait on before starting.
+     *  \return an event that will trigger when the operation is
      */
     template <int N2, typename T2>
     Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
@@ -774,13 +774,13 @@ namespace Realm {
      * account that the computed image may be restricted by an intersection
      * or difference operation. It can often be much faster to filter
      * the projected points before stuffing them into an index space.
-     *  @param field_data the field data to use for the computation
-     *  @param sources the source index spaces
-     *  @param diff_rhs the index spaces to use for the difference operation
-     *  @param images the resulting image index spaces
-     *  @param reqs profiling requests
-     *  @param wait_on event to wait on before starting.
-     *  @return an event that will trigger when the operation is
+     *  \param field_data the field data to use for the computation
+     *  \param sources the source index spaces
+     *  \param diff_rhs the index spaces to use for the difference operation
+     *  \param images the resulting image index spaces
+     *  \param reqs profiling requests
+     *  \param wait_on event to wait on before starting.
+     *  \return an event that will trigger when the operation is
      *  complete.
      */
     template <int N2, typename T2>
@@ -809,12 +809,12 @@ namespace Realm {
      * target - i.e. upon return (and waiting for the finish event), the
      * following invariant holds: preimages[i] = { x | transform(x) in
      * targets[i] }
-     * @param transform the transformation to use for the computation
-     * @param target the target index space
-     * @param preimage the resulting preimage index space
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting.
-     * @return an event that will trigger when the operation is
+     * \param transform the transformation to use for the computation
+     * \param target the target index space
+     * \param preimage the resulting preimage index space
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting.
+     * \return an event that will trigger when the operation is
      */
     template <int N2, typename T2, typename TRANSFORM>
     Event create_subspace_by_preimage(const TRANSFORM& transform,
@@ -846,12 +846,12 @@ namespace Realm {
      * target - i.e. upon return (and waiting for the finish event), the
      * following invariant holds: preimages[i] = { x | field_data(x) in
      * targets[i] }
-     * @param field_data the field data to use for the computation
-     * @param target the target index space
-     * @param preimage the resulting preimage index space
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting.
-     * @return an event that will trigger when the operation is
+     * \param field_data the field data to use for the computation
+     * \param target the target index space
+     * \param preimage the resulting preimage index space
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting.
+     * \return an event that will trigger when the operation is
      */
     template <int N2, typename T2>
     Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
@@ -890,11 +890,11 @@ namespace Realm {
     /**
      * Create an association, fill in instances described by 'field_data' with a
      * mapping from this index space to the 'range' index space.
-     * @param field_data the field data to use for the computation
-     * @param range the range index space
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting.
-     * @return an event that will trigger when the operation is
+     * \param field_data the field data to use for the computation
+     * \param range the range index space
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting.
+     * \return an event that will trigger when the operation is
      */
     template <int N2, typename T2>
     Event create_association(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
@@ -915,12 +915,12 @@ namespace Realm {
     ///@{
     /**
      * Compute the union of two index spaces.
-     * @param lhs the left hand side of the union
-     * @param rhs the right hand side of the union
-     * @param result the resulting index space
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting.
-     * @return an event that will trigger when the operation is
+     * \param lhs the left hand side of the union
+     * \param rhs the right hand side of the union
+     * \param result the resulting index space
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting.
+     * \return an event that will trigger when the operation is
      * complete
      */
     static Event compute_union(const IndexSpace<N,T>& lhs,
@@ -951,12 +951,12 @@ namespace Realm {
     ///@{
     /**
      * Compute the intersection of two index spaces.
-     * @param lhs the left hand side of the intersection
-     * @param rhs the right hand side of the intersection
-     * @param result the resulting index space
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting
-     * @return an event that will trigger when the operation is complete
+     * \param lhs the left hand side of the intersection
+     * \param rhs the right hand side of the intersection
+     * \param result the resulting index space
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting
+     * \return an event that will trigger when the operation is complete
      */
     static Event compute_intersection(const IndexSpace<N,T>& lhs,
 				    const IndexSpace<N,T>& rhs,
@@ -986,12 +986,12 @@ namespace Realm {
     ///@{
     /**
      * Compute the difference of two index spaces.
-     * @param lhs the left hand side of the difference
-     * @param rhs the right hand side of the difference
-     * @param result the resulting index space
-     * @param reqs profiling requests
-     * @param wait_on event to wait on before starting
-     * @return an event that will trigger when the operation is complete
+     * \param lhs the left hand side of the difference
+     * \param rhs the right hand side of the difference
+     * \param result the resulting index space
+     * \param reqs profiling requests
+     * \param wait_on event to wait on before starting
+     * \return an event that will trigger when the operation is complete
      */
     static Event compute_difference(const IndexSpace<N,T>& lhs,
 				    const IndexSpace<N,T>& rhs,
