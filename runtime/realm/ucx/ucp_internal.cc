@@ -56,7 +56,6 @@ namespace UCP {
 #ifdef REALM_USE_CUDA
   static constexpr size_t   ZCOPY_THRESH_DEV  = 0;
 #endif
-  static constexpr char     TLS_HOST[]        = "^dc_mlx5";
 
   namespace ThreadLocal {
     REALM_THREAD_LOCAL const TimeLimit *ucp_work_until = nullptr;
@@ -505,7 +504,7 @@ err:
     init_params.prog_boff_max            = config.prog_boff_max;
 
     read_env_var_update_map("UCX_NET_DEVICES", "", &config.host_nics, &ev_map);
-    read_env_var_update_map("UCX_TLS", TLS_HOST, &config.tls_host, &ev_map);
+    read_env_var_update_map("UCX_TLS", "", &config.tls_host, &ev_map);
     read_env_var_update_map("UCX_IB_SEG_SIZE",
         std::to_string(IB_SEG_SIZE), &config.ib_seg_size, &ev_map);
     read_env_var_update_map("UCX_ZCOPY_THRESH",
@@ -2023,7 +2022,7 @@ err:
 
   bool UCPMessageImpl::commit_multicast(size_t act_payload_size)
   {
-    size_t pending = 0;
+    size_t to_submit = targets.size();
     Request *req_prim, *req;
 
     req_prim = make_request(act_payload_size);
@@ -2049,6 +2048,8 @@ err:
         log_ucp.error() << "failed to send multicast am request";
         goto err_update_pending;
       }
+
+      to_submit--;
     }
 
     internal->request_release(req_prim);
@@ -2056,10 +2057,9 @@ err:
     return true;
 
 err_update_pending:
-    req->am_send.mc_desc->local_pending.fetch_sub(targets.size() - pending);
+    req->am_send.mc_desc->local_pending.fetch_sub(to_submit);
     if (remote_comp != nullptr) {
-      ucp_msg_hdr.remote_comp->remote_pending.fetch_sub(
-          targets.size() - pending);
+      ucp_msg_hdr.remote_comp->remote_pending.fetch_sub(to_submit);
     }
     UCPMessageImpl::am_local_failure_handler(req, internal);
 err:
