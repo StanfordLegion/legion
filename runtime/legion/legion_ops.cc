@@ -17092,9 +17092,7 @@ namespace Legion {
       add_launch_space_reference(launch_space);
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
-#ifdef LEGION_SPY
       intermediate_index_event = Runtime::create_ap_user_event(NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17261,27 +17259,21 @@ namespace Legion {
           desc.inst = manager->get_instance();
           desc.field_offset = manager->layout->find_field_info(
                         *(requirement.privilege_fields.begin())).field_id;
-          index_preconditions.insert(instances_ready);
+          if (instances_ready.exists())
+            index_preconditions.push_back(instances_ready);
 #ifdef DEBUG_LEGION
           assert(!points.empty());
 #endif
           ready = (instances.size() == points.size());
         }
-        ApEvent done_event;
         if (ready)
         {
-          done_event = thunk->perform(this, runtime->forest,
+          ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(&info, index_preconditions), instances);
-#ifdef LEGION_SPY
           Runtime::trigger_event(NULL, intermediate_index_event, done_event);
-#endif
           complete_execution();
         }
-#ifdef LEGION_SPY
         return intermediate_index_event;
-#else
-        return done_event;
-#endif
       }
       else
       {

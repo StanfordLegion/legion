@@ -532,7 +532,7 @@ if __name__ == '__main__':
         help='URL of Terra repository to clone from.')
     parser.add_argument(
         '--terra-branch', dest='terra_branch', required=False,
-        default='release-1.0.6',
+        default='release-1.1.0',
         help='Branch of Terra repository to checkout.')
     parser.add_argument(
         '--terra-lua', dest='terra_lua', required=False,
