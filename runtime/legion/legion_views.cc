@@ -9827,7 +9827,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(it->first != it->second);
           assert(it->second != src_index);
-          assert(!local_events[it->second].exists());
+          assert(has_instance_events || !local_events[it->second].exists());
           assert(!local_fields[it->first].empty());
 #endif
           IndividualView *local_view = local_views[it->first];
