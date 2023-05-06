@@ -17092,7 +17092,6 @@ namespace Legion {
       add_launch_space_reference(launch_space);
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
-      intermediate_index_event = Runtime::create_ap_user_event(NULL);
     }
 
     //--------------------------------------------------------------------------
@@ -17265,12 +17264,14 @@ namespace Legion {
           assert(!points.empty());
 #endif
           ready = (instances.size() == points.size());
+          if (!intermediate_index_event.exists())
+            intermediate_index_event = Runtime::create_ap_user_event(&info);
         }
         if (ready)
         {
           ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(&info, index_preconditions), instances);
-          Runtime::trigger_event(NULL, intermediate_index_event, done_event);
+          Runtime::trigger_event(&info, intermediate_index_event, done_event);
           complete_execution();
         }
         return intermediate_index_event;
@@ -17724,6 +17725,7 @@ namespace Legion {
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
+      intermediate_index_event = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
