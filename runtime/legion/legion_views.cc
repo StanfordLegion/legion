@@ -10960,7 +10960,6 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(this->did);
-            rez.serialize(local_view->did);
             pack_fields(rez, local_fields);
             local_inst.serialize(rez);
             rez.serialize(local_manager->get_unique_event());
