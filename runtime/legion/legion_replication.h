@@ -2007,7 +2007,7 @@ namespace Legion {
       ReplDependentPartitionOp& operator=(const ReplDependentPartitionOp &rhs);
     public:
       void initialize_by_field(ReplicateContext *ctx, ShardID target,
-                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
                                IndexSpace color_space, FieldID fid, 
                                MapperID id, MappingTagID tag,
@@ -2017,7 +2017,7 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                ShardID target,
 #endif
-                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition pid,
                                IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
@@ -2028,7 +2028,7 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                ShardID target,
 #endif
-                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition pid,
                                IndexSpace handle, LogicalPartition projection,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
@@ -2036,14 +2036,14 @@ namespace Legion {
                                ShardID shard, size_t total_shards,
                                Provenance *provenance);
       void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
-                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,
                                const UntypedBuffer &marg,
                                Provenance *provenance);
       void initialize_by_preimage_range(ReplicateContext *ctx, ShardID target, 
-                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition pid,
                                IndexPartition projection, LogicalRegion handle,
                                LogicalRegion parent, FieldID fid,
                                MapperID id, MappingTagID tag,

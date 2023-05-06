@@ -6181,12 +6181,15 @@ namespace Legion {
         // in the first round because their sizes are yet to be determined.
         if (defer && req.partition.exists() && global_indexing)
         {
-          add_reference();
-          FinalizeOutputArgs args(this);
-          runtime->issue_runtime_meta_task(
-              args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(node->index_space_ready));
-          return;
+          RtEvent ready_event = node->get_ready_event();
+          if (ready_event.exists())
+          {
+            add_reference();
+            FinalizeOutputArgs args(this);
+            runtime->issue_runtime_meta_task(
+                args, LG_THROUGHPUT_DEFERRED_PRIORITY, ready_event);
+            return;
+          }
         }
 
         // Initialize the index space domain

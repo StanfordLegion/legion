@@ -4607,7 +4607,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_field(ReplicateContext *ctx, 
                                                        ShardID target,
-                                                       ApEvent ready_event,
                                                        IndexPartition pid,
                                                        LogicalRegion handle, 
                                                        LogicalRegion parent,
@@ -4642,7 +4641,6 @@ namespace Legion {
 #endif
       thunk = new ReplByFieldThunk(ctx, target, pid);
       mapping_barrier = ctx->get_next_dependent_partition_barrier();;
-      partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
@@ -4654,7 +4652,6 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                                        ShardID target,
 #endif
-                                                       ApEvent ready_event,
                                                        IndexPartition pid,
                                                        IndexSpace handle,
                                                    LogicalPartition projection,
@@ -4697,7 +4694,6 @@ namespace Legion {
                                    shard, total);
 #endif
       mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
@@ -4710,7 +4706,6 @@ namespace Legion {
 #ifndef SHARD_BY_IMAGE
                                                          ShardID target,
 #endif
-                                                         ApEvent ready_event,
                                                          IndexPartition pid,
                                                          IndexSpace handle,
                                                 LogicalPartition projection,
@@ -4756,7 +4751,6 @@ namespace Legion {
                                         shard, total_shards);
 #endif
       mapping_barrier = ctx->get_next_dependent_partition_barrier();;
-      partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
@@ -4765,7 +4759,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_preimage(ReplicateContext *ctx,
-                              ShardID target_shard, ApEvent ready_event,
+                              ShardID target_shard,
                               IndexPartition pid, IndexPartition proj,
                               LogicalRegion handle, LogicalRegion parent,
                               FieldID fid, MapperID id, MappingTagID t,
@@ -4795,7 +4789,6 @@ namespace Legion {
 #endif
       thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
       mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)
@@ -4805,7 +4798,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_preimage_range(
                               ReplicateContext *ctx, ShardID target_shard,
-                              ApEvent ready_event,
                               IndexPartition pid, IndexPartition proj,
                               LogicalRegion handle, LogicalRegion parent,
                               FieldID fid, MapperID id, MappingTagID t,
@@ -4835,7 +4827,6 @@ namespace Legion {
 #endif
       thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
       mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
       if (runtime->check_privileges)

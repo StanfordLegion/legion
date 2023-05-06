@@ -3099,11 +3099,6 @@ namespace Legion {
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->compute_pending_space(op, target, initial, handles); }
-        virtual ApEvent perform_shard(PendingPartitionOp *op,
-                                      RegionTreeForest *forest,
-                                      ShardID shard, size_t total_shards)
-        { return forest->compute_pending_space(op, target, initial, handles,
-                                               shard, total_shards); }
         virtual void perform_logging(PendingPartitionOp* op);
       protected:
         IndexSpace target, initial;
@@ -3457,7 +3452,6 @@ namespace Legion {
       std::map<PhysicalManager*,unsigned> acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       DepPartThunk *thunk;
-      ApEvent partition_ready;
     protected:
       MapperManager *mapper;
     protected:

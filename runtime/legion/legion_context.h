@@ -2896,7 +2896,7 @@ namespace Legion {
       bool create_shard_partition(Operation *op, IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
           PartitionKind part_kind, LegionColor partition_color,
-          bool color_generated, ApBarrier partition_ready);
+          bool color_generated);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
@@ -3129,7 +3129,6 @@ namespace Legion {
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
     protected:
-      ApReplBar pending_partition_barrier;
       RtReplBar creation_barrier;
       RtLogicalBar deletion_ready_barrier;
       RtLogicalBar deletion_mapping_barrier;

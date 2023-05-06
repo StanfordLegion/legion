@@ -17726,7 +17726,6 @@ namespace Legion {
       parent_req_index = 0;
       thunk = NULL;
       // can be changed for control rep
-      partition_ready = get_completion_event(); 
       mapper = NULL;
       points_committed = 0;
       commit_request = false;
