@@ -7174,12 +7174,11 @@ namespace Legion {
                 rez.serialize(all_done);
             }
             rez.serialize(origin);
+            if (reduction_op_id == 0)
+              rez.serialize(COLLECTIVE_BROADCAST);
           }
           if (reduction_op_id == 0)
-          {
-            rez.serialize(COLLECTIVE_BROADCAST);
             runtime->send_collective_distribute_broadcast(origin, rez);
-          }
           else
             runtime->send_collective_distribute_reducecast(origin, rez);
           recorded_events.insert(recorded);
