@@ -3624,10 +3624,6 @@ namespace Legion {
     {
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
        static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
-      // Enumerate the color space
-      Realm::IndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
-      color_space->get_realm_index_space(realm_color_space, true/*tight*/);
-
       std::set<ApEvent> result_events;
       Realm::IndexSpace<DIM,T> parent_space;
       ApEvent parent_ready;
@@ -3963,7 +3959,8 @@ namespace Legion {
         std::vector<RealmDescriptor> descriptors;
         FieldDataDescriptor key;
         key.color = partition->color_space->delinearize_color_to_point(*itr);
-        Realm::IndexSpace<DIM2,T2> source;
+        Realm::IndexSpace<DIM2,T2> source =
+          Realm::IndexSpace<DIM2,T2>::make_empty();
         for (std::vector<FieldDataDescriptor>::const_iterator it =
               std::lower_bound(instances.begin(), instances.end(), key); it !=
               std::upper_bound(instances.begin(), instances.end(), key); it++)
@@ -4081,7 +4078,8 @@ namespace Legion {
         std::vector<RealmDescriptor> descriptors;
         FieldDataDescriptor key;
         key.color = partition->color_space->delinearize_color_to_point(*itr);
-        Realm::IndexSpace<DIM2,T2> source;
+        Realm::IndexSpace<DIM2,T2> source =
+          Realm::IndexSpace<DIM2,T2>::make_empty();
         for (std::vector<FieldDataDescriptor>::const_iterator it =
               std::lower_bound(instances.begin(), instances.end(), key); it !=
               std::upper_bound(instances.begin(), instances.end(), key); it++)

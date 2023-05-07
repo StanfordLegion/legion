@@ -8288,8 +8288,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Quick out if we've already sent this
-      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
-            collective_mapping->contains(target)))
+      if (has_remote_instance(target))
         return;
       // Send our parent first if necessary
       if (recurse && (parent != NULL))
@@ -8336,7 +8335,8 @@ namespace Legion {
         provenance->serialize(rez);
       else
         Provenance::serialize_null(rez);
-      if (index_space_set)
+      if (index_space_set && ((collective_mapping == NULL) ||
+            !collective_mapping->contains(target)))
         pack_index_space(rez, true/*include size*/);
       else
         rez.serialize<size_t>(0);
@@ -10503,8 +10503,7 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       // Quick out if we've already sent this
-      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
-            collective_mapping->contains(target)))
+      if (has_remote_instance(target))
         return;
       parent->send_node(target, true/*recurse*/);
       color_space->send_node(target, true/*recurse*/);

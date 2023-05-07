@@ -14993,19 +14993,11 @@ namespace Legion {
             ApEvent::NO_AP_EVENT, provenance, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
-      ShardID shard = 0;
       std::map<DomainPoint,Future> shard_futures;
       for (std::map<DomainPoint,Domain>::const_iterator it = 
             domains.begin(); it != domains.end(); it++)
-      {
-        // Use the direct call to TaskContext::from_value in order to
-        // avoid any further checks for invalid control replication
-        if (shard++ == owner_shard->shard_id)
-          shard_futures[it->first] = TaskContext::from_value(
-              &it->second, sizeof(it->second), false/*owned*/, provenance);
-        if (shard == total_shards)
-          shard = 0;
-      }
+        shard_futures[it->first] = TaskContext::from_value(
+            &it->second, sizeof(it->second), false/*owned*/, provenance);
       future_map.impl->set_all_futures(shard_futures);
       return create_partition_by_domain(parent, future_map, color_space, 
        perform_intersections, part_kind, color, provenance, true/*skip check*/);
