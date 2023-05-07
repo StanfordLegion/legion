@@ -3622,8 +3622,6 @@ namespace Legion {
                           bool perform_intersections) 
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
-       static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
       std::set<ApEvent> result_events;
       Realm::IndexSpace<DIM,T> parent_space;
       ApEvent parent_ready;
