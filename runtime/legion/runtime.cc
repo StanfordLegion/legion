@@ -725,10 +725,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (collective != NULL)
-      {
-        collective->wait_all_reduce();
         delete collective;
-      } 
     }
 
     //--------------------------------------------------------------------------
@@ -746,11 +743,7 @@ namespace Legion {
         // For the false case, check to see if we already got the
         // maximum observed false case
         if (collective != NULL)
-        {
           max_observed_index = collective->get_result(); 
-          delete collective;
-          collective = NULL;
-        }
         // Can safely return false here since it's later than the 
         // maximum observed index across all the shards so all shards
         // will return the same false decision
@@ -804,8 +797,7 @@ namespace Legion {
 #else
           ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(context);
 #endif
-          collective = new AllReduceCollective<MaxReduction<uint64_t> >(
-              repl_ctx, collective_id);
+          collective = new PredicateCollective(this, repl_ctx, collective_id);
           collective->async_all_reduce(max_observed_index);
         }
       }
