@@ -3587,6 +3587,7 @@ namespace Legion {
     template class CollectiveViewCreator<DetachOp>;
     template class CollectiveViewCreator<AcquireOp>;
     template class CollectiveViewCreator<ReleaseOp>;
+    template class CollectiveViewCreator<DependentPartitionOp>;
     template class CollectiveViewCreator<TaskOp>;
 
     ///////////////////////////////////////////////////////////// 

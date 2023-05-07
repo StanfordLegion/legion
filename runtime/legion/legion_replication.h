@@ -1857,7 +1857,8 @@ namespace Legion {
      * A dependent partitioning operation that knows that it
      * is being executed in a control replication context
      */
-    class ReplDependentPartitionOp : public DependentPartitionOp {
+    class ReplDependentPartitionOp : public ReplCollectiveViewCreator<
+                            CollectiveViewCreator<DependentPartitionOp> > {
     public:
       ReplDependentPartitionOp(Runtime *rt);
       ReplDependentPartitionOp(const ReplDependentPartitionOp &rhs) = delete;
@@ -1884,6 +1885,8 @@ namespace Legion {
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     protected:
       void select_sharding_function(void);
     protected:

@@ -4574,7 +4574,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplDependentPartitionOp(Runtime *rt)
-      : DependentPartitionOp(rt)
+      : ReplCollectiveViewCreator<
+          CollectiveViewCreator<DependentPartitionOp> >(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -4744,6 +4745,8 @@ namespace Legion {
         projection_info = ProjectionInfo(runtime, requirement, 
                                          launch_space, sharding_function);
       }
+      else
+        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
@@ -4927,6 +4930,17 @@ namespace Legion {
 #endif
       return sharding_function->find_shard_participants(launch_space,
                                         launch_space->handle, shards);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDependentPartitionOp::perform_collective_analysis(
+                                 CollectiveMapping *&mapping, bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not an index space launch then we know all the shards
+      // are going to be using the same region so we can do a collective
+      // rendezvous to create a collective view
+      return !is_index_space;
     }
 
     /////////////////////////////////////////////////////////////
