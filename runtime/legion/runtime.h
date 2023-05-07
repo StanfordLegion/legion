@@ -240,7 +240,7 @@ namespace Legion {
     protected:
       const CollectiveID collective_id;
       size_t max_observed_index;
-      AllReduceCollective<MaxReduction<uint64_t> > *collective;
+      PredicateCollective *collective;
     };
 
     /**

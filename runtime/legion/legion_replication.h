@@ -1327,6 +1327,26 @@ namespace Legion {
     };
 
     /**
+     * \class PredicateCollective
+     * A class for performing all-reduce of the maximum observed indexes
+     * for a replicated predicate impl
+     */
+    class PredicateCollective : 
+      public AllReduceCollective<MaxReduction<uint64_t> > {
+    public:
+      PredicateCollective(ReplPredicateImpl *predicate, 
+          ReplicateContext *ctx, CollectiveID id);
+      PredicateCollective(const PredicateCollective &rhs) = delete;
+      virtual ~PredicateCollective(void) { }
+    public:
+      PredicateCollective& operator=(const PredicateCollective &rhs) = delete;
+    public:
+      virtual RtEvent post_complete_exchange(void);
+    public:
+      ReplPredicateImpl *const predicate;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
