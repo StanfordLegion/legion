@@ -6214,8 +6214,7 @@ namespace Legion {
               domain.rect_data[domain.dim + off] = extents[idx] - 1;
             }
 
-            runtime->forest->set_pending_space_domain(
-                node->handle, domain, runtime->address_space);
+            runtime->forest->set_pending_space_domain(node->handle, domain);
           }
           else
           {
@@ -6232,7 +6231,7 @@ namespace Legion {
         {
           DomainPoint lo; lo.dim = extents.dim;
           domain = Domain(lo, extents - 1);
-          node->set_domain(domain, runtime->address_space);
+          node->set_domain(domain);
         }
       }
       else
@@ -12106,7 +12105,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_SET:
             {
-              runtime->handle_index_space_set(derez, remote_address_space);
+              runtime->handle_index_space_set(derez);
               break;
             }
           case SEND_INDEX_SPACE_CHILD_REQUEST:
@@ -23863,11 +23862,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_set(Deserializer &derez, 
-                                         AddressSpaceID source)
+    void Runtime::handle_index_space_set(Deserializer &derez) 
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_index_space_set(forest, derez, source);
+      IndexSpaceNode::handle_index_space_set(forest, derez);
     }
 
     //--------------------------------------------------------------------------

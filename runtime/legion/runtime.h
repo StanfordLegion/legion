@@ -3520,7 +3520,7 @@ namespace Legion {
                                        AddressSpaceID source);
       void handle_index_space_return(Deserializer &derez,
                                      AddressSpaceID source); 
-      void handle_index_space_set(Deserializer &derez, AddressSpaceID source);
+      void handle_index_space_set(Deserializer &derez);
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);

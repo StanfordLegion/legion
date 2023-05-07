@@ -36,9 +36,12 @@ namespace Legion {
      */
     struct FieldDataDescriptor {
     public:
-      IndexSpace index_space;
+      inline bool operator<(const FieldDataDescriptor &rhs) const
+        { return (color < rhs.color); }
+    public:
+      Domain domain;
+      DomainPoint color;
       PhysicalInstance inst;
-      size_t field_offset;
     };
 
     /**
@@ -181,7 +184,8 @@ namespace Legion {
                                        DistributedID did,
                                        Provenance *provenance,
                                        CollectiveMapping *mapping = NULL,
-                                       RtEvent initialized=RtEvent::NO_RT_EVENT);
+                                       RtEvent initialized =
+                                                   RtEvent::NO_RT_EVENT);
       void create_pending_cross_product(InnerContext *ctx,
                                         IndexPartition handle1,
                                         IndexPartition handle2,
@@ -191,7 +195,8 @@ namespace Legion {
                                         LegionColor &part_color,
                                         std::set<RtEvent> &safe_events,
                                         ShardID shard = 0,
-                                        const ShardMapping *mapping = NULL);
+                                        const ShardMapping *mapping = NULL,
+                          ValueBroadcast<LegionColor> *color_broadcast = NULL);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source,
                                std::set<RtEvent> &applied_events,
                                const CollectiveMapping *mapping = NULL);
@@ -235,35 +240,31 @@ namespace Legion {
                                               ShardID shard = 0,
                                               const ShardMapping *mapping=NULL);
     public:  
-      ApEvent create_partition_by_field(Operation *op,
+      ApEvent create_partition_by_field(Operation *op, FieldID fid,
                                         IndexPartition pending,
                     const std::vector<FieldDataDescriptor> &instances,
                                         ApEvent instances_ready);
-      ApEvent create_partition_by_image(Operation *op,
+      ApEvent create_partition_by_image(Operation *op, FieldID fid,
                                         IndexPartition pending,
                                         IndexPartition projection,
-                    const std::vector<FieldDataDescriptor> &instances,
-                                        ApEvent instances_ready,
-                                        ShardID shard = 0,
-                                        size_t total_shards = 1);
-      ApEvent create_partition_by_image_range(Operation *op,
+                      std::vector<FieldDataDescriptor> &instances,
+                                        ApEvent instances_ready);
+      ApEvent create_partition_by_image_range(Operation *op, FieldID fid,
                                               IndexPartition pending,
                                               IndexPartition projection,
-                    const std::vector<FieldDataDescriptor> &instances,
-                                              ApEvent instances_ready,
-                                              ShardID shard = 0,
-                                              size_t total_shards = 1);
-      ApEvent create_partition_by_preimage(Operation *op,
+                            std::vector<FieldDataDescriptor> &instances,
+                                              ApEvent instances_ready);
+      ApEvent create_partition_by_preimage(Operation *op, FieldID fid,
                                            IndexPartition pending,
                                            IndexPartition projection,
                     const std::vector<FieldDataDescriptor> &instances,
                                            ApEvent instances_ready);
-      ApEvent create_partition_by_preimage_range(Operation *op,
+      ApEvent create_partition_by_preimage_range(Operation *op, FieldID fid,
                                                  IndexPartition pending,
                                                  IndexPartition projection,
                     const std::vector<FieldDataDescriptor> &instances,
                                                  ApEvent instances_ready);
-      ApEvent create_association(Operation *op, 
+      ApEvent create_association(Operation *op, FieldID fid,
                                  IndexSpace domain, IndexSpace range,
                     const std::vector<FieldDataDescriptor> &instances,
                                  ApEvent instances_ready);
@@ -279,8 +280,7 @@ namespace Legion {
                                     const std::vector<IndexSpace> &handles);
     public:
       void set_pending_space_domain(IndexSpace target,
-                                    Domain domain,
-                                    AddressSpaceID source);
+                                    Domain domain);
     public:
       IndexPartition get_index_partition(IndexSpace parent, Color color); 
       bool has_index_subspace(IndexPartition parent,
@@ -1980,13 +1980,12 @@ namespace Legion {
       };
       class IndexSpaceSetFunctor {
       public:
-        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
-          : runtime(rt), source(src), rez(r) { }
+        IndexSpaceSetFunctor(Runtime *rt, Serializer &r)
+          : runtime(rt), rez(r) { }
       public:
         void apply(AddressSpaceID target);
       public:
         Runtime *const runtime;
-        const AddressSpaceID source;
         Serializer &rez;
       };
     public:
@@ -2066,7 +2065,7 @@ namespace Legion {
                             Deserializer &derez, AddressSpaceID source);
       static void handle_colors_response(Deserializer &derez);
       static void handle_index_space_set(RegionTreeForest *forest,
-                           Deserializer &derez, AddressSpaceID source);
+                                         Deserializer &derez);
       static void handle_generate_color_request(RegionTreeForest *forest,
                            Deserializer &derez, AddressSpaceID source);
       static void handle_generate_color_response(Deserializer &derez);
@@ -2077,10 +2076,9 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
-      virtual bool set_domain(const Domain &domain, AddressSpaceID space) = 0;
+      virtual bool set_domain(const Domain &domain) = 0;
       virtual bool set_output_union(
-            const std::map<DomainPoint,DomainPoint> &sizes,
-            AddressSpaceID space) = 0;
+            const std::map<DomainPoint,DomainPoint> &sizes) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
@@ -2146,8 +2144,7 @@ namespace Legion {
     public:
       virtual void pack_index_space(Serializer &rez, 
                                     bool include_size) const = 0;
-      virtual bool unpack_index_space(Deserializer &derez,
-                                      AddressSpaceID source) = 0;
+      virtual bool unpack_index_space(Deserializer &derez) = 0;
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
@@ -2182,35 +2179,31 @@ namespace Legion {
                                         IndexPartNode *partition,
                                         FutureMapImpl *future_map,
                                         size_t granularity) = 0;
-      virtual ApEvent create_by_field(Operation *op,
+      virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready) = 0;
-      virtual ApEvent create_by_image(Operation *op,
+      virtual ApEvent create_by_image(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
-                const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready,
-                                      ShardID shard,
-                                      size_t total_shards) = 0;
-      virtual ApEvent create_by_image_range(Operation *op,
+                    std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_image_range(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
-                const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready,
-                                      ShardID shard,
-                                      size_t total_shards) = 0;
-      virtual ApEvent create_by_preimage(Operation *op,
+                    std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready) = 0;
+      virtual ApEvent create_by_preimage(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready) = 0;
-      virtual ApEvent create_by_preimage_range(Operation *op,
+      virtual ApEvent create_by_preimage_range(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready) = 0;
-      virtual ApEvent create_association(Operation *op,
+      virtual ApEvent create_association(Operation *op, FieldID fid,
                                       IndexSpaceNode *range,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready) = 0;
@@ -2289,18 +2282,17 @@ namespace Legion {
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
 				    bool need_tight_result);
-      bool set_realm_index_space(AddressSpaceID source, ApEvent valid,
-                                 const Realm::IndexSpace<DIM,T> &value,
-                                 bool initialization = false);
+      bool set_realm_index_space(const Realm::IndexSpace<DIM,T> &value,
+                                 ApEvent valid, bool initialization = false,
+                                 bool broadcast = false);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
-      virtual bool set_domain(const Domain &domain, AddressSpaceID space);
+      virtual bool set_domain(const Domain &domain);
       virtual bool set_output_union(
-                const std::map<DomainPoint,DomainPoint> &sizes,
-                AddressSpaceID space);
+                const std::map<DomainPoint,DomainPoint> &sizes);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual IndexSpaceNode* create_node(IndexSpace handle, DistributedID did,
@@ -2342,8 +2334,7 @@ namespace Legion {
       virtual size_t compute_color_offset(LegionColor color);
     public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
-      virtual bool unpack_index_space(Deserializer &derez,
-                                      AddressSpaceID source);
+      virtual bool unpack_index_space(Deserializer &derez);
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
@@ -2392,73 +2383,65 @@ namespace Legion {
                                       IndexPartNode *partition,
                                       FutureMapImpl *future_map,
                                       size_t granularity);
-      virtual ApEvent create_by_field(Operation *op,
+      virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
       template<int COLOR_DIM, typename COLOR_T>
-      ApEvent create_by_field_helper(Operation *op,
+      ApEvent create_by_field_helper(Operation *op, FieldID fid,
                                      IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
                                      ApEvent instances_ready);
-      virtual ApEvent create_by_image(Operation *op,
+      virtual ApEvent create_by_image(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
-                const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready,
-                                      ShardID shard,
-                                      size_t total_shards);
+                    std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
       template<int DIM2, typename T2>
-      ApEvent create_by_image_helper(Operation *op,
+      ApEvent create_by_image_helper(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
-                const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready,
-                                      ShardID shard,
-                                      size_t total_shards);
-      virtual ApEvent create_by_image_range(Operation *op,
+                    std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_image_range(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
-                const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready,
-                                      ShardID shard,
-                                      size_t total_shards);
+                    std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
       template<int DIM2, typename T2>
-      ApEvent create_by_image_range_helper(Operation *op,
+      ApEvent create_by_image_range_helper(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
-                const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready,
-                                      ShardID shard,
-                                      size_t total_shards);
-      virtual ApEvent create_by_preimage(Operation *op,
+                    std::vector<FieldDataDescriptor> &instances,
+                                      ApEvent instances_ready);
+      virtual ApEvent create_by_preimage(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
       template<int DIM2, typename T2>
-      ApEvent create_by_preimage_helper(Operation *op,
+      ApEvent create_by_preimage_helper(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
-      virtual ApEvent create_by_preimage_range(Operation *op,
+      virtual ApEvent create_by_preimage_range(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
       template<int DIM2, typename T2>
-      ApEvent create_by_preimage_range_helper(Operation *op,
+      ApEvent create_by_preimage_range_helper(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
-      virtual ApEvent create_association(Operation *op,
+      virtual ApEvent create_association(Operation *op, FieldID fid,
                                       IndexSpaceNode *range,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
       template<int DIM2, typename T2>
-      ApEvent create_association_helper(Operation *op,
+      ApEvent create_association_helper(Operation *op, FieldID fid,
                                       IndexSpaceNode *range,
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
@@ -2593,19 +2576,19 @@ namespace Legion {
       };
       struct CreateByFieldHelper {
       public:
-        CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n,
-                            Operation *o, IndexPartNode *p,
+        CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n, 
+                            Operation *o, FieldID f, IndexPartNode *p,
                             const std::vector<FieldDataDescriptor> &i,
                             ApEvent r)
-          : node(n), op(o), partition(p), instances(i), ready(r) { }
+          : node(n), op(o), partition(p), instances(i), ready(r), fid(f) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByFieldHelper *creator)
         {
           creator->result = 
            creator->node->template create_by_field_helper<COLOR_DIM::N,COLOR_T>(
-                         creator->op, creator->partition, creator->instances,
-                         creator->ready);
+                         creator->op, creator->fid, creator->partition,
+                         creator->instances, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -2613,79 +2596,76 @@ namespace Legion {
         IndexPartNode *partition;
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
+        FieldID fid;
       };
       struct CreateByImageHelper {
       public:
-        CreateByImageHelper(IndexSpaceNodeT<DIM,T> *n,
-                            Operation *o, IndexPartNode *p, IndexPartNode *j,
-                            const std::vector<FieldDataDescriptor> &i,
-                            ApEvent r, ShardID s, size_t t)
+        CreateByImageHelper(IndexSpaceNodeT<DIM,T> *n, Operation *o,
+                            FieldID f, IndexPartNode *p, IndexPartNode *j,
+                            std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
           : node(n), op(o), partition(p), projection(j), 
-            instances(i), ready(r), shard(s), total_shards(t) { }
+            instances(i), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateByImageHelper *creator)
         {
           creator->result = 
            creator->node->template create_by_image_helper<DIM2::N,T2>(
-               creator->op, creator->partition, creator->projection,
-               creator->instances, creator->ready, creator->shard,
-               creator->total_shards);
+               creator->op, creator->fid, creator->partition,
+               creator->projection, creator->instances, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
         Operation *op;
         IndexPartNode *partition;
         IndexPartNode *projection;
-        const std::vector<FieldDataDescriptor> &instances;
+        std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
-        ShardID shard;
-        size_t total_shards;
+        FieldID fid;
       };
       struct CreateByImageRangeHelper {
       public:
-        CreateByImageRangeHelper(IndexSpaceNodeT<DIM,T> *n,
-                            Operation *o, IndexPartNode *p, IndexPartNode *j,
-                            const std::vector<FieldDataDescriptor> &i,
-                            ApEvent r, ShardID s, size_t t)
+        CreateByImageRangeHelper(IndexSpaceNodeT<DIM,T> *n, Operation *o,
+                            FieldID f, IndexPartNode *p, IndexPartNode *j,
+                            std::vector<FieldDataDescriptor> &i,
+                            ApEvent r)
           : node(n), op(o), partition(p), projection(j), 
-            instances(i), ready(r), shard(s), total_shards(t) { }
+            instances(i), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateByImageRangeHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_image_range_helper<DIM2::N,T2>(
-               creator->op, creator->partition, creator->projection,
-               creator->instances, creator->ready, creator->shard,
-               creator->total_shards);
+               creator->op, creator->fid, creator->partition,
+               creator->projection, creator->instances, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
         Operation *op;
         IndexPartNode *partition;
         IndexPartNode *projection;
-        const std::vector<FieldDataDescriptor> &instances;
+        std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
-        ShardID shard;
-        size_t total_shards;
+        FieldID fid;
       };
       struct CreateByPreimageHelper {
       public:
-        CreateByPreimageHelper(IndexSpaceNodeT<DIM,T> *n,
-                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+        CreateByPreimageHelper(IndexSpaceNodeT<DIM,T> *n, Operation *o, 
+                            FieldID f, IndexPartNode *p, IndexPartNode *j,
                             const std::vector<FieldDataDescriptor> &i,
                             ApEvent r)
           : node(n), op(o), partition(p), projection(j), 
-            instances(i), ready(r) { }
+            instances(i), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateByPreimageHelper *creator)
         {
           creator->result = 
            creator->node->template create_by_preimage_helper<DIM2::N,T2>(
-               creator->op, creator->partition, creator->projection,
-               creator->instances, creator->ready);
+               creator->op, creator->fid, creator->partition,
+               creator->projection, creator->instances, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -2694,23 +2674,24 @@ namespace Legion {
         IndexPartNode *projection;
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
+        FieldID fid;
       };
       struct CreateByPreimageRangeHelper {
       public:
-        CreateByPreimageRangeHelper(IndexSpaceNodeT<DIM,T> *n,
-                            Operation *o, IndexPartNode *p, IndexPartNode *j,
+        CreateByPreimageRangeHelper(IndexSpaceNodeT<DIM,T> *n, Operation *o,
+                            FieldID f, IndexPartNode *p, IndexPartNode *j,
                             const std::vector<FieldDataDescriptor> &i,
                             ApEvent r)
           : node(n), op(o), partition(p), projection(j), 
-            instances(i), ready(r) { }
+            instances(i), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateByPreimageRangeHelper *creator)
         {
           creator->result = creator->node->template 
             create_by_preimage_range_helper<DIM2::N,T2>(
-               creator->op, creator->partition, creator->projection,
-               creator->instances, creator->ready);
+               creator->op, creator->fid, creator->partition,
+               creator->projection, creator->instances, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -2719,21 +2700,23 @@ namespace Legion {
         IndexPartNode *projection;
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
+        FieldID fid;
       };
       struct CreateAssociationHelper {
       public:
         CreateAssociationHelper(IndexSpaceNodeT<DIM,T> *n,
-                            Operation *o, IndexSpaceNode *g,
+                            Operation *o, FieldID f, IndexSpaceNode *g,
                             const std::vector<FieldDataDescriptor> &i,
                             ApEvent r)
-          : node(n), op(o), range(g), instances(i), ready(r) { }
+          : node(n), op(o), range(g), instances(i), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateAssociationHelper *creator)
         {
           creator->result = creator->node->template 
             create_association_helper<DIM2::N,T2>(
-               creator->op, creator->range, creator->instances, creator->ready);
+               creator->op, creator->fid, creator->range, 
+               creator->instances, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -2741,6 +2724,7 @@ namespace Legion {
         IndexSpaceNode *range;
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
+        FieldID fid;
       };
     };
 

@@ -78,35 +78,41 @@ namespace Legion {
                                      size_t); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_field_helper<INST_N2,T2>(Operation *,	\
+                                     FieldID,             \
 				     IndexPartNode *,	  \
 				     const std::vector<FieldDataDescriptor> &, \
 				     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_image_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,         \
 				     IndexPartNode *, \
 				     IndexPartNode *, \
-				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent, ShardID, size_t); \
+				     std::vector<FieldDataDescriptor> &, \
+                                     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_image_range_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,           \
 				     IndexPartNode *,	\
 				     IndexPartNode *,		\
-				     const std::vector<FieldDataDescriptor> &, \
-				     ApEvent, ShardID, size_t); \
+				     std::vector<FieldDataDescriptor> &, \
+                                     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_preimage_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,           \
 				     IndexPartNode *,	\
 				     IndexPartNode *,		\
 				     const std::vector<FieldDataDescriptor> &, \
 				     ApEvent);		\
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_preimage_range_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,           \
 				     IndexPartNode *,	\
 				     IndexPartNode *,	\
 				     const std::vector<FieldDataDescriptor> &, \
 				     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_association_helper<INST_N2,T2>(Operation *, \
+                                     FieldID,          \
 				     IndexSpaceNode *, \
 				     const std::vector<FieldDataDescriptor> &, \
 				     ApEvent); \

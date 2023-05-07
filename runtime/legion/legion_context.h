@@ -2937,8 +2937,10 @@ namespace Legion {
         { return detach_effects_barrier.next(this); }
       inline ApBarrier get_next_future_map_wait_barrier(void)
         { return future_map_wait_barrier.next(this); }
-      inline RtBarrier get_next_dependent_partition_barrier(void)
-        { return dependent_partition_barrier.next(this); }
+      inline RtBarrier get_next_dependent_partition_mapping_barrier(void)
+        { return dependent_partition_mapping_barrier.next(this); }
+      inline ApBarrier get_next_dependent_partition_execution_barrier(void)
+        { return dependent_partition_execution_barrier.next(this); }
       inline RtBarrier get_next_attach_resource_barrier(void)
         { return attach_resource_barrier.next(this); }
       inline RtBarrier get_next_concurrent_precondition_barrier(void)
@@ -3139,7 +3141,8 @@ namespace Legion {
       RtReplBar resource_return_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
-      RtReplBar dependent_partition_barrier;
+      RtReplBar dependent_partition_mapping_barrier;
+      ApLogicalBar dependent_partition_execution_barrier;
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;

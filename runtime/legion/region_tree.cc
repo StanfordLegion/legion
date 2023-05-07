@@ -336,7 +336,8 @@ namespace Legion {
                                                  LegionColor &part_color,
                                                  std::set<RtEvent> &safe_events,
                                                  ShardID local_shard,
-                                              const ShardMapping *shard_mapping)
+                                              const ShardMapping *shard_mapping,
+                                   ValueBroadcast<LegionColor> *color_broadcast)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
@@ -431,6 +432,8 @@ namespace Legion {
           break;
         }
       }
+      if (color_broadcast != NULL)
+        color_broadcast->broadcast(part_color);
       // Iterate over all our sub-regions and generate partitions
       if (shard_mapping == NULL)
       {
@@ -530,6 +533,7 @@ namespace Legion {
                              handle1.get_tree_id(), handle1.get_type_tag());
             exchange.exchange_ids(child_color,
                 runtime->get_available_distributed_id(), pid);
+            user_handles[child_node->handle] = pid;
           }
           else
             exchange.perform_collective_async();
@@ -775,51 +779,51 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_partition_by_field(Operation *op,
+    ApEvent RegionTreeForest::create_partition_by_field(Operation *op, 
+                                                        FieldID fid,
                                                         IndexPartition pending,
                              const std::vector<FieldDataDescriptor> &instances,
                                                         ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
-      return partition->parent->create_by_field(op, partition, 
+      return partition->parent->create_by_field(op, fid, partition, 
                                                 instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_image(Operation *op,
+                                                        FieldID fid,
                                                         IndexPartition pending,
                                                         IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
-                                                      ApEvent instances_ready,
-                                                        ShardID shard,
-                                                        size_t total_shards)
+                                    std::vector<FieldDataDescriptor> &instances,
+                                                        ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_image(op, partition, projection,
-                          instances, instances_ready, shard, total_shards);
+      return partition->parent->create_by_image(op, fid, partition, projection,
+                                                instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_image_range(Operation *op,
+                                                      FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
-                                                      ApEvent instances_ready,
-                                                      ShardID shard,
-                                                      size_t total_shards)
+                                  std::vector<FieldDataDescriptor> &instances,
+                                                      ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_image_range(op, partition, projection,
-                               instances, instances_ready, shard, total_shards);
+      return partition->parent->create_by_image_range(op, fid, partition,
+                                  projection, instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_preimage(Operation *op,
+                                                      FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
                               const std::vector<FieldDataDescriptor> &instances,
@@ -828,12 +832,13 @@ namespace Legion {
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_preimage(op, partition, projection,
-                                           instances, instances_ready);
+      return partition->parent->create_by_preimage(op, fid, partition,
+                              projection, instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_preimage_range(Operation *op,
+                                                      FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
                               const std::vector<FieldDataDescriptor> &instances,
@@ -842,12 +847,12 @@ namespace Legion {
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_preimage_range(op, partition, 
-                                projection, instances, instances_ready);
+      return partition->parent->create_by_preimage_range(op, fid, partition, 
+                                    projection, instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::create_association(Operation *op,
+    ApEvent RegionTreeForest::create_association(Operation *op, FieldID fid,
                                                  IndexSpace dom, IndexSpace ran,
                               const std::vector<FieldDataDescriptor> &instances,
                                                  ApEvent instances_ready)
@@ -855,7 +860,7 @@ namespace Legion {
     {
       IndexSpaceNode *domain = get_node(dom);
       IndexSpaceNode *range = get_node(ran);
-      return domain->create_association(op, range, instances, instances_ready);
+      return domain->create_association(op,fid,range,instances,instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -907,8 +912,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::set_pending_space_domain(IndexSpace target,
-                                                    Domain domain,
-                                                    AddressSpaceID source)
+                                                    Domain domain)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
@@ -916,7 +920,7 @@ namespace Legion {
       if (!child_node->is_owner() && ((child_node->collective_mapping == NULL)
          || !child_node->collective_mapping->contains(child_node->local_space)))
         return;
-      if (child_node->set_domain(domain, source))
+      if (child_node->set_domain(domain))
         assert(false);
     }
 
@@ -3295,6 +3299,10 @@ namespace Legion {
         }
         else if (add_root_reference)
           result->add_base_valid_ref(APPLICATION_REF);
+        // If we didn't give it a value add a reference to be removed once
+        // the index space node has been set
+        if (bounds == NULL)
+          result->add_base_gc_ref(RUNTIME_REF);
         result->register_with_runtime();
       }
       return result;
@@ -3335,6 +3343,8 @@ namespace Legion {
         index_space_requests.erase(sp);
         // Always add a valid reference from the parent
         parent.add_child(result);
+        // Add a reference for when we set this index space node
+        result->add_base_gc_ref(RUNTIME_REF);
         result->register_with_runtime();
       } 
       return result;
@@ -3388,6 +3398,10 @@ namespace Legion {
           color_space->parent->add_nested_valid_ref(did);
         else
           color_space->add_nested_valid_ref(did);
+        // We know if we're disjoint or not but if we're not complete we might 
+        // still be getting notifications to compute the complete
+        if (complete < 0)
+          result->initialize_disjoint_complete_notifications();
         result->register_with_runtime();
       }
       return result;
@@ -3442,6 +3456,9 @@ namespace Legion {
           color_space->parent->add_nested_valid_ref(did);
         else
           color_space->add_nested_valid_ref(did);
+        // We don't know if we're disjonit or yet not so we need to do
+        // the disjoint and complete analysis
+        result->initialize_disjoint_complete_notifications();
         result->register_with_runtime();
       }
       return result;
@@ -8260,8 +8277,6 @@ namespace Legion {
     void IndexSpaceNode::IndexSpaceSetFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (target == source)
-        return;
       if (target == runtime->address_space)
         return;
       runtime->send_index_space_set(target, rez);
@@ -8711,15 +8726,29 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_index_space_set(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source) 
+                                  RegionTreeForest *forest, Deserializer &derez) 
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
-      IndexSpace handle;
-      derez.deserialize(handle);
-      IndexSpaceNode *node = forest->get_node(handle);
-      if (node->unpack_index_space(derez, source))
-        delete node;
+      IndexPartition parent_handle;
+      derez.deserialize(parent_handle);
+      if (parent_handle.exists())
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        IndexPartNode *parent = forest->get_node(parent_handle);
+        IndexSpaceNode *child = parent->get_child(color);
+        if (child->unpack_index_space(derez))
+          delete child;
+      }
+      else
+      {
+        IndexSpace handle;
+        derez.deserialize(handle);
+        IndexSpaceNode *node = forest->get_node(handle);
+        if (node->unpack_index_space(derez))
+          delete node;
+      }
     } 
 
     //--------------------------------------------------------------------------
@@ -9016,10 +9045,6 @@ namespace Legion {
     { 
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
-      // We know if we're disjoint or not but if we're not complete we might 
-      // still be getting notifications to compute the complete
-      if (comp < 0)
-        initialize_disjoint_complete_notifications();
 #ifdef DEBUG_LEGION
       assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif
@@ -9048,7 +9073,6 @@ namespace Legion {
     {
       parent->add_nested_resource_ref(did);
       color_space->add_nested_resource_ref(did);
-      initialize_disjoint_complete_notifications();
 #ifdef DEBUG_LEGION
       assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif

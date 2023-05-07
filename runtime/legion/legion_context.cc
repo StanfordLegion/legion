@@ -14721,61 +14721,60 @@ namespace Legion {
       LegionColor partition_color = INVALID_COLOR;
       if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      const RtBarrier creation_bar = creation_barrier.next(this);
+      std::set<RtEvent> safe_events;
       // We need an owner node to decide which color everyone is going to use
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
         // Do the call on the owner node
-        std::set<RtEvent> safe_events;
-        ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
-        runtime->forest->create_pending_cross_product(this, handle1, handle2, 
-                                           handles, kind, provenance, 
-                                           partition_color, safe_events,
-                                           owner_shard->shard_id,
-                                           &shard_manager->get_mapping());
-        // We need to wait on the safe event here to make sure effects
-        // have been broadcast before letting the other shard to their part
-        if (!safe_events.empty())
+        if (partition_color == INVALID_COLOR)
         {
-          const RtEvent wait_on = Runtime::merge_events(safe_events);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
+          runtime->forest->create_pending_cross_product(this, handle1, handle2, 
+                                             handles, kind, provenance, 
+                                             partition_color, safe_events,
+                                             owner_shard->shard_id,
+                                             &shard_manager->get_mapping(),
+                                             &color_collective);
         }
-        // Now broadcast the chosen color to all the other shards
-        color_collective.broadcast(partition_color);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
-        // Wait for the creation to be done
-        creation_bar.wait();
+        else
+          runtime->forest->create_pending_cross_product(this, handle1, handle2, 
+                                             handles, kind, provenance, 
+                                             partition_color, safe_events,
+                                             owner_shard->shard_id,
+                                             &shard_manager->get_mapping());
       }
       else
       {
         // Get the color result from the owner node
-        ValueBroadcast<LegionColor> color_collective(this,
-                          index_partition_allocator_shard, COLLECTIVE_LOC_15);
-        partition_color = color_collective.get_value();
+        if (partition_color == INVALID_COLOR)
+        {
+          ValueBroadcast<LegionColor> color_collective(this,
+                            index_partition_allocator_shard, COLLECTIVE_LOC_15);
+          partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
-        assert(partition_color != INVALID_COLOR);
+          assert(partition_color != INVALID_COLOR);
 #endif
+        }
         // Now we can do the call from this node
-        std::set<RtEvent> safe_events;
         runtime->forest->create_pending_cross_product(this, handle1, handle2, 
                                            handles, kind, provenance,
                                            partition_color, safe_events,
                                            owner_shard->shard_id,
                                            &shard_manager->get_mapping());
-        // Signal that we're done with our creation
-        RtEvent safe_event;
-        if (!safe_events.empty())
-          safe_event = Runtime::merge_events(safe_events);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
-        // Also have to wait for creation to finish on all shards because
-        // any shard can handle requests for any cross-product partition
-        creation_bar.wait();
       }
+      // Signal that we're done with our creation
+      RtEvent safe_event;
+      if (!safe_events.empty())
+        safe_event = Runtime::merge_events(safe_events);
+      const RtBarrier creation_bar = creation_barrier.next(this);
+      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
       part_op->initialize_cross_product(this, handle1, handle2, partition_color,
           provenance, owner_shard->shard_id, &shard_manager->get_mapping());
+      // Also have to wait for creation to finish on all shards because
+      // any shard can handle requests for any cross-product partition
+      creation_bar.wait();
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Perform the exchange of all the handle names so that we can record
@@ -15115,9 +15114,9 @@ namespace Legion {
             part_kind, part_color, color_generated))
         log_index.debug("Creating partition by field in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      part_op->initialize_by_field(this, index_partition_allocator_shard,
-                                   pid, handle, parent_priv, color_space,
+      part_op->initialize_by_field(this, pid, handle, parent_priv, color_space,
                                    fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -15196,13 +15195,9 @@ namespace Legion {
             part_kind, part_color, color_generated))
         log_index.debug("Creating partition by image in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      part_op->initialize_by_image(this, 
-#ifndef SHARD_BY_IMAGE
-                                   index_partition_allocator_shard,
-#endif
-                                   pid, handle, projection, parent, fid, 
-                                   id, tag, marg, owner_shard->shard_id,
-                                   total_shards, provenance);
+      part_op->initialize_by_image(this, pid, handle, projection, parent, fid,
+                                   id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_39));
@@ -15281,13 +15276,9 @@ namespace Legion {
             part_kind, part_color, color_generated))
         log_index.debug("Creating partition by image range in task %s "
                         "(ID %lld)", get_task_name(), get_unique_id());
-      part_op->initialize_by_image_range(this, 
-#ifndef SHARD_BY_IMAGE
-                                         index_partition_allocator_shard,
-#endif
-                                         pid, handle, projection, parent, fid, 
-                                         id, tag, marg, owner_shard->shard_id,
-                                         total_shards, provenance);
+      part_op->initialize_by_image_range(this, pid, handle, projection, parent, 
+                                         fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_40));
@@ -15383,9 +15374,9 @@ namespace Legion {
             color_space, provenance, part_kind, part_color, color_generated))
         log_index.debug("Creating partition by preimage in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
-      part_op->initialize_by_preimage(this, index_partition_allocator_shard,
-                                      pid, projection, handle, parent, fid,
-                                      id, tag, marg, provenance);
+      part_op->initialize_by_preimage(this, pid, projection, handle, parent,
+                                      fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_41));
@@ -15465,9 +15456,9 @@ namespace Legion {
         log_index.debug("Creating partition by preimage range in task %s "
                         "(ID %lld)", get_task_name(), get_unique_id());
       part_op->initialize_by_preimage_range(this, 
-                                            index_partition_allocator_shard, 
                                             pid, projection, handle, parent,
                                             fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_42));
