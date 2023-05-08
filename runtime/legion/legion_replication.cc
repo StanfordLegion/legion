@@ -11773,7 +11773,6 @@ namespace Legion {
       }
       if (participating)
         assert(done_triggered);
-      assert(done_event.has_triggered());
 #endif
     } 
 
