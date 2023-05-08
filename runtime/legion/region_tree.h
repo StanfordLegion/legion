@@ -1980,12 +1980,13 @@ namespace Legion {
       };
       class IndexSpaceSetFunctor {
       public:
-        IndexSpaceSetFunctor(Runtime *rt, Serializer &r)
-          : runtime(rt), rez(r) { }
+        IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
+          : runtime(rt), source(src), rez(r) { }
       public:
         void apply(AddressSpaceID target);
       public:
         Runtime *const runtime;
+        const AddressSpaceID source;
         Serializer &rez;
       };
     public:
@@ -2065,7 +2066,7 @@ namespace Legion {
                             Deserializer &derez, AddressSpaceID source);
       static void handle_colors_response(Deserializer &derez);
       static void handle_index_space_set(RegionTreeForest *forest,
-                                         Deserializer &derez);
+                           Deserializer &derez, AddressSpaceID source);
       static void handle_generate_color_request(RegionTreeForest *forest,
                            Deserializer &derez, AddressSpaceID source);
       static void handle_generate_color_response(Deserializer &derez);
@@ -2144,7 +2145,8 @@ namespace Legion {
     public:
       virtual void pack_index_space(Serializer &rez, 
                                     bool include_size) const = 0;
-      virtual bool unpack_index_space(Deserializer &derez) = 0;
+      virtual bool unpack_index_space(Deserializer &derez,
+                                      AddressSpaceID source) = 0;
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 
@@ -2284,7 +2286,8 @@ namespace Legion {
 				    bool need_tight_result);
       bool set_realm_index_space(const Realm::IndexSpace<DIM,T> &value,
                                  ApEvent valid, bool initialization = false,
-                                 bool broadcast = false);
+                                 bool broadcast = false, 
+                                 AddressSpaceID source = 0);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
@@ -2334,7 +2337,8 @@ namespace Legion {
       virtual size_t compute_color_offset(LegionColor color);
     public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
-      virtual bool unpack_index_space(Deserializer &derez);
+      virtual bool unpack_index_space(Deserializer &derez,
+                                      AddressSpaceID source);
     public:
       virtual ApEvent create_equal_children(Operation *op,
                                             IndexPartNode *partition, 

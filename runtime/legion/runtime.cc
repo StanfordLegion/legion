@@ -12097,7 +12097,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_SET:
             {
-              runtime->handle_index_space_set(derez);
+              runtime->handle_index_space_set(derez, remote_address_space);
               break;
             }
           case SEND_INDEX_SPACE_CHILD_REQUEST:
@@ -23854,10 +23854,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_set(Deserializer &derez) 
+    void Runtime::handle_index_space_set(Deserializer &derez,
+                                         AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_index_space_set(forest, derez);
+      IndexSpaceNode::handle_index_space_set(forest, derez, source);
     }
 
     //--------------------------------------------------------------------------

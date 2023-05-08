@@ -4746,7 +4746,12 @@ namespace Legion {
                                          launch_space, sharding_function);
       }
       else
+      {
         create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+#ifdef DEBUG_LEGION
+        sharding_collective->elide_collective();
+#endif
+      }
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,

@@ -2203,32 +2203,57 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_realm_index_space(
-                          const Realm::IndexSpace<DIM,T> &value, ApEvent valid, 
-                          bool initializing, bool broadcast)
+                       const Realm::IndexSpace<DIM,T> &value, ApEvent valid, 
+                       bool initializing, bool broadcast, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // If we're broadcasting, then send this out there to get it in flight
-      if (broadcast && (collective_mapping != NULL) && 
-          collective_mapping->contains(local_space))
+      if (broadcast)
       {
+        if ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space))
+        {
 #ifdef DEBUG_LEGION
-        assert(parent != NULL);
+          assert(is_owner() || (source == 
+                collective_mapping->get_parent(owner_space, local_space)));
+          assert(parent != NULL);
 #endif
-        std::vector<AddressSpaceID> children;
-        collective_mapping->get_children(owner_space, local_space, children);
-        if (!children.empty())
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(parent->handle);
+              rez.serialize(color);
+              rez.serialize(value);
+              rez.serialize(valid);
+            }
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              runtime->send_index_space_set(*it, rez);
+          }
+        }
+        else if (!is_owner() && (source == local_space))
         {
           Serializer rez;
           {
             RezCheck z(rez);
-            rez.serialize(parent->handle);
-            rez.serialize(color);
+            if (parent != NULL)
+            {
+              rez.serialize(parent->handle);
+              rez.serialize(color);
+            }
+            else
+            {
+              rez.serialize(IndexPartition::NO_PART);
+              rez.serialize(handle);
+            }
             rez.serialize(value);
             rez.serialize(valid);
           }
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            runtime->send_index_space_set(*it, rez);
+          runtime->send_index_space_set(owner_space, rez);
         }
       }
       // We can set this now and trigger the event but setting the
@@ -2268,7 +2293,7 @@ namespace Legion {
             pack_index_space(rez, false/*include size*/);
             rez.serialize(valid);
           }
-          IndexSpaceSetFunctor functor(context->runtime, rez);
+          IndexSpaceSetFunctor functor(context->runtime, source, rez);
           map_over_remote_instances(functor);
         }
       }
@@ -2283,8 +2308,11 @@ namespace Legion {
       // Remove the reference we were holding until this was set
       if (initializing)
         return false;
-      else
-        return remove_base_gc_ref(RUNTIME_REF);
+      else if (parent == NULL)
+        return remove_base_gc_ref(REGION_TREE_REF);
+      if (parent->remove_base_gc_ref(REGION_TREE_REF))
+        delete parent;
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -2318,7 +2346,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DomainT<DIM,T> realm_space = domain;
-      return set_realm_index_space(realm_space, ApEvent::NO_AP_EVENT);
+      return set_realm_index_space(realm_space, ApEvent::NO_AP_EVENT,
+          false/*init*/, true/*broadcast*/, context->runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -2350,7 +2379,8 @@ namespace Legion {
         output_rects.push_back(Realm::Rect<DIM,T>(lo, hi));
       }
       const Realm::IndexSpace<DIM,T> output_space(output_rects);
-      return set_realm_index_space(output_space, ApEvent::NO_AP_EVENT);
+      return set_realm_index_space(output_space, ApEvent::NO_AP_EVENT,
+          false/*init*/, true/*broadast*/, context->runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -3099,7 +3129,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::unpack_index_space(Deserializer &derez)
+    bool IndexSpaceNodeT<DIM,T>::unpack_index_space(Deserializer &derez,
+                                                    AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> result_space;
@@ -3107,7 +3138,7 @@ namespace Legion {
       ApEvent valid_event;
       derez.deserialize(valid_event);
       return set_realm_index_space(result_space, valid_event,
-                  false/*initialization*/, true/*broadcast*/);
+          false/*initialization*/, true/*broadcast*/, source);
     }
 
     //--------------------------------------------------------------------------
@@ -3881,9 +3912,10 @@ namespace Legion {
                                     precondition, result, DEP_PART_BY_FIELD);
 #endif
       // Update the children with the names of their subspaces 
+      const AddressSpaceID source_space = context->runtime->address_space;
       for (unsigned idx = 0; idx < children.size(); idx++)
         if (children[idx]->set_realm_index_space(subspaces[idx], result,
-                            false/*initialization*/, true/*broadcast*/))
+              false/*initialization*/, true/*broadcast*/, source_space))
           delete children[idx];
       return result;
     }
@@ -3927,6 +3959,7 @@ namespace Legion {
       bool first_child = true;
       std::vector<ApEvent> results;
       Realm::IndexSpace<DIM1,T1> local_space;
+      const AddressSpaceID source_space = context->runtime->address_space;
       typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM2,T2>,
                                        Realm::Point<DIM1,T1> > RealmDescriptor;
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
@@ -3996,7 +4029,7 @@ namespace Legion {
 #endif
         // Set the result and indicate that we're broadcasting it
         if (child->set_realm_index_space(subspace, result,
-              false/*initialization*/, true/*broadcast*/))
+              false/*initialization*/, true/*broadcast*/, source_space))
           delete child;
         if (result.exists())
           results.push_back(result);
@@ -4046,6 +4079,7 @@ namespace Legion {
       bool first_child = true;
       std::vector<ApEvent> results;
       Realm::IndexSpace<DIM1,T1> local_space;
+      const AddressSpaceID source_space = context->runtime->address_space;
       typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM2,T2>,
                                        Realm::Rect<DIM1,T1> > RealmDescriptor;
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
@@ -4115,7 +4149,7 @@ namespace Legion {
 #endif
         // Set the result and indicate that we're broadcasting it
         if (child->set_realm_index_space(subspace, result,
-              false/*initialization*/, true/*broadcast*/))
+              false/*initialization*/, true/*broadcast*/, source_space))
           delete child;
         if (result.exists())
           results.push_back(result);
@@ -4234,9 +4268,10 @@ namespace Legion {
                                     precondition, result, DEP_PART_BY_PREIMAGE);
 #endif
       // Update the child subspace of the preimage
+      const AddressSpaceID source_space = context->runtime->address_space;
       for (unsigned idx = 0; idx < children.size(); idx++)
         if (children[idx]->set_realm_index_space(subspaces[idx], result,
-              false/*initialization*/, true/*broadcast*/))
+              false/*initialization*/, true/*broadcast*/, source_space))
           delete children[idx];
       return result;
     }
@@ -4351,9 +4386,10 @@ namespace Legion {
                     precondition, result, DEP_PART_BY_PREIMAGE_RANGE);
 #endif
       // Update the child subspace of the preimage
+      const AddressSpaceID source_space = context->runtime->address_space;
       for (unsigned idx = 0; idx < children.size(); idx++)
         if (children[idx]->set_realm_index_space(subspaces[idx], result,
-              false/*initialization*/, true/*broadcast*/))
+              false/*initialization*/, true/*broadcast*/, source_space))
           delete children[idx];
       return result;
     }

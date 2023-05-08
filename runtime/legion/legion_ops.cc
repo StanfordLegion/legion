@@ -17956,7 +17956,10 @@ namespace Legion {
     size_t DependentPartitionOp::get_collective_points(void) const
     //--------------------------------------------------------------------------
     {
-      return get_shard_points()->get_volume();
+      if (is_index_space)
+        return get_shard_points()->get_volume();
+      else
+        return 1;
     }
 
     //--------------------------------------------------------------------------

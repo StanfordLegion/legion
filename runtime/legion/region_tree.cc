@@ -3302,7 +3302,14 @@ namespace Legion {
         // If we didn't give it a value add a reference to be removed once
         // the index space node has been set
         if (bounds == NULL)
-          result->add_base_gc_ref(RUNTIME_REF);
+        {
+          // Hold the reference on the parent partition to keep both it
+          // and the child index space alive if there is a a parent
+          if (result->parent != NULL)
+            result->parent->add_base_gc_ref(REGION_TREE_REF);
+          else
+            result->add_base_gc_ref(REGION_TREE_REF);
+        }
         result->register_with_runtime();
       }
       return result;
@@ -3344,7 +3351,9 @@ namespace Legion {
         // Always add a valid reference from the parent
         parent.add_child(result);
         // Add a reference for when we set this index space node
-        result->add_base_gc_ref(RUNTIME_REF);
+        // Hold the reference on the parent partition to keep both it
+        // and the child index space alive 
+        parent.add_base_gc_ref(REGION_TREE_REF);
         result->register_with_runtime();
       } 
       return result;
@@ -8279,6 +8288,8 @@ namespace Legion {
     {
       if (target == runtime->address_space)
         return;
+      if (target == source)
+        return;
       runtime->send_index_space_set(target, rez);
     } 
 
@@ -8726,7 +8737,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_index_space_set(
-                                  RegionTreeForest *forest, Deserializer &derez) 
+           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -8738,7 +8749,7 @@ namespace Legion {
         derez.deserialize(color);
         IndexPartNode *parent = forest->get_node(parent_handle);
         IndexSpaceNode *child = parent->get_child(color);
-        if (child->unpack_index_space(derez))
+        if (child->unpack_index_space(derez, source))
           delete child;
       }
       else
@@ -8746,7 +8757,7 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         IndexSpaceNode *node = forest->get_node(handle);
-        if (node->unpack_index_space(derez))
+        if (node->unpack_index_space(derez, source))
           delete node;
       }
     } 
@@ -9095,11 +9106,31 @@ namespace Legion {
         for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
           remaining_local_disjoint_complete_notifications++;
         // One for the disjointness task that will run
-        remaining_global_disjoint_complete_notifications = 1;
+        if (remaining_local_disjoint_complete_notifications > 0)
+          remaining_global_disjoint_complete_notifications = 1;
+        else
+          remaining_global_disjoint_complete_notifications = 0;
         // More notifications from any remote nodes
         if (collective_mapping != NULL)
           remaining_global_disjoint_complete_notifications +=
             collective_mapping->count_children(owner_space, local_space);
+        if (remaining_global_disjoint_complete_notifications == 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(!is_owner());
+#endif
+          const AddressSpaceID target =
+            collective_mapping->get_parent(owner_space, local_space);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<int>(1); // up and compressed
+            rez.serialize(total_children_volume);
+            rez.serialize(total_intersection_volume);
+          }
+          runtime->send_index_partition_disjoint_update(target, rez);
+        }
       }
       else
         remaining_global_disjoint_complete_notifications = 0;
@@ -10503,7 +10534,8 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       // Quick out if we've already sent this
-      if (has_remote_instance(target))
+      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
         return;
       parent->send_node(target, true/*recurse*/);
       color_space->send_node(target, true/*recurse*/);
