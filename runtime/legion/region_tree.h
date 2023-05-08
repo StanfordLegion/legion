@@ -2077,7 +2077,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
-      virtual bool set_domain(const Domain &domain) = 0;
+      virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
       virtual bool set_output_union(
             const std::map<DomainPoint,DomainPoint> &sizes) = 0;
       virtual void tighten_index_space(void) = 0;
@@ -2293,7 +2293,7 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
-      virtual bool set_domain(const Domain &domain);
+      virtual bool set_domain(const Domain &domain, bool broadcast = false);
       virtual bool set_output_union(
                 const std::map<DomainPoint,DomainPoint> &sizes);
       virtual void tighten_index_space(void);

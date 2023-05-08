@@ -2206,33 +2206,41 @@ namespace Legion {
                        const Realm::IndexSpace<DIM,T> &value, ApEvent valid, 
                        bool initializing, bool broadcast, AddressSpaceID source)
     //--------------------------------------------------------------------------
-    {
+    { 
       // If we're broadcasting, then send this out there to get it in flight
       if (broadcast)
       {
         if ((collective_mapping != NULL) && 
             collective_mapping->contains(local_space))
         {
-#ifdef DEBUG_LEGION
-          assert(is_owner() || (source == 
-                collective_mapping->get_parent(owner_space, local_space)));
-          assert(parent != NULL);
-#endif
           std::vector<AddressSpaceID> children;
           collective_mapping->get_children(owner_space, local_space, children);
-          if (!children.empty())
+          const AddressSpaceID parent_space = is_owner() ? source :
+              collective_mapping->get_parent(owner_space, local_space);
+          if (!children.empty() || (parent_space != source))
           {
             Serializer rez;
             {
               RezCheck z(rez);
-              rez.serialize(parent->handle);
-              rez.serialize(color);
+              if (parent != NULL)
+              {
+                rez.serialize(parent->handle);
+                rez.serialize(color);
+              }
+              else
+              {
+                rez.serialize(IndexPartition::NO_PART);
+                rez.serialize(handle);
+              }
               rez.serialize(value);
               rez.serialize(valid);
             }
             for (std::vector<AddressSpaceID>::const_iterator it =
                   children.begin(); it != children.end(); it++)
-              runtime->send_index_space_set(*it, rez);
+              if ((*it) != source)
+                runtime->send_index_space_set(*it, rez);
+            if (parent_space != source)
+              runtime->send_index_space_set(parent_space, rez);
           }
         }
         else if (!is_owner() && (source == local_space))
@@ -2253,7 +2261,11 @@ namespace Legion {
             rez.serialize(value);
             rez.serialize(valid);
           }
-          runtime->send_index_space_set(owner_space, rez);
+          if (collective_mapping != NULL)
+            runtime->send_index_space_set(
+                collective_mapping->find_nearest(local_space), rez);
+          else
+            runtime->send_index_space_set(owner_space, rez);
         }
       }
       // We can set this now and trigger the event but setting the
@@ -2342,18 +2354,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain)
+    bool IndexSpaceNodeT<DIM,T>::set_domain(const Domain &domain,bool broadcast)
     //--------------------------------------------------------------------------
     {
       const DomainT<DIM,T> realm_space = domain;
       return set_realm_index_space(realm_space, ApEvent::NO_AP_EVENT,
-          false/*init*/, true/*broadcast*/, context->runtime->address_space);
+          false/*init*/, broadcast, context->runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::set_output_union(
-                         const std::map<DomainPoint,DomainPoint> &output_sizes)
+                          const std::map<DomainPoint,DomainPoint> &output_sizes)
     //-------------------------------------------------------------------------- 
     {
       std::vector<Realm::Rect<DIM,T> > output_rects;
@@ -2380,7 +2392,7 @@ namespace Legion {
       }
       const Realm::IndexSpace<DIM,T> output_space(output_rects);
       return set_realm_index_space(output_space, ApEvent::NO_AP_EVENT,
-          false/*init*/, true/*broadast*/, context->runtime->address_space);
+          false/*init*/, false/*broadcast*/, context->runtime->address_space);
     }
 
     //--------------------------------------------------------------------------

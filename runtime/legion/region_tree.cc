@@ -916,12 +916,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *child_node = get_node(target);
-      // See if we own this child or not
-      if (!child_node->is_owner() && ((child_node->collective_mapping == NULL)
-         || !child_node->collective_mapping->contains(child_node->local_space)))
-        return;
-      if (child_node->set_domain(domain))
-        assert(false);
+      if (child_node->set_domain(domain, true/*broadcast*/))
+        delete child_node;
     }
 
     //--------------------------------------------------------------------------

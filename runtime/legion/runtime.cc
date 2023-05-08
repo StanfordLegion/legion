@@ -6223,7 +6223,8 @@ namespace Legion {
         {
           DomainPoint lo; lo.dim = extents.dim;
           domain = Domain(lo, extents - 1);
-          node->set_domain(domain);
+          if (node->set_domain(domain, true/*broadcast*/))
+            delete node;
         }
       }
       else
