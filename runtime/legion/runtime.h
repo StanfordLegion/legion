@@ -3514,12 +3514,10 @@ namespace Legion {
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
       void handle_shared_ownership(Deserializer &derez);
-      void handle_index_space_request(Deserializer &derez, 
-                                      AddressSpaceID source);
+      void handle_index_space_request(Deserializer &derez); 
       void handle_index_space_response(Deserializer &derez,
                                        AddressSpaceID source);
-      void handle_index_space_return(Deserializer &derez,
-                                     AddressSpaceID source); 
+      void handle_index_space_return(Deserializer &derez);
       void handle_index_space_set(Deserializer &derez,
                                   AddressSpaceID source);
       void handle_index_space_child_request(Deserializer &derez, 
@@ -3537,12 +3535,10 @@ namespace Legion {
       void handle_index_space_generate_color_response(Deserializer &derez);
       void handle_index_space_release_color(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
-      void handle_index_partition_request(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_index_partition_request(Deserializer &derez);
       void handle_index_partition_response(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_index_partition_return(Deserializer &derez,
-                                         AddressSpaceID source);
+      void handle_index_partition_return(Deserializer &derez);
       void handle_index_partition_child_request(Deserializer &derez,
                                                 AddressSpaceID source);
       void handle_index_partition_child_response(Deserializer &derez,
@@ -3556,8 +3552,7 @@ namespace Legion {
       void handle_index_partition_remote_interference_response(
                                    Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
-      void handle_field_space_request(Deserializer &derez,
-                                      AddressSpaceID source);
+      void handle_field_space_request(Deserializer &derez);
       void handle_field_space_return(Deserializer &derez);
       void handle_field_space_allocator_request(Deserializer &derez,
                                                 AddressSpaceID source);
@@ -3579,8 +3574,7 @@ namespace Legion {
       void handle_local_field_alloc_response(Deserializer &derez);
       void handle_local_field_free(Deserializer &derez);
       void handle_local_field_update(Deserializer &derez);
-      void handle_top_level_region_request(Deserializer &derez,
-                                           AddressSpaceID source);
+      void handle_top_level_region_request(Deserializer &derez);
       void handle_top_level_region_return(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_index_space_destruction(Deserializer &derez,

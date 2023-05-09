@@ -286,6 +286,7 @@ namespace Legion {
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
+      IndexPartNode *partition = NULL;
       if ((part_kind == LEGION_COMPUTE_KIND) || 
           (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
           (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
@@ -294,8 +295,8 @@ namespace Legion {
         // otherwise -1 since we don't know
         const int complete = (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ? 1 :
                          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
-        create_node(pid, parent_node, color_node, partition_color, complete, 
-            did, provenance, initialized, mapping); 
+        partition = create_node(pid, parent_node, color_node, partition_color,
+            complete, did, provenance, initialized, mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, -1/*unknown*/,
               complete, partition_color, runtime->address_space, 
@@ -312,16 +313,17 @@ namespace Legion {
                               (part_kind == LEGION_ALIASED_COMPLETE_KIND)) ? 1 :
                              ((part_kind == LEGION_DISJOINT_INCOMPLETE_KIND) ||
                         (part_kind == LEGION_ALIASED_INCOMPLETE_KIND)) ? 0 : -1;
-        create_node(pid, parent_node, color_node, partition_color, disjoint,
-                    complete, did, provenance, initialized, mapping);
+        partition = create_node(pid, parent_node, color_node, partition_color,
+            disjoint, complete, did, provenance, initialized, mapping);
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint ? 1 : 0,
               complete, partition_color, runtime->address_space,
               (provenance == NULL) ? NULL : provenance->human_str());
-	if (runtime->profiler != NULL)
-	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
-						    partition_color);
       }
+      // Instantiate all the local children nodes so that they're available
+      // if anybody comes looking for them
+      for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
+        partition->get_child(*itr);
       ctx->register_index_partition_creation(pid);
       return parent_notified;
     }
@@ -3264,9 +3266,8 @@ namespace Legion {
                                                   const bool tree_valid)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, bounds, is_domain, parent, color,
-                                did, is_ready, expr_id, initialized, depth,
-                                provenance, mapping, tree_valid);
+      IndexSpaceCreator creator(this, sp, parent, color, did, expr_id,
+                  initialized, depth, provenance, mapping, tree_valid);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
       IndexSpaceNode *result = creator.result;  
 #ifdef DEBUG_LEGION
@@ -3282,32 +3283,45 @@ namespace Legion {
         {
           // Need to remove resource reference if not owner
           delete result;
-          return it->second;
+          result = it->second;
+          if (bounds == NULL)
+            return result;
         }
-        index_nodes[sp] = result;
-        index_space_requests.erase(sp);
-        if (parent != NULL)
+        else
         {
+          index_nodes[sp] = result;
+          index_space_requests.erase(sp);
+          if (parent != NULL)
+          {
 #ifdef DEBUG_LEGION
-          assert(!add_root_reference);
+            assert(!add_root_reference);
 #endif
-          parent->add_child(result);
-        }
-        else if (add_root_reference)
-          result->add_base_valid_ref(APPLICATION_REF);
-        // If we didn't give it a value add a reference to be removed once
-        // the index space node has been set
-        if (bounds == NULL)
-        {
-          // Hold the reference on the parent partition to keep both it
-          // and the child index space alive if there is a a parent
-          if (result->parent != NULL)
-            result->parent->add_base_gc_ref(REGION_TREE_REF);
+            parent->add_child(result);
+          }
+          else if (add_root_reference)
+            result->add_base_valid_ref(APPLICATION_REF);
+          // If we didn't give it a value add a reference to be removed once
+          // the index space node has been set
+          if (bounds == NULL)
+          {
+            // Hold the reference on the parent partition to keep both it
+            // and the child index space alive if there is a a parent
+            if (result->parent != NULL)
+              result->parent->add_base_gc_ref(REGION_TREE_REF);
+            else
+              result->add_base_gc_ref(REGION_TREE_REF);
+          }
           else
-            result->add_base_gc_ref(REGION_TREE_REF);
+            result->set_bounds(bounds, is_domain, true/*init*/, is_ready);
+          result->register_with_runtime();
+          return result;
         }
-        result->register_with_runtime();
       }
+#ifdef DEBUG_LEGION
+      assert(bounds != NULL);
+#endif
+      if (result->set_bounds(bounds, is_domain, false/*init*/, is_ready))
+        assert(false); // should never hit this
       return result;
     }
 
@@ -3322,8 +3336,7 @@ namespace Legion {
                                                   unsigned depth)
     //--------------------------------------------------------------------------
     { 
-      IndexSpaceCreator creator(this, sp, NULL, false/*is domain*/, &parent,
-                                color, did, ApEvent::NO_AP_EVENT, 0/*expr id*/, 
+      IndexSpaceCreator creator(this, sp, &parent, color, did, 0/*expr id*/, 
                                 initialized, depth, provenance, mapping, 
                                 true/*tree valid*/);
       NT_TemplateHelper::demux<IndexSpaceCreator>(sp.get_type_tag(), &creator);
@@ -3407,6 +3420,9 @@ namespace Legion {
         // still be getting notifications to compute the complete
         if (complete < 0)
           result->initialize_disjoint_complete_notifications();
+        else if (runtime->profiler)
+          runtime->profiler->record_index_partition(parent->handle.id,
+              p.id, disjoint, result->color); 
         result->register_with_runtime();
       }
       return result;
@@ -3779,6 +3795,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(space);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_index_space_request(owner, rez);     
           wait_on = done;
         }
@@ -3922,6 +3939,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(part);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_index_partition_request(owner, rez);    
           wait_on = done;
         }
@@ -4059,6 +4077,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(space);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_field_space_request(owner, rez);    
           wait_on = done;
         }
@@ -4191,6 +4210,7 @@ namespace Legion {
               Serializer rez;
               rez.serialize(handle.get_tree_id());
               rez.serialize(done);
+              rez.serialize(runtime->address_space);
               runtime->send_top_level_region_request(owner, rez);
               wait_on = done;
             }
@@ -4408,6 +4428,7 @@ namespace Legion {
           Serializer rez;
           rez.serialize(tid);
           rez.serialize(done);
+          rez.serialize(runtime->address_space);
           runtime->send_top_level_region_request(owner, rez);
           wait_on = done;
         }
@@ -4461,6 +4482,7 @@ namespace Legion {
         Serializer rez;
         rez.serialize(space);
         rez.serialize(done);
+        rez.serialize(runtime->address_space);
         runtime->send_index_space_request(target, rez);
         return done;
       }
@@ -8300,9 +8322,14 @@ namespace Legion {
       // Send our parent first if necessary
       if (recurse && (parent != NULL))
         parent->send_node(target, true/*recurse*/);
-      // Allow for sending from the non-owner node
-      if (is_owner() || ((collective_mapping != NULL) && 
-            collective_mapping->contains(local_space)))
+      // Only send it if we're the owner without a collective mapping
+      // or the target is not in the collective mapping and we're the
+      // closest node in the collective mapping to the target
+      if ((is_owner() && (collective_mapping == NULL)) ||
+          ((collective_mapping != NULL) && 
+           !collective_mapping->contains(target) && 
+           collective_mapping->contains(local_space) &&
+           (local_space == collective_mapping->find_nearest(target))))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -8314,9 +8341,7 @@ namespace Legion {
           Serializer rez;
           pack_node(rez, target, recurse, valid);
           context->runtime->send_index_space_response(target, rez);
-          if ((collective_mapping == NULL) || 
-              !collective_mapping->contains(target))
-            update_remote_instances(target);
+          update_remote_instances(target);
         }
       }
     }
@@ -8493,17 +8518,51 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexSpace handle;
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      AddressSpaceID source;
+      derez.deserialize(source);
       IndexSpaceNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       bool valid = false;
       if (target != NULL)
       {
+        // If there is a collective mapping, check to see if we're on the
+        // right node and if not forward it on to the right node
+        if (target->collective_mapping != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!target->collective_mapping->contains(source));
+          assert(target->collective_mapping->contains(target->local_space));
+#endif
+          if (target->is_owner())
+          {
+            const AddressSpaceID nearest = 
+              target->collective_mapping->find_nearest(source);
+            // If we're not the nearest then forward it on to the
+            // proper node to handle the request
+            if (nearest != target->local_space)
+            {
+              Serializer rez;
+              rez.serialize(handle);
+              rez.serialize(to_trigger);
+              rez.serialize(source);
+              forest->runtime->send_index_space_request(nearest, rez);
+              return;
+            }
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            assert(target->local_space == 
+                target->collective_mapping->find_nearest(source));
+          }
+#endif
+        }
         // See if we're going to be sending the whole tree or not
         bool recurse = true;
         if (target->parent == NULL)
@@ -8562,7 +8621,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_node_return(
-          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
+                                 RegionTreeForest *context, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -10063,6 +10122,9 @@ namespace Legion {
             complete.store((parent_volume == total_children_volume));
           }
         }
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->record_index_partition(parent->handle.id,
+              handle.id, disjoint.load(), color);
       }
       has_disjoint.store(true);
       has_complete.store(true);
@@ -10530,12 +10592,18 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       // Quick out if we've already sent this
-      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
-            collective_mapping->contains(target)))
+      if (has_remote_instance(target))
         return;
       parent->send_node(target, true/*recurse*/);
       color_space->send_node(target, true/*recurse*/);
-      if (is_owner())
+      // Only send it if we're the owner without a collective mapping
+      // or the target is not in the collective mapping and we're the
+      // closest node in the collective mapping to the target
+      if ((is_owner() && (collective_mapping == NULL)) ||
+          ((collective_mapping != NULL) && 
+           !collective_mapping->contains(target) && 
+           collective_mapping->contains(local_space) &&
+           (local_space == collective_mapping->find_nearest(target))))
       {
         AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
@@ -10546,9 +10614,7 @@ namespace Legion {
           Serializer rez;
           pack_node(rez, target);
           context->runtime->send_index_partition_response(target, rez);
-          if ((collective_mapping == NULL) || 
-              !collective_mapping->contains(target))
-            update_remote_instances(target);
+          update_remote_instances(target);
         }
       }
     }
@@ -10659,16 +10725,50 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       IndexPartition handle;
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      AddressSpaceID source;
+      derez.deserialize(source);
       IndexPartNode *target = forest->get_node(handle, NULL, true/*can fail*/);
       if (target != NULL)
       {
+        // If there is a collective mapping, check to see if we're on the
+        // right node and if not forward it on to the right node
+        if (target->collective_mapping != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!target->collective_mapping->contains(source));
+          assert(target->collective_mapping->contains(target->local_space));
+#endif
+          if (target->is_owner())
+          {
+            const AddressSpaceID nearest = 
+              target->collective_mapping->find_nearest(source);
+            // If we're not the nearest then forward it on to the
+            // proper node to handle the request
+            if (nearest != target->local_space)
+            {
+              Serializer rez;
+              rez.serialize(handle);
+              rez.serialize(to_trigger);
+              rez.serialize(source);
+              forest->runtime->send_index_partition_request(nearest, rez);
+              return;
+            }
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            assert(target->local_space == 
+                target->collective_mapping->find_nearest(source));
+          }
+#endif
+        }
         target->pack_valid_ref();
         target->send_node(source, true/*recurse*/);
         // Now send back the results
@@ -10686,7 +10786,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_return(
-          RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
+                                 RegionTreeForest *context, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -14419,12 +14519,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      // Only send it if we're the owner without a collective mapping
+      // or the target is not in the collective mapping and we're the
+      // closest node in the collective mapping to the target
+      assert((is_owner() && (collective_mapping == NULL)) ||
+            ((collective_mapping != NULL) && 
+             !collective_mapping->contains(target) &&
+             collective_mapping->contains(local_space) && 
+             (local_space == collective_mapping->find_nearest(target))));
 #endif
       // See if this is in our creation set, if not, send it and all the fields
       AutoLock n_lock(node_lock);
-      if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
-            collective_mapping->contains(target)))
+      if (!has_remote_instance(target))
       {
         // First send the node info and then send all the fields
         Serializer rez;
@@ -14534,14 +14640,48 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void FieldSpaceNode::handle_node_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+           RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       FieldSpace handle;
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      AddressSpaceID source;
+      derez.deserialize(source);
       FieldSpaceNode *target = forest->get_node(handle);
+      // If there is a collective mapping, check to see if we're on the
+      // right node and if not forward it on to the right node
+      if (target->collective_mapping != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!target->collective_mapping->contains(source));
+        assert(target->collective_mapping->contains(target->local_space));
+#endif
+        if (target->is_owner())
+        {
+          const AddressSpaceID nearest = 
+            target->collective_mapping->find_nearest(source);
+          // If we're not the nearest then forward it on to the
+          // proper node to handle the request
+          if (nearest != target->local_space)
+          {
+            Serializer rez;
+            rez.serialize(handle);
+            rez.serialize(to_trigger);
+            rez.serialize(source);
+            forest->runtime->send_field_space_request(nearest, rez);
+            return;
+          }
+        }
+#ifdef DEBUG_LEGION
+        else
+        {
+          assert(target->local_space == 
+              target->collective_mapping->find_nearest(source));
+        }
+#endif
+      }
       target->send_node(source);
       Serializer rez;
       rez.serialize(to_trigger);
@@ -14877,33 +15017,30 @@ namespace Legion {
         invalidate_layouts(index, applied, source, false/*need lock*/);
         return;
       }
-      if (is_owner())
+      // Send messages to any remote nodes to perform the invalidation
+      // We're already holding the lock 
+      if (has_remote_instances())
       {
-        // Send messages to any remote nodes to perform the invalidation
-        // We're already holding the lock 
-        if (has_remote_instances())
+        std::deque<AddressSpaceID> targets;
+        FindTargetsFunctor functor(targets);
+        map_over_remote_instances(functor);
+        std::set<RtEvent> remote_ready;
+        for (std::deque<AddressSpaceID>::const_iterator it = 
+              targets.begin(); it != targets.end(); it++)
         {
-          std::deque<AddressSpaceID> targets;
-          FindTargetsFunctor functor(targets);
-          map_over_remote_instances(functor);
-          std::set<RtEvent> remote_ready;
-          for (std::deque<AddressSpaceID>::const_iterator it = 
-                targets.begin(); it != targets.end(); it++)
+          if ((*it) == source)
+            continue;
+          RtUserEvent remote_done = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            if ((*it) == source)
-              continue;
-            RtUserEvent remote_done = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize(index);
-              rez.serialize(remote_done);
-            }
-            pack_global_ref();
-            runtime->send_field_space_layout_invalidation(*it, rez);
-            applied.insert(remote_done);
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(index);
+            rez.serialize(remote_done);
           }
+          pack_global_ref();
+          runtime->send_field_space_layout_invalidation(*it, rez);
+          applied.insert(remote_done);
         }
       }
       std::vector<LEGION_FIELD_MASK_FIELD_TYPE> to_delete;
@@ -19704,8 +19841,7 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
-              collective_mapping->contains(target)))
+        if (!has_remote_instance(target))
         {
           continue_up = true;
           update_remote_instances(target);
@@ -20225,7 +20361,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RegionNode::handle_top_level_request(
-           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
+                                  RegionTreeForest *forest, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RegionTreeID tid;
@@ -20233,13 +20369,52 @@ namespace Legion {
       RegionNode *node = forest->get_tree(tid);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-      Serializer rez;
+      AddressSpaceID source;
+      derez.deserialize(source);
+      if (node != NULL)
       {
-        RezCheck z(rez);
-        node->send_node(rez, source);
-        rez.serialize(done_event);
+        // If there is a collective mapping, check to see if we're on the
+        // right node and if not forward it on to the right node
+        if (node->collective_mapping != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!node->collective_mapping->contains(source));
+          assert(node->collective_mapping->contains(node->local_space));
+#endif
+          if (node->is_owner())
+          {
+            const AddressSpaceID nearest = 
+              node->collective_mapping->find_nearest(source);
+            // If we're not the nearest then forward it on to the
+            // proper node to handle the request
+            if (nearest != node->local_space)
+            {
+              Serializer rez;
+              rez.serialize(tid);
+              rez.serialize(done_event);
+              rez.serialize(source);
+              forest->runtime->send_top_level_region_request(nearest, rez);
+              return;
+            }
+          }
+#ifdef DEBUG_LEGION
+          else
+          {
+            assert(node->local_space == 
+                node->collective_mapping->find_nearest(source));
+          }
+#endif
+        }
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          node->send_node(rez, source);
+          rez.serialize(done_event);
+        }
+        forest->runtime->send_top_level_region_return(source, rez);
       }
-      forest->runtime->send_top_level_region_return(source, rez);
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -21116,8 +21291,7 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
-              collective_mapping->contains(target)))
+        if (!has_remote_instance(target))
         {
           continue_up = true;
           update_remote_instances(target);

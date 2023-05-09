@@ -2052,11 +2052,9 @@ namespace Legion {
                                        AddressSpaceID source);
     public:
       static void handle_node_request(RegionTreeForest *context,
-                                      Deserializer &derez,
-                                      AddressSpaceID source);
+                                      Deserializer &derez);
       static void handle_node_return(RegionTreeForest *context,
-                                     Deserializer &derez,
-                                     AddressSpaceID source);
+                                     Deserializer &derez);
       static void handle_node_child_request(RegionTreeForest *context,
                             Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
@@ -2077,7 +2075,10 @@ namespace Legion {
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
+      
       virtual bool set_domain(const Domain &domain, bool broadcast = false) = 0;
+      virtual bool set_bounds(const void *bounds, bool is_domain, 
+                              bool inititializing, ApEvent is_ready) = 0;
       virtual bool set_output_union(
             const std::map<DomainPoint,DomainPoint> &sizes) = 0;
       virtual void tighten_index_space(void) = 0;
@@ -2272,8 +2273,7 @@ namespace Legion {
     public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
-                      const void *bounds, bool is_domain,
-                      DistributedID did, ApEvent ready_event,
+                      DistributedID did,
                       IndexSpaceExprID expr_id, RtEvent init,
                       unsigned depth, Provenance *provenance,
                       CollectiveMapping *mapping, bool tree_valid);
@@ -2287,13 +2287,15 @@ namespace Legion {
       bool set_realm_index_space(const Realm::IndexSpace<DIM,T> &value,
                                  ApEvent valid, bool initialization = false,
                                  bool broadcast = false, 
-                                 AddressSpaceID source = 0);
+                                 AddressSpaceID source = UINT_MAX);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
       virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual bool set_domain(const Domain &domain, bool broadcast = false);
+      virtual bool set_bounds(const void *bounds, bool is_domain, 
+                              bool inititializing, ApEvent is_ready);
       virtual bool set_output_union(
                 const std::map<DomainPoint,DomainPoint> &sizes);
       virtual void tighten_index_space(void);
@@ -2850,33 +2852,28 @@ namespace Legion {
      */
     class IndexSpaceCreator {
     public:
-      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, const void *b,
-                        bool is_dom, IndexPartNode *p, LegionColor c, 
-                        DistributedID d, ApEvent a, IndexSpaceExprID e,
+      IndexSpaceCreator(RegionTreeForest *f, IndexSpace s, IndexPartNode *p,
+                        LegionColor c, DistributedID d, IndexSpaceExprID e,
                         RtEvent init, unsigned dp, Provenance *prov,
                         CollectiveMapping *m, bool valid)
-        : forest(f), space(s), bounds(b), is_domain(is_dom), parent(p), 
-          color(c), did(d), ready(a), expr_id(e), initialized(init), depth(dp),
-          provenance(prov), mapping(m), tree_valid(valid), result(NULL) { }
+        : forest(f), space(s), parent(p), color(c), did(d), expr_id(e),
+          initialized(init), depth(dp), provenance(prov), mapping(m),
+          tree_valid(valid), result(NULL) { }
     public:
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
       {
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
-            creator->space, creator->parent, creator->color, creator->bounds,
-            creator->is_domain, creator->did, creator->ready, creator->expr_id,
-            creator->initialized, creator->depth, creator->provenance,
-            creator->mapping, creator->tree_valid);
+            creator->space, creator->parent, creator->color, creator->did,
+            creator->expr_id, creator->initialized, creator->depth,
+            creator->provenance, creator->mapping, creator->tree_valid);
       }
     public:
       RegionTreeForest *const forest;
       const IndexSpace space; 
-      const void *const bounds;
-      const bool is_domain;
       IndexPartNode *const parent;
       const LegionColor color;
       const DistributedID did;
-      const ApEvent ready;
       const IndexSpaceExprID expr_id;
       const RtEvent initialized;
       const unsigned depth;
@@ -3082,11 +3079,9 @@ namespace Legion {
                                        AddressSpaceID source);
     public:
       static void handle_node_request(RegionTreeForest *context,
-                                      Deserializer &derez,
-                                      AddressSpaceID source);
+                                      Deserializer &derez);
       static void handle_node_return(RegionTreeForest *context,
-                                     Deserializer &derez,
-                                     AddressSpaceID source);
+                                     Deserializer &derez);
       static void handle_node_child_request(
           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
@@ -3544,8 +3539,7 @@ namespace Legion {
                                        AddressSpaceID target);
     public:
       static void handle_node_request(RegionTreeForest *context,
-                                      Deserializer &derez,
-                                      AddressSpaceID source);
+                                      Deserializer &derez);
       static void handle_node_return(Deserializer &derez);
       static void handle_allocator_request(RegionTreeForest *forest,
                                            Deserializer &derez,
@@ -4007,7 +4001,7 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       static void handle_top_level_request(RegionTreeForest *forest,
-                                   Deserializer &derez, AddressSpaceID source);
+                                   Deserializer &derez);
       static void handle_top_level_return(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:

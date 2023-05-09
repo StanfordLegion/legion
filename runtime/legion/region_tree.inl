@@ -2113,27 +2113,12 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const void *bounds, bool is_domain, DistributedID did, 
-        ApEvent ready, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
+        DistributedID did, IndexSpaceExprID expr_id, RtEvent init, unsigned dep,
         Provenance *prov, CollectiveMapping *mapping, bool tree_valid)
       : IndexSpaceNode(ctx, handle, parent, color, did, expr_id, init,
           dep, prov, mapping, tree_valid), linearization(NULL)
     //--------------------------------------------------------------------------
     {
-      if (bounds != NULL)
-      {
-        if (is_domain)
-        {
-          const DomainT<DIM,T> temp_space = *static_cast<const Domain*>(bounds);
-          set_realm_index_space(temp_space, ready, true/*initialization*/);
-        }
-        else
-        {
-          const DomainT<DIM,T> temp_space =
-            *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
-          set_realm_index_space(temp_space, ready, true/*initialization*/);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2360,6 +2345,25 @@ namespace Legion {
       const DomainT<DIM,T> realm_space = domain;
       return set_realm_index_space(realm_space, ApEvent::NO_AP_EVENT,
           false/*init*/, broadcast, context->runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::set_bounds(const void *bounds, bool is_domain,
+                                          bool initialization, ApEvent is_ready)
+    //--------------------------------------------------------------------------
+    {
+      if (is_domain)
+      {
+        const DomainT<DIM,T> temp_space = *static_cast<const Domain*>(bounds);
+        return set_realm_index_space(temp_space, is_ready, initialization);
+      }
+      else
+      {
+        const DomainT<DIM,T> temp_space =
+          *static_cast<const Realm::IndexSpace<DIM,T>*>(bounds);
+        return set_realm_index_space(temp_space, is_ready, initialization);
+      }
     }
 
     //--------------------------------------------------------------------------

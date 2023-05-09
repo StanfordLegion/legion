@@ -12083,7 +12083,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_REQUEST:
             {
-              runtime->handle_index_space_request(derez, remote_address_space);
+              runtime->handle_index_space_request(derez);
               break;
             }
           case SEND_INDEX_SPACE_RESPONSE:
@@ -12093,7 +12093,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_RETURN:
             {
-              runtime->handle_index_space_return(derez, remote_address_space);
+              runtime->handle_index_space_return(derez);
               break;
             }
           case SEND_INDEX_SPACE_SET:
@@ -12158,20 +12158,18 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_REQUEST:
             {
-              runtime->handle_index_partition_request(derez, 
-                                                      remote_address_space);
+              runtime->handle_index_partition_request(derez); 
               break;
             }
           case SEND_INDEX_PARTITION_RESPONSE:
             {
-              runtime->handle_index_partition_response(derez,
+              runtime->handle_index_partition_response(derez, 
                                                        remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_RETURN:
             {
-              runtime->handle_index_partition_return(derez,
-                                                     remote_address_space);
+              runtime->handle_index_partition_return(derez);
               break;
             }
           case SEND_INDEX_PARTITION_CHILD_REQUEST:
@@ -12221,7 +12219,7 @@ namespace Legion {
             }
           case SEND_FIELD_SPACE_REQUEST:
             {
-              runtime->handle_field_space_request(derez, remote_address_space);
+              runtime->handle_field_space_request(derez);
               break;
             }
           case SEND_FIELD_SPACE_RETURN:
@@ -12315,8 +12313,7 @@ namespace Legion {
             }
           case SEND_TOP_LEVEL_REGION_REQUEST:
             {
-              runtime->handle_top_level_region_request(derez, 
-                                                       remote_address_space);
+              runtime->handle_top_level_region_request(derez); 
               break;
             }
           case SEND_TOP_LEVEL_REGION_RETURN:
@@ -23831,11 +23828,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_request(Deserializer &derez,
-                                             AddressSpaceID source)
+    void Runtime::handle_index_space_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_request(forest, derez, source);
+      IndexSpaceNode::handle_node_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -23847,11 +23843,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_return(Deserializer &derez,
-                                            AddressSpaceID source)
+    void Runtime::handle_index_space_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_return(forest, derez, source); 
+      IndexSpaceNode::handle_node_return(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
@@ -23939,11 +23934,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_request(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_index_partition_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_request(forest, derez, source);
+      IndexPartNode::handle_node_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -23955,11 +23949,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_return(Deserializer &derez,
-                                                AddressSpaceID source)
+    void Runtime::handle_index_partition_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_return(forest, derez, source);
+      IndexPartNode::handle_node_return(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24026,11 +24019,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_request(Deserializer &derez,
-                                             AddressSpaceID source)
+    void Runtime::handle_field_space_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_node_request(forest, derez, source);
+      FieldSpaceNode::handle_node_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24158,11 +24150,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_region_request(Deserializer &derez,
-                                                  AddressSpaceID source)
+    void Runtime::handle_top_level_region_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RegionNode::handle_top_level_request(forest, derez, source); 
+      RegionNode::handle_top_level_request(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
