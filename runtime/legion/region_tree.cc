@@ -3415,9 +3415,9 @@ namespace Legion {
         // still be getting notifications to compute the complete
         if (complete < 0)
           result->initialize_disjoint_complete_notifications();
-        else if (runtime->profiler)
+        else if ((runtime->profiler != NULL) && result->is_owner())
           runtime->profiler->record_index_partition(parent->handle.id,
-              p.id, disjoint, result->color); 
+              p.id, disjoint, result->color);
         result->register_with_runtime();
       }
       return result;

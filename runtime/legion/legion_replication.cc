@@ -13143,7 +13143,11 @@ namespace Legion {
                                                           int stage)
     //--------------------------------------------------------------------------
     {
-      unsigned offset = descriptors.size();
+      // If this is stack -1 and we're not participating then we're
+      // unpacking the full results back onto this node so overwrite
+      // our current results, otherwise we can safely append
+      const unsigned offset = 
+        ((stage < 0) && !participating) ? 0 : descriptors.size();
       size_t num_descriptors;
       derez.deserialize(num_descriptors);
       descriptors.resize(offset + num_descriptors);
