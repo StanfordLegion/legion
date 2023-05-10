@@ -1119,7 +1119,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!is_owner());
 #endif
-        return owner_space;
+        return collective_mapping->find_nearest(local_space);
       }
       if (!collective_mapping->contains(owner))
       {

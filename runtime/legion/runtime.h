@@ -3139,6 +3139,8 @@ namespace Legion {
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
                                                Serializer &rez);
+      void send_index_partition_child_replication(AddressSpaceID target,
+                                                  Serializer &rez);
       void send_index_partition_disjoint_update(AddressSpaceID target,
                                                 Serializer &rez);
       void send_index_partition_shard_rects_request(AddressSpaceID target,
@@ -3543,6 +3545,7 @@ namespace Legion {
                                                 AddressSpaceID source);
       void handle_index_partition_child_response(Deserializer &derez,
                                                  AddressSpaceID source);
+      void handle_index_partition_child_replication(Deserializer &derez);
       void handle_index_partition_disjoint_update(Deserializer &derez);
       void handle_index_partition_shard_rects_request(Deserializer &derez);
       void handle_index_partition_shard_rects_response(Deserializer &derez,
@@ -5779,6 +5782,8 @@ namespace Legion {
         case SEND_INDEX_PARTITION_CHILD_REQUEST:
           break;
         case SEND_INDEX_PARTITION_CHILD_RESPONSE:
+          break;
+        case SEND_INDEX_PARTITION_CHILD_REPLICATION:
           break;
         case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
           break;

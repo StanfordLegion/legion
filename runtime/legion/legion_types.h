@@ -771,6 +771,7 @@ namespace Legion {
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
+      SEND_INDEX_PARTITION_CHILD_REPLICATION,
       SEND_INDEX_PARTITION_DISJOINT_UPDATE,
       SEND_INDEX_PARTITION_SHARD_RECTS_REQUEST,
       SEND_INDEX_PARTITION_SHARD_RECTS_RESPONSE,
@@ -1034,6 +1035,7 @@ namespace Legion {
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
+        "Send Index Partition Child Replication",                     \
         "Send Index Partition Disjoint Update",                       \
         "Send Index Partition Shard Rects Request",                   \
         "Send Index Partition Shard Rects Response",                  \

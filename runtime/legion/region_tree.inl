@@ -3257,7 +3257,7 @@ namespace Legion {
 #endif
       std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces;
       std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces;
-      std::set<ApEvent> preconditions;
+      std::vector<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
@@ -3274,17 +3274,19 @@ namespace Legion {
           right_child->get_realm_index_space(rhs_spaces.back(),
                                              false/*tight*/);
         if (left_ready.exists())
-          preconditions.insert(left_ready);
+          preconditions.push_back(left_ready);
         if (right_ready.exists())
-          preconditions.insert(right_ready);
+          preconditions.push_back(right_ready);
       }
+      if (lhs_spaces.empty())
+        return ApEvent::NO_AP_EVENT;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                               op, DEP_PART_UNIONS);
       if (op->has_execution_fence_event())
-        preconditions.insert(op->get_execution_fence_event());
+        preconditions.push_back(op->get_execution_fence_event());
       const ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_unions(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
@@ -3328,7 +3330,7 @@ namespace Legion {
 #endif
       std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces;
       std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces;
-      std::set<ApEvent> preconditions;
+      std::vector<ApEvent> preconditions;
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
         IndexSpaceNodeT<DIM,T> *left_child = 
@@ -3344,17 +3346,19 @@ namespace Legion {
           right_child->get_realm_index_space(rhs_spaces.back(),
                                              false/*tight*/);
         if (left_ready.exists())
-          preconditions.insert(left_ready);
+          preconditions.push_back(left_ready);
         if (right_ready.exists())
-          preconditions.insert(right_ready);
+          preconditions.push_back(right_ready);
       }
+      if (lhs_spaces.empty())
+        return ApEvent::NO_AP_EVENT;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                         op, DEP_PART_INTERSECTIONS);
       if (op->has_execution_fence_event())
-        preconditions.insert(op->get_execution_fence_event());
+        preconditions.push_back(op->get_execution_fence_event());
       const ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
@@ -3398,7 +3402,7 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces;
-      std::set<ApEvent> preconditions;
+      std::vector<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
@@ -3409,8 +3413,10 @@ namespace Legion {
           right_child->get_realm_index_space(rhs_spaces.back(),
                                              false/*tight*/);
         if (right_ready.exists())
-          preconditions.insert(right_ready);
+          preconditions.push_back(right_ready);
       }
+      if (rhs_spaces.empty())
+        return ApEvent::NO_AP_EVENT;
       ApEvent result, precondition;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       if (dominates)
@@ -3429,9 +3435,9 @@ namespace Legion {
         Realm::IndexSpace<DIM,T> lhs_space;
         ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
         if (left_ready.exists())
-          preconditions.insert(left_ready);
+          preconditions.push_back(left_ready);
         if (op->has_execution_fence_event())
-          preconditions.insert(op->get_execution_fence_event());
+          preconditions.push_back(op->get_execution_fence_event());
         precondition = Runtime::merge_events(NULL, preconditions);
         result = ApEvent(Realm::IndexSpace<DIM,T>::compute_intersections(
               lhs_space, rhs_spaces, subspaces, requests, precondition));  
@@ -3476,7 +3482,7 @@ namespace Legion {
 #endif
       std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces;
       std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces;
-      std::set<ApEvent> preconditions;
+      std::vector<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       for (ColorSpaceIterator itr(partition, true/*local only*/); itr; itr++)
       {
@@ -3493,17 +3499,19 @@ namespace Legion {
           right_child->get_realm_index_space(rhs_spaces.back(),
                                              false/*tight*/);
         if (left_ready.exists())
-          preconditions.insert(left_ready);
+          preconditions.push_back(left_ready);
         if (right_ready.exists())
-          preconditions.insert(right_ready);
+          preconditions.push_back(right_ready);
       }
+      if (lhs_spaces.empty())
+        return ApEvent::NO_AP_EVENT;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                           op, DEP_PART_DIFFERENCES);
       if (op->has_execution_fence_event())
-        preconditions.insert(op->get_execution_fence_event());
+        preconditions.push_back(op->get_execution_fence_event());
       const ApEvent precondition = Runtime::merge_events(NULL, preconditions);
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_differences(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));

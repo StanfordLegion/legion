@@ -711,6 +711,7 @@ namespace Legion {
                                   CollectiveMapping *mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   RtEvent initialized, Provenance *provenance,
+                                  CollectiveMapping *mapping,
                                   Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
                                   RtEvent initialized, DistributedID did,
@@ -2940,14 +2941,12 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_CHILD_TASK_ID;
       public:
         DeferChildArgs(IndexPartNode *proxy, LegionColor child,
-            RtUserEvent trig, AddressSpaceID src)
+                       AddressSpaceID src)
           : LgTaskArgs<DeferChildArgs>(implicit_provenance),
-            proxy_this(proxy), child_color(child),
-            to_trigger(trig), source(src) { }
+            proxy_this(proxy), child_color(child), source(src) { }
       public:
         IndexPartNode *const proxy_this;
         const LegionColor child_color;
-        const RtUserEvent to_trigger;
         const AddressSpaceID source;
       };
       class RemoteDisjointnessFunctor {
@@ -3087,6 +3086,8 @@ namespace Legion {
       static void defer_node_child_request(const void *args);
       static void handle_node_child_response(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
+      static void handle_child_replication(RegionTreeForest *forest,
+                                           Deserializer &derez);
       static void handle_node_disjoint_update(RegionTreeForest *forest,
                                               Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
@@ -3384,8 +3385,8 @@ namespace Legion {
                      RtEvent initialized, CollectiveMapping *mapping,
                      Provenance *provenance);
       FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx, DistributedID did,
-                     RtEvent initialized, Provenance *provenance,
-                     Deserializer &derez);
+                     RtEvent initialized, CollectiveMapping *mapping,
+                     Provenance *provenance, Deserializer &derez);
       FieldSpaceNode(const FieldSpaceNode &rhs) = delete;
       virtual ~FieldSpaceNode(void);
     public:
