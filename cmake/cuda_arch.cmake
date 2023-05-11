@@ -50,3 +50,46 @@ function(populate_cuda_archs_list ARCHS)
 
   set(${ARCHS} ${archs} PARENT_SCOPE)
 endfunction(populate_cuda_archs_list)
+
+function(archs_list_to_gencode_flags)
+  set(options )
+  set(oneValueArgs FLAGS TARGET)
+  set(multiValueArgs ARCHS)
+  cmake_parse_arguments(CUDA "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  set(flags )
+
+  if(${CUDA_FLAGS})
+    set(flags ${${CUDA_FLAGS}})
+  endif()
+
+  if(NOT CUDA_ARCHS)
+    if(${CUDA_TARGET} AND (TARGET ${CUDA_TARGET}))
+      get_target_property(CUDA_ARCHS ${CUDA_TARGET} CUDA_ARCHITECTURES)
+    else()
+      set(CUDA_ARCHS ${CMAKE_CUDA_ARCHITECTURES})
+    endif()
+  endif()
+
+  list(REMOVE_DUPLICATES CUDA_ARCHS)
+
+  # ARCH=75-real    : --generate-code=arch=compute_75,code=[sm_75]
+  # ARCH=75-virtual : --generate-code=arch=compute_75,code=[compute_75]
+  # ARCH=75         : --generate-code=arch=compute_75,code=[compute_75,sm_75]
+  foreach(ARCH IN LISTS CUDA_ARCHS)
+    set(codes "compute_XX" "sm_XX")
+    if(ARCH MATCHES "-real")
+      list(POP_FRONT codes) # remove "compute_XX"
+      string(REPLACE "-real" "" ARCH "${ARCH}")
+    elseif(ARCH MATCHES "-virtual")
+      list(POP_BACK codes) # remove "sm_XX"
+      string(REPLACE "-virtual" "" ARCH "${ARCH}")
+    endif()
+    list(TRANSFORM codes REPLACE "_XX" "_${ARCH}")
+    list(JOIN codes "," codes)
+    list(APPEND flags "--generate-code=arch=compute_${ARCH},code=[${codes}]")
+  endforeach()
+
+  set(${CUDA_FLAGS} ${flags} PARENT_SCOPE)
+
+endfunction()
