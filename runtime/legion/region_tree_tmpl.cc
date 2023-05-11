@@ -81,6 +81,7 @@ namespace Legion {
                                      FieldID,             \
 				     IndexPartNode *,	  \
 				     const std::vector<FieldDataDescriptor> &, \
+                                     std::vector<DeppartResult>*, \
 				     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_image_helper<INST_N2,T2>(Operation *, \
@@ -102,6 +103,8 @@ namespace Legion {
 				     IndexPartNode *,	\
 				     IndexPartNode *,		\
 				     const std::vector<FieldDataDescriptor> &, \
+                                     const std::map<DomainPoint,Domain>*, \
+                                     std::vector<DeppartResult>*, \
 				     ApEvent);		\
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_by_preimage_range_helper<INST_N2,T2>(Operation *, \
@@ -109,6 +112,8 @@ namespace Legion {
 				     IndexPartNode *,	\
 				     IndexPartNode *,	\
 				     const std::vector<FieldDataDescriptor> &, \
+                                     const std::map<DomainPoint,Domain>*, \
+                                     std::vector<DeppartResult>*, \
 				     ApEvent); \
   template ApEvent IndexSpaceNodeT<INST_N1,T1>:: \
     create_association_helper<INST_N2,T2>(Operation *, \

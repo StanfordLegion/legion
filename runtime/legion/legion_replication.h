@@ -600,9 +600,8 @@ namespace Legion {
      */
     class FieldDescriptorExchange : public AllGatherCollective<true> {
     public:
-      FieldDescriptorExchange(ReplicateContext *ctx, CollectiveID,
-                              std::vector<FieldDataDescriptor> &descriptors,
-                              bool exchange_colors);
+      FieldDescriptorExchange(ReplicateContext *ctx, CollectiveID id,
+                              std::vector<FieldDataDescriptor> &descriptors);
       FieldDescriptorExchange(const FieldDescriptorExchange &rhs) = delete;
       virtual ~FieldDescriptorExchange(void);
     public:
@@ -612,9 +611,60 @@ namespace Legion {
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
-    public:
+    protected:
       std::vector<FieldDataDescriptor> &descriptors;
-      const bool exchange_colors;
+    };
+
+    /**
+     * \class FieldDescriptorGather
+     * Gather all of the field descriptors to a particular shard and
+     * track the merge of all the ready events
+     */
+    class FieldDescriptorGather : public GatherCollective {
+    public:
+      FieldDescriptorGather(ReplicateContext *ctx, CollectiveID id,
+                            std::vector<FieldDataDescriptor> &descriptors,
+                            std::map<DomainPoint,Domain> &remote_targets);
+      FieldDescriptorGather(const FieldDescriptorGather &rhs) = delete;
+      virtual ~FieldDescriptorGather(void);
+    public:
+      FieldDescriptorGather& operator=(
+                            const FieldDescriptorGather &rhs) = delete;
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void contribute_instances(ApEvent instances_ready);
+      ApEvent get_ready_event(void);
+    protected:
+      std::vector<FieldDataDescriptor> &descriptors;
+      std::map<DomainPoint,Domain> &remote_targets;
+      std::vector<ApEvent> ready_events;
+    };
+
+    /**
+     * \class DeppartResultScatter
+     * Scatter the results of a dependent partitioning operation
+     * back across the shards so they can fill in their nodes
+     */
+    class DeppartResultScatter : public BroadcastCollective {
+    public:
+      DeppartResultScatter(ReplicateContext *ctx, CollectiveID id,
+                           std::vector<DeppartResult> &results);
+      DeppartResultScatter(const DeppartResultScatter &rhs) = delete;
+      virtual ~DeppartResultScatter(void);
+    public:
+      DeppartResultScatter& operator=(const DeppartResultScatter &rhs) = delete;
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void broadcast_results(ApEvent done_event);
+      inline ApEvent get_done_event(void) { return done_event; }
+    public:
+      std::vector<DeppartResult> &results;
+      mutable ApEvent done_event;
+      mutable bool renamed;
     };
 
     /**
@@ -1909,13 +1959,18 @@ namespace Legion {
                                                bool &first_local);
     protected:
       void select_sharding_function(void);
+      void find_remote_targets(std::vector<ApEvent> &preconditions);
     protected:
       ShardingFunction *sharding_function;
       IndexSpaceNode *shard_points;
       RtBarrier mapping_barrier;
+      FieldDescriptorGather *gather;
+      DeppartResultScatter *scatter;
       FieldDescriptorExchange *exchange;
       ApBarrier collective_ready;
       ApBarrier collective_done;
+      std::map<DomainPoint,Domain> remote_targets;
+      std::vector<DeppartResult> deppart_results;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

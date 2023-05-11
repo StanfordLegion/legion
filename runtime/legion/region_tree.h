@@ -44,6 +44,15 @@ namespace Legion {
       PhysicalInstance inst;
     };
 
+    struct DeppartResult {
+    public:
+      inline bool operator<(const DeppartResult &rhs) const
+        { return (color < rhs.color); }
+    public:
+      Domain domain;
+      LegionColor color;
+    };
+
     /**
      * \struct IndirectRecord
      * A small helper class for performing exchanges of
@@ -243,6 +252,7 @@ namespace Legion {
       ApEvent create_partition_by_field(Operation *op, FieldID fid,
                                         IndexPartition pending,
                     const std::vector<FieldDataDescriptor> &instances,
+                          std::vector<DeppartResult> *results,
                                         ApEvent instances_ready);
       ApEvent create_partition_by_image(Operation *op, FieldID fid,
                                         IndexPartition pending,
@@ -258,11 +268,15 @@ namespace Legion {
                                            IndexPartition pending,
                                            IndexPartition projection,
                     const std::vector<FieldDataDescriptor> &instances,
+                    const std::map<DomainPoint,Domain> *remote_targets,
+                          std::vector<DeppartResult> *results,
                                            ApEvent instances_ready);
       ApEvent create_partition_by_preimage_range(Operation *op, FieldID fid,
                                                  IndexPartition pending,
                                                  IndexPartition projection,
                     const std::vector<FieldDataDescriptor> &instances,
+                    const std::map<DomainPoint,Domain> *remote_targets,
+                          std::vector<DeppartResult> *results,
                                                  ApEvent instances_ready);
       ApEvent create_association(Operation *op, FieldID fid,
                                  IndexSpace domain, IndexSpace range,
@@ -2186,6 +2200,7 @@ namespace Legion {
       virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready) = 0;
       virtual ApEvent create_by_image(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
@@ -2201,11 +2216,15 @@ namespace Legion {
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
+                const std::map<DomainPoint,Domain> *remote_targets,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready) = 0;
       virtual ApEvent create_by_preimage_range(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
+                const std::map<DomainPoint,Domain> *remote_targets,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready) = 0;
       virtual ApEvent create_association(Operation *op, FieldID fid,
                                       IndexSpaceNode *range,
@@ -2393,11 +2412,13 @@ namespace Legion {
       virtual ApEvent create_by_field(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_field_helper(Operation *op, FieldID fid,
                                      IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
+                      std::vector<DeppartResult> *results,
                                      ApEvent instances_ready);
       virtual ApEvent create_by_image(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
@@ -2425,23 +2446,31 @@ namespace Legion {
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
+                const std::map<DomainPoint,Domain> *remote_targets,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready);
       template<int DIM2, typename T2>
       ApEvent create_by_preimage_helper(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
+                const std::map<DomainPoint,Domain> *remote_targets,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready);
       virtual ApEvent create_by_preimage_range(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
+                const std::map<DomainPoint,Domain> *remote_targets,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready);
       template<int DIM2, typename T2>
       ApEvent create_by_preimage_range_helper(Operation *op, FieldID fid,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
                 const std::vector<FieldDataDescriptor> &instances,
+                const std::map<DomainPoint,Domain> *remote_targets,
+                      std::vector<DeppartResult> *results,
                                       ApEvent instances_ready);
       virtual ApEvent create_association(Operation *op, FieldID fid,
                                       IndexSpaceNode *range,
@@ -2586,8 +2615,9 @@ namespace Legion {
         CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n, 
                             Operation *o, FieldID f, IndexPartNode *p,
                             const std::vector<FieldDataDescriptor> &i,
-                            ApEvent r)
-          : node(n), op(o), partition(p), instances(i), ready(r), fid(f) { }
+                            std::vector<DeppartResult> *res, ApEvent r)
+          : node(n), op(o), partition(p), instances(i), 
+            results(res), ready(r), fid(f) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByFieldHelper *creator)
@@ -2595,13 +2625,14 @@ namespace Legion {
           creator->result = 
            creator->node->template create_by_field_helper<COLOR_DIM::N,COLOR_T>(
                          creator->op, creator->fid, creator->partition,
-                         creator->instances, creator->ready);
+                         creator->instances, creator->results, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
         Operation *op;
         IndexPartNode *partition;
         const std::vector<FieldDataDescriptor> &instances;
+        std::vector<DeppartResult> *const results;
         ApEvent ready, result;
         FieldID fid;
       };
@@ -2662,9 +2693,10 @@ namespace Legion {
         CreateByPreimageHelper(IndexSpaceNodeT<DIM,T> *n, Operation *o, 
                             FieldID f, IndexPartNode *p, IndexPartNode *j,
                             const std::vector<FieldDataDescriptor> &i,
-                            ApEvent r)
-          : node(n), op(o), partition(p), projection(j), 
-            instances(i), ready(r), fid(f) { }
+                            const std::map<DomainPoint,Domain> *t,
+                            std::vector<DeppartResult> *res, ApEvent r)
+          : node(n), op(o), partition(p), projection(j), instances(i),
+            remote_targets(t), results(res), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateByPreimageHelper *creator)
@@ -2672,7 +2704,8 @@ namespace Legion {
           creator->result = 
            creator->node->template create_by_preimage_helper<DIM2::N,T2>(
                creator->op, creator->fid, creator->partition,
-               creator->projection, creator->instances, creator->ready);
+               creator->projection, creator->instances,
+               creator->remote_targets, creator->results, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -2680,6 +2713,8 @@ namespace Legion {
         IndexPartNode *partition;
         IndexPartNode *projection;
         const std::vector<FieldDataDescriptor> &instances;
+        const std::map<DomainPoint,Domain> *const remote_targets;
+        std::vector<DeppartResult> *const results;
         ApEvent ready, result;
         FieldID fid;
       };
@@ -2688,9 +2723,10 @@ namespace Legion {
         CreateByPreimageRangeHelper(IndexSpaceNodeT<DIM,T> *n, Operation *o,
                             FieldID f, IndexPartNode *p, IndexPartNode *j,
                             const std::vector<FieldDataDescriptor> &i,
-                            ApEvent r)
-          : node(n), op(o), partition(p), projection(j), 
-            instances(i), ready(r), fid(f) { }
+                            const std::map<DomainPoint,Domain> *t,
+                            std::vector<DeppartResult> *res, ApEvent r)
+          : node(n), op(o), partition(p), projection(j), instances(i),
+            remote_targets(t), results(res), ready(r), fid(f) { }
       public:
         template<typename DIM2, typename T2>
         static inline void demux(CreateByPreimageRangeHelper *creator)
@@ -2698,7 +2734,8 @@ namespace Legion {
           creator->result = creator->node->template 
             create_by_preimage_range_helper<DIM2::N,T2>(
                creator->op, creator->fid, creator->partition,
-               creator->projection, creator->instances, creator->ready);
+               creator->projection, creator->instances,
+               creator->remote_targets, creator->results, creator->ready);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -2706,6 +2743,8 @@ namespace Legion {
         IndexPartNode *partition;
         IndexPartNode *projection;
         const std::vector<FieldDataDescriptor> &instances;
+        const std::map<DomainPoint,Domain> *const remote_targets;
+        std::vector<DeppartResult> *const results;
         ApEvent ready, result;
         FieldID fid;
       };

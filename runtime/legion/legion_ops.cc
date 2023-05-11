@@ -17600,19 +17600,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByFieldThunk::perform(
            DependentPartitionOp *op, RegionTreeForest *forest, FieldID fid,
-           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances)
+           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances,
+           const std::map<DomainPoint,Domain> *remote_targets,
+           std::vector<DeppartResult> *results)
     //--------------------------------------------------------------------------
     {
-      return forest->create_partition_by_field(op, fid, pid,
-                                               instances, instances_ready);
+#ifdef DEBUG_LEGION
+      assert((remote_targets == NULL) || remote_targets->empty());
+#endif
+      return forest->create_partition_by_field(op, fid, pid, instances,
+                                               results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByImageThunk::perform(
            DependentPartitionOp *op, RegionTreeForest *forest, FieldID fid,
-           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances)
+           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances,
+           const std::map<DomainPoint,Domain> *remote_targets,
+           std::vector<DeppartResult> *results)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should never see these here
+      assert(remote_targets == NULL);
+      assert(results == NULL);
+#endif
       return forest->create_partition_by_image(op, fid, pid, projection, 
                                                instances, instances_ready);
     }
@@ -17620,39 +17632,57 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByImageRangeThunk::perform(
            DependentPartitionOp *op, RegionTreeForest *forest, FieldID fid,
-           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances)
+           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances,
+           const std::map<DomainPoint,Domain> *remote_targets,
+           std::vector<DeppartResult> *results)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should never see these here
+      assert(remote_targets == NULL);
+      assert(results == NULL);
+#endif
       return forest->create_partition_by_image_range(op, fid, pid, projection,
-                                                     instances,instances_ready);
+                                                  instances, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByPreimageThunk::perform(
            DependentPartitionOp *op, RegionTreeForest *forest, FieldID fid,
-           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances)
+           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances,
+           const std::map<DomainPoint,Domain> *remote_targets,
+           std::vector<DeppartResult> *results)
     //--------------------------------------------------------------------------
     {
       return forest->create_partition_by_preimage(op, fid, pid, projection, 
-                                                  instances, instances_ready);
+                      instances, remote_targets, results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByPreimageRangeThunk::perform(
            DependentPartitionOp *op, RegionTreeForest *forest, FieldID fid,
-           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances)
+           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances,
+           const std::map<DomainPoint,Domain> *remote_targets,
+           std::vector<DeppartResult> *results)
     //--------------------------------------------------------------------------
     {
       return forest->create_partition_by_preimage_range(op, fid, pid,projection,
-                                                  instances, instances_ready);
+                           instances, remote_targets, results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::AssociationThunk::perform(
            DependentPartitionOp *op, RegionTreeForest *forest, FieldID fid,
-           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances)
+           ApEvent instances_ready, std::vector<FieldDataDescriptor> &instances,
+           const std::map<DomainPoint,Domain> *remote_targets,
+           std::vector<DeppartResult> *results)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should never see these here
+      assert(remote_targets == NULL);
+      assert(results == NULL);
+#endif
       return forest->create_association(op, fid, domain, range, 
                                         instances, instances_ready);
     }

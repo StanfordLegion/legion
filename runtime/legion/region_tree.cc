@@ -780,12 +780,13 @@ namespace Legion {
                                                         FieldID fid,
                                                         IndexPartition pending,
                              const std::vector<FieldDataDescriptor> &instances,
+                                   std::vector<DeppartResult> *results,
                                                         ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
-      return partition->parent->create_by_field(op, fid, partition, 
-                                                instances, instances_ready);
+      return partition->parent->create_by_field(op, fid, partition, instances,
+                                                results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -823,14 +824,16 @@ namespace Legion {
                                                       FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
+                             const std::vector<FieldDataDescriptor> &instances,
+                             const std::map<DomainPoint,Domain> *remote_targets,
+                                    std::vector<DeppartResult> *results,
                                                       ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
       return partition->parent->create_by_preimage(op, fid, partition,
-                              projection, instances, instances_ready);
+          projection, instances, remote_targets, results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -838,14 +841,16 @@ namespace Legion {
                                                       FieldID fid,
                                                       IndexPartition pending,
                                                       IndexPartition proj,
-                              const std::vector<FieldDataDescriptor> &instances,
+                             const std::vector<FieldDataDescriptor> &instances,
+                             const std::map<DomainPoint,Domain> *remote_targets,
+                                    std::vector<DeppartResult> *results,
                                                       ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *partition = get_node(pending);
       IndexPartNode *projection = get_node(proj);
-      return partition->parent->create_by_preimage_range(op, fid, partition, 
-                                    projection, instances, instances_ready);
+      return partition->parent->create_by_preimage_range(op, fid, partition,
+          projection, instances, remote_targets, results, instances_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -3279,7 +3284,8 @@ namespace Legion {
           // Need to remove resource reference if not owner
           delete result;
           result = it->second;
-          if (bounds == NULL)
+          // If the parent is NULL then we don't need to perform a duplicate set
+          if ((bounds == NULL) || (parent == NULL))
             return result;
         }
         else

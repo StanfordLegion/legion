@@ -3228,11 +3228,15 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances) = 0;
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL) = 0;
         virtual PartitionKind get_kind(void) const = 0;
         virtual IndexPartition get_partition(void) const = 0;
+        virtual IndexPartition get_projection(void) const = 0;
         virtual bool safe_projection(IndexPartition p) const { return false; }
         virtual bool is_image(void) const { return false; }
+        virtual bool is_preimage(void) const { return false; }
       };
       class ByFieldThunk : public DepPartThunk {
       public:
@@ -3241,9 +3245,13 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances);
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL);
         virtual PartitionKind get_kind(void) const { return BY_FIELD; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual IndexPartition get_projection(void) const 
+          { return IndexPartition::NO_PART; }
       protected:
         IndexPartition pid;
       };
@@ -3254,9 +3262,12 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances);
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL);
         virtual PartitionKind get_kind(void) const { return BY_IMAGE; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual IndexPartition get_projection(void) const { return projection; }
         virtual bool safe_projection(IndexPartition p) const 
           { return (p == projection); }
         virtual bool is_image(void) const { return true; }
@@ -3271,9 +3282,12 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances);
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL);
         virtual PartitionKind get_kind(void) const { return BY_IMAGE_RANGE; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual IndexPartition get_projection(void) const { return projection; }
         virtual bool safe_projection(IndexPartition p) const
           { return (p == projection); }
         virtual bool is_image(void) const { return true; }
@@ -3288,9 +3302,13 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances);
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL);
         virtual PartitionKind get_kind(void) const { return BY_PREIMAGE; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual IndexPartition get_projection(void) const { return projection; }
+        virtual bool is_preimage(void) const { return true; }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -3302,9 +3320,13 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances);
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL);
         virtual PartitionKind get_kind(void) const { return BY_PREIMAGE_RANGE; }
         virtual IndexPartition get_partition(void) const { return pid; }
+        virtual IndexPartition get_projection(void) const { return projection; }
+        virtual bool is_preimage(void) const { return true; }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -3316,9 +3338,13 @@ namespace Legion {
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, FieldID fid, ApEvent instances_ready,
-            std::vector<FieldDataDescriptor> &instances);
+            std::vector<FieldDataDescriptor> &instances,
+            const std::map<DomainPoint,Domain> *remote_targets = NULL,
+            std::vector<DeppartResult> *results = NULL);
         virtual PartitionKind get_kind(void) const { return BY_ASSOCIATION; }
         virtual IndexPartition get_partition(void) const
+          { return IndexPartition::NO_PART; }
+        virtual IndexPartition get_projection(void) const
           { return IndexPartition::NO_PART; }
       protected:
         IndexSpace domain;

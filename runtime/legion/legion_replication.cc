@@ -4600,6 +4600,8 @@ namespace Legion {
       DependentPartitionOp::activate();
       sharding_function = NULL;
       shard_points = NULL;
+      gather = NULL;
+      scatter = NULL;
       exchange = NULL;
       collective_ready = ApBarrier::NO_AP_BARRIER;
       collective_done = ApBarrier::NO_AP_BARRIER;
@@ -4613,8 +4615,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DependentPartitionOp::deactivate(false/*free*/);
+      if (gather != NULL)
+        delete gather;
+      if (scatter != NULL)
+        delete scatter;
       if (exchange != NULL)
         delete exchange;
+      remote_targets.clear();
+      deppart_results.clear();
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -4735,13 +4743,25 @@ namespace Legion {
         // can ask the mapper to also pick the sharding function
         select_sharding_function();
         // We can also initialize the barriers and exchange we will need
-        exchange = new FieldDescriptorExchange(repl_ctx,
-            repl_ctx->get_next_collective_index(COLLECTIVE_LOC_30, 
-              true/*logical*/), instances, thunk->is_image());
-        collective_ready = 
-          repl_ctx->get_next_dependent_partition_execution_barrier();
-        collective_done =
-          repl_ctx->get_next_dependent_partition_execution_barrier();
+        if (thunk->is_image())
+        {
+          exchange = new FieldDescriptorExchange(repl_ctx,
+              repl_ctx->get_next_collective_index(COLLECTIVE_LOC_30, 
+                true/*logical*/), instances);
+          collective_ready = 
+            repl_ctx->get_next_dependent_partition_execution_barrier();
+          collective_done =
+            repl_ctx->get_next_dependent_partition_execution_barrier();
+        }
+        else
+        {
+          gather = new FieldDescriptorGather(repl_ctx,
+              repl_ctx->get_next_collective_index(COLLECTIVE_LOC_61,
+                true/*logical*/), instances, remote_targets);
+          scatter = new DeppartResultScatter(repl_ctx,
+              repl_ctx->get_next_collective_index(COLLECTIVE_LOC_62,
+                true/*logical*/), deppart_results);
+        }
         projection_info = ProjectionInfo(runtime, requirement, 
                                          launch_space, sharding_function);
       }
@@ -4775,7 +4795,6 @@ namespace Legion {
       if (is_index_space)
       {
 #ifdef DEBUG_LEGION
-        assert(exchange != NULL);
         assert(sharding_function != NULL);
 #endif
         // Compute the local index space of points for this shard
@@ -4792,12 +4811,44 @@ namespace Legion {
 #endif
           // We have no local points, so we're done mapping
           finalize_mapping();
-          // We won't have any preconditions on the collective ready event
-          Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
-          // Perform the exchange of the instance data and then 
-          // trigger execution when it is ready
-          exchange->perform_collective_async();
-          RtEvent ready = exchange->perform_collective_wait(false/*block*/);
+          RtEvent ready;
+          if (thunk->is_image())
+          {
+#ifdef DEBUG_LEGION
+            assert(exchange != NULL);
+#endif
+            // We won't have any preconditions on the collective ready event
+            Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+            // Perform the exchange of the instance data and then 
+            // trigger execution when it is ready
+            exchange->perform_collective_async();
+            ready = exchange->perform_collective_wait(false/*block*/);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(gather != NULL);
+            assert(scatter != NULL);
+#endif
+            std::vector<ApEvent> preconditions;
+            if (thunk->is_preimage())
+              find_remote_targets(preconditions);
+            if (preconditions.empty())
+              gather->contribute_instances(ApEvent::NO_AP_EVENT);
+            else
+              gather->contribute_instances(
+                  Runtime::merge_events(NULL, preconditions));
+            if (gather->target != repl_ctx->owner_shard->shard_id)
+            {
+              ready = scatter->perform_collective_wait(false/*block*/);
+              // We're not going to have any updates to perform so 
+              // we can just return immediately
+              complete_execution(ready);
+              return;
+            }
+            else
+              ready = gather->perform_collective_wait(false/*block*/);
+          }
           parent_ctx->add_to_trigger_execution_queue(this, ready); 
         }
         else // If we have valid points then we do the base call
@@ -4872,19 +4923,59 @@ namespace Legion {
         }
         if (ready)
         {
-          // Get the exchange in flight
-          exchange->perform_collective_async();
-          // Arrive on the ready barrier
-          if (index_preconditions.empty())
-            Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+          if (thunk->is_image())
+          {
+            // Images can be sharded so we do them in parallel and 
+            // exchange the field descriptors with all the shards
+            // Get the exchange in flight
+            exchange->perform_collective_async();
+            // Arrive on the ready barrier
+            if (index_preconditions.empty())
+              Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+            else
+              Runtime::phase_barrier_arrive(collective_ready, 1/*count*/,
+                  Runtime::merge_events(&info, index_preconditions));
+            const RtEvent exchanged = 
+              exchange->perform_collective_wait(false/*block*/);
+            if (exchanged.exists() && !exchanged.has_triggered())
+              parent_ctx->add_to_trigger_execution_queue(this, exchanged);
+            else
+              trigger_execution();
+          }
           else
-            Runtime::phase_barrier_arrive(collective_ready, 1/*count*/,
-                Runtime::merge_events(&info, index_preconditions));
-          RtEvent exchanged = exchange->perform_collective_wait(false/*block*/);
-          if (exchanged.exists() && !exchanged.has_triggered())
-            parent_ctx->add_to_trigger_execution_queue(this, exchanged);
-          else
-            trigger_execution();
+          {
+            // For all other dependent partition operations we gather all
+            // the field descriptors to one node to perform the computation
+            // and then we scatter them all back out to the targets after
+            // we've computed them on one node. We do this because Realm can
+            // perform non-trivial optimizations for partition-by-field and
+            // partition-by-preimage for those cases when it see a single call
+            if (thunk->is_preimage())
+              find_remote_targets(index_preconditions);
+            if (index_preconditions.empty())
+              gather->contribute_instances(ApEvent::NO_AP_EVENT);
+            else
+              gather->contribute_instances(
+                  Runtime::merge_events(&info, index_preconditions));
+            if (gather->target == repl_ctx->owner_shard->shard_id)
+            {
+              const RtEvent gathered =
+                gather->perform_collective_wait(false/*block*/);
+              if (gathered.exists() && !gathered.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, gathered);
+              else
+                trigger_execution();
+            }
+            else
+            {
+              const RtEvent scattered =
+                scatter->perform_collective_wait(false/*block*/);
+              if (scattered.exists() && !scattered.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, scattered);
+              else
+                trigger_execution();
+            }
+          }
         }
         return collective_done;
       }
@@ -4913,14 +5004,40 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Check to see if we're the first shard in this address space 
-      ApEvent done_event; 
-      if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+      const bool first_local_shard =
+        repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard);
+      if (thunk->is_image())
       {
-        const FieldID fid = *(requirement.privilege_fields.begin());
-        done_event = thunk->perform(this, runtime->forest, fid,
-                                    collective_ready, instances);
+        ApEvent done_event; 
+        if (first_local_shard)
+        {
+          const FieldID fid = *(requirement.privilege_fields.begin());
+          done_event = thunk->perform(this, runtime->forest, fid,
+                                      collective_ready, instances);
+        }
+        Runtime::phase_barrier_arrive(collective_done, 1/*count*/, done_event);
       }
-      Runtime::phase_barrier_arrive(collective_done, 1/*count*/, done_event);
+      else
+      {
+        if (gather->target == repl_ctx->owner_shard->shard_id)
+        {
+#ifdef DEBUG_LEGION
+          assert(first_local_shard);
+          assert(scatter->origin == gather->target);
+#endif
+          const FieldID fid = *(requirement.privilege_fields.begin());
+          ApEvent done_event = thunk->perform(this, runtime->forest, fid,
+                                    gather->get_ready_event(), instances, 
+                                    &remote_targets, &deppart_results);
+          scatter->broadcast_results(done_event);
+        }
+        else if (first_local_shard)
+        {
+          const FieldID fid = *(requirement.privilege_fields.begin());
+          thunk->perform(this, runtime->forest, fid, scatter->get_done_event(),
+                         instances, &remote_targets, &deppart_results);
+        }
+      }
       complete_execution();
     }
 
@@ -4946,6 +5063,28 @@ namespace Legion {
       // are going to be using the same region so we can do a collective
       // rendezvous to create a collective view
       return !is_index_space;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::find_remote_targets(
+                                            std::vector<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = runtime->forest->get_node(thunk->get_projection());
+      if (node->is_owner() || ((node->collective_mapping != NULL) &&
+            node->collective_mapping->contains(node->local_space)))
+      {
+        for (ColorSpaceIterator itr(node, true/*local only*/); itr; itr++)
+        {
+          DomainPoint color = 
+            node->color_space->delinearize_color_to_point(*itr);
+          IndexSpaceNode *child = node->get_child(*itr);
+          ApEvent ready;
+          remote_targets[color] = child->get_domain(ready, false/*need tight*/);
+          if (ready.exists())
+            preconditions.push_back(ready);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -13098,9 +13237,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldDescriptorExchange::FieldDescriptorExchange(ReplicateContext *ctx,
-          CollectiveID id, std::vector<FieldDataDescriptor> &descs, bool colors)
-      : AllGatherCollective<true>(ctx, id), descriptors(descs), 
-        exchange_colors(colors)
+                  CollectiveID id, std::vector<FieldDataDescriptor> &descs)
+      : AllGatherCollective<true>(ctx, id), descriptors(descs)
     //--------------------------------------------------------------------------
     {
     }
@@ -13117,24 +13255,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       rez.serialize<size_t>(descriptors.size());
-      if (exchange_colors)
+      for (std::vector<FieldDataDescriptor>::const_iterator it = 
+            descriptors.begin(); it != descriptors.end(); it++)
       {
-        for (std::vector<FieldDataDescriptor>::const_iterator it = 
-              descriptors.begin(); it != descriptors.end(); it++)
-        {
-          rez.serialize(it->domain);
-          rez.serialize(it->color);
-          rez.serialize(it->inst);
-        }
-      }
-      else
-      {
-        for (std::vector<FieldDataDescriptor>::const_iterator it = 
-              descriptors.begin(); it != descriptors.end(); it++)
-        {
-          rez.serialize(it->domain);
-          rez.serialize(it->inst);
-        }
+        rez.serialize(it->domain);
+        rez.serialize(it->color);
+        rez.serialize(it->inst);
       }
     }
 
@@ -13151,23 +13277,171 @@ namespace Legion {
       size_t num_descriptors;
       derez.deserialize(num_descriptors);
       descriptors.resize(offset + num_descriptors);
-      if (exchange_colors)
+      for (unsigned idx = 0; idx < num_descriptors; idx++)
       {
-        for (unsigned idx = 0; idx < num_descriptors; idx++)
-        {
-          derez.deserialize(descriptors[offset+idx].domain);
-          derez.deserialize(descriptors[offset+idx].color);
-          derez.deserialize(descriptors[offset+idx].inst);
-        }
+        derez.deserialize(descriptors[offset+idx].domain);
+        derez.deserialize(descriptors[offset+idx].color);
+        derez.deserialize(descriptors[offset+idx].inst);
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Field Descriptor Gather
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorGather::FieldDescriptorGather(ReplicateContext *ctx,
+                  CollectiveID id, std::vector<FieldDataDescriptor> &descs,
+                  std::map<DomainPoint,Domain> &targets)
+      : GatherCollective(ctx, id, 0/*origin shard*/), descriptors(descs),
+        remote_targets(targets)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorGather::~FieldDescriptorGather(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(descriptors.size());
+      for (std::vector<FieldDataDescriptor>::const_iterator it = 
+            descriptors.begin(); it != descriptors.end(); it++)
+      {
+        rez.serialize(it->domain);
+        rez.serialize(it->color);
+        rez.serialize(it->inst);
+      }
+      rez.serialize<size_t>(remote_targets.size());
+      for (std::map<DomainPoint,Domain>::const_iterator it =
+            remote_targets.begin(); it != remote_targets.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      if (!ready_events.empty())
+        rez.serialize(Runtime::merge_events(NULL, ready_events));
       else
+        rez.serialize(ApEvent::NO_AP_EVENT);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      const unsigned offset = descriptors.size();
+      size_t num_descriptors;
+      derez.deserialize(num_descriptors);
+      descriptors.resize(offset + num_descriptors);
+      for (unsigned idx = 0; idx < num_descriptors; idx++)
       {
-        for (unsigned idx = 0; idx < num_descriptors; idx++)
-        {
-          derez.deserialize(descriptors[offset+idx].domain);
-          derez.deserialize(descriptors[offset+idx].inst);
-        }
+        derez.deserialize(descriptors[offset+idx].domain);
+        derez.deserialize(descriptors[offset+idx].color);
+        derez.deserialize(descriptors[offset+idx].inst);
       }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+        derez.deserialize(remote_targets[point]);
+      }
+      ApEvent ready;
+      derez.deserialize(ready);
+      if (ready.exists())
+        ready_events.push_back(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::contribute_instances(ApEvent ready)
+    //--------------------------------------------------------------------------
+    {
+      if (ready.exists())
+        ready_events.push_back(ready);
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FieldDescriptorGather::get_ready_event(void)
+    //--------------------------------------------------------------------------
+    {
+      if (ready_events.empty())
+        return ApEvent::NO_AP_EVENT;
+      else
+        return Runtime::merge_events(NULL, ready_events);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Deppart Result Scatter
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DeppartResultScatter::DeppartResultScatter(ReplicateContext *ctx,
+                  CollectiveID id, std::vector<DeppartResult> &res)
+      : BroadcastCollective(ctx, id, 0/*origin shard*/), results(res),
+        renamed(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    DeppartResultScatter::~DeppartResultScatter(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void DeppartResultScatter::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(results.size());
+      for (std::vector<DeppartResult>::const_iterator it =
+            results.begin(); it != results.end(); it++)
+      {
+        rez.serialize(it->domain);
+        rez.serialize(it->color);
+      }
+      if (!renamed)
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename, done_event);
+        done_event = rename;
+        renamed = true;
+      }
+      rez.serialize(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeppartResultScatter::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_results;
+      derez.deserialize(num_results);
+      results.resize(num_results);
+      for (std::vector<DeppartResult>::iterator it =
+            results.begin(); it != results.end(); it++)
+      {
+        derez.deserialize(it->domain);
+        derez.deserialize(it->color);
+      }
+      derez.deserialize(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeppartResultScatter::broadcast_results(ApEvent done)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!done_event.exists());
+#endif
+      done_event = done;
+      perform_collective_async();
     }
 
     /////////////////////////////////////////////////////////////
