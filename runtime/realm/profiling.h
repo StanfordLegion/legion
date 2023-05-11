@@ -193,13 +193,10 @@ namespace Realm {
         };
 
       struct InstInfo {
-        RegionInstance src_inst_id; // TODO: remove it
-        RegionInstance dst_inst_id; // TODO: remove it
         std::vector<RegionInstance> src_insts;   // src instances
         std::vector<RegionInstance> dst_insts;   // dst instances
         RegionInstance src_indirection_inst; // src indirection instance (gather)
         RegionInstance dst_indirection_inst; // dst indirection instance (scatter)
-        unsigned num_fields; // num fields TODO: remove it
         std::vector<FieldID> src_fields;  // src fields
         std::vector<FieldID> dst_fields;  // dst fields
         FieldID src_indirection_field;  // field of indirection points

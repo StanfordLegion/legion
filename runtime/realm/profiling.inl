@@ -213,13 +213,10 @@ namespace Realm {
       success = (ser & c.inst_info.size());
       if (!success) return false;
       for (size_t i = 0; i < c.inst_info.size(); i++) {
-        success = (ser & c.inst_info[i].src_inst_id) &&
-                  (ser & c.inst_info[i].dst_inst_id) &&
-                  (ser & c.inst_info[i].src_insts) &&
+        success = (ser & c.inst_info[i].src_insts) &&
                   (ser & c.inst_info[i].dst_insts) &&
                   (ser & c.inst_info[i].src_indirection_inst) &&
                   (ser & c.inst_info[i].dst_indirection_inst) &&
-                  (ser & c.inst_info[i].num_fields) &&
                   (ser & c.inst_info[i].src_fields) &&
                   (ser & c.inst_info[i].dst_fields) &&
                   (ser & c.inst_info[i].src_indirection_field) &&
@@ -239,13 +236,10 @@ namespace Realm {
       if (!success) return false;
       c.inst_info.resize(len);
       for (size_t i = 0; i < c.inst_info.size(); i++) {
-        success = (dez & c.inst_info[i].src_inst_id) &&
-                  (dez & c.inst_info[i].dst_inst_id) &&
-                  (dez & c.inst_info[i].src_insts) &&
+        success = (dez & c.inst_info[i].src_insts) &&
                   (dez & c.inst_info[i].dst_insts) &&
                   (dez & c.inst_info[i].src_indirection_inst) &&
                   (dez & c.inst_info[i].dst_indirection_inst) &&
-                  (dez & c.inst_info[i].num_fields) &&
                   (dez & c.inst_info[i].src_fields) &&
                   (dez & c.inst_info[i].dst_fields) &&
                   (dez & c.inst_info[i].src_indirection_field) &&

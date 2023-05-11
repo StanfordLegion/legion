@@ -4148,13 +4148,10 @@ namespace Realm {
 	std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
         prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-          srcs[i].inst,
-          dsts[i].inst,
 	  instinfo_src_insts,
 	  instinfo_dst_insts,
 	  RegionInstance::NO_INST,
 	  RegionInstance::NO_INST,
-          1 /*num_fields*/,
 	  instinfo_src_field_ids,
 	  instinfo_dst_field_ids,
 	  0,
@@ -4237,13 +4234,10 @@ namespace Realm {
 	std::vector<FieldID> instinfo_src_field_ids;
 	std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
         prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-              RegionInstance::NO_INST,
-              dsts[i].inst,
 	      instinfo_src_insts,
 	      instinfo_dst_insts,
 	      RegionInstance::NO_INST,
 	      RegionInstance::NO_INST,
-              1 /*num_fields*/,
 	      instinfo_src_field_ids,
 	      instinfo_dst_field_ids,
 	      0,
@@ -4372,13 +4366,10 @@ namespace Realm {
 	    std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
 	    std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 srcs[i].inst,
-                 dsts[i].inst,
 		 instinfo_src_insts,
 		 instinfo_dst_insts,
 		 RegionInstance::NO_INST,
 		 RegionInstance::NO_INST,
-                 num_fields,
 		 src_field_ids,
 		 dst_field_ids,
 		 0,
@@ -4414,13 +4405,10 @@ namespace Realm {
 	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 srcs[i].inst,
-                 RegionInstance::NO_INST,
 		 instinfo_src_insts,
 		 instinfo_dst_insts,
 		 RegionInstance::NO_INST,
 		 scatter_info->get_pointer_instance(),
-                 1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
 		 0,
@@ -4458,13 +4446,10 @@ namespace Realm {
 	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 RegionInstance::NO_INST,
-                 dsts[i].inst,
 		 instinfo_src_insts,
 		 instinfo_dst_insts,
 		 gather_info->get_pointer_instance(),
 		 RegionInstance::NO_INST,
-                 1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
 		 gather_info->get_field(),
@@ -4525,13 +4510,10 @@ namespace Realm {
 	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
 	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 RegionInstance::NO_INST,
-                 RegionInstance::NO_INST,
 		 instinfo_src_insts,
 		 instinfo_dst_insts,
 		 gather_info->get_pointer_instance(),
 		 scatter_info->get_pointer_instance(),
-                 1 /*num_fields*/,
 		 instinfo_src_field_ids,
 		 instinfo_dst_field_ids,
 		 gather_info->get_field(),
