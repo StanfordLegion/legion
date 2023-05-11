@@ -456,13 +456,24 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
     endif()
 
-    # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so unset it before enabling the CUDA language
-    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND CMAKE_CUDA_STANDARD GREATER_EQUAL 17)
-      unset(CMAKE_CUDA_STANDARD)
-      unset(CMAKE_CUDA_STANDARD CACHE)
-      if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
-        # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
-        string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
+    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17")
+
+      # Translate CUDA_ARCHITECTURES to -gencode flags for CMake < 3.18
+      archs_list_to_gencode_flags(
+        FLAGS cuda_gencode_flags
+        ARCHS ${CMAKE_CUDA_ARCHITECTURES}
+      )
+      list(JOIN cuda_gencode_flags " " cuda_gencode_flags)
+      string(APPEND CMAKE_CUDA_FLAGS ${cuda_gencode_flags})
+
+      # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so unset it before enabling the CUDA language
+      if(CMAKE_CUDA_STANDARD GREATER_EQUAL 17)
+        unset(CMAKE_CUDA_STANDARD)
+        unset(CMAKE_CUDA_STANDARD CACHE)
+        if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
+          # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
+          string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
+        endif()
       endif()
     endif()
 
