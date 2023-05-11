@@ -7174,12 +7174,11 @@ namespace Legion {
                 rez.serialize(all_done);
             }
             rez.serialize(origin);
+            if (reduction_op_id == 0)
+              rez.serialize(COLLECTIVE_BROADCAST);
           }
           if (reduction_op_id == 0)
-          {
-            rez.serialize(COLLECTIVE_BROADCAST);
             runtime->send_collective_distribute_broadcast(origin, rez);
-          }
           else
             runtime->send_collective_distribute_reducecast(origin, rez);
           recorded_events.insert(recorded);
@@ -9827,7 +9826,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(it->first != it->second);
           assert(it->second != src_index);
-          assert(!local_events[it->second].exists());
+          assert(has_instance_events || !local_events[it->second].exists());
           assert(!local_fields[it->first].empty());
 #endif
           IndividualView *local_view = local_views[it->first];
@@ -10960,7 +10959,6 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(this->did);
-            rez.serialize(local_view->did);
             pack_fields(rez, local_fields);
             local_inst.serialize(rez);
             rez.serialize(local_manager->get_unique_event());
@@ -11973,6 +11971,8 @@ namespace Legion {
             else
               reduce_pre = local_events[it->first];
           }
+          // Set the redop on dst fields
+          set_redop(local_fields[it->first]);
           // Issue the copy
           local_events[it->second] = copy_expression->issue_copy(
               op, trace_info, local_fields[it->first], local_fields[it->second],
@@ -11982,6 +11982,8 @@ namespace Legion {
 #endif
                 reduce_pre, predicate_guard, src_manager->get_unique_event(),
                 local_manager->get_unique_event(), collective_kind);
+          // Clear the redop in case we're reading them next
+          clear_redop(local_fields[it->first]);
           // Save the state for later
           if (local_events[it->second].exists())
           {

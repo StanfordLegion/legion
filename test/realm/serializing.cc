@@ -313,7 +313,12 @@ int main(int argc, const char *argv[])
     //  so set very tight bounds on our stack size and run time
     struct rlimit rl;
     int ret;
+#if defined(__APPLE__) && (defined(__arm64__) || defined(__aarch64__))
+    // macOS on ARM requires higher limit
+    rl.rlim_cur = rl.rlim_max = 131072;  // 128KB
+#else
     rl.rlim_cur = rl.rlim_max = 16384;  // 16KB
+#endif
     ret = setrlimit(RLIMIT_STACK, &rl);
     assert(ret == 0);
     rl.rlim_cur = rl.rlim_max = 5;  // 5 seconds

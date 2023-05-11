@@ -610,9 +610,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      // Should not be recording remote things in the collective mapping
+      // Should not be recording things we already know about
+      assert(remote_inst != owner_space);
+      assert(remote_inst != local_space);
+      // should not be recording things in the collective mapping
       assert((collective_mapping == NULL) || 
               !collective_mapping->contains(remote_inst));
+      // should only be recording on the owner or one of the
+      // nodes in the collective mapping
+      assert(is_owner() || ((collective_mapping != NULL) && 
+            collective_mapping->contains(local_space)));
 #endif
       AutoLock gc(gc_lock);
       // Handle a very unusual case here were we weren't able to perform the
@@ -653,8 +660,6 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
-      if (!is_owner())
-        remote_instances.add(owner_space);
       runtime->register_distributed_collectable(did, this);
     }
 
@@ -782,29 +787,29 @@ namespace Legion {
     void DistributedCollectable::send_downgrade_notifications(State downgrade)
     //--------------------------------------------------------------------------
     {
-      // Ready to downgrade, send the messages and then do our local one
-      if ((collective_mapping != NULL) && 
-          collective_mapping->contains(local_space))
+      // Ready to downgrade, send the messages
+      if (is_owner() || ((collective_mapping != NULL) &&
+            collective_mapping->contains(local_space)))
       {
-        std::vector<AddressSpaceID> children;
-        if (collective_mapping->contains(downgrade_owner))
-          collective_mapping->get_children(downgrade_owner, local_space,
-                                           children);
-        else
-          collective_mapping->get_children(owner_space, local_space,
-                                           children);
-        if (!children.empty())
+        if (collective_mapping != NULL)
         {
-          Serializer rez;
-          rez.serialize(did);
-          rez.serialize(downgrade);
-          for (std::vector<AddressSpaceID>::const_iterator it =
-                children.begin(); it != children.end(); it++)
-            runtime->send_did_downgrade_success(*it, rez);
+          std::vector<AddressSpaceID> children;
+          if (collective_mapping->contains(downgrade_owner))
+            collective_mapping->get_children(downgrade_owner, local_space,
+                                             children);
+          else
+            collective_mapping->get_children(owner_space, local_space,
+                                             children);
+          if (!children.empty())
+          {
+            Serializer rez;
+            rez.serialize(did);
+            rez.serialize(downgrade);
+            for (std::vector<AddressSpaceID>::const_iterator it =
+                  children.begin(); it != children.end(); it++)
+              runtime->send_did_downgrade_success(*it, rez);
+          }
         }
-      }
-      if (is_owner())
-      {
         if (!remote_instances.empty())
         {
           Serializer rez;
@@ -826,8 +831,7 @@ namespace Legion {
           remote_instances.map(downgrade_functor);
         }
       }
-      else if ((downgrade_owner == local_space) && ((collective_mapping == NULL) 
-                                 || !collective_mapping->contains(local_space)))
+      else if (downgrade_owner == local_space)
       {
         // If we're the owner then we have to send it to the owner_space
         // to get all the remote instances
@@ -896,37 +900,38 @@ namespace Legion {
       {
         // We're ready to be downgraded
         // Send messages and count how many responses we expect to see
-        if ((collective_mapping != NULL) && 
-            collective_mapping->contains(local_space))
+        if (is_owner() || ((collective_mapping != NULL) && 
+              collective_mapping->contains(local_space)))
         {
-          std::vector<AddressSpaceID> children;
-          if (collective_mapping->contains(owner))
-            collective_mapping->get_children(owner, local_space, children);
-          else
-            collective_mapping->get_children(owner_space, local_space,children);
-          if (!children.empty())
+          if (collective_mapping != NULL)
           {
-            Serializer rez;
+            std::vector<AddressSpaceID> children;
+            if (collective_mapping->contains(owner))
+              collective_mapping->get_children(owner, local_space, children);
+            else
+              collective_mapping->get_children(owner_space, local_space,
+                                               children);
+            if (!children.empty())
             {
-              RezCheck z(rez);
-              rez.serialize(did);
-              // If we're in a pending state send the downgrade
-              // for the non-pending version of this state
-              if ((current_state == PENDING_LOCAL_REF_STATE) ||
-                  (current_state == PENDING_GLOBAL_REF_STATE))
-                rez.serialize(current_state+1);
-              else
-                rez.serialize(current_state);
-              rez.serialize(owner);
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                // If we're in a pending state send the downgrade
+                // for the non-pending version of this state
+                if ((current_state == PENDING_LOCAL_REF_STATE) ||
+                    (current_state == PENDING_GLOBAL_REF_STATE))
+                  rez.serialize(current_state+1);
+                else
+                  rez.serialize(current_state);
+                rez.serialize(owner);
+              }
+              for (std::vector<AddressSpaceID>::const_iterator it =
+                    children.begin(); it != children.end(); it++)
+                runtime->send_did_downgrade_request(*it, rez);
+              remaining_responses += children.size();
             }
-            for (std::vector<AddressSpaceID>::const_iterator it =
-                  children.begin(); it != children.end(); it++)
-              runtime->send_did_downgrade_request(*it, rez);
-            remaining_responses += children.size();
           }
-        }
-        if (is_owner())
-        {
           if (!remote_instances.empty())
           {
             Serializer rez;
@@ -962,10 +967,9 @@ namespace Legion {
             remote_instances.map(downgrade_functor);
             remaining_responses += 
               (remote_instances.size() - downgrade_functor.skipped);
-          }
+          } 
         }
-        else if ((owner == local_space) && ((collective_mapping == NULL) || 
-                                !collective_mapping->contains(local_space)))
+        else if (owner == local_space)
         {
 #ifdef DEBUG_LEGION
           // Should be in a non-pending state if we're the owner

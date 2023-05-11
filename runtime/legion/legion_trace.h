@@ -784,8 +784,7 @@ namespace Legion {
                        const FieldMaskSet<IndexSpaceExpression> &right_exprs,
                        FailedPrecondition *condition) const;
       void antialias_individual_view(IndividualView *view, FieldMask mask);
-      void antialias_collective_view(CollectiveView *view,
-                                     const FieldMask &mask,
+      void antialias_collective_view(CollectiveView *view, FieldMask mask,
                                      FieldMaskSet<InstanceView> &altviews);
     protected:
       typedef LegionMap<LogicalView*,

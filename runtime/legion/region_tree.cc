@@ -8522,7 +8522,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Quick out if we've already sent this
-      if (has_remote_instance(target))
+      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
         return;
       // Send our parent first if necessary
       if (recurse && (parent != NULL))
@@ -9475,7 +9476,7 @@ namespace Legion {
         delete expr;
       for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
             color_map.begin(); it != color_map.end(); it++)
-        if (it->second->remove_nested_resource_ref(did))
+        if (it->second->remove_nested_gc_ref(did))
           delete it->second;
       color_map.clear();
     }
@@ -9803,7 +9804,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This child should live as long as we are alive
-      child->add_nested_resource_ref(did);
+      child->add_nested_gc_ref(did);
       child->add_nested_valid_ref(did);
       RtUserEvent to_trigger;
       {
@@ -10641,7 +10642,8 @@ namespace Legion {
       assert(parent != NULL);
 #endif
       // Quick out if we've already sent this
-      if (has_remote_instance(target))
+      if (has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
         return;
       parent->send_node(target, true/*recurse*/);
       color_space->send_node(target, true/*recurse*/);
@@ -14333,20 +14335,6 @@ namespace Legion {
           mask_index_map, unique_event, region_node, serdez,
           runtime->get_available_distributed_id(), collective_mapping);
       
-      if (collective_mapping != NULL)
-      {
-        // Since we're the owner address space, record that we have 
-        // instances on all other address spaces in the control
-        // replicated parent task's collective mapping
-        for (unsigned idx = 0; idx < collective_mapping->size(); idx++)
-        {
-          const AddressSpaceID space = (*collective_mapping)[idx];
-          if (space == manager->owner_space)
-            continue;
-          manager->update_remote_instances(space);
-        }
-      }
-
       Serializer rez;
       {
         RezCheck z2(rez);
@@ -14550,7 +14538,8 @@ namespace Legion {
 #endif
       // See if this is in our creation set, if not, send it and all the fields
       AutoLock n_lock(node_lock);
-      if (!has_remote_instance(target))
+      if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
+            collective_mapping->contains(target)))
       {
         // First send the node info and then send all the fields
         Serializer rez;
@@ -20488,7 +20477,8 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!has_remote_instance(target))
+        if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
+              collective_mapping->contains(target)))
         {
           continue_up = true;
           update_remote_instances(target);
@@ -21840,7 +21830,8 @@ namespace Legion {
       bool continue_up = false;
       {
         AutoLock n_lock(node_lock); 
-        if (!has_remote_instance(target))
+        if (!has_remote_instance(target) || ((collective_mapping != NULL) &&
+              collective_mapping->contains(target)))
         {
           continue_up = true;
           update_remote_instances(target);

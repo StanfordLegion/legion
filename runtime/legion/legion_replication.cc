@@ -12387,7 +12387,6 @@ namespace Legion {
       }
       if (participating)
         assert(done_triggered);
-      assert(done_event.has_triggered());
 #endif
     } 
 
@@ -16996,6 +16995,30 @@ namespace Legion {
             to_delete.push_back(*it);
         }
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Predicate Collective
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PredicateCollective::PredicateCollective(ReplPredicateImpl *pred,
+                                         ReplicateContext *ctx, CollectiveID id)
+      : AllReduceCollective<MaxReduction<uint64_t> >(ctx, id), predicate(pred)
+    //--------------------------------------------------------------------------
+    {
+      predicate->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent PredicateCollective::post_complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      const RtEvent result = 
+        AllReduceCollective<MaxReduction<uint64_t> >::post_complete_exchange();
+      if (predicate->remove_reference())
+        delete predicate;
+      return result;
     }
 
     /////////////////////////////////////////////////////////////

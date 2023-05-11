@@ -3979,12 +3979,23 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceViewSet::antialias_collective_view(CollectiveView *collective,
-           const FieldMask &mask, FieldMaskSet<InstanceView> &alternative_views)
+                  FieldMask mask, FieldMaskSet<InstanceView> &alternative_views)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(conditions.find(collective) == conditions.end());
-#endif
+      ViewExprs::const_iterator collective_finder = conditions.find(collective);
+      if (collective_finder != conditions.end())
+      {
+        // If we can already find it then it is already anti-aliased so
+        // there's no need to do the rest of this work for those fields
+        FieldMask overlap = mask & collective_finder->second.get_valid_mask();
+        if (!!overlap)
+        {
+          alternative_views.insert(collective, overlap);
+          mask -= overlap;
+          if (!mask)
+            return;
+        }
+      }
       ViewExprs to_add;
       CollectiveAntiAlias alias_analysis(collective);
       for (ViewExprs::iterator vit = conditions.begin(); 

@@ -17236,9 +17236,6 @@ namespace Legion {
       add_launch_space_reference(launch_space);
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
-#ifdef LEGION_SPY
-      intermediate_index_event = Runtime::create_ap_user_event(NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17405,27 +17402,23 @@ namespace Legion {
           desc.inst = manager->get_instance();
           desc.field_offset = manager->layout->find_field_info(
                         *(requirement.privilege_fields.begin())).field_id;
-          index_preconditions.insert(instances_ready);
+          if (instances_ready.exists())
+            index_preconditions.push_back(instances_ready);
 #ifdef DEBUG_LEGION
           assert(!points.empty());
 #endif
           ready = (instances.size() == points.size());
+          if (!intermediate_index_event.exists())
+            intermediate_index_event = Runtime::create_ap_user_event(&info);
         }
-        ApEvent done_event;
         if (ready)
         {
-          done_event = thunk->perform(this, runtime->forest,
+          ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(&info, index_preconditions), instances);
-#ifdef LEGION_SPY
-          Runtime::trigger_event(NULL, intermediate_index_event, done_event);
-#endif
+          Runtime::trigger_event(&info, intermediate_index_event, done_event);
           complete_execution();
         }
-#ifdef LEGION_SPY
         return intermediate_index_event;
-#else
-        return done_event;
-#endif
       }
       else
       {
@@ -17876,6 +17869,7 @@ namespace Legion {
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
+      intermediate_index_event = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -23315,34 +23309,9 @@ namespace Legion {
       // Now that we've got the output instances we copy the result to
       // each of the targets, we're done when the copies are done
       // create an external instance for the current allocation
-      const std::vector<Realm::FieldID> fids(1, 0/*field id*/);
-      const std::vector<size_t> sizes(1, 1);
-      const int dim_order[1] = { 0 };
-      const Realm::InstanceLayoutConstraints constraints(fids, sizes, 1);
-      const Realm::IndexSpace<1,coord_t> rect_space(
-          Realm::Rect<1,coord_t>(Realm::Point<1,coord_t>(0),
-            Realm::Point<1,coord_t>(future_result_size - 1)));
-      Realm::InstanceLayoutGeneric *ilg =
-        Realm::InstanceLayoutGeneric::choose_instance_layout<1,coord_t>(
-            rect_space, constraints, dim_order);
-      PhysicalInstance source_instance;
-      const Realm::ExternalMemoryResource resource(
-          reinterpret_cast<uintptr_t>(serdez_redop_buffer), 
-          future_result_size, true/*read only*/);
-      ApEvent src_ready(
-          PhysicalInstance::create_external_instance(
-            source_instance, resource.suggested_memory(), ilg,
-            resource, Realm::ProfilingRequestSet()));
-      if ((runtime->legion_spy_enabled || (runtime->profiler != NULL)) &&
-          !src_ready.exists())
-      {
-        ApUserEvent ready = Runtime::create_ap_user_event(NULL);
-        Runtime::trigger_event(NULL, ready);
-        src_ready = ready;
-      }
-      FutureInstance source(serdez_redop_buffer, future_result_size, 
-          src_ready, runtime, false/*eager*/, false/*external*/,
-          false/*own alloc*/, source_instance);
+      FutureInstance source(serdez_redop_buffer, future_result_size,
+          ApEvent::NO_AP_EVENT, runtime, false/*eager*/, true/*external*/,
+          false/*own allocation*/);
       std::vector<ApEvent> done_events;
       for (std::vector<FutureInstance*>::const_iterator it =
             targets.begin(); it != targets.end(); it++)
@@ -23355,14 +23324,10 @@ namespace Legion {
       {
         const ApEvent done = Runtime::merge_events(NULL, done_events);
         protect = Runtime::protect_event(done);
-        source_instance.destroy(protect);
         return done;
       }
       else
-      {
-        source_instance.destroy();
         return ApEvent::NO_AP_EVENT;
-      }
     }
 
     //--------------------------------------------------------------------------

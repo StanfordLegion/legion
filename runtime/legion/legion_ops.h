@@ -3524,15 +3524,12 @@ namespace Legion {
       // For index versions of this operation
       IndexSpaceNode*                   launch_space;
       std::vector<FieldDataDescriptor>  instances;
-      std::set<ApEvent>                 index_preconditions;
+      std::vector<ApEvent>              index_preconditions;
       std::vector<PointDepPartOp*>      points; 
       unsigned                          points_committed;
       bool                              commit_request;
       std::set<RtEvent>                 commit_preconditions;
-#ifdef LEGION_SPY
-      // Special helper event to make things look right for Legion Spy
       ApUserEvent                       intermediate_index_event;
-#endif
     protected:
       struct PartitionProfilingInfo :
         public Mapping::Mapper::PartitionProfilingInfo {

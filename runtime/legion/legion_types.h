@@ -2038,6 +2038,7 @@ namespace Legion {
     class FutureNameExchange;
     class MustEpochMappingBroadcast;
     class MustEpochMappingExchange;
+    class PredicateCollective;
     class ShardRendezvous;
 
     // Nasty global variable for TLS support of figuring out
