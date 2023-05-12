@@ -385,6 +385,7 @@ namespace Legion {
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
       LG_INDEX_PART_DEFER_CHILD_TASK_ID,
+      LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
@@ -502,6 +503,7 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
         "Defer Index Partition Child Request",                    \
+        "Defer Index Partition Find Shard Rects",                 \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
         "Remote View Creation",                                   \

@@ -2308,6 +2308,7 @@ namespace Legion {
                                  ApEvent valid, bool initialization = false,
                                  bool broadcast = false, 
                                  AddressSpaceID source = UINT_MAX);
+      RtEvent get_realm_index_space_ready(bool need_tight_result);
     public:
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
@@ -2988,6 +2989,16 @@ namespace Legion {
         const LegionColor child_color;
         const AddressSpaceID source;
       };
+      class DeferFindShardRects : public LgTaskArgs<DeferFindShardRects> {
+      public:
+        static const LgTaskID TASK_ID = LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID;
+      public:
+        DeferFindShardRects(IndexPartNode *proxy)
+          : LgTaskArgs<DeferFindShardRects>(implicit_provenance),
+            proxy_this(proxy) { }
+      public:
+        IndexPartNode *const proxy_this;
+      };
       class RemoteDisjointnessFunctor {
       public:
         RemoteDisjointnessFunctor(Serializer &r, Runtime *rt);
@@ -3123,6 +3134,7 @@ namespace Legion {
       static void handle_node_child_request(
           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
+      static void defer_find_local_shard_rects(const void *args);
       static void handle_node_child_response(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
       static void handle_child_replication(RegionTreeForest *forest,
@@ -3134,9 +3146,11 @@ namespace Legion {
     protected:
       RtEvent request_shard_rects(void);
       virtual void initialize_shard_rects(void) = 0;
+      virtual bool find_local_shard_rects(void) = 0;
       virtual void pack_shard_rects(Serializer &rez, bool clear) = 0;
       virtual void unpack_shard_rects(Deserializer &derez) = 0;
       bool process_shard_rects_response(Deserializer &derez, AddressSpace src);
+      bool perform_shard_rects_notification(void);
     public:
       static void handle_shard_rects_request(RegionTreeForest *forest,
                                              Deserializer &derez);
@@ -3258,6 +3272,7 @@ namespace Legion {
                  std::vector<LegionColor> &colors, bool local_only = false);
     protected:
       virtual void initialize_shard_rects(void);
+      virtual bool find_local_shard_rects(void);
       virtual void pack_shard_rects(Serializer &rez, bool clear);
       virtual void unpack_shard_rects(Deserializer &derez);
     protected:

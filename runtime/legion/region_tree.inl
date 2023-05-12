@@ -2314,6 +2314,26 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    RtEvent IndexSpaceNodeT<DIM,T>::get_realm_index_space_ready(bool need_tight)
+    //--------------------------------------------------------------------------
+    {
+      if (index_space_tight.load())
+        return RtEvent::NO_RT_EVENT;
+      if (!need_tight && index_space_set.load())
+        return RtEvent::NO_RT_EVENT;
+      AutoLock n_lock(node_lock);
+      // See if we lost the race
+      if (index_space_tight.load())
+        return RtEvent::NO_RT_EVENT;
+      if (!need_tight && index_space_set.load())
+        return RtEvent::NO_RT_EVENT;
+      if (!index_space_ready.exists())
+        index_space_ready = Runtime::create_rt_user_event();
+      return index_space_ready;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::get_expr_index_space(void *result,
                                             TypeTag tag, bool need_tight_result)
     //--------------------------------------------------------------------------
@@ -7032,8 +7052,7 @@ namespace Legion {
           return false;
         DomainT<DIM,T> parent_space;
         const TypeTag type_tag = handle.get_type_tag();
-        const ApEvent parent_ready = 
-         parent->get_expr_index_space(&parent_space, type_tag, true/*tight*/); 
+        parent->get_expr_index_space(&parent_space, type_tag, true/*tight*/); 
         if (collective_mapping == NULL)
         {
           // No shard mapping so we can build the full kd-tree here
@@ -7052,8 +7071,6 @@ namespace Legion {
             for (RectInDomainIterator<DIM,T> it(space); it(); it++)
               bounds.push_back(std::make_pair(*it, *itr));
           }
-          if (parent_ready.exists() && !parent_ready.has_triggered())
-            parent_ready.wait();
           KDNode<DIM,T,LegionColor> *root = 
            new KDNode<DIM,T,LegionColor>(parent_space.bounds, bounds);
           AutoLock n_lock(node_lock);
@@ -7079,17 +7096,6 @@ namespace Legion {
           if (!wait_on.exists() && (kd_remote == NULL))
           {
             const RtEvent rects_ready = request_shard_rects();
-            // Grab our local children for later
-            std::vector<IndexSpaceNode*> current_children;
-            {
-              AutoLock n_lock(node_lock,1,false/*exclusive*/);
-              current_children.reserve(color_map.size());
-              for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-                    color_map.begin(); it != color_map.end(); it++)
-                current_children.push_back(it->second);
-            }
-            if (parent_ready.exists() && !parent_ready.has_triggered())
-              parent_ready.wait();
             if (rects_ready.exists() && !rects_ready.has_triggered())
               rects_ready.wait();
             // Once we get the remote rectangles we can build the kd-trees
@@ -7098,18 +7104,15 @@ namespace Legion {
                   parent_space.bounds, *sparse_shard_rects);
             // Add any local sparse paces into the dense remote rects
             // All the local dense spaces are already included
-            for (unsigned idx = 0; idx < current_children.size(); idx++)
+            for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
             {
-              IndexSpaceNode *child = current_children[idx];
+              IndexSpaceNode *child = get_child(*itr);
               DomainT<DIM,T> space;
-              const ApEvent space_ready = 
-                child->get_expr_index_space(&space, type_tag, true/*tight*/);
-              if (space_ready.exists() && !space_ready.has_triggered())
-                space_ready.wait();
+              child->get_expr_index_space(&space, type_tag, true/*tight*/);
               if (space.empty() || space.dense())
                 continue;
               for (RectInDomainIterator<DIM,T> it(space); it(); it++)
-                dense_shard_rects->push_back(std::make_pair(*it, child->color));
+                dense_shard_rects->push_back(std::make_pair(*it, *itr));
             }
             KDNode<DIM,T,LegionColor> *root = new KDNode<DIM,T,LegionColor>(
                                     parent_space.bounds, *dense_shard_rects);
@@ -7161,19 +7164,47 @@ namespace Legion {
         new std::vector<std::pair<Rect<DIM,T>,LegionColor> >();
       sparse_shard_rects =
         new std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >();
-      const TypeTag type_tag = handle.get_type_tag();
-      // No need for the lock here, it's being held the caller
-      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
-            color_map.begin(); it != color_map.end(); it++)
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    bool IndexPartNodeT<DIM,T>::find_local_shard_rects(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RtEvent> ready_events;
+      std::vector<IndexSpaceNodeT<DIM,T>*> children;
+      for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
       {
-        // Only handle children that we made so that we don't duplicate
-        if (!it->second->is_owner())
-          continue;
+        IndexSpaceNodeT<DIM,T> *child =
+          static_cast<IndexSpaceNodeT<DIM,T>*>(get_child(*itr));
+        children.push_back(child);
+        RtEvent ready = child->get_realm_index_space_ready(true/*tight*/);
+        if (ready.exists())
+          ready_events.push_back(ready);
+      }
+      if (!ready_events.empty())
+      {
+        const RtEvent ready = Runtime::merge_events(ready_events);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          // Defer this until they're all ready
+          DeferFindShardRects args(this);
+          context->runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, ready);
+          return false;
+        }
+      }
+      // All the children are ready so we can get their spaces safely
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      assert(dense_shard_rects != NULL);
+      assert(sparse_shard_rects != NULL);
+#endif
+      for (typename std::vector<IndexSpaceNodeT<DIM,T>*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+      {
         DomainT<DIM,T> child_space;
-        const ApEvent child_ready = 
-          it->second->get_expr_index_space(&child_space,type_tag,true/*tight*/);
-        if (child_ready.exists() && !child_ready.has_triggered())
-          child_ready.wait();
+        (*it)->get_realm_index_space(child_space, true/*tight*/);
         if (!child_space.dense())
         {
           // Scan through all the previous rectangles to make sure we
@@ -7197,8 +7228,9 @@ namespace Legion {
         }
         else if (!child_space.bounds.empty())
           dense_shard_rects->push_back(
-              std::make_pair(child_space.bounds, it->first));
+              std::make_pair(child_space.bounds, (*it)->color));
       }
+      return perform_shard_rects_notification();
     }
 
     //--------------------------------------------------------------------------

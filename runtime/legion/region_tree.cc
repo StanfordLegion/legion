@@ -10954,6 +10954,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/void IndexPartNode::defer_find_local_shard_rects(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferFindShardRects *dargs = (const DeferFindShardRects*)args;
+      if (dargs->proxy_this->find_local_shard_rects())
+        delete dargs->proxy_this;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void IndexPartNode::handle_node_child_response(
            RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -11004,16 +11013,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(collective_mapping != NULL);
 #endif
-      AutoLock n_lock(node_lock);
-      if (shard_rects_ready.exists())
-        return shard_rects_ready;
-      shard_rects_ready = Runtime::create_rt_user_event();
-      // Add a reference to keep this node alive until this all done
-      add_base_resource_ref(RUNTIME_REF);
-      // Figure out how many downstream requests we have
       std::vector<AddressSpaceID> children;
-      collective_mapping->get_children(owner_space, local_space, children);
-      remaining_rect_notifications = children.size();
+      {
+        AutoLock n_lock(node_lock);
+        if (shard_rects_ready.exists())
+          return shard_rects_ready;
+        shard_rects_ready = Runtime::create_rt_user_event();
+        // Add a reference to keep this node alive until this all done
+        add_base_gc_ref(RUNTIME_REF);
+        // Figure out how many downstream requests we have
+        collective_mapping->get_children(owner_space, local_space, children);
+        // Need to see all our children notifications plus our local rectangles 
+        remaining_rect_notifications = children.size() + 1;
+        initialize_shard_rects();
+      }
       if (!children.empty())
       {
         Serializer rez;
@@ -11025,8 +11038,10 @@ namespace Legion {
               children.begin(); it != children.end(); it++)
           context->runtime->send_index_partition_shard_rects_request(*it, rez);
       }
-      // Fill in all the local rectangle values
-      initialize_shard_rects();
+      // Compute our local shard rectangles
+      if (find_local_shard_rects())
+        assert(false); // should never delete ourselves
+#if 0
       if (children.empty())
       {
         if (!is_owner())
@@ -11045,10 +11060,11 @@ namespace Legion {
         else
         {
           Runtime::trigger_event(shard_rects_ready);
-          if (remove_base_resource_ref(RUNTIME_REF))
+          if (remove_base_gc_ref(RUNTIME_REF))
             assert(false); // should never hit this
         }
       }
+#endif
       return shard_rects_ready;
     }
 
@@ -11062,16 +11078,17 @@ namespace Legion {
 #endif
       bool up;
       derez.deserialize<bool>(up);
-      AutoLock n_lock(node_lock);
       if (up)
       {
+        bool need_local = false;
         std::vector<AddressSpaceID> children;
+        AutoLock n_lock(node_lock);
         if (!shard_rects_ready.exists())
         {
           // Not initialized, so do the initialization
           shard_rects_ready = Runtime::create_rt_user_event();
           // Add a reference to keep this node alive until this all done
-          add_base_resource_ref(RUNTIME_REF);
+          add_base_gc_ref(RUNTIME_REF);
           // Figure out how many downstream requests we have
           collective_mapping->get_children(owner_space, local_space, children);
 #ifdef DEBUG_LEGION
@@ -11087,7 +11104,8 @@ namespace Legion {
           }
           assert(found);
 #endif
-          remaining_rect_notifications = children.size();
+          need_local = true;
+          remaining_rect_notifications = children.size() + 1;
           Serializer rez;
           {
             RezCheck z(rez);
@@ -11118,55 +11136,20 @@ namespace Legion {
         }
 #endif
         unpack_shard_rects(derez);
-#ifdef DEBUG_LEGION
-        assert(remaining_rect_notifications > 0);
-#endif
-        if (--remaining_rect_notifications == 0)
+        if (perform_shard_rects_notification())
         {
-          if (is_owner())
-          {
 #ifdef DEBUG_LEGION
-            assert(shard_rects_ready.exists());
+          assert(!need_local);
 #endif
-            if (children.empty())
-              collective_mapping->get_children(owner_space, 
-                                               local_space, children);
-            // We've got all the data now, so we can broadcast it back out
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize<bool>(false); // sending down the tree now
-              pack_shard_rects(rez, false/*clear*/);
-            }
-            // Only trigger this after we've packed the shard rects since the
-            // local node is going to mutate it with its own values after this
-            Runtime::trigger_event(shard_rects_ready);
-
-            for (std::vector<AddressSpaceID>::const_iterator it =
-                  children.begin(); it != children.end(); it++)
-              context->runtime->send_index_partition_shard_rects_response(*it,
-                                                                          rez);
-            return remove_base_resource_ref(RUNTIME_REF);
-          }
-          else
-          {
-            // Continue propagating it back up the tree
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(handle);
-              rez.serialize<bool>(true); // still going up
-              pack_shard_rects(rez, true/*clear*/);
-            }
-            context->runtime->send_index_partition_shard_rects_response(
-               collective_mapping->get_parent(owner_space, local_space), rez);
-          }
+          return true;
         }
+        else if (!need_local)
+          return false;
       }
       else
       {
         // Going down
+        AutoLock n_lock(node_lock);
         unpack_shard_rects(derez);
 #ifdef DEBUG_LEGION
         assert(shard_rects_ready.exists());
@@ -11190,7 +11173,59 @@ namespace Legion {
         // Only trigger this after we've packed the shard rects since the
         // local node is going to mutate it with its own values after this
         Runtime::trigger_event(shard_rects_ready);
-        return remove_base_resource_ref(RUNTIME_REF);
+        return remove_base_gc_ref(RUNTIME_REF);
+      }
+      // If we get here then we need to kick off the local analysis
+      return find_local_shard_rects();
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexPartNode::perform_shard_rects_notification(void)
+    //--------------------------------------------------------------------------
+    {
+      // Lock held from caller
+#ifdef DEBUG_LEGION
+      assert(remaining_rect_notifications > 0);
+#endif
+      if (--remaining_rect_notifications == 0)
+      {
+        if (is_owner())
+        {
+#ifdef DEBUG_LEGION
+          assert(shard_rects_ready.exists());
+#endif
+          std::vector<AddressSpaceID> children;
+          collective_mapping->get_children(owner_space, local_space, children);
+          // We've got all the data now, so we can broadcast it back out
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<bool>(false); // sending down the tree now
+            pack_shard_rects(rez, false/*clear*/);
+          }
+          // Only trigger this after we've packed the shard rects since the
+          // local node is going to mutate it with its own values after this
+          Runtime::trigger_event(shard_rects_ready);
+          for (std::vector<AddressSpaceID>::const_iterator it =
+                children.begin(); it != children.end(); it++)
+            context->runtime->send_index_partition_shard_rects_response(*it,
+                                                                        rez);
+          return remove_base_gc_ref(RUNTIME_REF);
+        }
+        else
+        {
+          // Continue propagating it back up the tree
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<bool>(true); // still going up
+            pack_shard_rects(rez, true/*clear*/);
+          }
+          context->runtime->send_index_partition_shard_rects_response(
+             collective_mapping->get_parent(owner_space, local_space), rez);
+        }
       }
       return false;
     }
@@ -11293,8 +11328,7 @@ namespace Legion {
       IndexPartition handle;
       derez.deserialize(handle);
       IndexPartNode *node = forest->get_node(handle);
-      if (node->process_shard_rects_response(derez, source) &&
-          node->remove_base_resource_ref(RUNTIME_REF))
+      if (node->process_shard_rects_response(derez, source))
         delete node;
     }
 

@@ -32288,6 +32288,11 @@ namespace Legion {
             IndexPartNode::defer_node_child_request(args);
             break;
           }
+        case LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID:
+          {
+            IndexPartNode::defer_find_local_shard_rects(args);
+            break;
+          }
         case LG_DEFERRED_ENQUEUE_TASK_ID:
           {
             InnerContext::handle_enqueue_task_queue(args);
