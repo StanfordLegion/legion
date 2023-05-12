@@ -4780,10 +4780,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      src_privilege_paths.clear();
-      dst_privilege_paths.clear();
-      gather_privilege_paths.clear();
-      scatter_privilege_paths.clear();
       src_parent_indexes.clear();
       dst_parent_indexes.clear();
       gather_parent_indexes.clear();
@@ -4945,33 +4941,29 @@ namespace Legion {
       compute_parent_indexes();
       // Initialize the privilege and mapping paths for all of the
       // region requirements that we have
-      src_privilege_paths.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        initialize_privilege_path(src_privilege_paths[idx],
+        initialize_privilege_path(copies[idx].src->privilege_path,
                                   src_requirements[idx]);
       }
-      dst_privilege_paths.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        initialize_privilege_path(dst_privilege_paths[idx],
+        initialize_privilege_path(copies[idx].dst->privilege_path,
                                   dst_requirements[idx]);
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_privilege_paths.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          initialize_privilege_path(gather_privilege_paths[idx],
+          initialize_privilege_path(copies[idx].gather->privilege_path,
                                     src_indirect_requirements[idx]);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_privilege_paths.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          initialize_privilege_path(scatter_privilege_paths[idx],
+          initialize_privilege_path(copies[idx].scatter->privilege_path,
                                     dst_indirect_requirements[idx]);
         }
       } 
@@ -4996,7 +4988,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].src->privilege_path,
                                                      map_applied_conditions);
       dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -5010,7 +5002,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].dst->privilege_path,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -5024,7 +5016,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  projection_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].gather->privilege_path,
                                                  map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
@@ -5036,7 +5028,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].scatter->privilege_path,
                                                  map_applied_conditions);
       }
     }
@@ -6968,7 +6960,6 @@ namespace Legion {
       compute_parent_indexes();
       // Initialize the privilege and mapping paths for all of the
       // region requirements that we have
-      src_privilege_paths.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         RegionRequirement &req = src_requirements[idx];
@@ -6978,9 +6969,8 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
         }
-        initialize_privilege_path(src_privilege_paths[idx], req);
+        initialize_privilege_path(copies[idx].src->privilege_path, req);
       }
-      dst_privilege_paths.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         RegionRequirement &req = dst_requirements[idx];
@@ -6990,11 +6980,10 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
         }
-        initialize_privilege_path(dst_privilege_paths[idx], req);
+        initialize_privilege_path(copies[idx].dst->privilege_path, req);
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_privilege_paths.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           RegionRequirement &req = src_indirect_requirements[idx];
@@ -7004,12 +6993,11 @@ namespace Legion {
             req.handle_type = LEGION_REGION_PROJECTION;
             req.projection = 0;
           }
-          initialize_privilege_path(gather_privilege_paths[idx], req);
+          initialize_privilege_path(copies[idx].gather->privilege_path, req);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_privilege_paths.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           RegionRequirement &req = dst_indirect_requirements[idx];
@@ -7019,7 +7007,7 @@ namespace Legion {
             req.handle_type = LEGION_REGION_PROJECTION;
             req.projection = 0;
           }
-          initialize_privilege_path(scatter_privilege_paths[idx], req);
+          initialize_privilege_path(copies[idx].scatter->privilege_path, req);
         }
       } 
       if (runtime->legion_spy_enabled)
@@ -7156,7 +7144,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].src->privilege_path,
                                                      map_applied_conditions);
       }
       dst_versions.resize(dst_requirements.size());
@@ -7172,7 +7160,7 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].dst->privilege_path,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -7188,7 +7176,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].gather->privilege_path,
                                                  map_applied_conditions);
         }
       }
@@ -7202,7 +7190,7 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].scatter->privilege_path,
                                                  map_applied_conditions);
         }
       }

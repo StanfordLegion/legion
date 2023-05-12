@@ -1353,16 +1353,12 @@ namespace Legion {
 
       std::vector<Operand> operands;
       std::vector<SingleCopy> copies;
-      std::vector<RegionTreePath>           src_privilege_paths;
-      std::vector<RegionTreePath>           dst_privilege_paths;
       std::vector<unsigned>                 src_parent_indexes;
       std::vector<unsigned>                 dst_parent_indexes;
       LegionVector<VersionInfo>             src_versions;
       LegionVector<VersionInfo>             dst_versions;
       std::vector<IndexSpaceExpression*>    copy_expressions;
     public: // These are only used for indirect copies
-      std::vector<RegionTreePath>           gather_privilege_paths;
-      std::vector<RegionTreePath>           scatter_privilege_paths;
       std::vector<unsigned>                 gather_parent_indexes;
       std::vector<unsigned>                 scatter_parent_indexes;
       std::vector<bool>                     gather_is_range;
