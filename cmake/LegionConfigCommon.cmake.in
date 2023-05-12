@@ -25,6 +25,7 @@ endif()
 # Find the CUDA Toolkit here
 set(Legion_USE_CUDA @Legion_USE_CUDA@)
 if(Legion_USE_CUDA)
+  set(Legion_CUDA_ARCH @Legion_CUDA_ARCH@)
   set(CMAKE_CUDA_RUNTIME_LIBRARY "@CMAKE_CUDA_RUNTIME_LIBRARY@")
   find_package(CUDAToolkit REQUIRED)
   if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")

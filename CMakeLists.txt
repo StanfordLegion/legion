@@ -455,39 +455,31 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       set(CUDAToolkit_NVCC_EXECUTABLE "${CMAKE_CUDA_COMPILER}")
     endif()
 
+    # Find the CUDA toolkit
+    find_package(CUDAToolkit REQUIRED)
+
     # Work around a clangd bug by generating compile commands
     # with `-isystem <path>` instead of `-isystem=<path>`.
     # Must come after `enable_language(CUDA)`
     set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
 
-    set(Legion_CUDA_ARCH "" CACHE STRING
-      "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)")
+    include(cmake/cuda_arch.cmake)
 
-    # Ensure CMAKE_CUDA_ARCHITECTURES is set before `enable_language(CUDA)`
-    if(NOT CMAKE_CUDA_ARCHITECTURES)
-      include(cmake/cuda_arch.cmake)
-      if(Legion_CUDA_ARCH)
-        # Support comma-delimited lists in addition to semicolons
-        string(REPLACE "," ";" CMAKE_CUDA_ARCHITECTURES "${Legion_CUDA_ARCH}")
-        list(TRANSFORM CMAKE_CUDA_ARCHITECTURES REPLACE "-virtual" "")
-        list(TRANSFORM CMAKE_CUDA_ARCHITECTURES REPLACE "-real" "")
-      elseif(CMAKE_VERSION VERSION_LESS "3.23")
-        # Find the CUDA toolkit first. We need to know the CTK version to
-        # automatically populate the architectures list for CMake < v3.23.
-        find_package(CUDAToolkit REQUIRED)
-      endif()
-      populate_cuda_archs_list(CMAKE_CUDA_ARCHITECTURES)
+    if(CMAKE_CUDA_ARCHITECTURES)
+      set(Legion_CUDA_ARCH ${CMAKE_CUDA_ARCHITECTURES})
+    elseif(NOT ("${Legion_CUDA_ARCH}" STREQUAL ""))
+      # Support comma-delimited lists in addition to semicolons
+      string(REPLACE "," ";" Legion_CUDA_ARCH "${Legion_CUDA_ARCH}")
+    else()
+      # Default to all major GPU archs
+      populate_cuda_archs_list(Legion_CUDA_ARCH)
     endif()
 
-    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17")
-      # Translate CUDA_ARCHITECTURES to -gencode flags for CMake < 3.18
-      archs_list_to_gencode_flags(
-        FLAGS cuda_gencode_flags
-        ARCHS ${CMAKE_CUDA_ARCHITECTURES}
-      )
-      list(JOIN cuda_gencode_flags " " cuda_gencode_flags)
-      string(APPEND CMAKE_CUDA_FLAGS ${cuda_gencode_flags})
-    endif()
+    list(REMOVE_DUPLICATES Legion_CUDA_ARCH)
+
+    set(Legion_CUDA_ARCH "${Legion_CUDA_ARCH}" CACHE STRING
+      "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)"
+      FORCE)
 
     #------------------------------------------------------------------------------#
     # NVTX configuration

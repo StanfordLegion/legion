@@ -30,5 +30,5 @@ set(CPU_SOURCES thrust_interop.cc)
 set(GPU_SOURCES thrust_shim.h thrust_shim.cu)
 add_executable(thrust_interop ${CPU_SOURCES} ${GPU_SOURCES})
 target_link_libraries(thrust_interop Legion::Legion)
-
+set_target_cuda_architectures(TARGET thrust_interop ARCHS ${Legion_CUDA_ARCH})
 target_compile_options(thrust_interop PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Wno-deprecated-gpu-targets>)
