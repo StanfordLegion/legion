@@ -4123,6 +4123,28 @@ namespace Legion {
     // Copy Operation 
     /////////////////////////////////////////////////////////////
 
+    CopyOp::SingleCopy::SingleCopy(unsigned user_index,
+                                   CopyOp::Operand *src,
+                                   CopyOp::Operand *dst,
+                                   CopyOp::Operand *src_indirect,
+                                   CopyOp::Operand *dst_indirect,
+                                   Grant *grant,
+                                   PhaseBarrier *wait_barrier,
+                                   PhaseBarrier *arrive_barrier)
+      :user_index(user_index),
+       src(src),
+       dst(dst),
+       src_indirect(src_indirect),
+       gather(src_indirect),
+       dst_indirect(dst_indirect),
+       scatter(dst_indirect),
+       grant(grant),
+       wait_barrier(wait_barrier),
+       arrive_barrier(arrive_barrier)
+    {
+    }
+
+
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
       : ExternalCopy(), MemoizableOp<SpeculativeOp>(rt)
@@ -4153,6 +4175,57 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    /* static */
+    void CopyOp::init_ops_from_vec(std::vector<CopyOp::Operand> &ops,
+                                   size_t *offsets,
+                                   ReqType type,
+                                   std::vector<RegionRequirement> &reqs)
+    {
+      offsets[type] = ops.size();
+      for (RegionRequirement &req : reqs)
+        ops.emplace_back(type, ops.size(), req);
+    }
+
+    /* static */
+    CopyOp::Operand *CopyOp::get_operand_ptr(std::vector<Operand> &ops,
+                                             const size_t *offsets,
+                                             ReqType type,
+                                             size_t user_index)
+    {
+      size_t start = offsets[type];
+      size_t count = offsets[type + 1] - start;
+
+      if (user_index >= count)
+        return nullptr;
+
+      return &ops[start + user_index];
+    }
+
+    void CopyOp::initialize_copies()
+    {
+      const size_t REQ_COUNT = 4;
+      operands.clear();
+      size_t offsets[REQ_COUNT + 1];
+
+      init_ops_from_vec(operands, offsets, SRC_REQ, src_requirements);
+      init_ops_from_vec(operands, offsets, DST_REQ, dst_requirements);
+      init_ops_from_vec(operands, offsets, GATHER_REQ, src_indirect_requirements);
+      init_ops_from_vec(operands, offsets, SCATTER_REQ, dst_indirect_requirements);
+      offsets[REQ_COUNT] = operands.size();
+
+      for (size_t i = 0; i < src_requirements.size(); i++)
+      {
+        copies.emplace_back(i,
+                            get_operand_ptr(operands, offsets, SRC_REQ, i),
+                            get_operand_ptr(operands, offsets, DST_REQ, i),
+                            get_operand_ptr(operands, offsets, GATHER_REQ, i),
+                            get_operand_ptr(operands, offsets, SCATTER_REQ, i),
+                            grants.size() > i ? &grants[i] : nullptr,
+                            wait_barriers.size() > i ? &wait_barriers[i] : nullptr,
+                            arrive_barriers.size() > i ? &arrive_barriers[i] : nullptr);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4339,6 +4412,7 @@ namespace Legion {
       {
         perform_type_checking();
       }
+      initialize_copies();
     }
 
     //--------------------------------------------------------------------------
@@ -6851,6 +6925,7 @@ namespace Legion {
       }
       if (runtime->check_privileges)
         perform_type_checking();
+      initialize_copies();
     }
 
     //--------------------------------------------------------------------------
@@ -7830,6 +7905,7 @@ namespace Legion {
                                 = owner->possible_dst_indirect_aliasing;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
+      initialize_copies();
     }
 
     //--------------------------------------------------------------------------

@@ -1293,6 +1293,66 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez, AddressSpaceID target,
                                          std::set<RtEvent> &applied) const;
     public:
+      struct Operand
+      {
+        Operand(ReqType type, unsigned req_index, RegionRequirement &requirement)
+          :type(type), req_index(req_index), requirement(requirement)
+        {}
+
+        // from CopyLauncher
+        const ReqType type;
+        const unsigned req_index;
+        RegionRequirement &requirement;
+
+        // calculated in CopyOp
+        RegionTreePath privilege_path;
+        unsigned parent_req_index;
+        VersionInfo version;
+      };
+
+      struct SingleCopy
+      {
+        SingleCopy(unsigned user_index,
+                   Operand *src,
+                   Operand *dst,
+                   Operand *src_indirect,
+                   Operand *dst_indirect,
+                   Grant *grant,
+                   PhaseBarrier *wait_barrier,
+                   PhaseBarrier *arrive_barrier);
+
+        // from CopyLauncher
+        const unsigned user_index;
+        Operand * const src;
+        Operand * const dst;
+        Operand * const src_indirect;
+        Operand * const gather;
+        Operand * const dst_indirect;
+        Operand * const scatter;
+        Grant * const grant;
+        PhaseBarrier * const wait_barrier;
+        PhaseBarrier * const arrive_barrier;
+
+        // calculated in CopyOp
+        IndexSpaceExpression *copy_expression;
+        std::vector<IndirectRecord> src_indirect_records;
+        std::vector<IndirectRecord> dst_indirect_records;
+      };
+
+      void initialize_copies();
+      static void
+      init_ops_from_vec(std::vector<Operand> &ops,
+                        size_t *offsets,
+                        ReqType type,
+                        std::vector<RegionRequirement> &reqs);
+      static Operand *
+      get_operand_ptr(std::vector<Operand> &ops,
+                      const size_t *offsets,
+                      ReqType type,
+                      size_t user_index);
+
+      std::vector<Operand> operands;
+      std::vector<SingleCopy> copies;
       std::vector<RegionTreePath>           src_privilege_paths;
       std::vector<RegionTreePath>           dst_privilege_paths;
       std::vector<unsigned>                 src_parent_indexes;
