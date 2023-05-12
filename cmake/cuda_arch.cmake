@@ -14,28 +14,28 @@ function(populate_cuda_archs_list ARCHS)
       set(${ARCHS} all-major PARENT_SCOPE)
       return()
     else()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "3.2" AND ${CUDAToolkit_VERSION} VERSION_LESS "10.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "3.2" AND CUDAToolkit_VERSION VERSION_LESS "10.0")
         list(APPEND archs 20)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "5.0" AND ${CUDAToolkit_VERSION} VERSION_LESS "11.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "5.0" AND CUDAToolkit_VERSION VERSION_LESS "11.0")
         list(APPEND archs 30)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "5.0" AND ${CUDAToolkit_VERSION} VERSION_LESS "12.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "5.0" AND CUDAToolkit_VERSION VERSION_LESS "12.0")
         list(APPEND archs 35)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "6.0" AND ${CUDAToolkit_VERSION} VERSION_LESS "12.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "6.0" AND CUDAToolkit_VERSION VERSION_LESS "12.0")
         list(APPEND archs 50)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "8.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "8.0")
         list(APPEND archs 60)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "9.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "9.0")
         list(APPEND archs 70)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "11.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "11.0")
         list(APPEND archs 80)
       endif()
-      if(${CUDAToolkit_VERSION} VERSION_GREATER_EQUAL "11.8.0")
+      if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL "11.8.0")
         list(APPEND archs 90)
       endif()
     endif()
@@ -51,45 +51,44 @@ function(populate_cuda_archs_list ARCHS)
   set(${ARCHS} ${archs} PARENT_SCOPE)
 endfunction(populate_cuda_archs_list)
 
-function(archs_list_to_gencode_flags)
-  set(options )
-  set(oneValueArgs FLAGS TARGET)
-  set(multiValueArgs ARCHS)
-  cmake_parse_arguments(CUDA "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+# Set a target's CUDA_ARCHITECTURES property, or translate the archs list
+# to --generate-code flags for CMake < 3.18
+function(set_target_cuda_architectures)
+    set(options )
+    set(oneValueArgs TARGET)
+    set(multiValueArgs ARCHS)
+    cmake_parse_arguments(cuda "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
-  set(flags )
-
-  if(${CUDA_FLAGS})
-    set(flags ${${CUDA_FLAGS}})
-  endif()
-
-  if(NOT CUDA_ARCHS)
-    if(${CUDA_TARGET} AND (TARGET ${CUDA_TARGET}))
-      get_target_property(CUDA_ARCHS ${CUDA_TARGET} CUDA_ARCHITECTURES)
+  # Translate CUDA_ARCHITECTURES to -gencode flags for CMake < 3.18
+  if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17")
+    set(flags )
+    if(cuda_ARCHS)
+      set(archs ${cuda_ARCHS})
     else()
-      set(CUDA_ARCHS ${CMAKE_CUDA_ARCHITECTURES})
+      get_target_property(archs ${cuda_TARGET} CUDA_ARCHITECTURES)
     endif()
+
+    # ARCH=75-real    : --generate-code=arch=compute_75,code=[sm_75]
+    # ARCH=75-virtual : --generate-code=arch=compute_75,code=[compute_75]
+    # ARCH=75         : --generate-code=arch=compute_75,code=[compute_75,sm_75]
+    foreach(arch IN LISTS archs)
+      set(codes "compute_XX" "sm_XX")
+      if(arch MATCHES "-real")
+        # remove "compute_XX"
+        list(POP_FRONT codes)
+        string(REPLACE "-real" "" arch "${arch}")
+      elseif(arch MATCHES "-virtual")
+        # remove "sm_XX"
+        list(POP_BACK codes)
+        string(REPLACE "-virtual" "" arch "${arch}")
+      endif()
+      list(TRANSFORM codes REPLACE "_XX" "_${arch}")
+      list(JOIN codes "," codes)
+      list(APPEND flags "--generate-code=arch=compute_${arch},code=[${codes}]")
+    endforeach()
+
+    target_compile_options(${cuda_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:${flags}>)
+  elseif(cuda_ARCHS)
+    set_property(TARGET ${cuda_TARGET} PROPERTY CUDA_ARCHITECTURES ${cuda_ARCHS})
   endif()
-
-  list(REMOVE_DUPLICATES CUDA_ARCHS)
-
-  # ARCH=75-real    : --generate-code=arch=compute_75,code=[sm_75]
-  # ARCH=75-virtual : --generate-code=arch=compute_75,code=[compute_75]
-  # ARCH=75         : --generate-code=arch=compute_75,code=[compute_75,sm_75]
-  foreach(ARCH IN LISTS CUDA_ARCHS)
-    set(codes "compute_XX" "sm_XX")
-    if(ARCH MATCHES "-real")
-      list(POP_FRONT codes) # remove "compute_XX"
-      string(REPLACE "-real" "" ARCH "${ARCH}")
-    elseif(ARCH MATCHES "-virtual")
-      list(POP_BACK codes) # remove "sm_XX"
-      string(REPLACE "-virtual" "" ARCH "${ARCH}")
-    endif()
-    list(TRANSFORM codes REPLACE "_XX" "_${ARCH}")
-    list(JOIN codes "," codes)
-    list(APPEND flags "--generate-code=arch=compute_${ARCH},code=[${codes}]")
-  endforeach()
-
-  set(${CUDA_FLAGS} ${flags} PARENT_SCOPE)
-
 endfunction()

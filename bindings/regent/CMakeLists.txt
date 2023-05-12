@@ -62,6 +62,7 @@ target_link_libraries(Regent PUBLIC Legion::Legion)
 
 if(Legion_USE_CUDA)
   target_link_libraries(Regent PRIVATE CUDA::toolkit)
+  set_target_cuda_architectures(TARGET Regent ARCHS ${Legion_CUDA_ARCH})
 elseif(Legion_USE_HIP)
   target_include_directories(Regent PRIVATE ${HIP_INCLUDE_DIRS})
   if (Legion_HIP_TARGET STREQUAL "CUDA")
