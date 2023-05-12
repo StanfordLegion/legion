@@ -22,8 +22,7 @@ if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_LLVM)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
 endif()
 
-# CUDA is only a private dependency of Legion but has a few usage requirements
-# so we add it in here
+# Find the CUDA Toolkit here
 set(Legion_USE_CUDA @Legion_USE_CUDA@)
 if(Legion_USE_CUDA)
   set(CMAKE_CUDA_RUNTIME_LIBRARY "@CMAKE_CUDA_RUNTIME_LIBRARY@")
