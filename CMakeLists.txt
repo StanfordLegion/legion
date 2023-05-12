@@ -432,6 +432,34 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       endif()
     endif()
 
+    # Default CMAKE_CUDA_STANDARD to CMAKE_CXX_STANDARD if unset
+    if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
+      set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+    endif()
+
+    # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so unset it before enabling the CUDA language
+    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND (CMAKE_CUDA_STANDARD GREATER_EQUAL 17))
+      unset(CMAKE_CUDA_STANDARD)
+      unset(CMAKE_CUDA_STANDARD CACHE)
+      if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
+        # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
+        string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
+      endif()
+    endif()
+
+    # Enable the CUDA language
+    enable_language(CUDA)
+
+    # Polyfill a CMake < 3.18 missing CUDA compiler detection variable
+    if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17" AND (NOT CUDAToolkit_NVCC_EXECUTABLE))
+      set(CUDAToolkit_NVCC_EXECUTABLE "${CMAKE_CUDA_COMPILER}")
+    endif()
+
+    # Work around a clangd bug by generating compile commands
+    # with `-isystem <path>` instead of `-isystem=<path>`.
+    # Must come after `enable_language(CUDA)`
+    set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
+
     set(Legion_CUDA_ARCH "" CACHE STRING
       "Comma (or semicolon) separated list of CUDA architectures to build for (e.g. 60,70,80,90)")
 
@@ -451,13 +479,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       populate_cuda_archs_list(CMAKE_CUDA_ARCHITECTURES)
     endif()
 
-    # Default CMAKE_CUDA_STANDARD to CMAKE_CXX_STANDARD if unset
-    if(CMAKE_CXX_STANDARD AND NOT CMAKE_CUDA_STANDARD)
-      set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-    endif()
-
     if(CMAKE_VERSION VERSION_LESS_EQUAL "3.17")
-
       # Translate CUDA_ARCHITECTURES to -gencode flags for CMake < 3.18
       archs_list_to_gencode_flags(
         FLAGS cuda_gencode_flags
@@ -465,31 +487,7 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
       )
       list(JOIN cuda_gencode_flags " " cuda_gencode_flags)
       string(APPEND CMAKE_CUDA_FLAGS ${cuda_gencode_flags})
-
-      # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so unset it before enabling the CUDA language
-      if(CMAKE_CUDA_STANDARD GREATER_EQUAL 17)
-        unset(CMAKE_CUDA_STANDARD)
-        unset(CMAKE_CUDA_STANDARD CACHE)
-        if(NOT "${CMAKE_CUDA_FLAGS}" MATCHES ".*-std=.*")
-          # CMake < 3.18 doesn't recognize >=17 as a CUDA standard, so set it manually
-          string(APPEND CMAKE_CUDA_FLAGS " -std=c++${CMAKE_CXX_STANDARD}")
-        endif()
-      endif()
     endif()
-
-    # Enable the CUDA language
-    enable_language(CUDA)
-
-    if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
-      get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
-      list(APPEND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
-      unset(_cuda_stubs_path)
-    endif()
-
-    # Work around a clangd bug by generating compile commands
-    # with `-isystem <path>` instead of `-isystem=<path>`.
-    # Must come after `enable_language(CUDA)`
-    set(CMAKE_INCLUDE_SYSTEM_FLAG_CUDA "-isystem ")
 
     #------------------------------------------------------------------------------#
     # NVTX configuration
@@ -502,6 +500,12 @@ if(Legion_USE_CUDA OR Legion_USE_HIP)
     # Find the CUDA toolkit if we haven't already.
     if(NOT CUDAToolkit_FOUND)
       find_package(CUDAToolkit REQUIRED)
+    endif()
+
+    if("${CUDA_cuda_driver_LIBRARY}" MATCHES ".*stubs.*")
+      get_filename_component(_cuda_stubs_path "${CUDA_cuda_driver_LIBRARY}" DIRECTORY)
+      list(APPEND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${_cuda_stubs_path}")
+      unset(_cuda_stubs_path)
     endif()
 
     # Install the vendored FindCUDAToolkit.cmake to support CMake < v3.19
