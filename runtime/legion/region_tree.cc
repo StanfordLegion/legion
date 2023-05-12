@@ -9869,7 +9869,10 @@ namespace Legion {
           for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
           {
             IndexSpaceNode *child = get_child(*itr);
-            children_volume += child->get_volume();
+            size_t child_volume = child->get_volume();
+            if (child_volume == 0)
+              continue;
+            children_volume += child_volume;
             std::vector<LegionColor> interfering;
             if (!find_interfering_children_kd(child, interfering))
             {
@@ -9960,7 +9963,10 @@ namespace Legion {
           for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
           {
             IndexSpaceNode *child = get_child(*itr);
-            children_volumes[*itr] = child->get_volume();
+            size_t child_volume = child->get_volume();
+            children_volumes[*itr] = child_volume;
+            if (child_volume == 0)
+              continue;
             std::vector<LegionColor> interfering;
             if (!find_interfering_children_kd(child, interfering))
             {
