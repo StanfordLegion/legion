@@ -1353,14 +1353,10 @@ namespace Legion {
 
       std::vector<Operand> operands;
       std::vector<SingleCopy> copies;
-      LegionVector<VersionInfo>             src_versions;
-      LegionVector<VersionInfo>             dst_versions;
       std::vector<IndexSpaceExpression*>    copy_expressions;
     public: // These are only used for indirect copies
       std::vector<bool>                     gather_is_range;
       std::vector<bool>                     scatter_is_range;
-      LegionVector<VersionInfo>             gather_versions;
-      LegionVector<VersionInfo>             scatter_versions;
       std::vector<std::vector<IndirectRecord> > src_indirect_records;
       std::vector<std::vector<IndirectRecord> > dst_indirect_records;
     protected: // for support with mapping
