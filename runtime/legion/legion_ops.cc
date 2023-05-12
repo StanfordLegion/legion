@@ -4780,10 +4780,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      src_parent_indexes.clear();
-      dst_parent_indexes.clear();
-      gather_parent_indexes.clear();
-      scatter_parent_indexes.clear();
       src_versions.clear();
       dst_versions.clear();
       gather_versions.clear();
@@ -5820,19 +5816,10 @@ namespace Legion {
     unsigned CopyOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      if (idx < src_parent_indexes.size())
-        return src_parent_indexes[idx];
-      idx -= src_parent_indexes.size();
-      if (idx < dst_parent_indexes.size())
-        return dst_parent_indexes[idx];
-      idx -= dst_parent_indexes.size();
-      if (idx < gather_parent_indexes.size())
-        return gather_parent_indexes[idx];
-      idx -= gather_parent_indexes.size();
 #ifdef DEBUG_LEGION
-      assert(idx < scatter_parent_indexes.size());
+      assert(idx < operands.size());
 #endif
-      return scatter_parent_indexes[idx];
+      return operands[idx].parent_index;
     }
 
     //--------------------------------------------------------------------------
@@ -6182,8 +6169,6 @@ namespace Legion {
     void CopyOp::compute_parent_indexes(void)
     //--------------------------------------------------------------------------
     {
-      src_parent_indexes.resize(src_requirements.size());
-      dst_parent_indexes.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         int parent_index =
@@ -6202,7 +6187,7 @@ namespace Legion {
                            src_requirements[idx].region.field_space.id, 
                            src_requirements[idx].region.tree_id, idx)
         else
-          src_parent_indexes[idx] = unsigned(parent_index);
+          copies[idx].src->parent_index = unsigned(parent_index);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -6222,11 +6207,10 @@ namespace Legion {
                            dst_requirements[idx].region.field_space.id, 
                            dst_requirements[idx].region.tree_id, idx)
         else
-          dst_parent_indexes[idx] = unsigned(parent_index);
+          copies[idx].dst->parent_index = unsigned(parent_index);
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_parent_indexes.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           int parent_index = 
@@ -6245,12 +6229,11 @@ namespace Legion {
                            src_indirect_requirements[idx].region.field_space.id, 
                            src_indirect_requirements[idx].region.tree_id, idx)
           else
-            gather_parent_indexes[idx] = unsigned(parent_index);
+            copies[idx].gather->parent_index = unsigned(parent_index);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_parent_indexes.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           int parent_index = 
@@ -6269,7 +6252,7 @@ namespace Legion {
                            dst_indirect_requirements[idx].region.field_space.id, 
                            dst_indirect_requirements[idx].region.tree_id, idx)
           else
-            scatter_parent_indexes[idx] = unsigned(parent_index);
+            copies[idx].scatter->parent_index = unsigned(parent_index);
         }
       }
     }
@@ -7878,10 +7861,6 @@ namespace Legion {
         memcpy(mapper_data, owner->mapper_data, mapper_data_size);
       }
       // From CopyOp
-      src_parent_indexes        = owner->src_parent_indexes;
-      dst_parent_indexes        = owner->dst_parent_indexes;
-      gather_parent_indexes     = owner->gather_parent_indexes;
-      scatter_parent_indexes    = owner->scatter_parent_indexes;
       gather_is_range           = owner->gather_is_range;
       scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
@@ -7893,7 +7872,11 @@ namespace Legion {
                                 = owner->possible_dst_indirect_aliasing;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
+
       initialize_copies();
+
+      for (CopyOp::Operand &op : operands)
+        op.parent_index = owner->operands[op.req_index].parent_index;
     }
 
     //--------------------------------------------------------------------------

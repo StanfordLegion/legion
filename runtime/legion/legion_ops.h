@@ -1306,7 +1306,7 @@ namespace Legion {
 
         // calculated in CopyOp
         RegionTreePath privilege_path;
-        unsigned parent_req_index;
+        unsigned parent_index;
         VersionInfo version;
       };
 
@@ -1353,14 +1353,10 @@ namespace Legion {
 
       std::vector<Operand> operands;
       std::vector<SingleCopy> copies;
-      std::vector<unsigned>                 src_parent_indexes;
-      std::vector<unsigned>                 dst_parent_indexes;
       LegionVector<VersionInfo>             src_versions;
       LegionVector<VersionInfo>             dst_versions;
       std::vector<IndexSpaceExpression*>    copy_expressions;
     public: // These are only used for indirect copies
-      std::vector<unsigned>                 gather_parent_indexes;
-      std::vector<unsigned>                 scatter_parent_indexes;
       std::vector<bool>                     gather_is_range;
       std::vector<bool>                     scatter_is_range;
       LegionVector<VersionInfo>             gather_versions;
