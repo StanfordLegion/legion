@@ -27,7 +27,7 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= disjoint_coimplete
+OUTFILE		?= disjoint_complete
 # List all the application source files here
 GEN_SRC		?= disjoint_complete.cc	# .cc files
 
