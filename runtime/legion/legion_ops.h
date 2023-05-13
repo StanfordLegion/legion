@@ -1305,6 +1305,7 @@ namespace Legion {
         RegionRequirement &requirement;
 
         // calculated in CopyOp
+        unsigned user_index;
         RegionTreePath privilege_path;
         unsigned parent_index;
         VersionInfo version;
@@ -1336,6 +1337,7 @@ namespace Legion {
         // calculated in CopyOp
         std::vector<IndirectRecord> src_indirect_records;
         std::vector<IndirectRecord> dst_indirect_records;
+        std::map<Reservation,bool> atomic_locks;
       };
 
       void initialize_copies();
@@ -1359,7 +1361,6 @@ namespace Legion {
       MapperManager*              mapper;
     protected:
       std::map<PhysicalManager*,unsigned> acquired_instances;
-      std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
     public:
       PredEvent                   predication_guard;

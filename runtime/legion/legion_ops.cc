@@ -4200,7 +4200,9 @@ namespace Legion {
       if (user_index >= count)
         return nullptr;
 
-      return &ops[start + user_index];
+      Operand *op = &ops[start + user_index];
+      op->user_index = user_index;
+      return op;
     }
 
     void CopyOp::initialize_copies()
@@ -4780,7 +4782,6 @@ namespace Legion {
       scatter_is_range.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      atomic_locks.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
       if (!profiling_info.empty())
@@ -5158,7 +5159,6 @@ namespace Legion {
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
       output.dst_indirect_instances.resize(dst_indirect_requirements.size());
-      atomic_locks.resize(dst_requirements.size());
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       output.copy_fill_priority = 0;
       output.compute_preimages = false;
@@ -5585,7 +5585,7 @@ namespace Legion {
               copies[index].src->version, copies[index].dst->version,
               src_targets, dst_targets, this, index, trace_info.dst_index,
               init_precondition, predication_guard, 
-              atomic_locks[index], trace_info, applied_conditions);
+              copies[index].atomic_locks, trace_info, applied_conditions);
         }
         else
         {
@@ -5601,7 +5601,7 @@ namespace Legion {
               src_requirements.size() + index, gather_is_range[index],
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, 
-              atomic_locks[index], trace_info, applied_conditions, 
+              copies[index].atomic_locks, trace_info, applied_conditions,
               possible_src_indirect_out_of_range, compute_preimages);
         }
       }
@@ -5621,7 +5621,7 @@ namespace Legion {
               src_requirements.size() + index, scatter_is_range[index],
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, 
-              atomic_locks[index], trace_info, applied_conditions, 
+              copies[index].atomic_locks, trace_info, applied_conditions,
               possible_dst_indirect_out_of_range, 
               possible_dst_indirect_aliasing, compute_preimages);
         }
@@ -5644,7 +5644,7 @@ namespace Legion {
               src_requirements.size() + dst_requirements.size() +
               src_indirect_requirements.size() + index, gather_is_range[index],
               init_precondition, predication_guard, collective_precondition,
-              collective_postcondition, local_precondition, atomic_locks[index],
+              collective_postcondition, local_precondition, copies[index].atomic_locks,
               trace_info,applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing, compute_preimages);
@@ -5869,19 +5869,10 @@ namespace Legion {
                                      Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      // Figure out which index this should actually be for
-      unsigned mod_index = index;
-      if (mod_index >= src_requirements.size())
-        mod_index -= src_requirements.size();
-      if (mod_index >= dst_requirements.size())
-        mod_index -= dst_requirements.size();
-      if (mod_index >= src_indirect_requirements.size())
-        mod_index -= src_indirect_requirements.size();
-      AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-      assert(mod_index < atomic_locks.size());
+      assert(index < operands.size());
 #endif
-      std::map<Reservation,bool> &local_locks = atomic_locks[mod_index];
+      std::map<Reservation,bool> &local_locks = copies[operands[index].user_index].atomic_locks;
       std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
       if (finder != local_locks.end())
       {
