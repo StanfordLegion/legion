@@ -4203,7 +4203,7 @@ namespace Legion {
       return &ops[start + copy_index];
     }
 
-    void CopyOp::initialize_copies()
+    void CopyOp::initialize_copies_common()
     {
       const size_t REQ_COUNT = 4;
       operands.clear();
@@ -4226,6 +4226,32 @@ namespace Legion {
                             wait_barriers.size() > i ? &wait_barriers[i] : nullptr,
                             arrive_barriers.size() > i ? &arrive_barriers[i] : nullptr);
       }
+    }
+
+    void CopyOp::initialize_copies_with_launcher_info(const std::vector<bool> &gather_is_range,
+                                                      const std::vector<bool> &scatter_is_range)
+    {
+      initialize_copies_common();
+
+      for (size_t i = 0; i < copies.size(); i++)
+      {
+        copies[i].gather_is_range = gather_is_range.size() > i && gather_is_range[i];
+        copies[i].scatter_is_range = scatter_is_range.size() > i && scatter_is_range[i];
+      }
+    }
+
+    void CopyOp::initialize_copies_with_owner(IndexCopyOp *own)
+    {
+      initialize_copies_common();
+
+      for (size_t i = 0; i < copies.size(); i++)
+      {
+        copies[i].gather_is_range = own->copies[i].gather_is_range;
+        copies[i].scatter_is_range = own->copies[i].scatter_is_range;
+      }
+
+      for (CopyOp::Operand &op : operands)
+        op.parent_index = own->operands[op.req_index].parent_index;
     }
 
     //--------------------------------------------------------------------------
@@ -4295,10 +4321,9 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.src_indirect_is_range.size(), gather_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        gather_is_range = launcher.src_indirect_is_range;
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          if (!gather_is_range[idx])
+          if (!launcher.src_indirect_is_range[idx])
             continue;
           // For anything that is a gather by range we either need 
           // it also to be a scatter by range or we need a reduction
@@ -4343,7 +4368,6 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.dst_indirect_is_range.size(), scatter_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        scatter_is_range = launcher.dst_indirect_is_range;
         if (!src_indirect_requirements.empty())
         {
           // Full indirections need to have the same index space
@@ -4408,7 +4432,8 @@ namespace Legion {
       {
         perform_type_checking();
       }
-      initialize_copies();
+      initialize_copies_with_launcher_info(launcher.src_indirect_is_range,
+                                           launcher.dst_indirect_is_range);
     }
 
     //--------------------------------------------------------------------------
@@ -4776,8 +4801,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      gather_is_range.clear();
-      scatter_is_range.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       map_applied_conditions.clear();
@@ -5596,7 +5619,7 @@ namespace Legion {
               dst_requirements[index], copies[index].src_indirect_records,
               src_targets, (*gather_targets), dst_targets, this, index, 
               src_requirements.size() + dst_requirements.size() + index,
-              src_requirements.size() + index, gather_is_range[index],
+              src_requirements.size() + index, copies[index].gather_is_range,
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, 
               copies[index].atomic_locks, trace_info, applied_conditions,
@@ -5616,7 +5639,7 @@ namespace Legion {
               dst_requirements[index], src_targets, (*scatter_targets),
               dst_targets, copies[index].dst_indirect_records, this, index,
               src_requirements.size() + dst_requirements.size() + index,
-              src_requirements.size() + index, scatter_is_range[index],
+              src_requirements.size() + index, copies[index].scatter_is_range,
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, 
               copies[index].atomic_locks, trace_info, applied_conditions,
@@ -5626,7 +5649,7 @@ namespace Legion {
         else
         {
 #ifdef DEBUG_LEGION
-          assert(gather_is_range[index] == scatter_is_range[index]);
+          assert(copies[index].gather_is_range == copies[index].scatter_is_range);
           assert(!copies[index].src_indirect_records.empty());
           assert(!copies[index].dst_indirect_records.empty());
 #endif
@@ -5640,7 +5663,7 @@ namespace Legion {
               src_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() +
-              src_indirect_requirements.size() + index, gather_is_range[index],
+              src_indirect_requirements.size() + index, copies[index].gather_is_range,
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, copies[index].atomic_locks,
               trace_info,applied_conditions, possible_src_indirect_out_of_range,
@@ -6731,10 +6754,9 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.src_indirect_is_range.size(), gather_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        gather_is_range = launcher.src_indirect_is_range;
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          if (!gather_is_range[idx])
+          if (!launcher.src_indirect_is_range[idx])
             continue;
           // For anything that is a gather by range we either need 
           // it also to be a scatter by range or we need a reduction
@@ -6780,7 +6802,6 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.dst_indirect_is_range.size(), scatter_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        scatter_is_range = launcher.dst_indirect_is_range;
         collective_exchanges.resize(scatter_size);
         possible_dst_indirect_out_of_range = 
           launcher.possible_dst_indirect_out_of_range;
@@ -6829,7 +6850,8 @@ namespace Legion {
       }
       if (runtime->check_privileges)
         perform_type_checking();
-      initialize_copies();
+      initialize_copies_with_launcher_info(launcher.src_indirect_is_range,
+                                           launcher.dst_indirect_is_range);
     }
 
     //--------------------------------------------------------------------------
@@ -7784,8 +7806,6 @@ namespace Legion {
         memcpy(mapper_data, owner->mapper_data, mapper_data_size);
       }
       // From CopyOp
-      gather_is_range           = owner->gather_is_range;
-      scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
       possible_src_indirect_out_of_range 
                                 = owner->possible_src_indirect_out_of_range;
@@ -7796,10 +7816,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
 
-      initialize_copies();
-
-      for (CopyOp::Operand &op : operands)
-        op.parent_index = owner->operands[op.req_index].parent_index;
+      initialize_copies_with_owner(owner);
     }
 
     //--------------------------------------------------------------------------

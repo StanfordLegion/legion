@@ -1339,6 +1339,8 @@ namespace Legion {
         Grant * const grant;
         PhaseBarrier * const wait_barrier;
         PhaseBarrier * const arrive_barrier;
+        bool gather_is_range;
+        bool scatter_is_range;
 
         // calculated in CopyOp
         std::vector<IndirectRecord> src_indirect_records;
@@ -1346,7 +1348,13 @@ namespace Legion {
         std::map<Reservation,bool> atomic_locks;
       };
 
-      void initialize_copies();
+      void initialize_copies_with_launcher_info(const std::vector<bool> &gather_is_range,
+                                                const std::vector<bool> &scatter_is_range);
+      void initialize_copies_with_owner(IndexCopyOp *own);
+
+    private: // used internally for initialization
+      void initialize_copies_common();
+
       static void
       init_ops_from_vec(std::vector<Operand> &ops,
                         size_t *offsets,
@@ -1357,12 +1365,9 @@ namespace Legion {
                       const size_t *offsets,
                       ReqType type,
                       size_t copy_index);
-
+    protected: // per-operand and per-copy data
       std::vector<Operand> operands;
       std::vector<SingleCopy> copies;
-    public: // These are only used for indirect copies
-      std::vector<bool>                     gather_is_range;
-      std::vector<bool>                     scatter_is_range;
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
