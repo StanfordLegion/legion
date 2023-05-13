@@ -1295,17 +1295,23 @@ namespace Legion {
     public:
       struct Operand
       {
-        Operand(ReqType type, unsigned req_index, RegionRequirement &requirement)
-          :type(type), req_index(req_index), requirement(requirement)
+        Operand(unsigned copy_index,
+                ReqType type,
+                unsigned req_index,
+                RegionRequirement &requirement)
+          :copy_index(copy_index),
+           type(type),
+           req_index(req_index),
+           requirement(requirement)
         {}
 
         // from CopyLauncher
+        const unsigned copy_index;
         const ReqType type;
         const unsigned req_index;
         RegionRequirement &requirement;
 
         // calculated in CopyOp
-        unsigned user_index;
         RegionTreePath privilege_path;
         unsigned parent_index;
         VersionInfo version;
@@ -1313,7 +1319,7 @@ namespace Legion {
 
       struct SingleCopy
       {
-        SingleCopy(unsigned user_index,
+        SingleCopy(unsigned copy_index,
                    Operand *src,
                    Operand *dst,
                    Operand *src_indirect,
@@ -1323,7 +1329,7 @@ namespace Legion {
                    PhaseBarrier *arrive_barrier);
 
         // from CopyLauncher
-        const unsigned user_index;
+        const unsigned copy_index;
         Operand * const src;
         Operand * const dst;
         Operand * const src_indirect;
@@ -1350,7 +1356,7 @@ namespace Legion {
       get_operand_ptr(std::vector<Operand> &ops,
                       const size_t *offsets,
                       ReqType type,
-                      size_t user_index);
+                      size_t copy_index);
 
       std::vector<Operand> operands;
       std::vector<SingleCopy> copies;

@@ -4123,7 +4123,7 @@ namespace Legion {
     // Copy Operation 
     /////////////////////////////////////////////////////////////
 
-    CopyOp::SingleCopy::SingleCopy(unsigned user_index,
+    CopyOp::SingleCopy::SingleCopy(unsigned copy_index,
                                    CopyOp::Operand *src,
                                    CopyOp::Operand *dst,
                                    CopyOp::Operand *src_indirect,
@@ -4131,7 +4131,7 @@ namespace Legion {
                                    Grant *grant,
                                    PhaseBarrier *wait_barrier,
                                    PhaseBarrier *arrive_barrier)
-      :user_index(user_index),
+      :copy_index(copy_index),
        src(src),
        dst(dst),
        src_indirect(src_indirect),
@@ -4184,25 +4184,23 @@ namespace Legion {
                                    std::vector<RegionRequirement> &reqs)
     {
       offsets[type] = ops.size();
-      for (RegionRequirement &req : reqs)
-        ops.emplace_back(type, ops.size(), req);
+      for (size_t i = 0; i < reqs.size(); i++)
+        ops.emplace_back(i, type, ops.size(), reqs[i]);
     }
 
     /* static */
     CopyOp::Operand *CopyOp::get_operand_ptr(std::vector<Operand> &ops,
                                              const size_t *offsets,
                                              ReqType type,
-                                             size_t user_index)
+                                             size_t copy_index)
     {
       size_t start = offsets[type];
       size_t count = offsets[type + 1] - start;
 
-      if (user_index >= count)
+      if (copy_index >= count)
         return nullptr;
 
-      Operand *op = &ops[start + user_index];
-      op->user_index = user_index;
-      return op;
+      return &ops[start + copy_index];
     }
 
     void CopyOp::initialize_copies()
@@ -5872,7 +5870,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(index < operands.size());
 #endif
-      std::map<Reservation,bool> &local_locks = copies[operands[index].user_index].atomic_locks;
+      std::map<Reservation,bool> &local_locks = copies[operands[index].copy_index].atomic_locks;
       std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
       if (finder != local_locks.end())
       {
