@@ -1334,7 +1334,6 @@ namespace Legion {
         PhaseBarrier * const arrive_barrier;
 
         // calculated in CopyOp
-        IndexSpaceExpression *copy_expression;
         std::vector<IndirectRecord> src_indirect_records;
         std::vector<IndirectRecord> dst_indirect_records;
       };
@@ -1353,12 +1352,9 @@ namespace Legion {
 
       std::vector<Operand> operands;
       std::vector<SingleCopy> copies;
-      std::vector<IndexSpaceExpression*>    copy_expressions;
     public: // These are only used for indirect copies
       std::vector<bool>                     gather_is_range;
       std::vector<bool>                     scatter_is_range;
-      std::vector<std::vector<IndirectRecord> > src_indirect_records;
-      std::vector<std::vector<IndirectRecord> > dst_indirect_records;
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:

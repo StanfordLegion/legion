@@ -4776,8 +4776,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      src_indirect_records.clear();
-      dst_indirect_records.clear();
       gather_is_range.clear();
       scatter_is_range.clear();
       if (!acquired_instances.empty())
@@ -5256,11 +5254,6 @@ namespace Legion {
 #endif
         profiling_reported = Runtime::create_rt_user_event();
       }
-      // Resize these now so they don't change later
-      if (!src_indirect_requirements.empty())
-        src_indirect_records.resize(src_indirect_requirements.size());
-      if (!dst_indirect_requirements.empty())
-        dst_indirect_records.resize(dst_indirect_requirements.size());
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
       ApEvent init_precondition = compute_init_precondition(trace_info);
@@ -5311,7 +5304,7 @@ namespace Legion {
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, src_targets,
               src_requirements[idx], index_point, 
-              src_indirect_records[idx], true/*source*/);
+              copies[idx].src_indirect_records, true/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -5324,7 +5317,7 @@ namespace Legion {
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, dst_targets,
               dst_requirements[idx], index_point, 
-              dst_indirect_records[idx], false/*source*/);
+              copies[idx].dst_indirect_records, false/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -5598,12 +5591,11 @@ namespace Legion {
         {
           // Gather copy
 #ifdef DEBUG_LEGION
-          assert(index < src_indirect_records.size());
-          assert(!src_indirect_records[index].empty());
+          assert(!copies[index].src_indirect_records.empty());
 #endif
           copy_post = runtime->forest->gather_across(
               src_requirements[index], src_indirect_requirements[index],
-              dst_requirements[index], src_indirect_records[index], 
+              dst_requirements[index], copies[index].src_indirect_records,
               src_targets, (*gather_targets), dst_targets, this, index, 
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, gather_is_range[index],
@@ -5619,13 +5611,12 @@ namespace Legion {
         {
           // Scatter copy
 #ifdef DEBUG_LEGION
-          assert(index < dst_indirect_records.size());
-          assert(!dst_indirect_records[index].empty());
+          assert(!copies[index].dst_indirect_records.empty());
 #endif
           copy_post = runtime->forest->scatter_across(
               src_requirements[index], dst_indirect_requirements[index],
               dst_requirements[index], src_targets, (*scatter_targets),
-              dst_targets, dst_indirect_records[index], this, index, 
+              dst_targets, copies[index].dst_indirect_records, this, index,
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + index, scatter_is_range[index],
               init_precondition, predication_guard, collective_precondition,
@@ -5638,17 +5629,15 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(gather_is_range[index] == scatter_is_range[index]);
-          assert(index < src_indirect_records.size());
-          assert(!src_indirect_records[index].empty());
-          assert(index < dst_indirect_records.size());
-          assert(!dst_indirect_records[index].empty());
+          assert(!copies[index].src_indirect_records.empty());
+          assert(!copies[index].dst_indirect_records.empty());
 #endif
           // Full indirection copy
           copy_post = runtime->forest->indirect_across(
               src_requirements[index], src_indirect_requirements[index],
               dst_requirements[index], dst_indirect_requirements[index],
-              src_targets, dst_targets, src_indirect_records[index], 
-              (*gather_targets), dst_indirect_records[index], 
+              src_targets, dst_targets, copies[index].src_indirect_records,
+              (*gather_targets), copies[index].dst_indirect_records,
               (*scatter_targets), this, index,
               src_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() + index,
@@ -6774,7 +6763,6 @@ namespace Legion {
                 "is no corresponding range indirection on the destination.",
                 idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
-        src_indirect_records.resize(gather_size);
         collective_exchanges.resize(gather_size);
         possible_src_indirect_out_of_range =
           launcher.possible_src_indirect_out_of_range;
@@ -6804,7 +6792,6 @@ namespace Legion {
               launcher.dst_indirect_is_range.size(), scatter_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         scatter_is_range = launcher.dst_indirect_is_range;
-        dst_indirect_records.resize(scatter_size);
         collective_exchanges.resize(scatter_size);
         possible_dst_indirect_out_of_range = 
           launcher.possible_dst_indirect_out_of_range;
@@ -7388,16 +7375,15 @@ namespace Legion {
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
         }
 #ifdef DEBUG_LEGION
-        assert(index < src_indirect_records.size());
-        assert(src_indirect_records[index].size() < points.size());
+        assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        src_indirect_records[index].emplace_back(
+        copies[index].src_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts, key));
         exchange.src_records.push_back(&records);
-        if (src_indirect_records[index].size() == points.size())
+        if (copies[index].src_indirect_records.size() == points.size())
         {
           for (unsigned idx = 0; idx < exchange.src_records.size(); idx++)
-            *exchange.src_records[idx] = src_indirect_records[index];
+            *exchange.src_records[idx] = copies[index].src_indirect_records;
           Runtime::trigger_event(exchange.src_ready);
         }
         return exchange.src_ready;
@@ -7430,16 +7416,15 @@ namespace Legion {
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
         }
 #ifdef DEBUG_LEGION
-        assert(index < dst_indirect_records.size());
-        assert(dst_indirect_records[index].size() < points.size());
+        assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        dst_indirect_records[index].emplace_back(
+        copies[index].dst_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts, key));
         exchange.dst_records.push_back(&records);
-        if (dst_indirect_records[index].size() == points.size())
+        if (copies[index].dst_indirect_records.size() == points.size())
         {
           for (unsigned idx = 0; idx < exchange.dst_records.size(); idx++)
-            *exchange.dst_records[idx] = dst_indirect_records[index];
+            *exchange.dst_records[idx] = copies[index].dst_indirect_records;
           Runtime::trigger_event(exchange.dst_ready);
         }
         return exchange.dst_ready;
