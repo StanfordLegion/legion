@@ -12001,7 +12001,7 @@ namespace Legion {
       std::vector<CopyAcrossHelper*> across_helpers;
       std::set<RtEvent> deferral_events, applied_events;
       RegionNode *dst_node = runtime->forest->get_node(dst_handle);
-      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
+      IndexSpaceExpression *dst_expr = dst_node->row_source;
       // Make sure that all our pointers are ready
       RtEvent ready_event;
       if (!ready_events.empty())

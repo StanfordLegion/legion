@@ -2909,6 +2909,11 @@ namespace Legion {
             : analysis_mapping->count_children(origin, local_space);
           rendezvous.ready_event = Runtime::create_ap_user_event(&trace_info);
           rendezvous.trace_info = new PhysicalTraceInfo(trace_info);
+          if (analysis_mapping != NULL)
+          {
+            rendezvous.analysis_mapping = analysis_mapping; 
+            analysis_mapping->add_reference();
+          }
           rendezvous.expr = expr;
           expr->add_nested_expression_reference(did);
           rendezvous.registered = Runtime::create_rt_user_event();
@@ -2919,6 +2924,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!finder->second.ready_event.exists());
           assert(finder->second.trace_info == NULL);
+          assert(finder->second.analysis_mapping == NULL);
 #endif
           // First local arrival
           finder->second.remaining_local_arrivals = local_collective_arrivals;
@@ -2942,6 +2948,7 @@ namespace Legion {
         }
         result = finder->second.ready_event;
         result_info = finder->second.trace_info;
+        analysis_mapping = finder->second.analysis_mapping;
         registered = finder->second.registered;
         registered_events.push_back(registered);
         applied = finder->second.applied;
@@ -2982,8 +2989,11 @@ namespace Legion {
         term_event = Runtime::merge_events(&trace_info, term_events);
       if (local_space != origin)
       {
+#ifdef DEBUG_LEGION
+        assert(analysis_mapping != NULL);
+#endif
         const AddressSpaceID parent = 
-          collective_mapping->get_parent(origin, local_space);
+          analysis_mapping->get_parent(origin, local_space);
         Serializer rez;
         {
           RezCheck z(rez);
@@ -2993,6 +3003,7 @@ namespace Legion {
           rez.serialize(match_space);
           rez.serialize(origin);
           result_info->pack_trace_info(rez, applied_events);
+          analysis_mapping->pack(rez);
           rez.serialize(term_event);
           rez.serialize(result);
           rez.serialize(registered);
@@ -3022,6 +3033,8 @@ namespace Legion {
       }
       if (expr->remove_nested_expression_reference(did))
         delete expr;
+      if ((analysis_mapping != NULL) && analysis_mapping->remove_reference())
+        delete analysis_mapping;
       delete result_info;
       return result;
     }
@@ -3033,6 +3046,7 @@ namespace Legion {
                                             const IndexSpaceID match_space,
                                             const AddressSpaceID origin,
                                             const PhysicalTraceInfo &trace_info,
+                                            CollectiveMapping *analysis_mapping,
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
                                             RtUserEvent remote_registered,
@@ -3040,7 +3054,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(collective_mapping != NULL);
+      assert(analysis_mapping != NULL);
 #endif
       UserRendezvous to_perform;
       const RendezvousKey key(op_ctx_index, index, match_space);
@@ -3057,8 +3071,10 @@ namespace Legion {
               std::make_pair(key,UserRendezvous())).first; 
           UserRendezvous &rendezvous = finder->second;
           rendezvous.local_initialized = false;
+          rendezvous.analysis_mapping = analysis_mapping;
+          analysis_mapping->add_reference();
           rendezvous.remaining_remote_arrivals =
-            collective_mapping->count_children(origin, local_space);
+            analysis_mapping->count_children(origin, local_space);
           // Don't make the ready event, that needs to be done with a
           // local trace_info
           rendezvous.registered = Runtime::create_rt_user_event();
@@ -3098,10 +3114,11 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(to_perform.applied.exists());
+        assert(to_perform.analysis_mapping != NULL);
 #endif
         // Send the message to the parent
         const AddressSpaceID parent = 
-            collective_mapping->get_parent(origin, local_space);
+            to_perform.analysis_mapping->get_parent(origin, local_space);
         std::set<RtEvent> applied_events;
         Serializer rez;
         {
@@ -3127,7 +3144,7 @@ namespace Legion {
       else
       {
 #ifdef DEBUG_LEGION
-        assert(!to_perform.applied.exists());
+        assert(to_perform.applied.exists());
 #endif
         std::vector<RtEvent> registered_events;
         std::set<RtEvent> applied_events;
@@ -3153,6 +3170,9 @@ namespace Legion {
       }
       if (to_perform.expr->remove_nested_expression_reference(did))
         delete to_perform.expr;
+      if ((to_perform.analysis_mapping != NULL) &&
+          to_perform.analysis_mapping->remove_reference())
+        delete to_perform.analysis_mapping;
       delete to_perform.trace_info;
     }
 
@@ -3177,6 +3197,13 @@ namespace Legion {
       derez.deserialize(origin);
       PhysicalTraceInfo trace_info = 
         PhysicalTraceInfo::unpack_trace_info(derez, runtime); 
+      size_t num_spaces;
+      derez.deserialize(num_spaces);
+#ifdef DEBUG_LEGION
+      assert(num_spaces > 0);
+#endif
+      CollectiveMapping *mapping = new CollectiveMapping(derez, num_spaces);
+      mapping->add_reference();
       ApEvent term_event;
       derez.deserialize(term_event);
       ApUserEvent ready_event;
@@ -3189,8 +3216,10 @@ namespace Legion {
         ready.wait();
 
       view->process_collective_user_registration(op_ctx_index, index, 
-          match_space, origin, trace_info, term_event, ready_event,
-          registered_event, applied_event);
+          match_space, origin, trace_info, mapping, term_event,
+          ready_event, registered_event, applied_event);
+      if (mapping->remove_reference())
+        delete mapping;
     }
 
     //--------------------------------------------------------------------------

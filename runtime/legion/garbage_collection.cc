@@ -597,9 +597,6 @@ namespace Legion {
                                                AddressSpaceID remote_inst) const
     //--------------------------------------------------------------------------
     {
-      if ((collective_mapping != NULL) && 
-          collective_mapping->contains(remote_inst))
-        return true;
       AutoLock gc(gc_lock,1,false/*exclusive*/);
       return remote_instances.contains(remote_inst);
     }
@@ -1122,7 +1119,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!is_owner());
 #endif
-        return owner_space;
+        return collective_mapping->find_nearest(local_space);
       }
       if (!collective_mapping->contains(owner))
       {

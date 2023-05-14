@@ -370,8 +370,6 @@ namespace Legion {
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
-      LG_PART_INDEPENDENCE_TASK_ID,
-      LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
       LG_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
@@ -384,6 +382,7 @@ namespace Legion {
       LG_PARTITION_SEMANTIC_INFO_REQ_TASK_ID,
       LG_INDEX_SPACE_DEFER_CHILD_TASK_ID,
       LG_INDEX_PART_DEFER_CHILD_TASK_ID,
+      LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
@@ -486,8 +485,6 @@ namespace Legion {
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
-        "Partition Independence Test",                            \
-        "Index Space Independence Test",                          \
         "Issue Frame",                                            \
         "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \
@@ -500,6 +497,7 @@ namespace Legion {
         "Partition Semantic Request",                             \
         "Defer Index Space Child Request",                        \
         "Defer Index Partition Child Request",                    \
+        "Defer Index Partition Find Shard Rects",                 \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
         "Remote View Creation",                                   \
@@ -768,6 +766,7 @@ namespace Legion {
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
+      SEND_INDEX_PARTITION_CHILD_REPLICATION,
       SEND_INDEX_PARTITION_DISJOINT_UPDATE,
       SEND_INDEX_PARTITION_SHARD_RECTS_REQUEST,
       SEND_INDEX_PARTITION_SHARD_RECTS_RESPONSE,
@@ -1033,6 +1032,7 @@ namespace Legion {
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
+        "Send Index Partition Child Replication",                     \
         "Send Index Partition Disjoint Update",                       \
         "Send Index Partition Shard Rects Request",                   \
         "Send Index Partition Shard Rects Response",                  \
@@ -1661,20 +1661,20 @@ namespace Legion {
       COLLECTIVE_LOC_60 = 60,
       COLLECTIVE_LOC_61 = 61,
       COLLECTIVE_LOC_62 = 62,
-      COLLECTIVE_LOC_63 = 63,
-      COLLECTIVE_LOC_64 = 64,
-      COLLECTIVE_LOC_65 = 65,
-      COLLECTIVE_LOC_66 = 66,
-      COLLECTIVE_LOC_67 = 67,
-      COLLECTIVE_LOC_68 = 68,
-      COLLECTIVE_LOC_69 = 69,
+      //COLLECTIVE_LOC_63 = 63,
+      //COLLECTIVE_LOC_64 = 64,
+      //COLLECTIVE_LOC_65 = 65,
+      //COLLECTIVE_LOC_66 = 66,
+      //COLLECTIVE_LOC_67 = 67,
+      //COLLECTIVE_LOC_68 = 68,
+      //COLLECTIVE_LOC_69 = 69,
       COLLECTIVE_LOC_70 = 70,
       COLLECTIVE_LOC_71 = 71,
       COLLECTIVE_LOC_72 = 72,
       COLLECTIVE_LOC_73 = 73,
       COLLECTIVE_LOC_74 = 74,
       COLLECTIVE_LOC_75 = 75,
-      COLLECTIVE_LOC_76 = 76,
+      //COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
       COLLECTIVE_LOC_79 = 79,

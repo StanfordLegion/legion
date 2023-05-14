@@ -359,6 +359,7 @@ namespace Legion {
                                             const IndexSpaceID match_space,
                                             const AddressSpaceID origin,
                                             const PhysicalTraceInfo &trace_info,
+                                            CollectiveMapping *analysis_mapping,
                                             ApEvent remote_term_event,
                                             ApUserEvent remote_ready_event,
                                             RtUserEvent remote_registered,
@@ -409,8 +410,8 @@ namespace Legion {
       struct UserRendezvous {
         UserRendezvous(void) 
           : remaining_local_arrivals(0), remaining_remote_arrivals(0),
-            trace_info(NULL), mask(NULL), expr(NULL), op_id(0),
-            symbolic(false), local_initialized(false) { }
+            trace_info(NULL), analysis_mapping(NULL), mask(NULL),
+            expr(NULL), op_id(0), symbolic(false), local_initialized(false) { }
         // event for when local instances can be used
         ApUserEvent ready_event; 
         // remote ready events to trigger
@@ -426,6 +427,7 @@ namespace Legion {
         unsigned remaining_remote_arrivals;
         // PhysicalTraceInfo that made the ready_event and should trigger it
         PhysicalTraceInfo *trace_info;
+        CollectiveMapping *analysis_mapping;
         // Arguments for performing the local registration
         RegionUsage usage;
         FieldMask *mask;

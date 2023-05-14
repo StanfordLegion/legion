@@ -686,9 +686,7 @@ namespace Legion {
       virtual void get_all_futures(std::map<DomainPoint,FutureImpl*> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
     public:
-      // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(ShardID shard,
-                                                  const DomainPoint &point);
+      virtual FutureImpl* find_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
@@ -746,9 +744,7 @@ namespace Legion {
       virtual void wait_all_results(bool silence_warnings = true,
                                     const char *warning_string = NULL);
     public:
-      // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(ShardID shard,
-                                                  const DomainPoint &point);
+      virtual FutureImpl* find_local_future(const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
@@ -792,8 +788,6 @@ namespace Legion {
                                     const char *warning_string = NULL);
     public:
       // Will return NULL if it does not exist
-      virtual FutureImpl* find_shard_local_future(ShardID shard,
-                                                  const DomainPoint &point);
       virtual void get_shard_local_futures(ShardID shard,
                                     std::map<DomainPoint,FutureImpl*> &futures);
     public:
@@ -3154,6 +3148,8 @@ namespace Legion {
                                               Serializer &rez);
       void send_index_partition_child_response(AddressSpaceID target,
                                                Serializer &rez);
+      void send_index_partition_child_replication(AddressSpaceID target,
+                                                  Serializer &rez);
       void send_index_partition_disjoint_update(AddressSpaceID target,
                                                 Serializer &rez);
       void send_index_partition_shard_rects_request(AddressSpaceID target,
@@ -3533,13 +3529,12 @@ namespace Legion {
       void handle_remote_task_replay(Deserializer &derez);
       void handle_remote_task_profiling_response(Deserializer &derez);
       void handle_shared_ownership(Deserializer &derez);
-      void handle_index_space_request(Deserializer &derez, 
-                                      AddressSpaceID source);
+      void handle_index_space_request(Deserializer &derez); 
       void handle_index_space_response(Deserializer &derez,
                                        AddressSpaceID source);
-      void handle_index_space_return(Deserializer &derez,
-                                     AddressSpaceID source); 
-      void handle_index_space_set(Deserializer &derez, AddressSpaceID source);
+      void handle_index_space_return(Deserializer &derez);
+      void handle_index_space_set(Deserializer &derez,
+                                  AddressSpaceID source);
       void handle_index_space_child_request(Deserializer &derez, 
                                             AddressSpaceID source); 
       void handle_index_space_child_response(Deserializer &derez);
@@ -3555,15 +3550,15 @@ namespace Legion {
       void handle_index_space_generate_color_response(Deserializer &derez);
       void handle_index_space_release_color(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
-      void handle_index_partition_request(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_index_partition_request(Deserializer &derez);
       void handle_index_partition_response(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_index_partition_return(Deserializer &derez,
-                                         AddressSpaceID source);
+      void handle_index_partition_return(Deserializer &derez);
       void handle_index_partition_child_request(Deserializer &derez,
                                                 AddressSpaceID source);
-      void handle_index_partition_child_response(Deserializer &derez);
+      void handle_index_partition_child_response(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_index_partition_child_replication(Deserializer &derez);
       void handle_index_partition_disjoint_update(Deserializer &derez);
       void handle_index_partition_shard_rects_request(Deserializer &derez);
       void handle_index_partition_shard_rects_response(Deserializer &derez,
@@ -3573,8 +3568,7 @@ namespace Legion {
       void handle_index_partition_remote_interference_response(
                                    Deserializer &derez);
       void handle_field_space_node(Deserializer &derez, AddressSpaceID source);
-      void handle_field_space_request(Deserializer &derez,
-                                      AddressSpaceID source);
+      void handle_field_space_request(Deserializer &derez);
       void handle_field_space_return(Deserializer &derez);
       void handle_field_space_allocator_request(Deserializer &derez,
                                                 AddressSpaceID source);
@@ -3596,8 +3590,7 @@ namespace Legion {
       void handle_local_field_alloc_response(Deserializer &derez);
       void handle_local_field_free(Deserializer &derez);
       void handle_local_field_update(Deserializer &derez);
-      void handle_top_level_region_request(Deserializer &derez,
-                                           AddressSpaceID source);
+      void handle_top_level_region_request(Deserializer &derez);
       void handle_top_level_region_return(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_index_space_destruction(Deserializer &derez,
@@ -5804,6 +5797,8 @@ namespace Legion {
         case SEND_INDEX_PARTITION_CHILD_REQUEST:
           break;
         case SEND_INDEX_PARTITION_CHILD_RESPONSE:
+          break;
+        case SEND_INDEX_PARTITION_CHILD_REPLICATION:
           break;
         case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
           break;

@@ -516,7 +516,7 @@ namespace Legion {
     };
 
     /**
-     * \class CrossProductExchange
+     * \class CrossProductCollective
      * A class for exchanging the names of partitions created by
      * a call for making cross-product partitions
      */
@@ -597,73 +597,73 @@ namespace Legion {
      * all of the constituent shards are done with the operation they
      * are collectively performing together.
      */
-    class FieldDescriptorExchange : public AllGatherCollective<false> {
+    class FieldDescriptorExchange : public AllGatherCollective<true> {
     public:
-      FieldDescriptorExchange(ReplicateContext *ctx,
-                              CollectiveIndexLocation loc);
-      FieldDescriptorExchange(const FieldDescriptorExchange &rhs);
+      FieldDescriptorExchange(ReplicateContext *ctx, CollectiveID id,
+                              std::vector<FieldDataDescriptor> &descriptors);
+      FieldDescriptorExchange(const FieldDescriptorExchange &rhs) = delete;
       virtual ~FieldDescriptorExchange(void);
     public:
-      FieldDescriptorExchange& operator=(const FieldDescriptorExchange &rhs);
-    public:
-      ApEvent exchange_descriptors(ApEvent ready_event,
-                                 const std::vector<FieldDataDescriptor> &desc);
-      // Have to call this with the completion event
-      ApEvent exchange_completion(ApEvent complete_event);
+      FieldDescriptorExchange& operator=(
+                              const FieldDescriptorExchange &rhs) = delete;
     public:
       virtual void pack_collective_stage(ShardID target,
                                          Serializer &rez, int stage);
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
-    public:
-      std::set<ApEvent> ready_events;
-      std::vector<FieldDataDescriptor> descriptors;
-    public:
-      // Use these for building the butterfly network of user events for
-      // knowing when everything is done on all the nodes. 
-      // This vector is of the number of stages and tracks the incoming
-      // set of remote complete events for a stage, in the case of a 
-      // remainder stage it is of size 1
-      std::vector<std::set<ApUserEvent> > remote_to_trigger; // stages
-      // This vector is the number of stages+1 to capture the ready
-      // event for each of the different stages as well as the event
-      // for when the entire collective is done
-      mutable std::vector<std::set<ApEvent> > local_preconditions; 
+    protected:
+      std::vector<FieldDataDescriptor> &descriptors;
     };
 
     /**
      * \class FieldDescriptorGather
-     * A class for doing a gather of field descriptors to a specific
-     * node for doing dependent partitioning operations. This collective
-     * also will construct an event broadcast tree to inform all the 
-     * constituent shards about when the operation is done with the 
-     * instances which are being gathered.
+     * Gather all of the field descriptors to a particular shard and
+     * track the merge of all the ready events
      */
     class FieldDescriptorGather : public GatherCollective {
     public:
-      FieldDescriptorGather(ReplicateContext *ctx, ShardID target,
-                            CollectiveIndexLocation loc);
-      FieldDescriptorGather(const FieldDescriptorGather &rhs);
+      FieldDescriptorGather(ReplicateContext *ctx, CollectiveID id,
+                            std::vector<FieldDataDescriptor> &descriptors,
+                            std::map<DomainPoint,Domain> &remote_targets);
+      FieldDescriptorGather(const FieldDescriptorGather &rhs) = delete;
       virtual ~FieldDescriptorGather(void);
     public:
-      FieldDescriptorGather& operator=(const FieldDescriptorGather &rhs);
+      FieldDescriptorGather& operator=(
+                            const FieldDescriptorGather &rhs) = delete;
     public:
       virtual void pack_collective(Serializer &rez) const;
       virtual void unpack_collective(Deserializer &derez);
     public:
-      void contribute(ApEvent ready_event,
-                      const std::vector<FieldDataDescriptor> &descriptors);
-      const std::vector<FieldDataDescriptor>& 
-           get_full_descriptors(ApEvent &ready);
-      // Owner shard only
-      void notify_remote_complete(ApEvent precondition);
-      // Non-owner shard only
-      ApEvent get_complete_event(void) const;
+      void contribute_instances(ApEvent instances_ready);
+      ApEvent get_ready_event(void);
     protected:
-      std::set<ApEvent> ready_events;
-      std::vector<FieldDataDescriptor> descriptors;
-      std::set<ApUserEvent> remote_complete_events;
-      ApUserEvent complete_event;
-      bool used;
+      std::vector<FieldDataDescriptor> &descriptors;
+      std::map<DomainPoint,Domain> &remote_targets;
+      std::vector<ApEvent> ready_events;
+    };
+
+    /**
+     * \class DeppartResultScatter
+     * Scatter the results of a dependent partitioning operation
+     * back across the shards so they can fill in their nodes
+     */
+    class DeppartResultScatter : public BroadcastCollective {
+    public:
+      DeppartResultScatter(ReplicateContext *ctx, CollectiveID id,
+                           std::vector<DeppartResult> &results);
+      DeppartResultScatter(const DeppartResultScatter &rhs) = delete;
+      virtual ~DeppartResultScatter(void);
+    public:
+      DeppartResultScatter& operator=(const DeppartResultScatter &rhs) = delete;
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void broadcast_results(ApEvent done_event);
+      inline ApEvent get_done_event(void) { return done_event; }
+    public:
+      std::vector<DeppartResult> &results;
+      mutable ApEvent done_event;
+      mutable bool renamed;
     };
 
     /**
@@ -1428,6 +1428,30 @@ namespace Legion {
     };
 
     /**
+     * \class CrossProductExchange
+     * This all-gather exchanges IDs for the creation of replicated
+     * partitions when performing a cross-product partition
+     */
+    class CrossProductExchange : public AllGatherCollective<false> {
+    public:
+      CrossProductExchange(ReplicateContext *ctx, CollectiveIndexLocation loc);
+      CrossProductExchange(const CrossProductExchange &rhs) = delete;
+      virtual ~CrossProductExchange(void) { }
+    public:
+      CrossProductExchange& operator=(const CrossProductExchange &rhs) = delete;
+    public:
+      virtual void pack_collective_stage(ShardID target,
+                                         Serializer &rez, int stage);
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_ids(LegionColor color,DistributedID did,IndexPartition pid);
+      void sync_child_ids(LegionColor color, DistributedID &did, 
+                          IndexPartition &pid);
+    protected:
+      std::map<LegionColor,std::pair<IndexPartition,DistributedID> > child_ids;
+    };
+
+    /**
      * \class SlowBarrier
      * This class creates a collective that behaves like a barrier, but is
      * probably slower than Realm phase barriers. It's useful for cases
@@ -2050,7 +2074,8 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(bool free = true);
     public:
-      virtual void populate_sources(const FutureMap &fm);
+      virtual void populate_sources(const FutureMap &fm,
+          IndexPartition pid, bool needs_all_futures);
       virtual void trigger_execution(void);
     };
 
@@ -2059,153 +2084,17 @@ namespace Legion {
      * A dependent partitioning operation that knows that it
      * is being executed in a control replication context
      */
-    class ReplDependentPartitionOp : public DependentPartitionOp {
-    public:
-      class ReplByFieldThunk : public ByFieldThunk {
-      public:
-        ReplByFieldThunk(ReplicateContext *ctx,
-                         ShardID target, IndexPartition p);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) 
-          { gather_collective.elide_collective(); }
-      protected:
-        FieldDescriptorGather gather_collective;
-      };
-      class ReplByImageThunk : public ByImageThunk {
-      public:
-#ifdef SHARD_BY_IMAGE
-        ReplByImageThunk(ReplicateContext *ctx,
-                         IndexPartition p, IndexPartition proj,
-                         ShardID shard_id, size_t total);
-#else
-        ReplByImageThunk(ReplicateContext *ctx, ShardID target,
-                         IndexPartition p, IndexPartition proj,
-                         ShardID shard_id, size_t total);
-#endif
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) { collective.elide_collective(); }
-      protected:
-#ifdef SHARD_BY_IMAGE
-        FieldDescriptorExchange collective;
-#else
-        FieldDescriptorGather collective;
-#endif
-        const ShardID shard_id;
-        const size_t total_shards;
-      };
-      class ReplByImageRangeThunk : public ByImageRangeThunk {
-      public:
-#ifdef SHARD_BY_IMAGE
-        ReplByImageRangeThunk(ReplicateContext *ctx,
-                              IndexPartition p, IndexPartition proj,
-                              ShardID shard_id, size_t total);
-#else
-        ReplByImageRangeThunk(ReplicateContext *ctx, ShardID target, 
-                              IndexPartition p, IndexPartition proj,
-                              ShardID shard_id, size_t total);
-#endif
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) { collective.elide_collective(); }
-      protected:
-#ifdef SHARD_BY_IMAGE
-        FieldDescriptorExchange collective;
-#else
-        FieldDescriptorGather collective;
-#endif
-        const ShardID shard_id;
-        const size_t total_shards;
-      };
-      class ReplByPreimageThunk : public ByPreimageThunk {
-      public:
-        ReplByPreimageThunk(ReplicateContext *ctx, ShardID target,
-                            IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) 
-          { gather_collective.elide_collective(); }
-      protected:
-        FieldDescriptorGather gather_collective;
-      };
-      class ReplByPreimageRangeThunk : public ByPreimageRangeThunk {
-      public:
-        ReplByPreimageRangeThunk(ReplicateContext *ctx, ShardID target,
-                                 IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-        virtual void elide_collectives(void) 
-          { gather_collective.elide_collective(); }
-      protected:
-        FieldDescriptorGather gather_collective;
-      };
-      // Nothing special about association for control replication
+    class ReplDependentPartitionOp : public ReplCollectiveViewCreator<
+                            CollectiveViewCreator<DependentPartitionOp> > {
     public:
       ReplDependentPartitionOp(Runtime *rt);
-      ReplDependentPartitionOp(const ReplDependentPartitionOp &rhs);
+      ReplDependentPartitionOp(const ReplDependentPartitionOp &rhs) = delete;
       virtual ~ReplDependentPartitionOp(void);
     public:
-      ReplDependentPartitionOp& operator=(const ReplDependentPartitionOp &rhs);
+      ReplDependentPartitionOp& operator=(
+                               const ReplDependentPartitionOp &rhs) = delete;
     public:
-      void initialize_by_field(ReplicateContext *ctx, ShardID target,
-                               ApEvent ready_event, IndexPartition pid,
-                               LogicalRegion handle, LogicalRegion parent,
-                               IndexSpace color_space, FieldID fid, 
-                               MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg,
-                               Provenance *provenance);
-      void initialize_by_image(ReplicateContext *ctx,
-#ifndef SHARD_BY_IMAGE
-                               ShardID target,
-#endif
-                               ApEvent ready_event, IndexPartition pid,
-                               IndexSpace handle, LogicalPartition projection,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg,
-                               ShardID shard, size_t total_shards,
-                               Provenance *provenance);
-      void initialize_by_image_range(ReplicateContext *ctx,
-#ifndef SHARD_BY_IMAGE
-                               ShardID target,
-#endif
-                               ApEvent ready_event, IndexPartition pid,
-                               IndexSpace handle, LogicalPartition projection,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg,
-                               ShardID shard, size_t total_shards,
-                               Provenance *provenance);
-      void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
-                               ApEvent ready_event, IndexPartition pid,
-                               IndexPartition projection, LogicalRegion handle,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg,
-                               Provenance *provenance);
-      void initialize_by_preimage_range(ReplicateContext *ctx, ShardID target, 
-                               ApEvent ready_event, IndexPartition pid,
-                               IndexPartition projection, LogicalRegion handle,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg,
-                               Provenance *provenance);
-      void initialize_by_association(ReplicateContext *ctx,LogicalRegion domain,
-                               LogicalRegion domain_parent, FieldID fid,
-                               IndexSpace range, MapperID id, MappingTagID tag,
-                               const UntypedBuffer &marg,
-                               Provenance *provenance);
+      void initialize_replication(ReplicateContext *context);
     public:
       virtual void activate(void);
       virtual void deactivate(bool free = true);
@@ -2214,16 +2103,31 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);  
       virtual void finalize_mapping(void);
+      virtual ApEvent trigger_thunk(IndexSpace handle, ApEvent insts_ready,
+                                    const InstanceSet &mapped_instances,
+                                    const PhysicalTraceInfo &info,
+                                    const DomainPoint &color);
+      virtual void trigger_execution(void);
       virtual void select_partition_projection(void);
       virtual IndexSpaceNode* get_shard_points(void) const 
         { return shard_points; }
       virtual bool find_shard_participants(std::vector<ShardID> &shards);
+      virtual bool perform_collective_analysis(CollectiveMapping *&mapping,
+                                               bool &first_local);
     protected:
       void select_sharding_function(void);
+      void find_remote_targets(std::vector<ApEvent> &preconditions);
     protected:
       ShardingFunction *sharding_function;
       IndexSpaceNode *shard_points;
       RtBarrier mapping_barrier;
+      FieldDescriptorGather *gather;
+      DeppartResultScatter *scatter;
+      FieldDescriptorExchange *exchange;
+      ApBarrier collective_ready;
+      ApBarrier collective_done;
+      std::map<DomainPoint,Domain> remote_targets;
+      std::vector<DeppartResult> deppart_results;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
