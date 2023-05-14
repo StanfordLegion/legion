@@ -46,6 +46,7 @@ add_subdirectory(tiling)
 add_subdirectory(padded_instances)
 add_subdirectory(implicit_top_task)
 add_subdirectory(future_map_transforms)
+add_subdirectory(collective_writes)
 add_subdirectory(concurrent_tasks)
 add_subdirectory(tree_collectives)
 
