@@ -91,6 +91,7 @@ legion_cxx_tests = [
     ['test/output_requirements/output_requirements', ['-empty', '-replicate']],
     ['test/output_requirements/output_requirements', ['-empty', '-index']],
     ['test/output_requirements/output_requirements', ['-empty', '-index', '-replicate']],
+    ['test/disjoint_complete/disjoint_complete', []],
 
     # Tutorial/realm
     ['tutorial/realm/hello_world/realm_hello_world', []],

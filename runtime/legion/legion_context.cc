@@ -4289,11 +4289,10 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       part_op->initialize_equal_partition(this, pid, granularity, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this,pid,parent,
                     color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
-                    did, provenance, term_event);
+                    did, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4326,12 +4325,11 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_weight_partition(this, pid, weights, 
                                            granularity, provenance);
-      const ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RegionTreeForest *forest = runtime->forest;
       const RtEvent safe = forest->create_pending_partition(this, pid, parent,
                   color_space, partition_color, LEGION_DISJOINT_COMPLETE_KIND,
-                  did, provenance, term_event);
+                  did, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4379,7 +4377,6 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_union_partition(this, pid, handle1, 
                                           handle2, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       // If either partition is aliased the result is aliased
       if ((kind == LEGION_COMPUTE_KIND) || 
           (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
@@ -4411,8 +4408,8 @@ namespace Legion {
         }
       }
       // Tell the region tree forest about this partition
-      RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-       parent, color_space, partition_color, kind, did, provenance, term_event);
+      RtEvent safe = runtime->forest->create_pending_partition(this, pid,
+          parent, color_space, partition_color, kind, did, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4462,7 +4459,6 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_intersection_partition(this, pid, handle1, 
                                                  handle2, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       // If either partition is disjoint then the result is disjoint
       if ((kind == LEGION_COMPUTE_KIND) || 
           (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
@@ -4493,8 +4489,8 @@ namespace Legion {
         }
       }
       // Tell the region tree forest about this partition
-      RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-       parent, color_space, partition_color, kind, did, provenance, term_event);
+      RtEvent safe = runtime->forest->create_pending_partition(this, pid,
+          parent, color_space, partition_color, kind, did, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4538,7 +4534,6 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_intersection_partition(this, pid, partition,
                                                  dominates, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       IndexPartNode *part_node = runtime->forest->get_node(partition);
       // See if we can determine disjointness if we weren't told
       if ((kind == LEGION_COMPUTE_KIND) || 
@@ -4558,7 +4553,7 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,parent,
                      part_node->color_space->handle, partition_color, kind, did,
-                     provenance, term_event);
+                     provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4611,7 +4606,6 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_difference_partition(this, pid, handle1, 
                                                handle2, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       // If the left-hand-side is disjoint the result is disjoint
       if ((kind == LEGION_COMPUTE_KIND) || 
           (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
@@ -4631,7 +4625,7 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                          parent, color_space, partition_color, kind, did,
-                         provenance, term_event);
+                         provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4671,11 +4665,10 @@ namespace Legion {
         partition_color = color;
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       std::set<RtEvent> safe_events;
       runtime->forest->create_pending_cross_product(this, handle1, handle2, 
-           handles, kind, provenance, partition_color, term_event, safe_events);
+           handles, kind, provenance, partition_color, safe_events);
       part_op->initialize_cross_product(this, handle1, handle2,
                                         partition_color, provenance);
       // Now we can add the operation to the queue
@@ -4802,10 +4795,9 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_restricted_partition(this, pid, transform, 
                           transform_size, extent, extent_size, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-       parent, color_space, part_color, part_kind, did, provenance, term_event);
+      RtEvent safe = runtime->forest->create_pending_partition(this, pid,
+          parent, color_space, part_color, part_kind, did, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4867,10 +4859,9 @@ namespace Legion {
         runtime->get_available_pending_partition_op();
       part_op->initialize_by_domain(this, pid, domains, 
                           perform_intersections, provenance);
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,
-       parent, color_space, part_color, part_kind, did, provenance, term_event);
+          parent, color_space, part_color, part_kind, did, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Wait for any notifications to occur before returning
@@ -4913,10 +4904,9 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op();
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
-      RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-       parent, color_space, part_color, part_kind, did, provenance, term_event);
+      RtEvent safe = runtime->forest->create_pending_partition(this, pid,
+          parent, color_space, part_color, part_kind, did, provenance);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, 
@@ -4982,10 +4972,9 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op();
-      ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
-      RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-       handle, color_space, part_color, part_kind, did, provenance, term_event);
+      RtEvent safe = runtime->forest->create_pending_partition(this, pid,
+          handle, color_space, part_color, part_kind, did, provenance);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image(this, pid, handle, projection, parent,
@@ -5051,10 +5040,9 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op();
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
-       handle, color_space, part_color, part_kind, did, provenance, term_event);
+      RtEvent safe = runtime->forest->create_pending_partition(this, pid,
+          handle, color_space, part_color, part_kind, did, provenance);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image_range(this, pid, handle, projection, parent,
@@ -5120,7 +5108,6 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(); 
-      ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
       if ((part_kind == LEGION_COMPUTE_KIND) || 
@@ -5141,7 +5128,7 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid, 
                            handle.get_index_space(), color_space, 
-                           part_color, part_kind, did, provenance, term_event);
+                           part_color, part_kind, did, provenance);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage(this, pid, projection, handle, 
@@ -5207,11 +5194,10 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(); 
-      ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,
                        handle.get_index_space(), color_space,
-                       part_color, part_kind, did, provenance, term_event);
+                       part_color, part_kind, did, provenance);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
@@ -5269,12 +5255,9 @@ namespace Legion {
       LegionColor part_color = INVALID_COLOR;
       if (color != LEGION_AUTO_GENERATE_ID)
         part_color = color;
-      size_t color_space_size = runtime->forest->get_domain_volume(color_space);
-      const ApBarrier partition_ready(
-                     Realm::Barrier::create_barrier(color_space_size));
       RtEvent safe = runtime->forest->create_pending_partition(this, pid,
                             parent, color_space, part_color, part_kind,
-                            did, provenance, partition_ready, partition_ready);
+                            did, provenance);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.wait();
@@ -5284,8 +5267,7 @@ namespace Legion {
         // control back in order to fill in the pieces of the partitions
         // so just launch a meta-task to check it when we can
         VerifyPartitionArgs args(this, pid, verify_kind, __func__);
-        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
-            Runtime::protect_event(partition_ready));
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
       }
       return pid;
     }
@@ -5307,7 +5289,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handles, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5331,7 +5313,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handle, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5356,7 +5338,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handles, prov);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5381,7 +5363,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handle, prov);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -5407,7 +5389,7 @@ namespace Legion {
       PendingPartitionOp *part_op = 
         runtime->get_available_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_difference(this, result, initial,
                                                  handles, provenance);
       // Now we can add the operation to the queue
@@ -14185,8 +14167,7 @@ namespace Legion {
            IndexPartition &pid, IndexSpace parent, 
            IndexSpace color_space, Provenance *provenance,
            PartitionKind part_kind, LegionColor partition_color,
-           bool color_generated, ApBarrier partition_ready,
-           ValueBroadcast<bool> *disjoint_result/*=NULL*/)
+           bool color_generated)
     //--------------------------------------------------------------------------
     {
       if (pending_index_partitions.empty())
@@ -14198,7 +14179,6 @@ namespace Legion {
       const bool is_owner = (collective.second == owner_shard->shard_id);
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
-      ShardMapping &shard_mapping = shard_manager->get_mapping();
       const RtBarrier creation_bar = creation_barrier.next(this);
       if (is_owner)
       {
@@ -14206,15 +14186,11 @@ namespace Legion {
         pid.id = value.pid;
         double_buffer = value.double_buffer;
         // Have to do our registration before broadcasting
-        RtEvent safe_event = runtime->forest->create_pending_partition_shard(
-                                           collective.second, this, pid, parent,
-                                           color_space, partition_color, 
-                                           part_kind,value.did, provenance,
-                                           disjoint_result, partition_ready,
-                                           &collective_mapping, &shard_mapping,
-                                           creation_bar, (op == NULL) ? 
-                                            partition_ready : 
-                                            ApBarrier::NO_AP_BARRIER);
+        RtEvent safe_event = runtime->forest->create_pending_partition(this,
+                                           pid, parent, color_space, 
+                                           partition_color, part_kind,
+                                           value.did, provenance,
+                                           &collective_mapping, creation_bar);
         // Broadcast the color if we have to generate it
         if (color_generated)
         {
@@ -14254,15 +14230,11 @@ namespace Legion {
 #endif
         }
         // Do our registration
-        RtEvent safe_event = runtime->forest->create_pending_partition_shard(
-                                         collective.second, this, pid, parent, 
-                                         color_space, partition_color, 
-                                         part_kind, value.did, provenance,
-                                         disjoint_result, partition_ready,
-                                         &collective_mapping, &shard_mapping,
-                                         creation_bar, (op == NULL) ?
-                                          partition_ready :
-                                          ApBarrier::NO_AP_BARRIER);
+        RtEvent safe_event = runtime->forest->create_pending_partition(this,
+                                         pid, parent, color_space, 
+                                         partition_color, part_kind,
+                                         value.did, provenance,
+                                         &collective_mapping, creation_bar);
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
       }
@@ -14274,11 +14246,6 @@ namespace Legion {
       // in flight if we're not hiding the latency
       increase_pending_partitions(double_buffer ? 
         pending_index_partitions.size() + 1 : 1, double_next && !double_buffer);
-      // If we have an operation arrive on the partition ready barrier 
-      // once the operation is completed
-      if (op != NULL)
-        Runtime::phase_barrier_arrive(partition_ready, 1/*count*/,
-            op->get_completion_event());
       return is_owner;
     }
 
@@ -14314,10 +14281,8 @@ namespace Legion {
         color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            LEGION_DISJOINT_COMPLETE_KIND, partition_color, 
-            color_generated, pending_part_bar))
+            LEGION_DISJOINT_COMPLETE_KIND, partition_color, color_generated))
         log_index.debug("Creating equal partition %d with parent index space %x"
                         " in task %s (ID %lld)", pid.id, parent.id,
                         get_task_name(), get_unique_id());
@@ -14360,10 +14325,8 @@ namespace Legion {
         color_generated = true;
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            LEGION_DISJOINT_COMPLETE_KIND, partition_color, color_generated,
-            pending_part_bar))
+            LEGION_DISJOINT_COMPLETE_KIND, partition_color, color_generated))
         log_index.debug("Creating equal partition %d with parent index space %x"
                         " in task %s (ID %lld)", pid.id, parent.id,
                         get_task_name(), get_unique_id());
@@ -14451,20 +14414,11 @@ namespace Legion {
             kind = LEGION_ALIASED_INCOMPLETE_KIND;
         }
       }
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((kind == LEGION_COMPUTE_KIND) || 
-          (kind == LEGION_COMPUTE_COMPLETE_KIND) || 
-          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_61);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            kind, partition_color, color_generated, pending_part_bar,
-            disjoint_result))
+            kind, partition_color, color_generated))
         log_index.debug("Creating union partition %d with parent index "
                         "space %x in task %s (ID %lld)", pid.id, parent.id,
                         get_task_name(), get_unique_id());
@@ -14553,20 +14507,11 @@ namespace Legion {
             kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((kind == LEGION_COMPUTE_KIND) || 
-          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_62);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            kind, partition_color, color_generated, pending_part_bar,
-            disjoint_result))
+            kind, partition_color, color_generated))
         log_index.debug("Creating intersection partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
                         parent.id, get_task_name(), get_unique_id());
@@ -14635,20 +14580,12 @@ namespace Legion {
             kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((kind == LEGION_COMPUTE_KIND) || 
-          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_62);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent,
             part_node->color_space->handle, provenance, kind, partition_color,
-            color_generated, pending_part_bar, disjoint_result))
+            color_generated))
         log_index.debug("Creating intersection partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
                         parent.id, get_task_name(), get_unique_id());
@@ -14727,20 +14664,11 @@ namespace Legion {
             kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((kind == LEGION_COMPUTE_KIND) || 
-          (kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_63);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            kind, partition_color, color_generated, pending_part_bar,
-            disjoint_result))
+            kind, partition_color, color_generated))
         log_index.debug("Creating difference partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
                         parent.id, get_task_name(), get_unique_id());
@@ -14793,62 +14721,60 @@ namespace Legion {
       LegionColor partition_color = INVALID_COLOR;
       if (color != LEGION_AUTO_GENERATE_ID)
         partition_color = color;
-      ReplPendingPartitionOp *part_op = 
-        runtime->get_available_repl_pending_partition_op();
-      ApEvent term_event = part_op->get_completion_event();
-      const RtBarrier creation_bar = creation_barrier.next(this);
+      std::set<RtEvent> safe_events;
       // We need an owner node to decide which color everyone is going to use
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
         // Do the call on the owner node
-        std::set<RtEvent> safe_events;
-        runtime->forest->create_pending_cross_product(this, handle1, handle2, 
-                                           handles, kind, provenance, 
-                                           partition_color, 
-                                           term_event, safe_events, 
-                                           owner_shard->shard_id, total_shards);
-        // We need to wait on the safe event here to make sure effects
-        // have been broadcast before letting the other shard to their part
-        if (!safe_events.empty())
+        if (partition_color == INVALID_COLOR)
         {
-          const RtEvent wait_on = Runtime::merge_events(safe_events);
-          if (wait_on.exists() && !wait_on.has_triggered())
-            wait_on.wait();
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
+          runtime->forest->create_pending_cross_product(this, handle1, handle2, 
+                                             handles, kind, provenance, 
+                                             partition_color, safe_events,
+                                             owner_shard->shard_id,
+                                             &shard_manager->get_mapping(),
+                                             &color_collective);
         }
-        // Now broadcast the chosen color to all the other shards
-        ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
-        color_collective.broadcast(partition_color);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
-        // Wait for the creation to be done
-        creation_bar.wait();
+        else
+          runtime->forest->create_pending_cross_product(this, handle1, handle2, 
+                                             handles, kind, provenance, 
+                                             partition_color, safe_events,
+                                             owner_shard->shard_id,
+                                             &shard_manager->get_mapping());
       }
       else
       {
         // Get the color result from the owner node
-        ValueBroadcast<LegionColor> color_collective(this,
-                          index_partition_allocator_shard, COLLECTIVE_LOC_15);
-        partition_color = color_collective.get_value();
+        if (partition_color == INVALID_COLOR)
+        {
+          ValueBroadcast<LegionColor> color_collective(this,
+                            index_partition_allocator_shard, COLLECTIVE_LOC_15);
+          partition_color = color_collective.get_value();
 #ifdef DEBUG_LEGION
-        assert(partition_color != INVALID_COLOR);
+          assert(partition_color != INVALID_COLOR);
 #endif
+        }
         // Now we can do the call from this node
-        std::set<RtEvent> safe_events;
         runtime->forest->create_pending_cross_product(this, handle1, handle2, 
                                            handles, kind, provenance,
-                                           partition_color, 
-                                           term_event, safe_events, 
-                                           owner_shard->shard_id, total_shards);
-        // Signal that we're done with our creation
-        RtEvent safe_event;
-        if (!safe_events.empty())
-          safe_event = Runtime::merge_events(safe_events);
-        Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
-        // Also have to wait for creation to finish on all shards because
-        // any shard can handle requests for any cross-product partition
-        creation_bar.wait();
+                                           partition_color, safe_events,
+                                           owner_shard->shard_id,
+                                           &shard_manager->get_mapping());
       }
-      part_op->initialize_cross_product(this, handle1, handle2,
-                                        partition_color, provenance);
+      // Signal that we're done with our creation
+      RtEvent safe_event;
+      if (!safe_events.empty())
+        safe_event = Runtime::merge_events(safe_events);
+      const RtBarrier creation_bar = creation_barrier.next(this);
+      Runtime::phase_barrier_arrive(creation_bar, 1/*count*/, safe_event);
+      ReplPendingPartitionOp *part_op = 
+        runtime->get_available_repl_pending_partition_op();
+      part_op->initialize_cross_product(this, handle1, handle2, partition_color,
+          provenance, owner_shard->shard_id, &shard_manager->get_mapping());
+      // Also have to wait for creation to finish on all shards because
+      // any shard can handle requests for any cross-product partition
+      creation_bar.wait();
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
       // Perform the exchange of all the handle names so that we can record
@@ -15012,20 +14938,11 @@ namespace Legion {
         part_color = color; 
       else
         color_generated = true;
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_64);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            part_kind, part_color, color_generated, pending_part_bar,
-            disjoint_result))
+            part_kind, part_color, color_generated))
         log_index.debug("Creating restricted partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
       part_op->initialize_restricted_partition(this, pid, transform, 
@@ -15076,19 +14993,11 @@ namespace Legion {
             ApEvent::NO_AP_EVENT, provenance, true/*reg now*/));
       // Prune out every N-th one for this shard and then pass through
       // the subset to the normal InnerContext variation of this
-      ShardID shard = 0;
       std::map<DomainPoint,Future> shard_futures;
       for (std::map<DomainPoint,Domain>::const_iterator it = 
             domains.begin(); it != domains.end(); it++)
-      {
-        // Use the direct call to TaskContext::from_value in order to
-        // avoid any further checks for invalid control replication
-        if (shard++ == owner_shard->shard_id)
-          shard_futures[it->first] = TaskContext::from_value(
-              &it->second, sizeof(it->second), false/*owned*/, provenance);
-        if (shard == total_shards)
-          shard = 0;
-      }
+        shard_futures[it->first] = TaskContext::from_value(
+            &it->second, sizeof(it->second), false/*owned*/, provenance);
       future_map.impl->set_all_futures(shard_futures);
       return create_partition_by_domain(parent, future_map, color_space, 
        perform_intersections, part_kind, color, provenance, true/*skip check*/);
@@ -15131,20 +15040,11 @@ namespace Legion {
         part_color = color; 
       else
         color_generated = true;
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_76);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            part_kind, part_color, color_generated, pending_part_bar,
-            disjoint_result))
+            part_kind, part_color, color_generated))
         log_index.debug("Creating partition by domain in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
       part_op->initialize_by_domain(this, pid, domains, 
@@ -15202,15 +15102,13 @@ namespace Legion {
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, parent, color_space, provenance,
-            part_kind, part_color, color_generated, pending_part_bar))
+            part_kind, part_color, color_generated))
         log_index.debug("Creating partition by field in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      part_op->initialize_by_field(this, index_partition_allocator_shard,
-                                   pending_part_bar, pid, handle, 
-                                   parent_priv, color_space, fid, id, tag,
-                                   marg, provenance);
+      part_op->initialize_by_field(this, pid, handle, parent_priv, color_space,
+                                   fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_38));
@@ -15282,30 +15180,16 @@ namespace Legion {
         part_color = color;
       else
         color_generated = true;
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_65);
       IndexPartition pid(0/*temp*/, handle.get_tree_id(),handle.get_type_tag());
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, handle, color_space, provenance,
-            part_kind, part_color, color_generated, pending_part_bar,
-            disjoint_result))
+            part_kind, part_color, color_generated))
         log_index.debug("Creating partition by image in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      part_op->initialize_by_image(this, 
-#ifndef SHARD_BY_IMAGE
-                                   index_partition_allocator_shard,
-#endif
-                                   pending_part_bar, pid, handle, 
-                                   projection, parent, fid, id, tag, marg,
-                                   owner_shard->shard_id, total_shards,
-                                   provenance);
+      part_op->initialize_by_image(this, pid, handle, projection, parent, fid,
+                                   id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_39));
@@ -15377,30 +15261,16 @@ namespace Legion {
         part_color = color;
       else
         color_generated = true;
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_66);
       IndexPartition pid(0/*temp*/, handle.get_tree_id(),handle.get_type_tag());
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, handle, color_space, provenance,
-            part_kind, part_color, color_generated, pending_part_bar,
-            disjoint_result))
+            part_kind, part_color, color_generated))
         log_index.debug("Creating partition by image range in task %s "
                         "(ID %lld)", get_task_name(), get_unique_id());
-      part_op->initialize_by_image_range(this, 
-#ifndef SHARD_BY_IMAGE
-                                         index_partition_allocator_shard,
-#endif
-                                         pending_part_bar, pid, handle,
-                                         projection, parent, fid, id, tag, marg,
-                                         owner_shard->shard_id, total_shards,
-                                         provenance);
+      part_op->initialize_by_image_range(this, pid, handle, projection, parent, 
+                                         fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_40));
@@ -15488,27 +15358,17 @@ namespace Legion {
             part_kind = LEGION_DISJOINT_INCOMPLETE_KIND;
         }
       }
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_67);
       IndexPartition pid(0/*temp*/,
           handle.get_index_space().get_tree_id(), handle.get_type_tag());
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, handle.get_index_space(),
-            color_space, provenance, part_kind, part_color,
-            color_generated, pending_part_bar, disjoint_result))
+            color_space, provenance, part_kind, part_color, color_generated))
         log_index.debug("Creating partition by preimage in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
-      part_op->initialize_by_preimage(this, index_partition_allocator_shard,
-                                      pending_part_bar, pid, projection,
-                                      handle, parent, fid, id, tag, marg,
-                                      provenance);
+      part_op->initialize_by_preimage(this, pid, projection, handle, parent,
+                                      fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_41));
@@ -15579,28 +15439,18 @@ namespace Legion {
         part_color = color;
       else
         color_generated = true; 
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_68);
       IndexPartition pid(0/*temp*/,
           handle.get_index_space().get_tree_id(), handle.get_type_tag());
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op();
-      const ApBarrier pending_part_bar = pending_partition_barrier.next(this);
       if (create_shard_partition(part_op, pid, handle.get_index_space(),
-            color_space, provenance, part_kind, part_color,
-            color_generated, pending_part_bar, disjoint_result))
+            color_space, provenance, part_kind, part_color, color_generated))
         log_index.debug("Creating partition by preimage range in task %s "
                         "(ID %lld)", get_task_name(), get_unique_id());
       part_op->initialize_by_preimage_range(this, 
-                                            index_partition_allocator_shard, 
-                                            pending_part_bar, pid, projection,
-                                            handle, parent, fid, id, tag, marg,
-                                            provenance);
+                                            pid, projection, handle, parent,
+                                            fid, id, tag, marg, provenance);
+      part_op->initialize_replication(this);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(new ShardingGatherCollective(this, 
                                     0/*owner shard*/, COLLECTIVE_LOC_42));
@@ -15661,38 +15511,9 @@ namespace Legion {
         part_color = color; 
       else
         color_generated = true;
-      ValueBroadcast<bool> *disjoint_result = NULL;
-      if ((part_kind == LEGION_COMPUTE_KIND) || 
-          (part_kind == LEGION_COMPUTE_COMPLETE_KIND) ||
-          (part_kind == LEGION_COMPUTE_INCOMPLETE_KIND))
-        disjoint_result = new ValueBroadcast<bool>(this, 
-            pending_index_partitions.empty() ? index_partition_allocator_shard :
-            pending_index_partitions.front().second, COLLECTIVE_LOC_69);
-      ApBarrier partition_ready;
-      if (owner_shard->shard_id == index_partition_allocator_shard)
-      {
-        // We have to make a barrier to be used for this partition
-        size_t color_space_size = 
-          runtime->forest->get_domain_volume(color_space);
-        partition_ready = 
-          ApBarrier(Realm::Barrier::create_barrier(color_space_size));
-        ValueBroadcast<ApBarrier> bar_collective(this, COLLECTIVE_LOC_30);
-        bar_collective.broadcast(partition_ready);
-      }
-      else
-      {
-        ValueBroadcast<ApBarrier> bar_collective(this,
-                      index_partition_allocator_shard, COLLECTIVE_LOC_30);
-        partition_ready = bar_collective.get_value();
-      }
-      // Update our allocation shard
-      index_partition_allocator_shard++;
-      if (index_partition_allocator_shard == total_shards)
-        index_partition_allocator_shard = 0;
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (create_shard_partition(NULL/*op*/, pid, parent, color_space,
-            provenance,part_kind, part_color, color_generated,
-            partition_ready, disjoint_result))
+            provenance, part_kind, part_color, color_generated))
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
       if (runtime->verify_partitions && !trust)
@@ -15701,8 +15522,7 @@ namespace Legion {
         // control back in order to fill in the pieces of the partitions
         // so just launch a meta-task to check it when we can
         VerifyPartitionArgs args(this, pid, verify_kind, __func__);
-        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, 
-            Runtime::protect_event(partition_ready));
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY); 
       }
       return pid;
     }
@@ -15740,7 +15560,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handles, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -15778,7 +15598,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag);
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag);
       part_op->initialize_index_space_union(this, result, handle, provenance);
       // Now we can add the operation to the queue
       add_to_dependence_queue(part_op);
@@ -15818,7 +15638,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handles,
                                                    provenance);
       // Now we can add the operation to the queue
@@ -15857,7 +15677,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_intersection(this, result, handle,
                                                    provenance);
       // Now we can add the operation to the queue
@@ -15900,7 +15720,7 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op();
       IndexSpace result = 
-        runtime->forest->get_index_subspace(parent, realm_color, type_tag); 
+        runtime->forest->instantiate_subspace(parent, realm_color, type_tag); 
       part_op->initialize_index_space_difference(this, result, initial,
                                                  handles, provenance);
       // Now we can add the operation to the queue
@@ -15915,8 +15735,7 @@ namespace Legion {
     {
       IndexPartNode *node = runtime->forest->get_node(pid);
       // Check containment first
-      for (ColorSpaceIterator itr(node, 
-            owner_shard->shard_id, total_shards); itr; itr++)
+      for (ColorSpaceIterator itr(node, true/*local only*/); itr; itr++) 
       {
         IndexSpaceNode *child_node = node->get_child(*itr);
         IndexSpaceExpression *diff = 
@@ -16088,7 +15907,6 @@ namespace Legion {
         *creator = collective.first->origin;
       CollectiveMapping &collective_mapping = 
         shard_manager->get_collective_mapping();
-      ShardMapping &shard_mapping = shard_manager->get_mapping();
       const RtBarrier creation_bar = creation_barrier.next(this);
       if (collective.second)
       {
@@ -16097,7 +15915,7 @@ namespace Legion {
         double_buffer = value.double_buffer;
         // Need to register this before broadcasting
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_bar);
+                                      &collective_mapping, creation_bar);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/); 
         runtime->forest->revoke_pending_field_space(value.space_id);
@@ -16125,7 +15943,7 @@ namespace Legion {
         assert(space.exists());
 #endif
         runtime->forest->create_field_space(space, value.did, provenance,
-            &collective_mapping, &shard_mapping, creation_bar);
+                                      &collective_mapping, creation_bar);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_bar, 1/*count*/);
       }

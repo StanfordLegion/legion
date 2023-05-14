@@ -766,6 +766,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void CollectiveMapping::pack_null(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
+    }
+
+    //--------------------------------------------------------------------------
     unsigned CollectiveMapping::convert_to_offset(unsigned index,
                                                   unsigned origin_index) const
     //--------------------------------------------------------------------------

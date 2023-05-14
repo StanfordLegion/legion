@@ -1676,9 +1676,6 @@ namespace Legion {
       if (!repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
         return;
       RegionTreeForest *forest = runtime->forest;
-      const CollectiveMapping &mapping =
-        repl_ctx->shard_manager->get_collective_mapping();
-
       for (unsigned idx = 0; idx < output_regions.size(); ++idx)
       {
         const OutputOptions &options = output_region_options[idx];
@@ -1704,14 +1701,13 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain, runtime->address_space, &mapping))
+          if (parent->set_domain(root_domain))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(all_output_sizes[idx],
-                              runtime->address_space, &mapping))
+        else if (parent->set_output_union(all_output_sizes[idx]))
           delete parent;
       }
     }
@@ -2265,7 +2261,7 @@ namespace Legion {
           {
             const size_t max_check = children.size();
             for (ColorSpaceIterator itr(index_part,
-                  repl_ctx->owner_shard->shard_id, 
+                  repl_ctx->owner_shard->shard_id,
                   repl_ctx->total_shards); itr; itr++)
             {
               RegionNode *child = part_node->get_child(*itr);
@@ -4519,7 +4515,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplPendingPartitionOp::populate_sources(const FutureMap &fm)
+    void ReplPendingPartitionOp::populate_sources(const FutureMap &fm,
+                                     IndexPartition pid, bool needs_all_futures)
     //--------------------------------------------------------------------------
     {
       future_map = fm;
@@ -4529,18 +4526,19 @@ namespace Legion {
 #endif
       if (future_map.impl != NULL)
       {
-        if (!thunk->need_all_futures())
+        if (needs_all_futures)
         {
-#ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx = 
-            dynamic_cast<ReplicateContext*>(parent_ctx);
-          assert(repl_ctx != NULL);
-#else
-          ReplicateContext *repl_ctx =
-            static_cast<ReplicateContext*>(parent_ctx);
-#endif
-          future_map.impl->get_shard_local_futures(
-              repl_ctx->owner_shard->shard_id, sources);
+          IndexPartNode *partition = runtime->forest->get_node(pid);
+          const Domain future_map_domain = future_map.impl->get_domain();
+          for (ColorSpaceIterator itr(partition,true/*local only*/); itr; itr++)
+          {
+            const DomainPoint point = 
+              partition->color_space->delinearize_color_to_point(*itr);
+            if (!future_map_domain.contains(point))
+              continue;
+            Future f = future_map.impl->get_future(point, true/*internal*/);
+            sources[point] = f.impl;
+          }
         }
         else
           future_map.impl->get_all_futures(sources);
@@ -4559,8 +4557,12 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Perform the partitioning operation
-      const ApEvent ready_event = thunk->perform_shard(this, runtime->forest,
-        repl_ctx->owner_shard->shard_id, repl_ctx->shard_manager->total_shards);
+      ApEvent ready_event;
+      // One the first shard will perform the pending partition computations
+      if (repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard))
+        ready_event = thunk->perform(this, runtime->forest);
+      else if (thunk->is_cross_product())
+        ready_event = thunk->perform(this, runtime->forest);
       if (ready_event.exists())
         record_completion_effect(ready_event);
       complete_execution();
@@ -4572,19 +4574,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplDependentPartitionOp(Runtime *rt)
-      : DependentPartitionOp(rt)
+      : ReplCollectiveViewCreator<
+          CollectiveViewCreator<DependentPartitionOp> >(rt)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplDependentPartitionOp::ReplDependentPartitionOp(
-                                            const ReplDependentPartitionOp &rhs)
-      : DependentPartitionOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -4594,264 +4587,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplDependentPartitionOp& ReplDependentPartitionOp::operator=(
-                                            const ReplDependentPartitionOp &rhs)
+    void ReplDependentPartitionOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_by_field(ReplicateContext *ctx, 
-                                                       ShardID target,
-                                                       ApEvent ready_event,
-                                                       IndexPartition pid,
-                                                       LogicalRegion handle, 
-                                                       LogicalRegion parent,
-                                                       IndexSpace color_space,
-                                                       FieldID fid,
-                                                       MapperID id, 
-                                                       MappingTagID t,
-                                                       const UntypedBuffer &arg,
-                                                       Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance); 
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      requirement = 
-        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = arg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, arg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-      thunk = new ReplByFieldThunk(ctx, target, pid);
-      mapping_barrier = ctx->get_next_dependent_partition_barrier();;
-      partition_ready = ready_event;
-      if (runtime->legion_spy_enabled)
-        perform_logging();
-      if (runtime->check_privileges)
-        check_by_field(pid, color_space, handle, parent, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_by_image(ReplicateContext *ctx, 
-#ifndef SHARD_BY_IMAGE
-                                                       ShardID target,
-#endif
-                                                       ApEvent ready_event,
-                                                       IndexPartition pid,
-                                                       IndexSpace handle,
-                                                   LogicalPartition projection,
-                                             LogicalRegion parent, FieldID fid,
-                                                   MapperID id, MappingTagID t,
-                                                   const UntypedBuffer &marg,
-                                                   ShardID shard, size_t total,
-                                                        Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      LogicalRegion proj_parent = 
-        runtime->forest->get_parent_logical_region(projection);
-      requirement = 
-        RegionRequirement(proj_parent,LEGION_READ_ONLY,LEGION_EXCLUSIVE,parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = marg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-#ifdef SHARD_BY_IMAGE
-      thunk = new ReplByImageThunk(ctx, pid, projection.get_index_partition(),
-                                   shard, total);
-#else
-      thunk = new ReplByImageThunk(ctx, target, pid,
-                                   projection.get_index_partition(),
-                                   shard, total);
-#endif
-      mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      partition_ready = ready_event;
-      if (runtime->legion_spy_enabled)
-        perform_logging();
-      if (runtime->check_privileges)
-        check_by_image(pid, handle, projection, parent, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_by_image_range(
-                                                         ReplicateContext *ctx, 
-#ifndef SHARD_BY_IMAGE
-                                                         ShardID target,
-#endif
-                                                         ApEvent ready_event,
-                                                         IndexPartition pid,
-                                                         IndexSpace handle,
-                                                LogicalPartition projection,
-                                                LogicalRegion parent,
-                                                FieldID fid, MapperID id,
-                                                MappingTagID t,  
-                                                const UntypedBuffer &marg,
-                                                ShardID shard, 
-                                                size_t total_shards,
-                                                Provenance *provenance) 
-    //--------------------------------------------------------------------------
-    {
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      LogicalRegion proj_parent = 
-        runtime->forest->get_parent_logical_region(projection);
-      requirement = 
-        RegionRequirement(proj_parent,LEGION_READ_ONLY,LEGION_EXCLUSIVE,parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = marg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-#ifdef SHARD_BY_IMAGE
-      thunk = new ReplByImageRangeThunk(ctx, pid, 
-                                        projection.get_index_partition(),
-                                        shard, total_shards);
-#else
-      thunk = new ReplByImageRangeThunk(ctx, target, pid, 
-                                        projection.get_index_partition(),
-                                        shard, total_shards);
-#endif
-      mapping_barrier = ctx->get_next_dependent_partition_barrier();;
-      partition_ready = ready_event;
-      if (runtime->legion_spy_enabled)
-        perform_logging();
-      if (runtime->check_privileges)
-        check_by_image_range(pid, handle, projection, parent, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_by_preimage(ReplicateContext *ctx,
-                              ShardID target_shard, ApEvent ready_event,
-                              IndexPartition pid, IndexPartition proj,
-                              LogicalRegion handle, LogicalRegion parent,
-                              FieldID fid, MapperID id, MappingTagID t,
-                              const UntypedBuffer &marg, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      requirement = 
-        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = marg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-      thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
-      mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      partition_ready = ready_event;
-      if (runtime->legion_spy_enabled)
-        perform_logging();
-      if (runtime->check_privileges)
-        check_by_preimage(pid, proj, handle, parent, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_by_preimage_range(
-                              ReplicateContext *ctx, ShardID target_shard,
-                              ApEvent ready_event,
-                              IndexPartition pid, IndexPartition proj,
-                              LogicalRegion handle, LogicalRegion parent,
-                              FieldID fid, MapperID id, MappingTagID t,
-                              const UntypedBuffer &marg, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      parent_task = ctx->get_task();
-      initialize_operation(ctx, true/*track*/, 0/*regions*/, provenance);
-      // Start without the projection requirement, we'll ask
-      // the mapper later if it wants to turn this into an index launch
-      requirement = 
-        RegionRequirement(handle, LEGION_READ_ONLY, LEGION_EXCLUSIVE, parent);
-      requirement.add_field(fid);
-      map_id = id;
-      tag = t;
-      mapper_data_size = marg.get_size();
-      if (mapper_data_size > 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper_data == NULL);
-#endif
-        mapper_data = malloc(mapper_data_size);
-        memcpy(mapper_data, marg.get_ptr(), mapper_data_size);
-      }
-#ifdef DEBUG_LEGION
-      assert(thunk == NULL);
-#endif
-      thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
-      mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      partition_ready = ready_event;
-      if (runtime->legion_spy_enabled)
-        perform_logging();
-      if (runtime->check_privileges)
-        check_by_preimage_range(pid, proj, handle, parent, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplDependentPartitionOp::initialize_by_association(
-                              ReplicateContext *ctx, LogicalRegion domain,
-                              LogicalRegion domain_parent, FieldID fid,
-                              IndexSpace range, MapperID id, MappingTagID tag,
-                              const UntypedBuffer &marg, Provenance *provenance)
-    //--------------------------------------------------------------------------
-    {
-      mapping_barrier = ctx->get_next_dependent_partition_barrier();
-      DependentPartitionOp::initialize_by_association(ctx, domain, 
-                          domain_parent, fid, range, id, tag, marg, provenance);
+      mapping_barrier = ctx->get_next_dependent_partition_mapping_barrier();
     }
 
     //--------------------------------------------------------------------------
@@ -4861,6 +4600,11 @@ namespace Legion {
       DependentPartitionOp::activate();
       sharding_function = NULL;
       shard_points = NULL;
+      gather = NULL;
+      scatter = NULL;
+      exchange = NULL;
+      collective_ready = ApBarrier::NO_AP_BARRIER;
+      collective_done = ApBarrier::NO_AP_BARRIER;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -4871,6 +4615,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DependentPartitionOp::deactivate(false/*free*/);
+      if (gather != NULL)
+        delete gather;
+      if (scatter != NULL)
+        delete scatter;
+      if (exchange != NULL)
+        delete exchange;
+      remote_targets.clear();
+      deppart_results.clear();
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -4923,7 +4675,9 @@ namespace Legion {
     void ReplDependentPartitionOp::select_partition_projection(void)
     //--------------------------------------------------------------------------
     {
-      if (!runtime->unsafe_mapper)
+      if (thunk->is_image() || runtime->unsafe_mapper)
+        DependentPartitionOp::select_partition_projection();
+      else
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
@@ -4958,8 +4712,6 @@ namespace Legion {
         else
           part_check.broadcast(requirement.partition);
       }
-      else
-        DependentPartitionOp::select_partition_projection();
     }
 
     //--------------------------------------------------------------------------
@@ -4972,9 +4724,6 @@ namespace Legion {
       // mapper whether it would like to make this an index space
       // operation or a single operation
       select_partition_projection();
-      // Now that we know that we have the right region requirement we
-      // can ask the mapper to also pick the sharding function
-      select_sharding_function();
       // Do thise now that we've picked our region requirement
       initialize_privilege_path(privilege_path, requirement);
       if (runtime->legion_spy_enabled)
@@ -4983,9 +4732,45 @@ namespace Legion {
       LogicalAnalysis analysis(this, map_applied_conditions);
       if (is_index_space)
       {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        // Now that we know that we have the right region requirement we
+        // can ask the mapper to also pick the sharding function
+        select_sharding_function();
+        // We can also initialize the barriers and exchange we will need
+        if (thunk->is_image())
+        {
+          exchange = new FieldDescriptorExchange(repl_ctx,
+              repl_ctx->get_next_collective_index(COLLECTIVE_LOC_30, 
+                true/*logical*/), instances);
+          collective_ready = 
+            repl_ctx->get_next_dependent_partition_execution_barrier();
+          collective_done =
+            repl_ctx->get_next_dependent_partition_execution_barrier();
+        }
+        else
+        {
+          gather = new FieldDescriptorGather(repl_ctx,
+              repl_ctx->get_next_collective_index(COLLECTIVE_LOC_61,
+                true/*logical*/), instances, remote_targets);
+          scatter = new DeppartResultScatter(repl_ctx,
+              repl_ctx->get_next_collective_index(COLLECTIVE_LOC_62,
+                true/*logical*/), deppart_results);
+        }
         projection_info = ProjectionInfo(runtime, requirement, 
                                          launch_space, sharding_function);
-
+      }
+      else
+      {
+        create_collective_view_rendezvous(requirement.parent.get_tree_id(), 0);
+#ifdef DEBUG_LEGION
+        sharding_collective->elide_collective();
+#endif
       }
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -5006,7 +4791,6 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      
       // Do different things if this is an index space point or a single point
       if (is_index_space)
       {
@@ -5025,15 +4809,47 @@ namespace Legion {
           LegionSpy::log_operation_events(unique_op_id, 
               ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
 #endif
-          // We aren't participating directly, but we still have to 
-          // participate in the collective operations
-          const ApEvent done_event = 
-            thunk->perform(this,runtime->forest,ApEvent::NO_AP_EVENT,instances);
-          // We have no local points, so we can just trigger
-          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
-          complete_mapping(mapping_barrier);
-          record_completion_effect(done_event);
-          complete_execution();
+          // We have no local points, so we're done mapping
+          finalize_mapping();
+          RtEvent ready;
+          if (thunk->is_image())
+          {
+#ifdef DEBUG_LEGION
+            assert(exchange != NULL);
+#endif
+            // We won't have any preconditions on the collective ready event
+            Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+            // Perform the exchange of the instance data and then 
+            // trigger execution when it is ready
+            exchange->perform_collective_async();
+            ready = exchange->perform_collective_wait(false/*block*/);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(gather != NULL);
+            assert(scatter != NULL);
+#endif
+            std::vector<ApEvent> preconditions;
+            if (thunk->is_preimage())
+              find_remote_targets(preconditions);
+            if (preconditions.empty())
+              gather->contribute_instances(ApEvent::NO_AP_EVENT);
+            else
+              gather->contribute_instances(
+                  Runtime::merge_events(NULL, preconditions));
+            if (gather->target != repl_ctx->owner_shard->shard_id)
+            {
+              ready = scatter->perform_collective_wait(false/*block*/);
+              // We're not going to have any updates to perform so 
+              // we can just return immediately
+              complete_execution(ready);
+              return;
+            }
+            else
+              ready = gather->perform_collective_wait(false/*block*/);
+          }
+          parent_ctx->add_to_trigger_execution_queue(this, ready); 
         }
         else // If we have valid points then we do the base call
         {
@@ -5044,26 +4860,9 @@ namespace Legion {
       }
       else
       {
-        // Inform the thunk that we're eliding collectives since this
-        // is a singular operation and not an index operation
-        thunk->elide_collectives();
-        // Shard 0 always owns dependent partition operations
-        // If we own it we go on the queue, otherwise we complete early
-        if (repl_ctx->owner_shard->shard_id != 0)
-        {
-#ifdef LEGION_SPY
-          // Still have to do this for legion spy
-          LegionSpy::log_operation_events(unique_op_id, 
-              ApEvent::NO_AP_EVENT, ApEvent::NO_AP_EVENT);
-#endif
-          // We don't own it, so we can pretend like we
-          // mapped and executed this task already
-          Runtime::phase_barrier_arrive(mapping_barrier, 1/*count*/);
-          complete_mapping(mapping_barrier);
-          complete_execution();
-        }
-        else // If we're the shard then we do the base call
-          DependentPartitionOp::trigger_ready();
+        // In this case we're all going to map the source instance
+        // and then perform the partition creation collective
+        DependentPartitionOp::trigger_ready();
       }
     }
 
@@ -5084,265 +4883,162 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplDependentPartitionOp::ReplByFieldThunk::ReplByFieldThunk(
-        ReplicateContext *ctx, ShardID target, IndexPartition p)
-      : ByFieldThunk(p), 
-        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_54))
+    ApEvent ReplDependentPartitionOp::trigger_thunk(IndexSpace handle,
+                                                ApEvent instances_ready,
+                                                const InstanceSet &mapped_insts,
+                                                const PhysicalTraceInfo &info,
+                                                const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReplDependentPartitionOp::ReplByFieldThunk::perform(
-                              DependentPartitionOp *op,
-                              RegionTreeForest *forest, ApEvent instances_ready,
-                              const std::vector<FieldDataDescriptor> &instances)
-    //--------------------------------------------------------------------------
-    {
-      if (op->is_index_space)
-      {
-        gather_collective.contribute(instances_ready, instances);
-        if (gather_collective.is_target())
-        {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            gather_collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_field(op, pid,
-                                      full_descriptors, all_ready);
-          gather_collective.notify_remote_complete(done);
-          return done;
-        }
-        else // nothing else for us to do
-          return gather_collective.get_complete_event();
-      }
-      else // singular so just do the normal thing
-        return forest->create_partition_by_field(op, pid, 
-                                                 instances, instances_ready);
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef SHARD_BY_IMAGE
-    ReplDependentPartitionOp::ReplByImageThunk::ReplByImageThunk(
-                                          ReplicateContext *ctx, 
-                                          IndexPartition p, IndexPartition proj,
-                                          ShardID s, size_t total)
-      : ByImageThunk(p, proj), 
-        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_55)),
+#ifdef DEBUG_LEGION
+      assert(mapped_insts.size() == 1);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
 #else
-    ReplDependentPartitionOp::ReplByImageThunk::ReplByImageThunk(
-                                          ReplicateContext *ctx, ShardID target,
-                                          IndexPartition p, IndexPartition proj,
-                                          ShardID s, size_t total)
-      : ByImageThunk(p, proj), 
-        collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_55)),
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-        shard_id(s), total_shards(total)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReplDependentPartitionOp::ReplByImageThunk::perform(
-                              DependentPartitionOp *op,
-                              RegionTreeForest *forest, ApEvent instances_ready,
-                              const std::vector<FieldDataDescriptor> &instances)
-    //--------------------------------------------------------------------------
-    {
-      if (op->is_index_space)
+      if (is_index_space)
       {
-#ifdef SHARD_BY_IMAGE
-        // There is a special case here if we're projecting the same 
-        // partition that we used to make the instances, if it is then
-        // we can avoid needing to do the exchange at all
-        if ((op->requirement.handle_type == PART_PROJECTION) &&
-            (op->requirement.partition.get_index_partition() == projection))
+        IndexSpaceNode *node = runtime->forest->get_node(handle);
+        ApEvent domain_ready;
+        Domain domain = node->get_domain(domain_ready, false/*need tight*/);
+        bool ready = false;
         {
-          // Make sure we elide our collective to avoid leaking anything
-          collective.elide_collective();
-          if (!instances.empty())
-            return forest->create_partition_by_image_range(op, pid, projection,
-                instances, instances_ready, shard_id, total_shards);
+          AutoLock o_lock(op_lock);
+          instances.resize(instances.size() + 1);
+          FieldDataDescriptor &desc = instances.back();
+          const InstanceRef &ref = mapped_insts[0];
+          PhysicalManager *manager = ref.get_physical_manager();
+          desc.inst = manager->get_instance();
+          desc.domain = domain;
+          desc.color = color;
+          if (instances_ready.exists())
+            index_preconditions.push_back(instances_ready);
+          if (domain_ready.exists())
+            index_preconditions.push_back(domain_ready);
+#ifdef DEBUG_LEGION
+          assert(!points.empty());
+#endif
+          ready = (instances.size() == points.size());
+        }
+        if (ready)
+        {
+          if (thunk->is_image())
+          {
+            // Images can be sharded so we do them in parallel and 
+            // exchange the field descriptors with all the shards
+            // Get the exchange in flight
+            exchange->perform_collective_async();
+            // Arrive on the ready barrier
+            if (index_preconditions.empty())
+              Runtime::phase_barrier_arrive(collective_ready, 1/*count*/);
+            else
+              Runtime::phase_barrier_arrive(collective_ready, 1/*count*/,
+                  Runtime::merge_events(&info, index_preconditions));
+            const RtEvent exchanged = 
+              exchange->perform_collective_wait(false/*block*/);
+            if (exchanged.exists() && !exchanged.has_triggered())
+              parent_ctx->add_to_trigger_execution_queue(this, exchanged);
+            else
+              trigger_execution();
+          }
           else
-            return ApEvent::NO_AP_EVENT;
+          {
+            // For all other dependent partition operations we gather all
+            // the field descriptors to one node to perform the computation
+            // and then we scatter them all back out to the targets after
+            // we've computed them on one node. We do this because Realm can
+            // perform non-trivial optimizations for partition-by-field and
+            // partition-by-preimage for those cases when it see a single call
+            if (thunk->is_preimage())
+              find_remote_targets(index_preconditions);
+            if (index_preconditions.empty())
+              gather->contribute_instances(ApEvent::NO_AP_EVENT);
+            else
+              gather->contribute_instances(
+                  Runtime::merge_events(&info, index_preconditions));
+            if (gather->target == repl_ctx->owner_shard->shard_id)
+            {
+              const RtEvent gathered =
+                gather->perform_collective_wait(false/*block*/);
+              if (gathered.exists() && !gathered.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, gathered);
+              else
+                trigger_execution();
+            }
+            else
+            {
+              const RtEvent scattered =
+                scatter->perform_collective_wait(false/*block*/);
+              if (scattered.exists() && !scattered.has_triggered())
+                parent_ctx->add_to_trigger_execution_queue(this, scattered);
+              else
+                trigger_execution();
+            }
+          }
         }
-        // Do the all-to-all gather of the field data descriptors
-        ApEvent all_ready = collective.exchange_descriptors(instances_ready,
-                                                            instances);
-        ApEvent done = forest->create_partition_by_image(op, pid, projection,
-                  collective.descriptors, all_ready, shard_id, total_shards);
-        return collective.exchange_completion(done);
-#else
-        collective.contribute(instances_ready, instances);
-        if (collective.is_target())
-        {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_image(op, pid,
-                          projection, full_descriptors, all_ready);
-          collective.notify_remote_complete(done);
-          return done;
-        }
-        else // nothing else for us to do
-          return collective.get_complete_event();
-#endif
+        return collective_done;
       }
-      else // singular so just do the normal thing
-        return forest->create_partition_by_image(op, pid, projection, 
-                                                 instances, instances_ready);
-    }
-
-    //--------------------------------------------------------------------------
-#ifdef SHARD_BY_IMAGE
-    ReplDependentPartitionOp::ReplByImageRangeThunk::ReplByImageRangeThunk(
-                                          ReplicateContext *ctx, 
-                                          IndexPartition p, IndexPartition proj,
-                                          ShardID s, size_t total)
-      : ByImageRangeThunk(p, proj), 
-        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_60)),
-#else
-    ReplDependentPartitionOp::ReplByImageRangeThunk::ReplByImageRangeThunk(
-                                          ReplicateContext *ctx, ShardID target,
-                                          IndexPartition p, IndexPartition proj,
-                                          ShardID s, size_t total)
-      : ByImageRangeThunk(p, proj), 
-        collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_60)),
-#endif
-        shard_id(s), total_shards(total)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReplDependentPartitionOp::ReplByImageRangeThunk::perform(
-                              DependentPartitionOp *op,
-                              RegionTreeForest *forest, ApEvent instances_ready,
-                              const std::vector<FieldDataDescriptor> &instances)
-    //--------------------------------------------------------------------------
-    {
-      if (op->is_index_space)
+      else
       {
-#ifdef SHARD_BY_IMAGE
-        // There is a special case here if we're projecting the same 
-        // partition that we used to make the instances, if it is then
-        // we can avoid needing to do the exchange at all
-        if ((op->requirement.handle_type == PART_PROJECTION) &&
-            (op->requirement.partition.get_index_partition() == projection))
-        {
-          // Make sure we elide our collective to avoid leaking anything
-          collective.elide_collective();
-          if (!instances.empty())
-            return forest->create_partition_by_image_range(op, pid, projection,
-                instances, instances_ready, shard_id, total_shards);
-          else
-            return ApEvent::NO_AP_EVENT;
-        }
-        // Do the all-to-all gather of the field data descriptors
-        ApEvent all_ready = collective.exchange_descriptors(instances_ready,
-                                                            instances);
-        ApEvent done = forest->create_partition_by_image_range(op, pid, 
-            projection,collective.descriptors,all_ready,shard_id,total_shards);
-        return collective.exchange_completion(done);   
+        // Only need to perform this if we're the first local shard
+        if (repl_ctx->shard_manager->is_first_local_shard(
+                                    repl_ctx->owner_shard))
+          return DependentPartitionOp::trigger_thunk(handle, instances_ready,
+                                                     mapped_insts, info, color);
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::trigger_execution(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_index_space);
+      assert(requirement.privilege_fields.size() == 1);
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
 #else
-        collective.contribute(instances_ready, instances);
-        if (collective.is_target())
-        {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_image_range(op, pid,
-                              projection, full_descriptors, all_ready);
-          collective.notify_remote_complete(done);
-          return done;
-        }
-        else // nothing else for us to do
-          return collective.get_complete_event();
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      }
-      else // singular so just do the normal thing
-        return forest->create_partition_by_image_range(op, pid, projection, 
-                                                 instances, instances_ready);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplDependentPartitionOp::ReplByPreimageThunk::ReplByPreimageThunk(
-                                          ReplicateContext *ctx, ShardID target,
-                                          IndexPartition p, IndexPartition proj)
-      : ByPreimageThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_56))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReplDependentPartitionOp::ReplByPreimageThunk::perform(
-                              DependentPartitionOp *op,
-                              RegionTreeForest *forest, ApEvent instances_ready,
-                              const std::vector<FieldDataDescriptor> &instances)
-    //--------------------------------------------------------------------------
-    {
-      if (op->is_index_space)
+      // Check to see if we're the first shard in this address space 
+      const bool first_local_shard =
+        repl_ctx->shard_manager->is_first_local_shard(repl_ctx->owner_shard);
+      if (thunk->is_image())
       {
-        gather_collective.contribute(instances_ready, instances);
-        if (gather_collective.is_target())
+        ApEvent done_event; 
+        if (first_local_shard)
         {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            gather_collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_preimage(op, pid, 
-                              projection, full_descriptors, all_ready);
-          gather_collective.notify_remote_complete(done);
-          return done;
+          const FieldID fid = *(requirement.privilege_fields.begin());
+          done_event = thunk->perform(this, runtime->forest, fid,
+                                      collective_ready, instances);
         }
-        else // nothing else for us to do
-          return gather_collective.get_complete_event();
+        Runtime::phase_barrier_arrive(collective_done, 1/*count*/, done_event);
       }
-      else // singular so just do the normal thing
-        return forest->create_partition_by_preimage(op, pid, projection, 
-                                                 instances, instances_ready);
-    }
-    
-    //--------------------------------------------------------------------------
-    ReplDependentPartitionOp::ReplByPreimageRangeThunk::
-                 ReplByPreimageRangeThunk(ReplicateContext *ctx, ShardID target,
-                                          IndexPartition p, IndexPartition proj)
-      : ByPreimageRangeThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_57))
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReplDependentPartitionOp::ReplByPreimageRangeThunk::perform(
-                              DependentPartitionOp *op,
-                              RegionTreeForest *forest, ApEvent instances_ready,
-                              const std::vector<FieldDataDescriptor> &instances)
-    //--------------------------------------------------------------------------
-    {
-      if (op->is_index_space)
+      else
       {
-        gather_collective.contribute(instances_ready, instances);
-        if (gather_collective.is_target())
+        if (gather->target == repl_ctx->owner_shard->shard_id)
         {
-          ApEvent all_ready;
-          const std::vector<FieldDataDescriptor> &full_descriptors =
-            gather_collective.get_full_descriptors(all_ready);
-          // Perform the operation
-          ApEvent done = forest->create_partition_by_preimage_range(op, pid, 
-                                    projection, full_descriptors, all_ready);
-          gather_collective.notify_remote_complete(done);
-          return done;
+#ifdef DEBUG_LEGION
+          assert(first_local_shard);
+          assert(scatter->origin == gather->target);
+#endif
+          const FieldID fid = *(requirement.privilege_fields.begin());
+          ApEvent done_event = thunk->perform(this, runtime->forest, fid,
+                                    gather->get_ready_event(), instances, 
+                                    &remote_targets, &deppart_results);
+          scatter->broadcast_results(done_event);
         }
-        else // nothing else for us to do
-          return gather_collective.get_complete_event();
+        else if (first_local_shard)
+        {
+          const FieldID fid = *(requirement.privilege_fields.begin());
+          thunk->perform(this, runtime->forest, fid, scatter->get_done_event(),
+                         instances, &remote_targets, &deppart_results);
+        }
       }
-      else // singular so just do the normal thing
-        return forest->create_partition_by_preimage_range(op, pid, projection, 
-                                                 instances, instances_ready);
+      complete_execution();
     }
 
     //--------------------------------------------------------------------------
@@ -5356,6 +5052,39 @@ namespace Legion {
 #endif
       return sharding_function->find_shard_participants(launch_space,
                                         launch_space->handle, shards);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReplDependentPartitionOp::perform_collective_analysis(
+                                 CollectiveMapping *&mapping, bool &first_local)
+    //--------------------------------------------------------------------------
+    {
+      // If we're not an index space launch then we know all the shards
+      // are going to be using the same region so we can do a collective
+      // rendezvous to create a collective view
+      return !is_index_space;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::find_remote_targets(
+                                            std::vector<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *node = runtime->forest->get_node(thunk->get_projection());
+      if (node->is_owner() || ((node->collective_mapping != NULL) &&
+            node->collective_mapping->contains(node->local_space)))
+      {
+        for (ColorSpaceIterator itr(node, true/*local only*/); itr; itr++)
+        {
+          DomainPoint color = 
+            node->color_space->delinearize_color_to_point(*itr);
+          IndexSpaceNode *child = node->get_child(*itr);
+          ApEvent ready;
+          remote_targets[color] = child->get_domain(ready, false/*need tight*/);
+          if (ready.exists())
+            preconditions.push_back(ready);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -13508,20 +13237,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldDescriptorExchange::FieldDescriptorExchange(ReplicateContext *ctx,
-                                                   CollectiveIndexLocation loc)
-      : AllGatherCollective(loc, ctx)
+                  CollectiveID id, std::vector<FieldDataDescriptor> &descs)
+      : AllGatherCollective<true>(ctx, id), descriptors(descs)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldDescriptorExchange::FieldDescriptorExchange(
-                                             const FieldDescriptorExchange &rhs)
-      : AllGatherCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -13531,138 +13250,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldDescriptorExchange& FieldDescriptorExchange::operator=(
-                                             const FieldDescriptorExchange &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent FieldDescriptorExchange::exchange_descriptors(ApEvent ready_event,
-                                  const std::vector<FieldDataDescriptor> &descs)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock c_lock(collective_lock);
-        ready_events.insert(ready_event);
-        descriptors.insert(descriptors.end(), descs.begin(), descs.end());
-        if (participating)
-        {
-          remote_to_trigger.resize(shard_collective_stages + 1);
-          local_preconditions.resize(shard_collective_stages + 1);
-        }
-        else
-        {
-          remote_to_trigger.resize(1);
-          local_preconditions.resize(1);
-        }
-      }
-      perform_collective_sync();
-      return Runtime::merge_events(NULL, ready_events);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent FieldDescriptorExchange::exchange_completion(ApEvent complete)
-    //--------------------------------------------------------------------------
-    {
-      if (participating)
-      {
-        // Might have a precondition from a remainder shard 
-        if (!local_preconditions[0].empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(local_preconditions[0].size() == 1);
-#endif
-          complete = Runtime::merge_events(NULL, complete,
-              *(local_preconditions[0].begin()));
-        }
-        const std::set<ApUserEvent> &to_trigger = remote_to_trigger[0];
-        for (std::set<ApUserEvent>::const_iterator it = 
-              to_trigger.begin(); it != to_trigger.end(); it++)
-          Runtime::trigger_event(NULL, *it, complete);
-        const ApEvent done = 
-          Runtime::merge_events(NULL, local_preconditions.back());
-        // If we have a remainder shard then we need to signal them too
-        if (!remote_to_trigger[shard_collective_stages].empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(remote_to_trigger[shard_collective_stages].size() == 1);
-#endif
-          Runtime::trigger_event(NULL,
-              *(remote_to_trigger[shard_collective_stages].begin()), done);     
-        }
-        return done;
-      }
-      else
-      {
-        // Not participating so we should have exactly one thing to 
-        // trigger and one precondition for being done
-#ifdef DEBUG_LEGION
-        assert(remote_to_trigger[0].size() == 1);
-        assert(local_preconditions[0].size() == 1);
-#endif
-        Runtime::trigger_event(NULL, *(remote_to_trigger[0].begin()), complete);
-        return *(local_preconditions[0].begin());
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void FieldDescriptorExchange::pack_collective_stage(ShardID target,
                                                      Serializer &rez, int stage)
     //--------------------------------------------------------------------------
     {
-      // Always make a stage precondition and send it back
-      ApUserEvent stage_complete = Runtime::create_ap_user_event(NULL);
-      rez.serialize(stage_complete);
-      if (stage == -1)
-      {
-#ifdef DEBUG_LEGION
-        assert(!local_preconditions.empty());
-        assert(local_preconditions[0].empty());
-#endif
-        // Always save this as a precondition for later
-        local_preconditions[0].insert(stage_complete);
-      }
-      else 
-      {
-#ifdef DEBUG_LEGION
-        assert(participating);
-        assert(stage < shard_collective_stages);
-#endif
-        std::set<ApEvent> &preconditions = 
-          local_preconditions[shard_collective_stages - stage];
-        preconditions.insert(stage_complete);
-        // See if we've sent all our messages in which case we can 
-        // trigger all the remote user events for any previous stages
-        if (((stage == (shard_collective_stages-1)) && 
-              (int(preconditions.size()) == shard_collective_last_radix)) ||
-            ((stage < (shard_collective_stages-1)) &&
-              (int(preconditions.size()) == shard_collective_radix)))
-        {
-          const std::set<ApUserEvent> &to_trigger = 
-           remote_to_trigger[(stage > 0) ? (stage-1) : shard_collective_stages];
-          // Check for empty which can happen with stage 0 if there
-          // are no remainders
-          if (!to_trigger.empty())
-          {
-            const ApEvent stage_pre = Runtime::merge_events(NULL,preconditions);
-            for (std::set<ApUserEvent>::const_iterator it = 
-                  to_trigger.begin(); it != to_trigger.end(); it++)
-              Runtime::trigger_event(NULL, *it, stage_pre);
-          }
-        }
-      }
-      rez.serialize<size_t>(ready_events.size());
-      for (std::set<ApEvent>::const_iterator it = ready_events.begin();
-            it != ready_events.end(); it++)
-        rez.serialize(*it);
       rez.serialize<size_t>(descriptors.size());
       for (std::vector<FieldDataDescriptor>::const_iterator it = 
             descriptors.begin(); it != descriptors.end(); it++)
-        rez.serialize(*it);
+      {
+        rez.serialize(it->domain);
+        rez.serialize(it->color);
+        rez.serialize(it->inst);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13670,200 +13269,179 @@ namespace Legion {
                                                           int stage)
     //--------------------------------------------------------------------------
     {
-      ApUserEvent remote_complete;
-      derez.deserialize(remote_complete);
-      if (stage == -1)
-      {
-#ifdef DEBUG_LEGION
-        assert(!remote_to_trigger.empty());
-#endif
-        if (participating)
-        {
-#ifdef DEBUG_LEGION
-          assert(remote_to_trigger[shard_collective_stages].empty());
-#endif
-          remote_to_trigger[shard_collective_stages].insert(remote_complete);
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(remote_to_trigger[0].empty());
-#endif
-          remote_to_trigger[0].insert(remote_complete);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(participating);
-        assert(stage < int(remote_to_trigger.size()));
-#endif
-        remote_to_trigger[stage].insert(remote_complete);
-      }
-      size_t num_events;
-      derez.deserialize(num_events);
-      for (unsigned idx = 0; idx < num_events; idx++)
-      {
-        ApEvent ready;
-        derez.deserialize(ready);
-        ready_events.insert(ready);
-      }
-      unsigned offset = descriptors.size();
+      // If this is stack -1 and we're not participating then we're
+      // unpacking the full results back onto this node so overwrite
+      // our current results, otherwise we can safely append
+      const unsigned offset = 
+        ((stage < 0) && !participating) ? 0 : descriptors.size();
       size_t num_descriptors;
       derez.deserialize(num_descriptors);
       descriptors.resize(offset + num_descriptors);
       for (unsigned idx = 0; idx < num_descriptors; idx++)
-        derez.deserialize(descriptors[offset + idx]);
+      {
+        derez.deserialize(descriptors[offset+idx].domain);
+        derez.deserialize(descriptors[offset+idx].color);
+        derez.deserialize(descriptors[offset+idx].inst);
+      }
     }
 
     /////////////////////////////////////////////////////////////
-    // Field Descriptor Gather 
+    // Field Descriptor Gather
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     FieldDescriptorGather::FieldDescriptorGather(ReplicateContext *ctx,
-                             ShardID target, CollectiveIndexLocation loc)
-      : GatherCollective(loc, ctx, target), used(false)
+                  CollectiveID id, std::vector<FieldDataDescriptor> &descs,
+                  std::map<DomainPoint,Domain> &targets)
+      : GatherCollective(ctx, id, 0/*origin shard*/), descriptors(descs),
+        remote_targets(targets)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldDescriptorGather::FieldDescriptorGather(
-                                               const FieldDescriptorGather &rhs)
-      : GatherCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
     FieldDescriptorGather::~FieldDescriptorGather(void)
     //--------------------------------------------------------------------------
     {
-      // Make sure that we wait in case we still have messages to pass on
-      if (used)
-        perform_collective_wait();
-#ifdef DEBUG_LEGION
-      assert(!complete_event.exists() || complete_event.has_triggered());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    FieldDescriptorGather& FieldDescriptorGather::operator=(
-                                               const FieldDescriptorGather &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
     }
 
     //--------------------------------------------------------------------------
     void FieldDescriptorGather::pack_collective(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(complete_event.exists());
-#endif
-      // Trigger any remote complete events we have dependent on our event
-      if (!remote_complete_events.empty())
-      {
-        for (std::set<ApUserEvent>::const_iterator it = 
-              remote_complete_events.begin(); it != 
-              remote_complete_events.end(); it++)
-          Runtime::trigger_event(NULL, *it, complete_event); 
-      }
-      rez.serialize(complete_event);
-      rez.serialize<size_t>(ready_events.size());
-      for (std::set<ApEvent>::const_iterator it = ready_events.begin();
-            it != ready_events.end(); it++)
-        rez.serialize(*it);
       rez.serialize<size_t>(descriptors.size());
       for (std::vector<FieldDataDescriptor>::const_iterator it = 
             descriptors.begin(); it != descriptors.end(); it++)
-        rez.serialize(*it);
+      {
+        rez.serialize(it->domain);
+        rez.serialize(it->color);
+        rez.serialize(it->inst);
+      }
+      rez.serialize<size_t>(remote_targets.size());
+      for (std::map<DomainPoint,Domain>::const_iterator it =
+            remote_targets.begin(); it != remote_targets.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      if (!ready_events.empty())
+        rez.serialize(Runtime::merge_events(NULL, ready_events));
+      else
+        rez.serialize(ApEvent::NO_AP_EVENT);
     }
-    
+
     //--------------------------------------------------------------------------
     void FieldDescriptorGather::unpack_collective(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ApUserEvent remote_complete;
-      derez.deserialize(remote_complete);
-      remote_complete_events.insert(remote_complete);
-      size_t num_events;
-      derez.deserialize(num_events);
-      for (unsigned idx = 0; idx < num_events; idx++)
-      {
-        ApEvent ready;
-        derez.deserialize(ready);
-        ready_events.insert(ready);
-      }
-      unsigned offset = descriptors.size();
+      const unsigned offset = descriptors.size();
       size_t num_descriptors;
       derez.deserialize(num_descriptors);
       descriptors.resize(offset + num_descriptors);
       for (unsigned idx = 0; idx < num_descriptors; idx++)
-        derez.deserialize(descriptors[offset + idx]);
+      {
+        derez.deserialize(descriptors[offset+idx].domain);
+        derez.deserialize(descriptors[offset+idx].color);
+        derez.deserialize(descriptors[offset+idx].inst);
+      }
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+        derez.deserialize(remote_targets[point]);
+      }
+      ApEvent ready;
+      derez.deserialize(ready);
+      if (ready.exists())
+        ready_events.push_back(ready);
     }
 
     //--------------------------------------------------------------------------
-    void FieldDescriptorGather::contribute(ApEvent ready_event,
-                                  const std::vector<FieldDataDescriptor> &descs)
+    void FieldDescriptorGather::contribute_instances(ApEvent ready)
     //--------------------------------------------------------------------------
     {
-      used = true;
-      {
-        AutoLock c_lock(collective_lock);
-        ready_events.insert(ready_event);
-        descriptors.insert(descriptors.end(), descs.begin(), descs.end());
-        // If we're not the owner make our complete event
-#ifdef DEBUG_LEGION
-        assert(!complete_event.exists());
-#endif
-        if (!is_target())
-          complete_event = Runtime::create_ap_user_event(NULL);
-      }
+      if (ready.exists())
+        ready_events.push_back(ready);
       perform_collective_async();
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<FieldDataDescriptor>& 
-                     FieldDescriptorGather::get_full_descriptors(ApEvent &ready)
+    ApEvent FieldDescriptorGather::get_ready_event(void)
     //--------------------------------------------------------------------------
     {
-      perform_collective_wait();
-      ready = Runtime::merge_events(NULL, ready_events);
-      return descriptors;
+      if (ready_events.empty())
+        return ApEvent::NO_AP_EVENT;
+      else
+        return Runtime::merge_events(NULL, ready_events);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Deppart Result Scatter
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    DeppartResultScatter::DeppartResultScatter(ReplicateContext *ctx,
+                  CollectiveID id, std::vector<DeppartResult> &res)
+      : BroadcastCollective(ctx, id, 0/*origin shard*/), results(res),
+        renamed(false)
+    //--------------------------------------------------------------------------
+    {
     }
 
     //--------------------------------------------------------------------------
-    void FieldDescriptorGather::notify_remote_complete(ApEvent precondition)
+    DeppartResultScatter::~DeppartResultScatter(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_target());
-#endif
-      if (!remote_complete_events.empty())
+    }
+
+    //--------------------------------------------------------------------------
+    void DeppartResultScatter::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(results.size());
+      for (std::vector<DeppartResult>::const_iterator it =
+            results.begin(); it != results.end(); it++)
       {
-        for (std::set<ApUserEvent>::const_iterator it = 
-              remote_complete_events.begin(); it != 
-              remote_complete_events.end(); it++)
-          Runtime::trigger_event(NULL, *it, precondition);
+        rez.serialize(it->domain);
+        rez.serialize(it->color);
       }
+      if (!renamed)
+      {
+        ApUserEvent rename = Runtime::create_ap_user_event(NULL);
+        Runtime::trigger_event(NULL, rename, done_event);
+        done_event = rename;
+        renamed = true;
+      }
+      rez.serialize(done_event);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FieldDescriptorGather::get_complete_event(void) const
+    void DeppartResultScatter::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_results;
+      derez.deserialize(num_results);
+      results.resize(num_results);
+      for (std::vector<DeppartResult>::iterator it =
+            results.begin(); it != results.end(); it++)
+      {
+        derez.deserialize(it->domain);
+        derez.deserialize(it->color);
+      }
+      derez.deserialize(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeppartResultScatter::broadcast_results(ApEvent done)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_target());
-      assert(complete_event.exists());
+      assert(!done_event.exists());
 #endif
-      return complete_event;
+      done_event = done;
+      perform_collective_async();
     }
 
     /////////////////////////////////////////////////////////////
@@ -16594,6 +16172,74 @@ namespace Legion {
       if (predicate->remove_reference())
         delete predicate;
       return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Cross Product Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CrossProductExchange::CrossProductExchange(ReplicateContext *ctx,
+                                               CollectiveIndexLocation loc)
+      : AllGatherCollective<false>(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::pack_collective_stage(ShardID target,
+                                                     Serializer &rez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(child_ids.size());
+      for (std::map<LegionColor,std::pair<IndexPartition,DistributedID> >::
+            const_iterator it = child_ids.begin(); it != child_ids.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second.first);
+        rez.serialize(it->second.second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::unpack_collective_stage(Deserializer &derez,
+                                                       int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_ids;
+      derez.deserialize(num_ids);
+      for (unsigned idx = 0; idx < num_ids; idx++)
+      {
+        LegionColor color;
+        derez.deserialize(color);
+        std::pair<IndexPartition,DistributedID> &ids = child_ids[color];
+        derez.deserialize(ids.first);
+        derez.deserialize(ids.second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::exchange_ids(LegionColor color,
+                                          DistributedID did, IndexPartition pid)
+    //--------------------------------------------------------------------------
+    {
+      child_ids.emplace(std::make_pair(color, std::make_pair(pid, did)));
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductExchange::sync_child_ids(LegionColor color, 
+                                        DistributedID &did, IndexPartition &pid)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      std::map<LegionColor,std::pair<IndexPartition,DistributedID> >::iterator
+        finder = child_ids.find(color);
+#ifdef DEBUG_LEGION
+      assert(finder != child_ids.end());
+#endif
+      pid = finder->second.first;
+      did = finder->second.second;
     }
 
     /////////////////////////////////////////////////////////////

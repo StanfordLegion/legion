@@ -145,6 +145,7 @@ namespace Legion {
       bool contains(const CollectiveMapping &rhs) const;
       CollectiveMapping* clone_with(AddressSpace space) const;
       void pack(Serializer &rez) const;
+      static void pack_null(Serializer &rez);
     protected:
       unsigned convert_to_offset(unsigned index, unsigned origin) const;
       unsigned convert_to_index(unsigned offset, unsigned origin) const;
