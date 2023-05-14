@@ -2896,8 +2896,7 @@ namespace Legion {
       bool create_shard_partition(Operation *op, IndexPartition &pid,
           IndexSpace parent, IndexSpace color_space, Provenance *provenance,
           PartitionKind part_kind, LegionColor partition_color,
-          bool color_generated, ApBarrier partition_ready,
-          ValueBroadcast<bool> *disjoint_result = NULL);
+          bool color_generated);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc,
@@ -2938,8 +2937,10 @@ namespace Legion {
         { return detach_effects_barrier.next(this); }
       inline ApBarrier get_next_future_map_wait_barrier(void)
         { return future_map_wait_barrier.next(this); }
-      inline RtBarrier get_next_dependent_partition_barrier(void)
-        { return dependent_partition_barrier.next(this); }
+      inline RtBarrier get_next_dependent_partition_mapping_barrier(void)
+        { return dependent_partition_mapping_barrier.next(this); }
+      inline ApBarrier get_next_dependent_partition_execution_barrier(void)
+        { return dependent_partition_execution_barrier.next(this); }
       inline RtBarrier get_next_attach_resource_barrier(void)
         { return attach_resource_barrier.next(this); }
       inline RtBarrier get_next_concurrent_precondition_barrier(void)
@@ -3130,7 +3131,6 @@ namespace Legion {
       ShardID dynamic_id_allocator_shard;
       ShardID equivalence_set_allocator_shard;
     protected:
-      ApReplBar pending_partition_barrier;
       RtReplBar creation_barrier;
       RtLogicalBar deletion_ready_barrier;
       RtLogicalBar deletion_mapping_barrier;
@@ -3141,7 +3141,8 @@ namespace Legion {
       RtReplBar resource_return_barrier;
       RtLogicalBar summary_fence_barrier;
       ApLogicalBar execution_fence_barrier;
-      RtReplBar dependent_partition_barrier;
+      RtReplBar dependent_partition_mapping_barrier;
+      ApLogicalBar dependent_partition_execution_barrier;
       RtReplBar semantic_attach_barrier;
       ApReplBar future_map_wait_barrier;
       ApReplBar inorder_barrier;

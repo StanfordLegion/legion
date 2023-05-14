@@ -8586,8 +8586,7 @@ namespace Legion {
           lo[dim] = extents[c];
           hi[dim] = extents[c + 1] - 1;
         }
-        forest->set_pending_space_domain(
-          child->handle, Domain(lo, hi), runtime->address_space);
+        forest->set_pending_space_domain(child->handle, Domain(lo, hi));
       }
 
       // Finally, compute the extents of the root index space and return it
@@ -8631,14 +8630,13 @@ namespace Legion {
             << ")] setting " << root_domain << " to index space " << std::hex
             << parent->handle.get_id();
 
-          if (parent->set_domain(root_domain, runtime->address_space))
+          if (parent->set_domain(root_domain))
             delete parent;
         }
         // For locally indexed output regions, sizes of subregions are already
         // set when they are fianlized by the point tasks. So we only need to
         // initialize the root index space by taking a union of subspaces.
-        else if (parent->set_output_union(all_output_sizes[idx],
-                                          runtime->address_space))
+        else if (parent->set_output_union(all_output_sizes[idx]))
           delete parent;
       }
     }

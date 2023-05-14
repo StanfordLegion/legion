@@ -4006,8 +4006,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* FutureMapImpl::find_shard_local_future(ShardID shard,
-                                                       const DomainPoint &point)
+    FutureImpl* FutureMapImpl::find_local_future(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4316,7 +4315,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureImpl* TransformFutureMapImpl::find_shard_local_future(ShardID shard,
+    FutureImpl* TransformFutureMapImpl::find_local_future(
                                                        const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
@@ -4333,7 +4332,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(previous->future_map_domain->contains_point(transformed));
 #endif
-        return previous->find_shard_local_future(shard, transformed);
+        return previous->find_local_future(transformed);
       }
       else
       {
@@ -4341,7 +4340,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(previous->future_map_domain->contains_point(transformed));
 #endif
-        return previous->find_shard_local_future(shard, transformed);
+        return previous->find_local_future(transformed);
       } 
     }
 
@@ -4642,26 +4641,6 @@ namespace Legion {
         wait_bar.wait();
     }
 
-    //--------------------------------------------------------------------------
-    FutureImpl* ReplFutureMapImpl::find_shard_local_future(ShardID local_shard,
-                                                       const DomainPoint &point)
-    //--------------------------------------------------------------------------
-    {
-      Domain domain;
-      shard_domain->get_launch_space_domain(domain);
-      if (sharding_function == NULL)
-      {
-        RtEvent wait_on = get_sharding_function_ready();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
-      // Check to see if we own this point or not
-      const ShardID shard = sharding_function.load()->find_owner(point, domain);
-      if (shard != local_shard)
-        return NULL;
-      return FutureMapImpl::find_shard_local_future(local_shard, point);
-    }
-    
     //--------------------------------------------------------------------------
     void ReplFutureMapImpl::get_shard_local_futures(ShardID local_shard,
                                       std::map<DomainPoint,FutureImpl*> &others)
@@ -6194,12 +6173,15 @@ namespace Legion {
         // in the first round because their sizes are yet to be determined.
         if (defer && req.partition.exists() && global_indexing)
         {
-          add_reference();
-          FinalizeOutputArgs args(this);
-          runtime->issue_runtime_meta_task(
-              args, LG_THROUGHPUT_DEFERRED_PRIORITY,
-              Runtime::protect_event(node->index_space_ready));
-          return;
+          RtEvent ready_event = node->get_ready_event();
+          if (ready_event.exists())
+          {
+            add_reference();
+            FinalizeOutputArgs args(this);
+            runtime->issue_runtime_meta_task(
+                args, LG_THROUGHPUT_DEFERRED_PRIORITY, ready_event);
+            return;
+          }
         }
 
         // Initialize the index space domain
@@ -6224,8 +6206,7 @@ namespace Legion {
               domain.rect_data[domain.dim + off] = extents[idx] - 1;
             }
 
-            runtime->forest->set_pending_space_domain(
-                node->handle, domain, runtime->address_space);
+            runtime->forest->set_pending_space_domain(node->handle, domain);
           }
           else
           {
@@ -6242,7 +6223,8 @@ namespace Legion {
         {
           DomainPoint lo; lo.dim = extents.dim;
           domain = Domain(lo, extents - 1);
-          node->set_domain(domain, runtime->address_space);
+          if (node->set_domain(domain, true/*broadcast*/))
+            delete node;
         }
       }
       else
@@ -12101,7 +12083,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_REQUEST:
             {
-              runtime->handle_index_space_request(derez, remote_address_space);
+              runtime->handle_index_space_request(derez);
               break;
             }
           case SEND_INDEX_SPACE_RESPONSE:
@@ -12111,7 +12093,7 @@ namespace Legion {
             }
           case SEND_INDEX_SPACE_RETURN:
             {
-              runtime->handle_index_space_return(derez, remote_address_space);
+              runtime->handle_index_space_return(derez);
               break;
             }
           case SEND_INDEX_SPACE_SET:
@@ -12176,20 +12158,18 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_REQUEST:
             {
-              runtime->handle_index_partition_request(derez, 
-                                                      remote_address_space);
+              runtime->handle_index_partition_request(derez); 
               break;
             }
           case SEND_INDEX_PARTITION_RESPONSE:
             {
-              runtime->handle_index_partition_response(derez,
+              runtime->handle_index_partition_response(derez, 
                                                        remote_address_space);
               break;
             }
           case SEND_INDEX_PARTITION_RETURN:
             {
-              runtime->handle_index_partition_return(derez,
-                                                     remote_address_space);
+              runtime->handle_index_partition_return(derez);
               break;
             }
           case SEND_INDEX_PARTITION_CHILD_REQUEST:
@@ -12200,7 +12180,13 @@ namespace Legion {
             }
           case SEND_INDEX_PARTITION_CHILD_RESPONSE:
             {
-              runtime->handle_index_partition_child_response(derez);
+              runtime->handle_index_partition_child_response(derez,
+                                                          remote_address_space);
+              break;
+            }
+          case SEND_INDEX_PARTITION_CHILD_REPLICATION:
+            {
+              runtime->handle_index_partition_child_replication(derez);
               break;
             }
           case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
@@ -12238,7 +12224,7 @@ namespace Legion {
             }
           case SEND_FIELD_SPACE_REQUEST:
             {
-              runtime->handle_field_space_request(derez, remote_address_space);
+              runtime->handle_field_space_request(derez);
               break;
             }
           case SEND_FIELD_SPACE_RETURN:
@@ -12332,8 +12318,7 @@ namespace Legion {
             }
           case SEND_TOP_LEVEL_REGION_REQUEST:
             {
-              runtime->handle_top_level_region_request(derez, 
-                                                       remote_address_space);
+              runtime->handle_top_level_region_request(derez); 
               break;
             }
           case SEND_TOP_LEVEL_REGION_RETURN:
@@ -21556,6 +21541,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_child_replication(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<
+        SEND_INDEX_PARTITION_CHILD_REPLICATION>(rez, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_index_partition_disjoint_update(AddressSpaceID target,
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
@@ -23848,11 +23842,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_request(Deserializer &derez,
-                                             AddressSpaceID source)
+    void Runtime::handle_index_space_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_request(forest, derez, source);
+      IndexSpaceNode::handle_node_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -23864,16 +23857,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_return(Deserializer &derez,
-                                            AddressSpaceID source)
+    void Runtime::handle_index_space_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceNode::handle_node_return(forest, derez, source); 
+      IndexSpaceNode::handle_node_return(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_space_set(Deserializer &derez, 
-                                         AddressSpaceID source)
+    void Runtime::handle_index_space_set(Deserializer &derez,
+                                         AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode::handle_index_space_set(forest, derez, source);
@@ -23956,11 +23948,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_request(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_index_partition_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_request(forest, derez, source);
+      IndexPartNode::handle_node_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -23972,11 +23963,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_return(Deserializer &derez,
-                                                AddressSpaceID source)
+    void Runtime::handle_index_partition_return(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_return(forest, derez, source);
+      IndexPartNode::handle_node_return(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -23988,10 +23978,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_index_partition_child_response(Deserializer &derez)
+    void Runtime::handle_index_partition_child_response(Deserializer &derez,
+                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      IndexPartNode::handle_node_child_response(forest, derez);
+      IndexPartNode::handle_node_child_response(forest, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_child_replication(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_child_replication(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24042,11 +24040,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_field_space_request(Deserializer &derez,
-                                             AddressSpaceID source)
+    void Runtime::handle_field_space_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode::handle_node_request(forest, derez, source);
+      FieldSpaceNode::handle_node_request(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -24174,11 +24171,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_top_level_region_request(Deserializer &derez,
-                                                  AddressSpaceID source)
+    void Runtime::handle_top_level_region_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RegionNode::handle_top_level_request(forest, derez, source); 
+      RegionNode::handle_top_level_request(forest, derez); 
     }
 
     //--------------------------------------------------------------------------
@@ -32196,16 +32192,6 @@ namespace Legion {
             IndexPartNode::handle_disjointness_computation(args, forest);
             break;
           }
-        case LG_PART_INDEPENDENCE_TASK_ID:
-          {
-            IndexSpaceNode::handle_disjointness_test(args);
-            break;
-          }
-        case LG_SPACE_INDEPENDENCE_TASK_ID:
-          {
-            IndexPartNode::handle_disjointness_test(args);
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 
@@ -32300,6 +32286,11 @@ namespace Legion {
         case LG_INDEX_PART_DEFER_CHILD_TASK_ID:
           {
             IndexPartNode::defer_node_child_request(args);
+            break;
+          }
+        case LG_INDEX_PART_DEFER_SHARD_RECTS_TASK_ID:
+          {
+            IndexPartNode::defer_find_local_shard_rects(args);
             break;
           }
         case LG_DEFERRED_ENQUEUE_TASK_ID:
