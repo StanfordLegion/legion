@@ -8953,6 +8953,7 @@ namespace Legion {
       compute_parent_indexes(); 
       // Count how many total points we need for this index space task
       total_points = index_domain.get_volume();
+      const size_t previous_collectives = check_collective_regions.size();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         RegionRequirement &req = regions[idx];
@@ -8963,17 +8964,34 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
           // If we're reading or reducing then make a collective view
-          if (IS_READ_ONLY(req) || IS_REDUCE(req))
+          if ((IS_READ_ONLY(req) || IS_REDUCE(req) || IS_COLLECTIVE(req)) &&
+              !std::binary_search(check_collective_regions.begin(),
+                check_collective_regions.begin()+previous_collectives, idx))
             check_collective_regions.push_back(idx);
         }
         // If all the points are using the same logical region then
         // record that we should do a collective rendezvous
         else if ((req.handle_type == LEGION_REGION_PROJECTION) &&
             (req.projection == 0) && (IS_READ_ONLY(req) || IS_REDUCE(req)))
-          check_collective_regions.push_back(idx);
+        {
+          if (!std::binary_search(check_collective_regions.begin(),
+                check_collective_regions.begin()+previous_collectives, idx))
+            check_collective_regions.push_back(idx);
+        }
+        else if (IS_COLLECTIVE(req))
+        {
+          if (!std::binary_search(check_collective_regions.begin(),
+                check_collective_regions.begin()+previous_collectives, idx))
+            check_collective_regions.push_back(idx);
+        }
       }
       if (!check_collective_regions.empty())
       {
+        // Resort any new indices that we appended to the list
+        if ((previous_collectives > 0) &&
+            (check_collective_regions.size() != previous_collectives))
+          std::sort(check_collective_regions.begin(),
+                    check_collective_regions.end());
         // Check to make sure that there are no invertible projection functors
         // in this index space launch on writing requirements which might cause
         // point tasks to be interfering. If there are then we can't perform 
@@ -10605,6 +10623,13 @@ namespace Legion {
             // If either one are the NO_REGION then there is no interference
             if (!point_reqs[it->first].exists() || 
                 !other_reqs[it->second].exists())
+              continue;
+            // If the user marked this region requirement as collective
+            // and this is the same region requirement for both points
+            // and the region name is the same then we allow that
+            if (!same_point && (it->first == it->second) &&
+                IS_COLLECTIVE(regions[it->first]) &&
+                (point_reqs[it->first] == other_reqs[it->second]))
               continue;
             if (!runtime->forest->are_disjoint(
                   point_reqs[it->first].get_index_space(), 

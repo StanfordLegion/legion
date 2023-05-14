@@ -56,10 +56,16 @@ DEPENDENCE_TYPES = [
 
 NO_ACCESS     = 0x00000000
 READ_ONLY     = 0x00000001
+READ_PRIV     = 0x00000001
+WRITE_PRIV    = 0x00000002
+REDUCE_PRIV   = 0x00000004
 READ_WRITE    = 0x00000007
 WRITE_ONLY    = 0x10000002
 WRITE_DISCARD = 0x10000007
 REDUCE        = 0x00000004
+COLLECTIVE    = 0x20000000
+DISCARD_MASK  = 0x10000000
+COLLECTIVE_MASK = 0x20000000
 
 EXCLUSIVE = 0
 ATOMIC = 1
@@ -3941,6 +3947,10 @@ class LogicalVerificationState(object):
             if dep_type is NO_DEPENDENCE:
                 dominates = False
                 continue
+            if prev_req.is_collective() and req.is_collective() and \
+                    prev_req.index == req.index and prev_logical is logical_op:
+                dominates = False
+                continue
             # Interfering operations should have been caught earlier
             assert prev_op is not op
             assert prev_logical is not logical_op
@@ -6086,27 +6096,31 @@ class Requirement(object):
         return self.priv == NO_ACCESS
 
     def is_read_only(self):
-        return self.priv == READ_ONLY
+        return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_read(self):
-        return (self.priv == READ_ONLY) or (self.priv == READ_WRITE)
+        return bool(self.priv & READ_ONLY)
 
     def has_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
-                (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV)
 
     def is_read_write(self):
-        return self.priv == READ_WRITE
+        return self.has_read() and self.has_write()
 
     def is_write_only(self):
-        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
+        return self.has_write() and not self.has_read()
 
     def is_reduce(self):
-        return self.priv == REDUCE
+        return self.priv == REDUCE_PRIV
+
+    def is_discard(self):
+        return bool(self.priv & DISCARD_MASK)
+
+    def is_collective(self):
+        return bool(self.priv & COLLECTIVE_MASK)
 
     def is_exclusive(self):
         return self.coher == EXCLUSIVE
@@ -6137,14 +6151,15 @@ class Requirement(object):
     def get_privilege(self):
         if self.priv == NO_ACCESS:
             return "NO-ACCESS"
-        elif self.priv == READ_ONLY:
+        elif bool(self.priv & WRITE_PRIV):
+            if bool(self.priv & READ_PRIV):
+                return "READ-WRITE"
+            elif bool(self.priv & DISCARD_MASK):
+                return "WRITE-DISCARD"
+            else:
+                return "WRITE-ONLY"
+        elif bool(self.priv & READ_PRIV):
             return "READ-ONLY"
-        elif self.priv == READ_WRITE:
-            return "READ-WRITE"
-        elif self.priv == WRITE_DISCARD:
-            return "WRITE-DISCARD"
-        elif self.priv == WRITE_ONLY:
-            return "WRITE-ONLY"
         else:
             assert self.priv == REDUCE
             return "REDUCE with Reduction Op "+str(self.redop)
@@ -7102,6 +7117,11 @@ class Operation(object):
                         break
                 if fields_disjoint:
                     continue 
+                # Handle the case where they are both collective and
+                # from the same region requirement and same region name
+                if req1.is_collective() and req2.is_collective() and \
+                        req1.index == req2.index and req1.logical_node is req2.logical_node:
+                    continue
                 # Check for interference at a common ancestor
                 aliased,ancestor = self.state.has_aliased_ancestor_tree_only(
                     req1.logical_node.get_index_node(),
@@ -9782,24 +9802,28 @@ class PointUser(object):
         return self.priv == NO_ACCESS
 
     def is_read_only(self):
-        return self.priv == READ_ONLY
+        return bool(self.priv & READ_ONLY) and not self.has_write()
 
     def has_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == REDUCE) or \
-                (self.priv == WRITE_DISCARD) or (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
 
     def is_write(self):
-        return (self.priv == READ_WRITE) or (self.priv == WRITE_DISCARD) or \
-                (self.priv == WRITE_ONLY)
+        return bool(self.priv & WRITE_PRIV)
 
     def is_read_write(self):
-        return self.priv == READ_WRITE
+        return self.has_read() and self.has_write()
 
     def is_write_only(self):
-        return self.priv == WRITE_DISCARD or self.priv == WRITE_ONLY
+        return self.has_write() and not self.has_read()
 
     def is_reduce(self):
         return self.priv == REDUCE
+
+    def is_discard(self):
+        return bool(self.priv & DISCARD_MASK)
+
+    def is_collective(self):
+        return bool(self.priv & COLLECTIVE_MASK)
 
     def is_exclusive(self):
         return self.coher == EXCLUSIVE
@@ -10155,6 +10179,13 @@ class Instance(object):
             # skip the dependence because we'll catch it implicitly
             # as part of the dependences through other region requirements
             if logical_op is user.logical_op and req.index != user.index:
+                continue
+            # Check for the collective write case where multiple point
+            # tasks from the same collective operation are writing to
+            # the same instance
+            if req.is_collective() and req.index == user.index and \
+                    user.op is not None and user.op.index_owner is not None and \
+                    user.op.index_owner is logical_op.index_owner:
                 continue
             dep = compute_dependence_type(user, req)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
