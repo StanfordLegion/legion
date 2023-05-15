@@ -155,6 +155,7 @@ void reader_task(const Task *task,
 
 class DivFunctor : public ProjectionFunctor {
 public:
+  using ProjectionFunctor::project;
   virtual LogicalRegion project(LogicalPartition upper_bound,
                                 const DomainPoint &p,
                                 const Domain &launch_domain) override
@@ -175,6 +176,7 @@ public:
 
 class ModFunctor : public ProjectionFunctor {
 public:
+  using ProjectionFunctor::project;
   virtual LogicalRegion project(LogicalPartition upper_bound,
                                 const DomainPoint &p,
                                 const Domain &launch_domain) override
