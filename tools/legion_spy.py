@@ -9804,6 +9804,9 @@ class PointUser(object):
     def is_read_only(self):
         return bool(self.priv & READ_ONLY) and not self.has_write()
 
+    def has_read(self):
+        return bool(self.priv & READ_ONLY)
+
     def has_write(self):
         return bool(self.priv & WRITE_PRIV) or bool(self.priv & REDUCE_PRIV)
 
