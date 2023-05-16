@@ -10186,10 +10186,11 @@ class Instance(object):
             # Check for the collective write case where multiple point
             # tasks from the same collective operation are writing to
             # the same instance
-            if req.is_collective() and req.index == user.index and \
-                    user.op is not None and user.op.index_owner is not None and \
-                    user.op.index_owner is logical_op.index_owner:
-                continue
+            if req.is_collective() and req.index == user.index and user.op is not None:
+                logical_user = user.op.get_logical_op()
+                if logical_user.index_owner is not None and \
+                        logical_user.index_owner is logical_op.index_owner:
+                    continue
             dep = compute_dependence_type(user, req)
             if dep == TRUE_DEPENDENCE or dep == ANTI_DEPENDENCE:
                 result.add(user.op)
