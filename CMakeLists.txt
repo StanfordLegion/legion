@@ -678,6 +678,14 @@ if(Legion_USE_NVTX)
 endif()
 
 #------------------------------------------------------------------------------#
+# Backtrace configuration
+#------------------------------------------------------------------------------#
+option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
+if(Legion_BACKTRACE_USE_UNWIND)
+  set(REALM_USE_UNWIND ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")

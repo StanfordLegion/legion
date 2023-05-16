@@ -812,6 +812,12 @@ ifeq ($(strip $(USE_ZLIB)),1)
   SLIB_LEGION_DEPS += -l$(ZLIB_LIBNAME)
 endif
 
+# backtrace
+REALM_BACKTRACE_USE_UNWIND ?= 1
+ifeq ($(strip $(REALM_BACKTRACE_USE_UNWIND)),1)
+  REALM_CC_FLAGS += -DREALM_USE_UNWIND
+endif
+
 
 ifeq ($(strip $(DEBUG)),1)
   ifeq ($(strip $(DARWIN)),1)

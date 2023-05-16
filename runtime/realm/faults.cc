@@ -25,6 +25,10 @@
 #endif
 #include <assert.h>
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#ifdef REALM_USE_UNWIND // enabled by default
+#include <unwind.h>
+#include <limits>
+#endif
 #include <execinfo.h>
 #endif
 #ifdef REALM_HAVE_CXXABI_H
@@ -37,6 +41,80 @@
 #endif
 
 namespace Realm {
+
+// unwind.h is not supported by Windows
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#ifdef REALM_USE_UNWIND
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class UnwindTrace
+
+  class UnwindTrace {
+  public:
+    UnwindTrace(size_t _depth, uintptr_t *_rawptrs);
+
+    size_t backtrace(void);
+
+  private:
+    ssize_t index;
+    size_t depth;
+    uintptr_t *rawptrs;
+
+    static _Unwind_Reason_Code backtrace_trampoline(_Unwind_Context *ctx, void *self);
+
+    _Unwind_Reason_Code get_backtrace_per_line(_Unwind_Context *ctx);
+  };
+
+  UnwindTrace::UnwindTrace(size_t _depth, uintptr_t *_rawptrs)
+    : index(-1), depth(_depth), rawptrs(_rawptrs)
+  {}
+
+  size_t UnwindTrace::backtrace(void)
+  {
+    _Unwind_Backtrace(&this->backtrace_trampoline, this);
+    if (index == -1) {
+      // _Unwind_Backtrace has failed to obtain any backtraces
+      return 0;
+    } else {
+      return static_cast<size_t>(index);
+    }
+  }
+
+  /*static*/ _Unwind_Reason_Code UnwindTrace::backtrace_trampoline(_Unwind_Context *ctx, void *self) 
+  {
+    return (static_cast<UnwindTrace *>(self))->get_backtrace_per_line(ctx);
+  }
+
+  _Unwind_Reason_Code UnwindTrace::get_backtrace_per_line(_Unwind_Context *ctx) 
+  {
+    if (index >= 0 && static_cast<size_t>(index) >= depth)
+      return _URC_END_OF_STACK;
+
+    int ip_before_instruction = 0;
+    uintptr_t ip = _Unwind_GetIPInfo(ctx, &ip_before_instruction);
+
+    if (!ip_before_instruction) {
+      // calculating 0-1 for unsigned, looks like a possible bug to sanitizers,
+      // so let's do it explicitly:
+      if (ip == 0) {
+        ip = std::numeric_limits<uintptr_t>::max(); // set it to 0xffff... (as
+                                                    // from casting 0-1)
+      } else {
+        ip -= 1; // else just normally decrement it (no overflow/underflow will
+                  // happen)
+      }
+    }
+
+    if (index >= 0) { // ignore first frame.
+      rawptrs[index] = ip;
+    }
+
+    index += 1;
+    return _URC_NO_REASON;
+  }
+#endif
+#endif
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -143,6 +221,9 @@ namespace Realm {
     rawptrs = (uintptr_t *)alloca(sizeof(void *) * (max_depth + skip));
 #ifdef REALM_ON_WINDOWS
     int count = 0; // TODO: StackWalk appears to be the right API call?
+#elif defined(REALM_USE_UNWIND)
+    UnwindTrace unwind_trace((max_depth + skip), rawptrs);
+    int count = unwind_trace.backtrace();
 #else
     int count = backtrace((void **)rawptrs, max_depth + skip);
 #endif
@@ -153,7 +234,6 @@ namespace Realm {
 
     if(count > skip)
       pcs.insert(pcs.end(), rawptrs + skip, rawptrs + count);
-
     // recompute the hash too
     pc_hash = compute_hash();
   }
