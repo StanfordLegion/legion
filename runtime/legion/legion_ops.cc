@@ -4800,6 +4800,8 @@ namespace Legion {
       dst_indirect_requirements.clear();
       grants.clear();
       wait_barriers.clear();
+      copies.clear();
+      operands.clear();
       arrive_barriers.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
