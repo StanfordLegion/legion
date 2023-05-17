@@ -38,7 +38,8 @@ struct BenchTimingTaskArgs {
   size_t num_dummy_tasks = 100;
   size_t num_samples = 1;
   size_t arg_size = 0;
-  bool chain;
+  bool chain = false;
+  bool test_gpu = false;
 };
 
 struct DummyTaskLauncherArgs {
@@ -103,6 +104,11 @@ std::ostream &operator<<(std::ostream &os, const Stat &s)
             << ", N=" << s.get_count();
 }
 
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
+void dummy_gpu_task(const void *args, size_t arglen, 
+		                const void *userdata, size_t userlen, Processor p);
+#endif
+
 static void display_processor_info(Processor p) {}
 
 static void dummy_task(const void *args, size_t arglen, const void *userdata,
@@ -147,9 +153,18 @@ static void bench_timing_task(const void *args, size_t arglen, const void *userd
   launcher_args.num_child_tasks = self_args.num_dummy_tasks;
   launcher_args.chain = self_args.chain;
 
+  Processor::Kind proc_kind = Processor::Kind::NO_KIND;
+  if (self_args.test_gpu) {
+    proc_kind = Processor::TOC_PROC;
+  } else {
+    proc_kind = Processor::LOC_PROC;
+  }
+
   size_t num_procs_to_test = Machine::ProcessorQuery(Machine::get_machine())
-                                 .only_kind(Processor::LOC_PROC)
+                                 .only_kind(proc_kind)
                                  .count();
+
+  log_app.print() << "Proc kind:" << proc_kind << " count:" <<num_procs_to_test;
 
   std::vector<Event> task_events(self_args.num_launcher_tasks * num_procs_to_test,
                                  Event::NO_EVENT);
@@ -160,7 +175,7 @@ static void bench_timing_task(const void *args, size_t arglen, const void *userd
     launcher_args.dummy_task_trigger_event = UserEvent::create_user_event();
 
     Machine::ProcessorQuery processors_to_test =
-        Machine::ProcessorQuery(Machine::get_machine()).only_kind(Processor::LOC_PROC);
+        Machine::ProcessorQuery(Machine::get_machine()).only_kind(proc_kind);
     size_t proc_num = 0;
     for(Processor target_processor : processors_to_test) {
       for(size_t t = 0; t < self_args.num_launcher_tasks; t++) {
@@ -220,8 +235,28 @@ int main(int argc, char **argv)
   assert(ok);
 
   r.register_task(BENCH_TIMING_TASK, bench_timing_task);
-  r.register_task(DUMMY_TASK_LAUNCHER, dummy_task_launcher);
-  r.register_task(DUMMY_TASK, dummy_task);
+  Processor::register_task_by_kind(Processor::LOC_PROC,
+				   false /*!global*/,
+				   DUMMY_TASK_LAUNCHER,
+				   CodeDescriptor(dummy_task_launcher),
+				   ProfilingRequestSet()).wait();
+  Processor::register_task_by_kind(Processor::LOC_PROC,
+				   false /*!global*/,
+				   DUMMY_TASK,
+				   CodeDescriptor(dummy_task),
+				   ProfilingRequestSet()).wait();
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
+  Processor::register_task_by_kind(Processor::TOC_PROC,
+				   false /*!global*/,
+				   DUMMY_TASK_LAUNCHER,
+				   CodeDescriptor(dummy_task_launcher),
+				   ProfilingRequestSet()).wait();
+  Processor::register_task_by_kind(Processor::TOC_PROC,
+				   false /*!global*/,
+				   DUMMY_TASK,
+				   CodeDescriptor(dummy_gpu_task),
+				   ProfilingRequestSet()).wait();
+#endif
 
   BenchTimingTaskArgs args;
 
@@ -230,6 +265,7 @@ int main(int argc, char **argv)
   cp.add_option_int("-tpp", args.num_launcher_tasks);
   cp.add_option_int("-n", args.num_dummy_tasks);
   cp.add_option_bool("-c", args.chain);
+  cp.add_option_bool("-gpu", args.test_gpu);
 
   ok = cp.parse_command_line(argc, (const char **)argv);
   assert(ok);
