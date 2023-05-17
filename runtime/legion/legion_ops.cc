@@ -4178,7 +4178,7 @@ namespace Legion {
     }
 
     /* static */
-    void CopyOp::init_ops_from_vec(std::vector<CopyOp::Operand> &ops,
+    void CopyOp::init_ops_from_vec(LegionVector<CopyOp::Operand> &ops,
                                    size_t *offsets,
                                    ReqType type,
                                    std::vector<RegionRequirement> &reqs)
@@ -4189,7 +4189,7 @@ namespace Legion {
     }
 
     /* static */
-    CopyOp::Operand *CopyOp::get_operand_ptr(std::vector<Operand> &ops,
+    CopyOp::Operand *CopyOp::get_operand_ptr(LegionVector<Operand> &ops,
                                              const size_t *offsets,
                                              ReqType type,
                                              size_t copy_index)
@@ -4205,8 +4205,10 @@ namespace Legion {
 
     void CopyOp::initialize_copies_common()
     {
-      const size_t REQ_COUNT = 4;
       operands.clear();
+      copies.clear();
+
+      const size_t REQ_COUNT = 4;
       size_t offsets[REQ_COUNT + 1];
 
       init_ops_from_vec(operands, offsets, SRC_REQ, src_requirements);

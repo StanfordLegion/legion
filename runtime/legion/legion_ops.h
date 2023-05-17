@@ -1356,17 +1356,17 @@ namespace Legion {
       void initialize_copies_common();
 
       static void
-      init_ops_from_vec(std::vector<Operand> &ops,
+      init_ops_from_vec(LegionVector<Operand> &ops,
                         size_t *offsets,
                         ReqType type,
                         std::vector<RegionRequirement> &reqs);
       static Operand *
-      get_operand_ptr(std::vector<Operand> &ops,
+      get_operand_ptr(LegionVector<Operand> &ops,
                       const size_t *offsets,
                       ReqType type,
                       size_t copy_index);
     protected: // per-operand and per-copy data
-      std::vector<Operand> operands;
+      LegionVector<Operand> operands;
       std::vector<SingleCopy> copies;
     protected: // for support with mapping
       MapperManager*              mapper;
