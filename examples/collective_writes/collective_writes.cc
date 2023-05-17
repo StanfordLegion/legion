@@ -19,8 +19,10 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
+#include "mappers/default_mapper.h"
 
 using namespace Legion;
+using namespace Legion::Mapping;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -193,12 +195,57 @@ public:
   virtual unsigned get_depth(void) const override { return 0; }
 };
 
+// Need a custom mapper to make sure all the instances for the 
+// collective writes are different from each other
+class CollectiveMapper : public DefaultMapper {
+public:
+  CollectiveMapper(MapperRuntime *rt, Machine machine, Processor local)
+    : DefaultMapper(rt, machine, local, "collective mapper") { }
+public:
+  virtual LayoutConstraintID default_policy_select_layout_constraints(
+                                    MapperContext ctx, Memory target_memory,
+                                    const RegionRequirement &req,
+                                    MappingKind mapping_kind,
+                                    bool needs_field_constraint_check,
+                                    bool &force_new_instances) override
+  {
+    const LayoutConstraintID result = 
+      DefaultMapper::default_policy_select_layout_constraints(ctx, target_memory,
+          req, mapping_kind, needs_field_constraint_check, force_new_instances);
+    force_new_instances = true;
+    return result;
+  }
+  virtual CachedMappingPolicy default_policy_select_task_cache_policy(
+                                  MapperContext ctx, const Task &task) override
+  {
+    return DEFAULT_CACHE_POLICY_DISABLE;
+  }
+  virtual LogicalRegion default_policy_select_instance_region(
+                                    MapperContext ctx, Memory target_memory,
+                                    const RegionRequirement &req,
+                                    const LayoutConstraintSet &constraints,
+                                    bool force_new_instances,
+                                    bool meets_constraints) override
+  {
+    return req.region;
+  }
+};
+
+void registration_callback(Machine machine, Runtime *runtime,
+                           const std::set<Processor> &local_procs)
+{
+  for (std::set<Processor>::const_iterator it = local_procs.begin();
+        it != local_procs.end(); it++)
+    runtime->replace_default_mapper(new CollectiveMapper(
+          runtime->get_mapper_runtime(), machine, *it));
+}
+
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   Runtime::preregister_projection_functor(DIV_PID, new DivFunctor());
   Runtime::preregister_projection_functor(MOD_PID, new ModFunctor());
-
+  Runtime::add_registration_callback(registration_callback);
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
