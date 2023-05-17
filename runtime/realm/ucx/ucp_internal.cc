@@ -61,6 +61,93 @@ namespace UCP {
     REALM_THREAD_LOCAL const TimeLimit *ucp_work_until = nullptr;
   };
 
+  enum {
+    REQUEST_AM_FLAG_FAILURE = 1ul << 0
+  };
+
+  enum {
+    REMOTE_COMP_FLAG_FAILURE = 1ul << 0
+  };
+
+  struct CompList {
+    size_t bytes{0};
+
+    static const size_t TOTAL_CAPACITY = 256;
+    typedef char Storage_unaligned[TOTAL_CAPACITY];
+    REALM_ALIGNED_TYPE_CONST(Storage_aligned, Storage_unaligned,
+        Realm::CompletionCallbackBase::ALIGNMENT);
+    Storage_aligned storage;
+  };
+
+  struct RemoteComp {
+    CompList        *comp_list;
+    atomic<size_t>  remote_pending;
+    uint8_t         flags;
+    RemoteComp(size_t _remote_pending)
+      : comp_list(new CompList)
+      , remote_pending(_remote_pending)
+      , flags(0)
+    {}
+
+    ~RemoteComp()
+    {
+      delete comp_list;
+    }
+  };
+
+  struct UCPRDMAInfo {
+    uint64_t reg_base;
+    int dev_index;
+    char rkey[0];
+
+    UCPRDMAInfo() = delete;
+    ~UCPRDMAInfo() = delete;
+  } __attribute__ ((packed)); // gcc-specific
+
+  struct MCDesc {
+    uint8_t           flags;
+    atomic<size_t>    local_pending; // number of targets pending local
+                                     // completion (to support multicast)
+    MCDesc(size_t _local_pending)
+      : flags(0)
+      , local_pending(_local_pending)
+    {}
+  };
+
+  struct Request {
+    // UCPContext::Request must be the first field because
+    // the space preceding it is used internally by ucp
+    UCPContext::Request       ucp;
+    UCPInternal               *internal;
+    UCPContext                *context;
+    union {
+      struct {
+        PayloadBaseType       payload_base_type;
+        CompList              *local_comp;
+        MCDesc                *mc_desc;
+      } am_send;
+
+      struct {
+        void                  *header;
+        void                  *payload;
+        size_t                header_size;
+        size_t                payload_size;
+        int                   payload_mode;
+        ucp_ep_h              reply_ep;
+        // header buffer from am rndv should always be freed
+      } am_rndv_recv;
+
+      struct {
+        UCPRDMAInfo           *rdma_info_buf;
+      } rma;
+    };
+
+    // Should be allocated/freed only through UCPInternal because it must
+    // always have UCP-request-size bytes of available space before itself.
+    Request() = delete;
+    ~Request() = delete;
+  };
+
   struct RealmCallbackArgs {
     UCPInternal    *internal;
     UCPContext     *context;
@@ -1670,6 +1757,7 @@ err:
     ucp_msg_hdr.msgid = _msgid;
     payload_size      = _max_payload_size;
 
+    payload_base_type = PAYLOAD_BASE_LAST;
     if (payload_size > 0) {
       if ((src_payload_addr != nullptr) && (src_payload_lines <= 1)) {
         // contiguous source data can be used directly
