@@ -4188,11 +4188,11 @@ namespace Legion {
         ops.emplace_back(i, type, ops.size(), reqs[i]);
     }
 
-    /* static */
-    CopyOp::Operand *CopyOp::get_operand_ptr(LegionVector<Operand> &ops,
-                                             const size_t *offsets,
-                                             ReqType type,
-                                             size_t copy_index)
+    /* static */ CopyOp::Operand *
+    CopyOp::get_operand_ptr(LegionVector<Operand> &ops,
+                            const size_t offsets[REQ_OFFSETS_COUNT],
+                            ReqType type,
+                            size_t copy_index)
     {
       size_t start = offsets[type];
       size_t count = offsets[type + 1] - start;
@@ -4208,13 +4208,18 @@ namespace Legion {
       operands.clear();
       copies.clear();
 
-      const size_t REQ_COUNT = 4;
-      size_t offsets[REQ_COUNT + 1];
+      size_t offsets[REQ_OFFSETS_COUNT];
 
       init_ops_from_vec(operands, offsets, SRC_REQ, src_requirements);
       init_ops_from_vec(operands, offsets, DST_REQ, dst_requirements);
-      init_ops_from_vec(operands, offsets, GATHER_REQ, src_indirect_requirements);
-      init_ops_from_vec(operands, offsets, SCATTER_REQ, dst_indirect_requirements);
+      init_ops_from_vec(operands,
+                        offsets,
+                        GATHER_REQ,
+                        src_indirect_requirements);
+      init_ops_from_vec(operands,
+                        offsets,
+                        SCATTER_REQ,
+                        dst_indirect_requirements);
       offsets[REQ_COUNT] = operands.size();
 
       for (size_t i = 0; i < src_requirements.size(); i++)
@@ -4225,20 +4230,26 @@ namespace Legion {
                             get_operand_ptr(operands, offsets, GATHER_REQ, i),
                             get_operand_ptr(operands, offsets, SCATTER_REQ, i),
                             grants.size() > i ? &grants[i] : nullptr,
-                            wait_barriers.size() > i ? &wait_barriers[i] : nullptr,
-                            arrive_barriers.size() > i ? &arrive_barriers[i] : nullptr);
+                            wait_barriers.size() > i ? &wait_barriers[i]
+                                                     : nullptr,
+                            arrive_barriers.size() > i ? &arrive_barriers[i]
+                                                     : nullptr);
       }
     }
 
-    void CopyOp::initialize_copies_with_launcher_info(const std::vector<bool> &gather_is_range,
-                                                      const std::vector<bool> &scatter_is_range)
+    template <typename T>
+    void CopyOp::initialize_copies_with_launcher(const T &lnch)
     {
       initialize_copies_common();
 
+      const std::vector<bool> &g_is_range = lnch.src_indirect_is_range;
+      const std::vector<bool> &s_is_range = lnch.dst_indirect_is_range;
+
       for (size_t i = 0; i < copies.size(); i++)
       {
-        copies[i].gather_is_range = gather_is_range.size() > i && gather_is_range[i];
-        copies[i].scatter_is_range = scatter_is_range.size() > i && scatter_is_range[i];
+        SingleCopy &cp = copies[i];
+        cp.gather_is_range = g_is_range.size() > i && g_is_range[i];
+        cp.scatter_is_range = s_is_range.size() > i && s_is_range[i];
       }
     }
 
@@ -4434,8 +4445,7 @@ namespace Legion {
       {
         perform_type_checking();
       }
-      initialize_copies_with_launcher_info(launcher.src_indirect_is_range,
-                                           launcher.dst_indirect_is_range);
+      initialize_copies_with_launcher(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -4999,7 +5009,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     copies[idx].src->privilege_path,
+                                                     copies[idx].
+                                                       src->privilege_path,
                                                      map_applied_conditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -5012,7 +5023,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     copies[idx].dst->privilege_path,
+                                                     copies[idx].
+                                                       dst->privilege_path,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -5025,7 +5037,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  projection_info,
-                                                 copies[idx].gather->privilege_path,
+                                                 copies[idx].
+                                                   gather->privilege_path,
                                                  map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
@@ -5036,7 +5049,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
-                                                 copies[idx].scatter->privilege_path,
+                                                 copies[idx].
+                                                   scatter->privilege_path,
                                                  map_applied_conditions);
       }
     }
@@ -5653,7 +5667,8 @@ namespace Legion {
         else
         {
 #ifdef DEBUG_LEGION
-          assert(copies[index].gather_is_range == copies[index].scatter_is_range);
+          assert(copies[index].gather_is_range ==
+                 copies[index].scatter_is_range);
           assert(!copies[index].src_indirect_records.empty());
           assert(!copies[index].dst_indirect_records.empty());
 #endif
@@ -5667,9 +5682,11 @@ namespace Legion {
               src_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() +
-              src_indirect_requirements.size() + index, copies[index].gather_is_range,
+              src_indirect_requirements.size() + index,
+              copies[index].gather_is_range,
               init_precondition, predication_guard, collective_precondition,
-              collective_postcondition, local_precondition, copies[index].atomic_locks,
+              collective_postcondition, local_precondition,
+              copies[index].atomic_locks,
               trace_info,applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing, compute_preimages);
@@ -5897,7 +5914,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(index < operands.size());
 #endif
-      std::map<Reservation,bool> &local_locks = copies[operands[index].copy_index].atomic_locks;
+      SingleCopy &copy = copies[operands[index].copy_index];
+      std::map<Reservation,bool> &local_locks = copy.atomic_locks;
       std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
       if (finder != local_locks.end())
       {
@@ -6854,8 +6872,7 @@ namespace Legion {
       }
       if (runtime->check_privileges)
         perform_type_checking();
-      initialize_copies_with_launcher_info(launcher.src_indirect_is_range,
-                                           launcher.dst_indirect_is_range);
+      initialize_copies_with_launcher(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -7081,7 +7098,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_info,
-                                                     copies[idx].src->privilege_path,
+                                                     copies[idx].
+                                                      src->privilege_path,
                                                      map_applied_conditions);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -7096,7 +7114,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_info,
-                                                     copies[idx].dst->privilege_path,
+                                                     copies[idx].
+                                                      dst->privilege_path,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -7111,7 +7130,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 copies[idx].gather->privilege_path,
+                                                 copies[idx].
+                                                   gather->privilege_path,
                                                  map_applied_conditions);
         }
       }
@@ -7124,7 +7144,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 copies[idx].scatter->privilege_path,
+                                                 copies[idx].
+                                                  scatter->privilege_path,
                                                  map_applied_conditions);
         }
       }
@@ -7894,7 +7915,8 @@ namespace Legion {
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           src_indirect_requirements[idx], copies[idx].gather->version, preconditions);
+           src_indirect_requirements[idx], copies[idx].gather->version,
+           preconditions);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -7902,7 +7924,8 @@ namespace Legion {
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           dst_indirect_requirements[idx], copies[idx].scatter->version,preconditions);
+           dst_indirect_requirements[idx], copies[idx].scatter->version,
+           preconditions);
         if (!src_indirect_requirements.empty())
         {
           // Full indirections need to have the same index space

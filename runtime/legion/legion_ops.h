@@ -1142,6 +1142,9 @@ namespace Legion {
         GATHER_REQ = 2,
         SCATTER_REQ = 3,
       };
+    private:
+      static constexpr size_t REQ_COUNT = SCATTER_REQ + 1;
+      static constexpr size_t REQ_OFFSETS_COUNT = REQ_COUNT + 1;
     public:
       struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross>,
                                   public PhysicalTraceInfo {
@@ -1348,8 +1351,8 @@ namespace Legion {
         std::map<Reservation,bool> atomic_locks;
       };
 
-      void initialize_copies_with_launcher_info(const std::vector<bool> &gather_is_range,
-                                                const std::vector<bool> &scatter_is_range);
+      template <typename T>
+      void initialize_copies_with_launcher(const T &lnch);
       void initialize_copies_with_owner(IndexCopyOp *own);
 
     private: // used internally for initialization
@@ -1362,7 +1365,7 @@ namespace Legion {
                         std::vector<RegionRequirement> &reqs);
       static Operand *
       get_operand_ptr(LegionVector<Operand> &ops,
-                      const size_t *offsets,
+                      const size_t offsets[REQ_OFFSETS_COUNT],
                       ReqType type,
                       size_t copy_index);
     protected: // per-operand and per-copy data
