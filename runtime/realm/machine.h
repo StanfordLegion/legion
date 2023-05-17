@@ -77,14 +77,14 @@ namespace Realm {
       struct ProcessorMemoryAffinity {
         Processor p;        // accessing processor
         Memory m;           // target memory
-        unsigned bandwidth; // in gbps
+        unsigned bandwidth; // in MB/s
         unsigned latency;   // in nanoseconds
       };
 
       struct MemoryMemoryAffinity {
         Memory m1;          // source memory
         Memory m2;          // destination memory
-        unsigned bandwidth; // in gbps
+        unsigned bandwidth; // in MB/s
         unsigned latency;   // in nanoseconds
       };
 
