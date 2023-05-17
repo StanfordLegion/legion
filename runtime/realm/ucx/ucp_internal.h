@@ -187,7 +187,7 @@ namespace UCP {
     struct Config {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
-      int prog_boff_max{4};
+      int prog_boff_max{4}; //progress thread maximum backoff
       int pollers_max{2};
       bool mpool_leakcheck{false};
       bool crc_check{false};
