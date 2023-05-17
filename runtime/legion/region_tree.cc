@@ -9753,8 +9753,8 @@ namespace Legion {
           // Launch the task to perform the local disjointness 
           // and completeness tests
           DisjointnessArgs args(this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY);
+          runtime->issue_runtime_meta_task(args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, initialized);
         }
       }
     }
