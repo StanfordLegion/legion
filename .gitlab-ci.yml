@@ -96,6 +96,8 @@ cache: &global_cache
 .terra12: &terra12
   LLVM_CONFIG: "llvm-config-12"
   TERRA_DIR: "/usr/local/terra12"
+.terra13: &terra13 # macOS only
+  TERRA_DIR: "/usr/local/terra-13"
 .terra14: &terra14
   LLVM_CONFIG: "llvm-config-14"
   TERRA_DIR: "/usr/local/terra14"
@@ -1149,14 +1151,22 @@ clang12_cxx11_debug_maxdim4_external2:
     <<: [*clang12, *terra12, *debug, *cxx11_normal, *maxdim4, *openmp, *hdf5, *external2, *libdw]
 
 # macOS with Clang
-macos_clang_cxx11_debug:
+macos_clang_cxx11_debug_legion:
   <<: [*macos, *tests]
   variables:
     <<: [*macos_clang, *debug, *cxx11_normal, *legion, *short, *no_ccache]
-macos_clang_cxx14_release:
+macos_clang_cxx14_release_legion:
   <<: [*macos, *tests]
   variables:
     <<: [*macos_clang, *release, *cxx14_normal, *legion, *short, *no_ccache]
+macos_clang_cxx17_release_cmake_legion:
+  <<: [*macos, *tests]
+  variables:
+    <<: [*macos_clang, *release, *cxx17_normal, *cmake, *legion, *ctest, *short, *no_ccache]
+macos_clang_cxx11_debug_cmake_regent:
+  <<: [*macos, *tests]
+  variables:
+    <<: [*macos_clang, *debug, *cxx11_normal, *cmake, *regent, *short, *no_ccache]
 
 # Run minimal tests on other compilers.
 
