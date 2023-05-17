@@ -1329,7 +1329,9 @@ namespace Legion {
                    Operand *dst_indirect,
                    Grant *grant,
                    PhaseBarrier *wait_barrier,
-                   PhaseBarrier *arrive_barrier);
+                   PhaseBarrier *arrive_barrier,
+                   bool gather_is_range,
+                   bool scatter_is_range);
 
         // from CopyLauncher
         const unsigned copy_index;
@@ -1342,8 +1344,8 @@ namespace Legion {
         Grant * const grant;
         PhaseBarrier * const wait_barrier;
         PhaseBarrier * const arrive_barrier;
-        bool gather_is_range;
-        bool scatter_is_range;
+        const bool gather_is_range;
+        const bool scatter_is_range;
 
         // calculated in CopyOp
         std::vector<IndirectRecord> src_indirect_records;
@@ -1351,12 +1353,40 @@ namespace Legion {
         std::map<Reservation,bool> atomic_locks;
       };
 
+    protected:
       template <typename T>
-      void initialize_copies_with_launcher(const T &lnch);
-      void initialize_copies_with_owner(IndexCopyOp *own);
+      void initialize_copies(const T *launcher, const SingleCopy *other_copies);
 
     private: // used internally for initialization
-      void initialize_copies_common();
+      template<typename F>
+      class FieldInitHelper
+      {
+      public:
+        FieldInitHelper(const SingleCopy *copies,
+                        const F *field_in_copy_zero,
+                        const std::vector<F> *fields,
+                        F missing)
+        :copies(copies),
+         offset((char *)field_in_copy_zero - (char *)copies),
+         fields(fields),
+         missing(missing)
+        {
+        }
+
+        const F operator[](size_t idx)
+        {
+          if (copies != nullptr)
+            return *(F *)((char *)(copies + idx) + offset);
+
+          return fields->size() > idx ? (*fields)[idx] : missing;
+        }
+
+      private:
+        const SingleCopy *copies;
+        size_t offset;
+        const std::vector<F> *fields;
+        F missing;
+      };
 
       static void
       init_ops_from_vec(LegionVector<Operand> &ops,
@@ -1368,7 +1398,7 @@ namespace Legion {
                       const size_t offsets[REQ_OFFSETS_COUNT],
                       ReqType type,
                       size_t copy_index);
-    protected: // per-operand and per-copy data
+    public: // per-operand and per-copy data
       LegionVector<Operand> operands;
       std::vector<SingleCopy> copies;
     protected: // for support with mapping

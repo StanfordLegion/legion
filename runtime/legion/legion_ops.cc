@@ -4130,7 +4130,9 @@ namespace Legion {
                                    CopyOp::Operand *dst_indirect,
                                    Grant *grant,
                                    PhaseBarrier *wait_barrier,
-                                   PhaseBarrier *arrive_barrier)
+                                   PhaseBarrier *arrive_barrier,
+                                   bool gather_is_range,
+                                   bool scatter_is_range)
       :copy_index(copy_index),
        src(src),
        dst(dst),
@@ -4140,7 +4142,9 @@ namespace Legion {
        scatter(dst_indirect),
        grant(grant),
        wait_barrier(wait_barrier),
-       arrive_barrier(arrive_barrier)
+       arrive_barrier(arrive_barrier),
+       gather_is_range(gather_is_range),
+       scatter_is_range(scatter_is_range)
     {
     }
 
@@ -4203,8 +4207,12 @@ namespace Legion {
       return &ops[start + copy_index];
     }
 
-    void CopyOp::initialize_copies_common()
+    template <typename T>
+    void CopyOp::initialize_copies(const T *launcher,
+                                   const SingleCopy *other_copies)
     {
+      assert((launcher == nullptr) != (other_copies == nullptr));
+
       operands.clear();
       copies.clear();
 
@@ -4222,6 +4230,15 @@ namespace Legion {
                         dst_indirect_requirements);
       offsets[REQ_COUNT] = operands.size();
 
+      FieldInitHelper<bool> g_is_range(other_copies,
+                                       &other_copies->gather_is_range,
+                                       &launcher->src_indirect_is_range,
+                                       false);
+      FieldInitHelper<bool> s_is_range(other_copies,
+                                       &other_copies->scatter_is_range,
+                                       &launcher->dst_indirect_is_range,
+                                       false);
+
       for (size_t i = 0; i < src_requirements.size(); i++)
       {
         copies.emplace_back(i,
@@ -4229,42 +4246,14 @@ namespace Legion {
                             get_operand_ptr(operands, offsets, DST_REQ, i),
                             get_operand_ptr(operands, offsets, GATHER_REQ, i),
                             get_operand_ptr(operands, offsets, SCATTER_REQ, i),
-                            grants.size() > i ? &grants[i] : nullptr,
-                            wait_barriers.size() > i ? &wait_barriers[i]
+                            i < grants.size() ? &grants[i] : nullptr,
+                            i < wait_barriers.size() ? &wait_barriers[i]
                                                      : nullptr,
-                            arrive_barriers.size() > i ? &arrive_barriers[i]
-                                                     : nullptr);
+                            i < arrive_barriers.size() ? &arrive_barriers[i]
+                                                       : nullptr,
+                            g_is_range[i],
+                            s_is_range[i]);
       }
-    }
-
-    template <typename T>
-    void CopyOp::initialize_copies_with_launcher(const T &lnch)
-    {
-      initialize_copies_common();
-
-      const std::vector<bool> &g_is_range = lnch.src_indirect_is_range;
-      const std::vector<bool> &s_is_range = lnch.dst_indirect_is_range;
-
-      for (size_t i = 0; i < copies.size(); i++)
-      {
-        SingleCopy &cp = copies[i];
-        cp.gather_is_range = g_is_range.size() > i && g_is_range[i];
-        cp.scatter_is_range = s_is_range.size() > i && s_is_range[i];
-      }
-    }
-
-    void CopyOp::initialize_copies_with_owner(IndexCopyOp *own)
-    {
-      initialize_copies_common();
-
-      for (size_t i = 0; i < copies.size(); i++)
-      {
-        copies[i].gather_is_range = own->copies[i].gather_is_range;
-        copies[i].scatter_is_range = own->copies[i].scatter_is_range;
-      }
-
-      for (CopyOp::Operand &op : operands)
-        op.parent_index = own->operands[op.req_index].parent_index;
     }
 
     //--------------------------------------------------------------------------
@@ -4445,7 +4434,7 @@ namespace Legion {
       {
         perform_type_checking();
       }
-      initialize_copies_with_launcher(launcher);
+      initialize_copies(&launcher, nullptr);
     }
 
     //--------------------------------------------------------------------------
@@ -6872,7 +6861,7 @@ namespace Legion {
       }
       if (runtime->check_privileges)
         perform_type_checking();
-      initialize_copies_with_launcher(launcher);
+      initialize_copies(&launcher, nullptr);
     }
 
     //--------------------------------------------------------------------------
@@ -7841,7 +7830,11 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
 
-      initialize_copies_with_owner(owner);
+      initialize_copies<CopyLauncher>(nullptr, owner->copies.data());
+
+      for (CopyOp::Operand &op : operands)
+        op.parent_index = owner->operands[op.req_index].parent_index;
+
     }
 
     //--------------------------------------------------------------------------
