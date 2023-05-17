@@ -19,6 +19,7 @@
 
 #include "realm/ucx/ucp_utils.h"
 #include "realm/ucx/mpool.h"
+#include "realm/ucx/spinlock.h"
 
 #include "realm/atomics.h"
 #include "realm/mutex.h"
@@ -37,6 +38,11 @@ namespace UCP {
 
   class UCPWorker {
   public:
+    enum Type {
+      WORKER_TX,
+      WORKER_RX,
+      WORKER_LAST
+    };
     enum OpType{
       AM_SEND,
       PUT,
@@ -71,7 +77,7 @@ namespace UCP {
       ~Request() = delete;
     };
 
-    UCPWorker(const UCPContext *context,
+    UCPWorker(const UCPContext *context, Type type,
         size_t am_alignment, bool use_wakeup,
         unsigned prog_boff_max /*progress thread maximum backoff*/,
         int prog_itr_max, int rdesc_rel_max,
@@ -118,6 +124,7 @@ namespace UCP {
     bool initialized{false};
     bool have_residual_events{false};
     int  worker_efd;
+    Type type;
     size_t ucp_req_size;
     size_t am_alignment;
     bool use_wakeup;
@@ -129,11 +136,11 @@ namespace UCP {
     MPool *request_mp;
     MPool *pbuf_mp;
     VMPool *mmp;
-    Mutex req_mp_mutex;
-    Mutex pbuf_mp_mutex;
+    SpinLock req_mp_spinlock;
+    SpinLock pbuf_mp_spinlock;
     std::queue<void*> am_rdesc_q;
-    Mutex am_rdesc_q_mutex;
-    Mutex mmp_mutex;
+    SpinLock am_rdesc_q_spinlock;
+    SpinLock mmp_spinlock;
     std::unordered_map<void*, ucp_mem_h> pbuf_mp_mem_hs;
     std::unordered_map<int, std::unordered_map<int, ucp_ep_h>> eps;
     size_t max_am_header;
