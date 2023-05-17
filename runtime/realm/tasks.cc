@@ -18,6 +18,7 @@
 #include "realm/tasks.h"
 
 #include "realm/runtime_impl.h"
+#include "realm/proc_impl.h"
 
 namespace Realm {
 
