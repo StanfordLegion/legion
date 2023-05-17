@@ -7517,7 +7517,7 @@ namespace Legion {
       // If we're doing a collective read-write then check to make sure that
       // we have exactly one arrival on each of the instances, if we don't
       // then we're not going to have the isolation that we expect
-      if (!collective_arrivals.empty() && IS_WRITE(usage) && !IS_DISCARD(usage))
+      if (!collective_arrivals.empty() && IS_WRITE(usage))
       {
 #ifdef DEBUG_LEGION
         assert(IS_COLLECTIVE(usage));
@@ -7525,12 +7525,13 @@ namespace Legion {
         for (std::map<InstanceView*,size_t>::const_iterator it =
               collective_arrivals.begin(); it !=
               collective_arrivals.end(); it++)
-          if (it->second > 1)
+          if ((it->second > 1) && (it->first->is_individual_view() ||
+              (it->first->as_collective_view()->local_views.size()<it->second)))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                "Illegal mapper output: detected multiple read-write "
-                "collective users of the same instance on region requirement "
-                "%d of %s (UID %lld). For read-write collectives it is "
-                "mandatory that every point map to a separate instance.",
+                "Illegal mapper output: detected multiple write-collective "
+                "users of the same instance on region requirement %d of %s "
+                "(UID %lld). For read-write collectives it is mandatory "
+                "that every point map to a separate instance.",
                 index, op->get_logging_name(), op->get_unique_op_id())
       }
       if (user_registered.exists())
