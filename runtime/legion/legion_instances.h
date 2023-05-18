@@ -393,8 +393,7 @@ namespace Legion {
       bool notify_invalid(void);
     public:
       virtual void send_manager(AddressSpaceID target);
-      static void handle_manager_request(Deserializer &derez, 
-                          Runtime *runtime, AddressSpaceID source);
+      static void handle_manager_request(Deserializer &derez, Runtime *runtime);
     public:
       virtual void notify_local(void);
     public:

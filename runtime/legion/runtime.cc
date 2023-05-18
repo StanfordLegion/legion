@@ -12689,7 +12689,7 @@ namespace Legion {
             }
           case SEND_VIEW_REQUEST:
             {
-              runtime->handle_view_request(derez, remote_address_space);
+              runtime->handle_view_request(derez);
               break;
             }
           case SEND_VIEW_REGISTER_USER:
@@ -12739,7 +12739,7 @@ namespace Legion {
 #endif
           case SEND_MANAGER_REQUEST:
             {
-              runtime->handle_manager_request(derez, remote_address_space);
+              runtime->handle_manager_request(derez);
               break;
             } 
           case SEND_FUTURE_RESULT:
@@ -12939,8 +12939,7 @@ namespace Legion {
             }
           case SEND_REMOTE_CONTEXT_REQUEST:
             {
-              runtime->handle_remote_context_request(derez, 
-                                                     remote_address_space);
+              runtime->handle_remote_context_request(derez); 
               break;
             }
           case SEND_REMOTE_CONTEXT_RESPONSE:
@@ -12997,8 +12996,7 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_REQUEST:
             {
-              runtime->handle_equivalence_set_request(derez, 
-                                      remote_address_space);
+              runtime->handle_equivalence_set_request(derez); 
               break;
             }
           case SEND_EQUIVALENCE_SET_RESPONSE:
@@ -22440,6 +22438,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_request(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message<SEND_VIEW_REQUEST>(rez, 
+                                                    true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_view_register_user(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -24741,19 +24747,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_request(Deserializer &derez, 
-                                      AddressSpaceID source)
+    void Runtime::handle_view_request(Deserializer &derez) 
     //--------------------------------------------------------------------------
     {
-      LogicalView::handle_view_request(derez, this, source);
+      LogicalView::handle_view_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_manager_request(Deserializer &derez, 
-                                         AddressSpaceID source)
+    void Runtime::handle_manager_request(Deserializer &derez) 
     //--------------------------------------------------------------------------
     {
-      PhysicalManager::handle_manager_request(derez, this, source);
+      PhysicalManager::handle_manager_request(derez, this);
     }
 
 #ifdef ENABLE_VIEW_REPLICATION
@@ -25124,11 +25128,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_context_request(Deserializer &derez,
-                                                AddressSpaceID source)
+    void Runtime::handle_remote_context_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RemoteContext::handle_context_request(derez, this, source);
+      RemoteContext::handle_context_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -25203,11 +25206,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_request(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_equivalence_set_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_equivalence_set_request(derez, this, source);
+      EquivalenceSet::handle_equivalence_set_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -27094,6 +27096,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(to_find);
+        rez.serialize(address_space);
       }
       find_messenger(target)->send_message<MK>(rez, true/*flush*/);
       return result;
