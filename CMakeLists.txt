@@ -725,12 +725,7 @@ if (NOT is_pow_two)
   message(FATAL_ERROR "Legion_MAX_FIELDS must be a power of two.")
 endif()
 
-if (${Legion_DEFAULT_LOCAL_FIELDS} LESS_EQUAL ${Legion_MAX_FIELDS})
-  set(local_fields_smaller_than_max_fields TRUE)
-else()
-  set(local_fields_smaller_than_max_fields FALSE)
-endif()
-if (NOT local_fields_smaller_than_max_fields)
+if (${Legion_DEFAULT_LOCAL_FIELDS} GREATER ${Legion_MAX_FIELDS})
   message(FATAL_ERROR "Legion_DEFAULT_LOCAL_FIELDS must be smaller than or equal to Legion_MAX_FIELDS.")
 endif()
 
