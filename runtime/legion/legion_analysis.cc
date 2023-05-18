@@ -17472,12 +17472,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_equivalence_set_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
