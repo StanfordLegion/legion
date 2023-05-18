@@ -4899,6 +4899,14 @@ namespace Legion {
         common_ancestor = one;
         return false;
       }
+      // Some older code still relies on us being able to prove that two index
+      // spaces are non-interfering with each other without using the tree so
+      // we still check that even if we can't prove it with just the tree
+      IndexSpaceNode *original_one = NULL, *original_two = NULL;
+      if (one->is_index_space_node())
+        original_one = one->as_index_space_node();
+      if (two->is_index_space_node())
+        original_two = two->as_index_space_node();
       // Bring them to the same depth
       while (one->depth < two->depth)
         two = two->get_parent();
@@ -4938,6 +4946,14 @@ namespace Legion {
       {
         if (parent_one->as_index_part_node()->are_disjoint(one->color, 
                                                            two->color))
+          return true;
+      }
+      // Test if two index spaces are interfering without using the tree
+      if ((original_one != NULL) && (original_two != NULL))
+      {
+        IndexSpaceExpression *intersection =
+          intersect_index_spaces(original_one, original_two);
+        if (intersection->is_empty())
           return true;
       }
       common_ancestor = parent_one;
@@ -9788,8 +9804,8 @@ namespace Legion {
           // Launch the task to perform the local disjointness 
           // and completeness tests
           DisjointnessArgs args(this);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY);
+          runtime->issue_runtime_meta_task(args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, initialized);
         }
       }
     }

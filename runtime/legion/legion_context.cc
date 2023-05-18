@@ -23178,12 +23178,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteContext::handle_context_request(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       InnerContext *context = dynamic_cast<InnerContext*>(dc);

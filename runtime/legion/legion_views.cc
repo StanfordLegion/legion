@@ -56,12 +56,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void LogicalView::handle_view_request(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)
+                                                     Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      AddressSpaceID source;
+      derez.deserialize(source);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       LogicalView *view = dynamic_cast<LogicalView*>(dc);
@@ -69,6 +71,27 @@ namespace Legion {
 #else
       LogicalView *view = static_cast<LogicalView*>(dc);
 #endif
+      if (view->collective_mapping != NULL)
+      {
+        // Check to see if this is a collective view, if the target
+        // is in the replicated set, then there's nothing we need to do
+        // We can just ignore this and the registration will be done later
+        if (view->collective_mapping->contains(source))
+          return;
+        AddressSpaceID nearest = view->collective_mapping->find_nearest(source);
+        if (nearest != runtime->address_space)
+        {
+          // Forward this on to the nearest space in the collective mapping
+          Serializer rez;
+          {
+            RezCheck z2(rez);
+            rez.serialize(did);
+            rez.serialize(source);
+          }
+          runtime->send_view_request(nearest, rez);
+          return;
+        }
+      }
       view->send_view(source);
     }
 
@@ -4869,14 +4892,6 @@ namespace Legion {
     void MaterializedView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Check to see if this is a replicated view, if the target
-      // is in the replicated set, then there's nothing we need to do
-      // We can just ignore this and the registration will be done later
-      if ((collective_mapping != NULL) && collective_mapping->contains(target))
-        return;
       Serializer rez;
       {
         RezCheck z(rez);
@@ -6226,14 +6241,6 @@ namespace Legion {
     void ReductionView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Check to see if this is a replicated view, if the target
-      // is in the replicated set, then there's nothing we need to do
-      // We can just ignore this and the registration will be done later
-      if ((collective_mapping != NULL) && collective_mapping->contains(target))
-        return;
       // Don't take the lock, it's alright to have duplicate sends
       Serializer rez;
       {
@@ -11540,14 +11547,6 @@ namespace Legion {
     void ReplicatedView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Check to see if this is a replicated view, if the target
-      // is in the replicated set, then there's nothing we need to do
-      // We can just ignore this and the registration will be done later
-      if ((collective_mapping != NULL) && collective_mapping->contains(target))
-        return;
       Serializer rez;
       {
         RezCheck z(rez);
@@ -11647,14 +11646,6 @@ namespace Legion {
     void AllreduceView::send_view(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      // Check to see if this is a replicated view, if the target
-      // is in the replicated set, then there's nothing we need to do
-      // We can just ignore this and the registration will be done later
-      if ((collective_mapping != NULL) && collective_mapping->contains(target))
-        return;
       Serializer rez;
       {
         RezCheck z(rez);

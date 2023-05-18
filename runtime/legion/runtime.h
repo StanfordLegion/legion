@@ -3306,6 +3306,7 @@ namespace Legion {
                                                         Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
+      void send_view_request(AddressSpaceID target, Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
       void send_view_find_copy_preconditions_request(AddressSpaceID target,
                                                      Serializer &rez);
@@ -3682,7 +3683,7 @@ namespace Legion {
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
-      void handle_view_request(Deserializer &derez, AddressSpaceID source);
+      void handle_view_request(Deserializer &derez);
       void handle_view_register_user(Deserializer &derez,AddressSpaceID source);
       void handle_view_copy_pre_request(Deserializer &derez,
                                         AddressSpaceID source);
@@ -3697,7 +3698,7 @@ namespace Legion {
       void handle_view_replication_removal(Deserializer &derez, 
                                            AddressSpaceID source);
 #endif
-      void handle_manager_request(Deserializer &derez, AddressSpaceID source);
+      void handle_manager_request(Deserializer &derez);
       void handle_future_result(Deserializer &derez);
       void handle_future_result_size(Deserializer &derez,
                                      AddressSpaceID source);
@@ -3738,8 +3739,7 @@ namespace Legion {
                                                AddressSpaceID source);
       void handle_logical_partition_semantic_info(Deserializer &derez,
                                                   AddressSpaceID source);
-      void handle_remote_context_request(Deserializer &derez,
-                                         AddressSpaceID source);
+      void handle_remote_context_request(Deserializer &derez);
       void handle_remote_context_response(Deserializer &derez);
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
@@ -3757,8 +3757,7 @@ namespace Legion {
                                                        AddressSpaceID source);
       void handle_finish_equivalence_sets_subscription(Deserializer &derez,
                                                        AddressSpaceID source);
-      void handle_equivalence_set_request(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_equivalence_set_request(Deserializer &derez);
       void handle_equivalence_set_response(Deserializer &derez);
       void handle_equivalence_set_invalidate_trackers(Deserializer &derez);
       void handle_equivalence_set_replication_request(Deserializer &derez,

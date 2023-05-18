@@ -678,6 +678,14 @@ if(Legion_USE_NVTX)
 endif()
 
 #------------------------------------------------------------------------------#
+# Backtrace configuration
+#------------------------------------------------------------------------------#
+option(Legion_BACKTRACE_USE_UNWIND "Use unwind to capture backtrace" ON)
+if(Legion_BACKTRACE_USE_UNWIND)
+  set(REALM_USE_UNWIND ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")
@@ -692,6 +700,8 @@ set(REALM_MAX_DIM ${Legion_MAX_DIM})
 #  sure they're big enough for your use case
 set(Legion_MAX_FIELDS 512 CACHE STRING
     "Maximum number of fields allocated to a single field space -- MUST be a power of two.")
+set(Legion_DEFAULT_LOCAL_FIELDS 4 CACHE STRING
+    "Number of slots in a field space reserved for local fields -- MUST be smaller than or equal to Legion_MAX_FIELDS")
 set(Legion_MAX_NUM_NODES 1024 CACHE STRING
     "Maximum number of nodes supported by the runtime -- MUST be a power of two.")
 set(Legion_MAX_NUM_PROCS 64 CACHE STRING
@@ -715,6 +725,10 @@ if (NOT is_pow_two)
   message(FATAL_ERROR "Legion_MAX_FIELDS must be a power of two.")
 endif()
 
+if (${Legion_DEFAULT_LOCAL_FIELDS} GREATER ${Legion_MAX_FIELDS})
+  message(FATAL_ERROR "Legion_DEFAULT_LOCAL_FIELDS must be smaller than or equal to Legion_MAX_FIELDS.")
+endif()
+
 is_power_of_two(${Legion_MAX_NUM_NODES} is_pow_two)
 if (NOT is_pow_two)
   message(FATAL_ERROR "Legion_MAX_NUM_NODES must be a power of two.")
@@ -727,6 +741,7 @@ endif()
 
 # define variables for legion_defines.h
 set(LEGION_MAX_FIELDS ${Legion_MAX_FIELDS})
+set(LEGION_DEFAULT_LOCAL_FIELDS "(${Legion_DEFAULT_LOCAL_FIELDS})")
 set(LEGION_MAX_NUM_NODES ${Legion_MAX_NUM_NODES})
 set(LEGION_MAX_NUM_PROCS ${Legion_MAX_NUM_PROCS})
 

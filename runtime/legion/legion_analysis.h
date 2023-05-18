@@ -3933,7 +3933,7 @@ namespace Legion {
       static void handle_apply_state(const void *args);
     public:
       static void handle_equivalence_set_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
+                                                 Runtime *runtime);
       static void handle_equivalence_set_response(Deserializer &derez,
                                                   Runtime *runtime);
       static void handle_migration(Deserializer &derez, 

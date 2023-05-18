@@ -3432,8 +3432,7 @@ namespace Legion {
       static void handle_local_field_update(Deserializer &derez, 
                                             Runtime *runtime);
     public:
-      static void handle_context_request(Deserializer &derez, Runtime *runtime,
-                                         AddressSpaceID source);
+      static void handle_context_request(Deserializer &derez, Runtime *runtime);
       static void handle_context_response(Deserializer &derez,Runtime *runtime);
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
