@@ -495,7 +495,7 @@ if(Legion_USE_HIP)
     if("${Legion_HIP_ARCH}" STREQUAL "")
       set(HIP_GENCODE "")
     else()
-      set(HIP_GENCODE "--offload-target=${Legion_HIP_ARCH}")
+      set(HIP_GENCODE "--offload-arch=${Legion_HIP_ARCH}")
     endif()
   endif()
 
