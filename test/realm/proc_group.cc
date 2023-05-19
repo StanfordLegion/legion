@@ -50,22 +50,32 @@ struct timespec add_microseconds(const struct timespec time, long long microseco
 }
 
 void accurate_sleep(long long microseconds) {
+  // Sleep can be inaccurate depending on system configuration and load,
+  // at least track that here so that we know when the sleep is accurate.
+
+  long long init_time = Realm::Clock::current_time_in_microseconds();
+  long long current_time = init_time;
+
+#if 0
   // Attempt to do a more accurate sleep by breaking the interval into
   // smaller pieces of size `granule` microseconds.
 
-  long long init_time = Realm::Clock::current_time_in_microseconds();
-
   long long final_target_time = init_time + microseconds;
 
-  long long current_time = init_time;
   const long long granule = 20000; // 20 ms
   while (final_target_time - current_time > granule) {
-    //long long target_time = std::min(final_target_time - current_time, granule);
-    usleep(granule);//target_time);
+    usleep(granule);
     current_time = Realm::Clock::current_time_in_microseconds();
   }
+#else
+  usleep(microseconds);
+  current_time = Realm::Clock::current_time_in_microseconds();
+#endif
 
-  printf("goal: %lld us, actual: %lld us, relative: %f\n", microseconds, current_time - init_time, ((double)(current_time - init_time))/microseconds);
+  double relative = ((double)(current_time - init_time))/microseconds;
+  if (relative > 1.5) {
+    log_app.warning() << "sleep took too long - goal: " << microseconds << " us, actual: " << current_time - init_time << " us, relative: " relative);
+  }
 }
 
 void delay_task(const void *args, size_t arglen, 
