@@ -73,8 +73,10 @@ void accurate_sleep(long long microseconds) {
 #endif
 
   double relative = ((double)(current_time - init_time))/microseconds;
-  if (relative > 1.5) {
-    log_app.warning() << "sleep took too long - goal: " << microseconds << " us, actual: " << current_time - init_time << " us, relative: " relative);
+  if (relative > 1.2) {
+    log_app.warning() << "sleep took too long - goal: " << microseconds <<
+      " us, actual: " << current_time - init_time << " us, relative: " <<
+      relative;
   }
 }
 
@@ -236,7 +238,7 @@ void top_level_task(const void *args, size_t arglen,
 
       DelayTaskArgs d_args;
       d_args.id = count++;
-      d_args.sleep_useconds = 250000;
+      d_args.sleep_useconds = 500000;
       d_args.inst = tgt_inst;
       Event e = (to_group ? pgrp : all_cpus[i]).spawn(DELAY_TASK, &d_args, sizeof(d_args),
 						      Event::NO_EVENT, priority);
@@ -245,7 +247,7 @@ void top_level_task(const void *args, size_t arglen,
 	pgrp_events.insert(e);
     }
     // small delay after each batch to make sure the tasks are all enqueued
-    accurate_sleep(100000);
+    accurate_sleep(200000);
   }
   log_app.info() << count << " tasks launched";
 
