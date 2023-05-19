@@ -9283,13 +9283,13 @@ namespace Legion {
             {
               LegionSpy::log_mapping_dependence(
                   get_unique_id(), current_fence_uid, 0,
-                  current_mapping_fence_gen, idx, TRUE_DEPENDENCE);
+                  op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
             }
           }
           else
             LegionSpy::log_mapping_dependence(
                 get_unique_id(), current_fence_uid, 0,
-                current_mapping_fence_gen, 0, TRUE_DEPENDENCE);
+                op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
         }
 #endif
       }
