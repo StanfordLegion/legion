@@ -56,13 +56,13 @@ void accurate_sleep(long long microseconds) {
   long long init_time = Realm::Clock::current_time_in_microseconds();
   long long current_time = init_time;
 
-#if 0
+#if 1
   // Attempt to do a more accurate sleep by breaking the interval into
   // smaller pieces of size `granule` microseconds.
 
   long long final_target_time = init_time + microseconds;
 
-  const long long granule = 20000; // 20 ms
+  const long long granule = 100000; // 100 ms
   while (final_target_time - current_time > granule) {
     usleep(granule);
     current_time = Realm::Clock::current_time_in_microseconds();
