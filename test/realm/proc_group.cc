@@ -33,22 +33,6 @@ enum {
   FID_TASK_END,   // double
 };
 
-long long duration_microseconds(const struct timespec from, const struct timespec to) {
-  return ((long long)(to.tv_sec) - (long long)(from.tv_sec)) * 1000000 +
-    ((long long)(to.tv_nsec) - (long long)(from.tv_nsec)) / 1000;
-}
-
-struct timespec add_microseconds(const struct timespec time, long long microseconds) {
-  long long new_nsec = time.tv_nsec + microseconds * 1000;
-  long long new_sec = time.tv_sec + new_nsec / 1000000000;
-  new_nsec = new_nsec % 1000000000;
-
-  struct timespec result;
-  result.tv_sec = new_sec;
-  result.tv_nsec = new_nsec;
-  return result;
-}
-
 void accurate_sleep(long long microseconds) {
   // Sleep can be inaccurate depending on system configuration and load,
   // at least track that here so that we know when the sleep is accurate.
