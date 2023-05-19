@@ -532,8 +532,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &execution_events) = 0;
+          const std::vector<ApUserEvent> &unmap_events) = 0;
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                       std::set<RtEvent> &applied) = 0;
       virtual void receive_created_region_contexts(RegionTreeContext ctx,
@@ -765,10 +764,6 @@ namespace Legion {
     public:
       const bool inline_task;
       const bool implicit_task; 
-#ifdef LEGION_SPY
-    protected:
-      UniqueID current_fence_uid;
-#endif
     }; 
 
     class InnerContext : public TaskContext, public Murmur3Hasher::HashVerifier,
@@ -1594,7 +1589,8 @@ namespace Legion {
       void register_child_complete(Operation *op);
       void register_child_commit(Operation *op); 
       ReorderBufferEntry& find_rob_entry(Operation *op);
-      ApEvent register_implicit_dependences(Operation *op);
+      ApEvent register_implicit_dependences(Operation *op, 
+                              RtEvent &mappin_fence_event);
     public:
       RtEvent get_current_mapping_fence_event(void);
       ApEvent get_current_execution_fence_event(void);
@@ -1656,8 +1652,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &execution_events);
+          const std::vector<ApUserEvent> &unmap_events);
       virtual EquivalenceSet* create_initial_equivalence_set(unsigned idx1,
                                                   const RegionRequirement &req);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
@@ -1934,9 +1929,12 @@ namespace Legion {
       // indicating that it is no longer far enough ahead
       bool currently_active_context;
     protected:
-      FenceOp *current_mapping_fence;
-      GenerationID mapping_fence_gen;
+#ifdef LEGION_SPY
+      UniqueID current_fence_uid;
+      GenerationID current_mapping_fence_gen;
+#endif
       unsigned current_mapping_fence_index;
+      RtEvent current_mapping_fence_event;
       ApEvent current_execution_fence_event;
       unsigned current_execution_fence_index;
       // We currently do not track dependences for dependent partitioning
@@ -3791,8 +3789,7 @@ namespace Legion {
       virtual void initialize_region_tree_contexts(
           const std::vector<RegionRequirement> &clone_requirements,
           const LegionVector<VersionInfo> &version_infos,
-          const std::vector<ApUserEvent> &unmap_events,
-          std::set<RtEvent> &execution_events);
+          const std::vector<ApUserEvent> &unmap_events);
       virtual void invalidate_region_tree_contexts(const bool is_top_level_task,
                                                    std::set<RtEvent> &applied);
       virtual void receive_created_region_contexts(RegionTreeContext ctx,

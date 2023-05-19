@@ -2288,7 +2288,11 @@ namespace Legion {
       }
       parent_ctx->invalidate_trace_cache(trace, this);
       // See if we have any fence dependences
-      execution_fence_event = parent_ctx->register_implicit_dependences(this);
+      RtEvent mapping_fence_event;
+      execution_fence_event =
+        parent_ctx->register_implicit_dependences(this, mapping_fence_event);
+      if (mapping_fence_event.exists())
+        mapping_tracker->add_mapping_dependence(mapping_fence_event);
     }
 
     //--------------------------------------------------------------------------
