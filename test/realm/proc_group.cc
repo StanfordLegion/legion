@@ -59,9 +59,9 @@ void accurate_sleep(long long microseconds) {
 
   long long current_time = init_time;
   const long long granule = 20000; // 20 ms
-  while (final_target_time - current_time > 0) {
-    long long target_time = std::min(final_target_time - current_time, granule);
-    usleep(target_time);
+  while (final_target_time - current_time > granule) {
+    //long long target_time = std::min(final_target_time - current_time, granule);
+    usleep(granule);//target_time);
     current_time = Realm::Clock::current_time_in_microseconds();
   }
 
