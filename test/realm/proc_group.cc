@@ -238,7 +238,7 @@ void top_level_task(const void *args, size_t arglen,
 
       DelayTaskArgs d_args;
       d_args.id = count++;
-      d_args.sleep_useconds = 500000;
+      d_args.sleep_useconds = 1000000;
       d_args.inst = tgt_inst;
       Event e = (to_group ? pgrp : all_cpus[i]).spawn(DELAY_TASK, &d_args, sizeof(d_args),
 						      Event::NO_EVENT, priority);
@@ -247,7 +247,7 @@ void top_level_task(const void *args, size_t arglen,
 	pgrp_events.insert(e);
     }
     // small delay after each batch to make sure the tasks are all enqueued
-    accurate_sleep(200000);
+    accurate_sleep(400000);
   }
   log_app.info() << count << " tasks launched";
 
