@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
@@ -32,6 +33,41 @@ enum {
   FID_TASK_END,   // double
 };
 
+long long duration_microseconds(const struct timespec from, const struct timespec to) {
+  return ((long long)(to.tv_sec) - (long long)(from.tv_sec)) * 1000000 +
+    ((long long)(to.tv_nsec) - (long long)(from.tv_nsec)) / 1000;
+}
+
+struct timespec add_microseconds(const struct timespec time, long long microseconds) {
+  long long new_nsec = time.tv_nsec + microseconds * 1000;
+  long long new_sec = time.tv_sec + new_nsec / 1000000000;
+  new_nsec = new_nsec % 1000000000;
+
+  struct timespec result;
+  result.tv_sec = new_sec;
+  result.tv_nsec = new_nsec;
+  return result;
+}
+
+void accurate_sleep(long long microseconds) {
+  // Attempt to do a more accurate sleep by breaking the interval into
+  // smaller pieces of size `granule` microseconds.
+
+  long long init_time = Realm::Clock::current_time_in_microseconds();
+
+  long long final_target_time = init_time + microseconds;
+
+  long long current_time = init_time;
+  const long long granule = 20000; // 20 ms
+  while (final_target_time - current_time > 0) {
+    long long target_time = std::min(final_target_time - current_time, granule);
+    usleep(target_time);
+    current_time = Realm::Clock::current_time_in_microseconds();
+  }
+
+  printf("goal: %lld us, actual: %lld us, relative: %f\n", microseconds, current_time - init_time, ((double)(current_time - init_time))/microseconds);
+}
+
 void delay_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)
 {
@@ -48,7 +84,7 @@ void delay_task(const void *args, size_t arglen,
   task_start_times[d_args.id] = Clock::current_time();
 
   //printf("starting task %d on processor " IDFMT "\n", d_args.id, p.id);
-  usleep(d_args.sleep_useconds);
+  accurate_sleep(d_args.sleep_useconds);
   //printf("ending task %d on processor " IDFMT "\n", d_args.id, p.id);
 
   task_end_times[d_args.id] = Clock::current_time();
@@ -199,7 +235,7 @@ void top_level_task(const void *args, size_t arglen,
 	pgrp_events.insert(e);
     }
     // small delay after each batch to make sure the tasks are all enqueued
-    usleep(100000);
+    accurate_sleep(100000);
   }
   log_app.info() << count << " tasks launched";
 
