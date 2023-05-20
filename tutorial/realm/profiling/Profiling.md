@@ -32,6 +32,9 @@ task_prs.add_request(profile_proc, COMPUTE_PROF_TASK, &task_result, sizeof(Compu
 Realm profiling adopts a callback design, where a profiling task is launched
 to report profiling results when an operation is completed. Therefore, as shown on the code above, 
 we need to specify the task (`COMPUTE_PROF_TASK`) and processor (`profile_proc`) to be used to launch the task for the ProfilingRequest.
+It is noted that we use utility processor to launch profiling tasks because we want
+to leave the cpu processor for regular tasks. It does not mean that profiling tasks
+can not be launched on cpu processors. 
 
 ## Adding Performance Metrics
 
