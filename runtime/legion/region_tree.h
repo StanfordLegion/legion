@@ -3021,14 +3021,15 @@ namespace Legion {
       };
       class RemoteKDTracker {
       public:
-        RemoteKDTracker(std::set<LegionColor> &colors, Runtime *runtime);
+        RemoteKDTracker(Runtime *runtime);
       public:
-        void find_remote_interfering(const std::set<AddressSpaceID> &targets,
+        RtEvent find_remote_interfering(const std::set<AddressSpaceID> &targets,
                           IndexPartition handle, IndexSpaceExpression *expr);
+        void get_remote_interfering(std::set<LegionColor> &colors);
         RtUserEvent process_remote_interfering_response(Deserializer &derez);
       protected:
         mutable LocalLock tracker_lock;
-        std::set<LegionColor> &colors;
+        std::set<LegionColor> remote_colors;
         Runtime *const runtime;
         RtUserEvent done_event;
         std::atomic<unsigned> remaining;
@@ -3075,6 +3076,8 @@ namespace Legion {
                                    Deserializer &derez, AddressSpaceID source);
     public:
       bool has_color(const LegionColor c);
+      AddressSpaceID find_color_creator_space(LegionColor color, 
+                                  CollectiveMapping *&child_mapping) const;
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
       void add_child(IndexSpaceNode *child);
       void set_child(IndexSpaceNode *child);
@@ -3280,8 +3283,12 @@ namespace Legion {
       KDNode<DIM,T,AddressSpaceID> *kd_remote;
       RtUserEvent kd_remote_ready;
     protected:
+      // Each color appears exactly once in this data structure
       std::vector<std::pair<Rect<DIM,T>,LegionColor> > *dense_shard_rects;
-      std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> > *sparse_shard_rects;
+      // There might be multiple rectangles for each color here
+      // These rectangles are just an approximation of the actual
+      // points in the children with sparsity maps
+      std::vector<std::pair<Rect<DIM,T>,LegionColor> > *sparse_shard_rects;
     };
 
     /**
