@@ -7268,7 +7268,7 @@ namespace Legion {
           {
             // Compute ceil(log(N)) of the total children to know how many
             // rectangles we can ask for in the approximation
-            size_t power = 1;
+            LegionColor power = 1;
             while (power < total_children)
             {
               logn_children++;
