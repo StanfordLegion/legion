@@ -36,6 +36,7 @@ add_subdirectory(subgraph)
 add_subdirectory(reservation)
 add_subdirectory(completion_queue)
 add_subdirectory(profiling)
-if (REALM_USE_CUDA OR REALM_USE_HIP)
+# FIXME: HIP does not appear to have full support for surf2Dwrite
+if (REALM_USE_CUDA)# OR REALM_USE_HIP)
   add_subdirectory(cuda_interop)
 endif ()

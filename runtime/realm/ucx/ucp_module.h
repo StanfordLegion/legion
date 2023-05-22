@@ -19,7 +19,6 @@
 #ifndef UCP_MODULE_H
 #define UCP_MODULE_H
 
-#include <ucp/api/ucp.h>
 #include "realm/network.h"
 
 namespace Realm {

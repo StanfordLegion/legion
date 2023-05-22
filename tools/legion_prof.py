@@ -2206,7 +2206,6 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
             cnt = cnt+1
-        print(val)
         return val
 
     @typeassert(instances=dict)
