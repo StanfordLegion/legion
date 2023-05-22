@@ -216,7 +216,7 @@ void top_level_task(const void *args, size_t arglen,
   Runtime::get_runtime().shutdown(Event::NO_EVENT, errors == 0 ? 0 : 1);
 }
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
 // defined in multiaffine_gpu.cu
 void register_multiaffine_gpu_tasks();
 #endif
@@ -247,7 +247,7 @@ int main(int argc, char **argv)
 				   ProfilingRequestSet(),
 				   0, 0).wait();
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
   register_multiaffine_gpu_tasks();
 #endif
 
