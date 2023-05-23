@@ -72,7 +72,7 @@ if(Legion_USE_HIP)
   # some tests have HIP source files too
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
-  set(CUDASRC_multiaffine multiaffine_gpu.cu)
+  set(HIPSRC_multiaffine multiaffine_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)
