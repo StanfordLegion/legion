@@ -4181,78 +4181,149 @@ namespace Legion {
       return *this;
     }
 
-    /* static */
-    void CopyOp::init_ops_from_vec(LegionVector<CopyOp::Operand> &ops,
-                                   size_t *offsets,
-                                   ReqType type,
-                                   std::vector<RegionRequirement> &reqs)
+    std::vector<RegionRequirement> &CopyOp::get_reqs_by_type(ReqType type)
     {
-      offsets[type] = ops.size();
-      for (size_t i = 0; i < reqs.size(); i++)
-        ops.emplace_back(i, type, ops.size(), reqs[i]);
-    }
-
-    /* static */ CopyOp::Operand *
-    CopyOp::get_operand_ptr(LegionVector<Operand> &ops,
-                            const size_t offsets[REQ_OFFSETS_COUNT],
-                            ReqType type,
-                            size_t copy_index)
-    {
-      size_t start = offsets[type];
-      size_t count = offsets[type + 1] - start;
-
-      if (copy_index >= count)
-        return nullptr;
-
-      return &ops[start + copy_index];
+      switch (type)
+      {
+      case SRC_REQ:
+        return src_requirements;
+      case DST_REQ:
+        return dst_requirements;
+      case GATHER_REQ:
+        return src_indirect_requirements;
+      case SCATTER_REQ:
+        return dst_indirect_requirements;
+      }
+      // should never get here
+      return *(std::vector<RegionRequirement> *)nullptr;
     }
 
     template <typename T>
-    void CopyOp::initialize_copies(const T *launcher,
-                                   const SingleCopy *other_copies)
+    class CopyOp::Indexable
     {
-      assert((launcher == nullptr) != (other_copies == nullptr));
+    public:
+      Indexable(const std::vector<T> &vec)
+        :vec(&vec),
+         base(nullptr),
+         stride(0),
+         offset(0),
+         count(vec.size())
+      {}
 
+      Indexable(std::vector<T> &vec)
+        :vec(nullptr),
+         base(vec.data()),
+         stride(sizeof (T)),
+         offset(0),
+         count(vec.size())
+      {}
+
+      template <typename C>
+      Indexable(C *c, T *t)
+        :vec(nullptr),
+         base(c),
+         stride(sizeof *c),
+         offset((char *)t - (char *)c),
+         count(ULONG_MAX)
+      {}
+
+      Indexable(T *t, size_t count)
+        :vec(nullptr),
+         base(t),
+         stride(sizeof *t),
+         offset(0),
+         count(count)
+      {}
+
+      T get(size_t idx, T def)
+      {
+        if (idx >= count)
+          return def;
+
+        if (vec != nullptr)
+          return (*vec)[idx];
+
+        return *from_base(idx);
+      }
+
+      T *ptr(size_t idx)
+      {
+        if (idx >= count || base == nullptr)
+          return nullptr;
+
+        return from_base(idx);
+      }
+
+    private:
+      T *from_base(size_t idx)
+      {
+        return (T *)((char *)base + idx * stride + offset);
+      }
+
+      const std::vector<T> *vec;
+      void *base;
+      size_t stride;
+      size_t offset;
+      size_t count;
+    };
+
+    template<typename T>
+    void CopyOp::initialize_copies_with_launcher(const T &launcher)
+    {
+      Indexable<bool> is_gather(launcher.src_indirect_is_range);
+      Indexable<bool> is_scatter(launcher.dst_indirect_is_range);
+      CopyInitInfo info{is_gather, is_scatter};
+      initialize_copies(info);
+    }
+
+    void
+    CopyOp::initialize_copies_with_copies(std::vector<SingleCopy> &other)
+    {
+      SingleCopy *cps = other.data();
+      Indexable<bool> is_gather(cps, &cps->gather_is_range);
+      Indexable<bool> is_scatter(cps, &cps->scatter_is_range);
+      CopyInitInfo info{is_gather, is_scatter};
+      initialize_copies(info);
+    }
+
+    void CopyOp::initialize_copies(const CopyInitInfo &info)
+    {
       operands.clear();
       copies.clear();
 
-      size_t offsets[REQ_OFFSETS_COUNT];
+      for (ReqType type = SRC_REQ; type < REQ_COUNT; type = ReqType(type + 1))
+      {
+        std::vector<RegionRequirement> &reqs = get_reqs_by_type(type);
 
-      init_ops_from_vec(operands, offsets, SRC_REQ, src_requirements);
-      init_ops_from_vec(operands, offsets, DST_REQ, dst_requirements);
-      init_ops_from_vec(operands,
-                        offsets,
-                        GATHER_REQ,
-                        src_indirect_requirements);
-      init_ops_from_vec(operands,
-                        offsets,
-                        SCATTER_REQ,
-                        dst_indirect_requirements);
-      offsets[REQ_COUNT] = operands.size();
+        for (size_t cpidx = 0; cpidx < reqs.size(); cpidx++)
+          operands.emplace_back(cpidx, type, operands.size(), reqs[cpidx]);
+      }
 
-      FieldInitHelper<bool> g_is_range(other_copies,
-                                       &other_copies->gather_is_range,
-                                       &launcher->src_indirect_is_range,
-                                       false);
-      FieldInitHelper<bool> s_is_range(other_copies,
-                                       &other_copies->scatter_is_range,
-                                       &launcher->dst_indirect_is_range,
-                                       false);
+      size_t offset = 0;
+      std::vector<Indexable<Operand>> ops_by_type;
+      for (ReqType type = SRC_REQ; type < REQ_COUNT; type = ReqType(type + 1))
+      {
+        size_t count = get_reqs_by_type(type).size();
+        ops_by_type.emplace_back(&operands[offset], count);
+        offset += get_reqs_by_type(type).size();
+      }
+
+      Indexable<Grant> grant(grants);
+      Indexable<PhaseBarrier> waits(wait_barriers);
+      Indexable<PhaseBarrier> arrives(arrive_barriers);
 
       for (size_t i = 0; i < src_requirements.size(); i++)
       {
         copies.emplace_back(i,
-                            get_operand_ptr(operands, offsets, SRC_REQ, i),
-                            get_operand_ptr(operands, offsets, DST_REQ, i),
-                            get_operand_ptr(operands, offsets, GATHER_REQ, i),
-                            get_operand_ptr(operands, offsets, SCATTER_REQ, i),
-                            i < grants.size() ? &grants[i] : nullptr,
-                            i < wait_barriers.size() ? &wait_barriers[i]
-                                                     : nullptr,
-                            i < arrive_barriers.size() ? &arrive_barriers[i]
-                                                       : nullptr,
-                            g_is_range[i],
-                            s_is_range[i]);
+                            ops_by_type[SRC_REQ].ptr(i),
+                            ops_by_type[DST_REQ].ptr(i),
+                            ops_by_type[GATHER_REQ].ptr(i),
+                            ops_by_type[SCATTER_REQ].ptr(i),
+                            grant.ptr(i),
+                            waits.ptr(i),
+                            arrives.ptr(i),
+                            info.gather_is_range.get(i, false),
+                            info.scatter_is_range.get(i, false));
       }
     }
 
@@ -4434,7 +4505,7 @@ namespace Legion {
       {
         perform_type_checking();
       }
-      initialize_copies(&launcher, nullptr);
+      initialize_copies_with_launcher(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6861,7 +6932,7 @@ namespace Legion {
       }
       if (runtime->check_privileges)
         perform_type_checking();
-      initialize_copies(&launcher, nullptr);
+      initialize_copies_with_launcher(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -7830,11 +7901,10 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
 
-      initialize_copies<CopyLauncher>(nullptr, owner->copies.data());
+      initialize_copies_with_copies(owner->copies);
 
       for (CopyOp::Operand &op : operands)
         op.parent_index = owner->operands[op.req_index].parent_index;
-
     }
 
     //--------------------------------------------------------------------------

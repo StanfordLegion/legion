@@ -1344,8 +1344,8 @@ namespace Legion {
         Grant * const grant;
         PhaseBarrier * const wait_barrier;
         PhaseBarrier * const arrive_barrier;
-        const bool gather_is_range;
-        const bool scatter_is_range;
+        bool gather_is_range;
+        bool scatter_is_range;
 
         // calculated in CopyOp
         std::vector<IndirectRecord> src_indirect_records;
@@ -1354,50 +1354,23 @@ namespace Legion {
       };
 
     protected:
-      template <typename T>
-      void initialize_copies(const T *launcher, const SingleCopy *other_copies);
+      template<typename T>
+      void initialize_copies_with_launcher(const T &launcher);
+
+      void initialize_copies_with_copies(std::vector<SingleCopy> &other);
 
     private: // used internally for initialization
-      template<typename F>
-      class FieldInitHelper
+      template <typename T> class Indexable;
+
+      struct CopyInitInfo
       {
-      public:
-        FieldInitHelper(const SingleCopy *copies,
-                        const F *field_in_copy_zero,
-                        const std::vector<F> *fields,
-                        F missing)
-        :copies(copies),
-         offset((char *)field_in_copy_zero - (char *)copies),
-         fields(fields),
-         missing(missing)
-        {
-        }
-
-        const F operator[](size_t idx)
-        {
-          if (copies != nullptr)
-            return *(F *)((char *)(copies + idx) + offset);
-
-          return fields->size() > idx ? (*fields)[idx] : missing;
-        }
-
-      private:
-        const SingleCopy *copies;
-        size_t offset;
-        const std::vector<F> *fields;
-        F missing;
+        Indexable<bool> &gather_is_range;
+        Indexable<bool> &scatter_is_range;
       };
 
-      static void
-      init_ops_from_vec(LegionVector<Operand> &ops,
-                        size_t *offsets,
-                        ReqType type,
-                        std::vector<RegionRequirement> &reqs);
-      static Operand *
-      get_operand_ptr(LegionVector<Operand> &ops,
-                      const size_t offsets[REQ_OFFSETS_COUNT],
-                      ReqType type,
-                      size_t copy_index);
+      void initialize_copies(const CopyInitInfo &info);
+      std::vector<RegionRequirement> &get_reqs_by_type(ReqType type);
+
     public: // per-operand and per-copy data
       LegionVector<Operand> operands;
       std::vector<SingleCopy> copies;
