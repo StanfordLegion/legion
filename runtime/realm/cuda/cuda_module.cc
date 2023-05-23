@@ -4117,9 +4117,11 @@ namespace Realm {
                                << pci_info.busId << "(" << std::hex
                                << pci_info.pciDeviceId << "), ignoring...";
               }
-            } else if(dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH) {
+            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
+              // Accumulate the link bandwidth for one gpu and assume symmetry
+              // across all GPUs, and all GPus have access to the NVSWITCH fabric
               nvswitch_bandwidth += nvlink_bandwidth;
-            } else if(dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU) {
+            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
               // TODO: use the npu_bandwidth for sysmem affinities
               // npu_bandwidth += nvlink_bandwidth;
             }
