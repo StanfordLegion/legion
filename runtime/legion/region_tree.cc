@@ -10112,7 +10112,7 @@ namespace Legion {
             rez.serialize(total_children_volume);
             rez.serialize(total_intersection_volume);
           }
-          runtime->send_index_partition_disjoint_update(target, rez);
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
         }
       }
       return false;

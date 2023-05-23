@@ -21549,12 +21549,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::send_index_partition_disjoint_update(AddressSpaceID target,
-                                                       Serializer &rez)
+                                          Serializer &rez, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message<
-        SEND_INDEX_PARTITION_DISJOINT_UPDATE>(rez, 
-                  true/*flush*/, true/*response*/); 
+        SEND_INDEX_PARTITION_DISJOINT_UPDATE>(rez, true/*flush*/, 
+            true/*response*/, false/*shutdown*/, precondition); 
     }
 
     //--------------------------------------------------------------------------
