@@ -1142,9 +1142,6 @@ namespace Legion {
         GATHER_REQ = 2,
         SCATTER_REQ = 3,
       };
-    private:
-      static constexpr size_t REQ_COUNT = SCATTER_REQ + 1;
-      static constexpr size_t REQ_OFFSETS_COUNT = REQ_COUNT + 1;
     public:
       struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross>,
                                   public PhysicalTraceInfo {
@@ -1356,19 +1353,15 @@ namespace Legion {
     protected:
       template<typename T>
       void initialize_copies_with_launcher(const T &launcher);
-
       void initialize_copies_with_copies(std::vector<SingleCopy> &other);
 
     private: // used internally for initialization
-      template <typename T> class Indexable;
+      static constexpr size_t REQ_COUNT = SCATTER_REQ + 1;
 
-      struct CopyInitInfo
-      {
-        Indexable<bool> &gather_is_range;
-        Indexable<bool> &scatter_is_range;
-      };
+      template <typename T> class InitField;
+      struct InitInfo;
 
-      void initialize_copies(const CopyInitInfo &info);
+      void initialize_copies(InitInfo &info);
       std::vector<RegionRequirement> &get_reqs_by_type(ReqType type);
 
     public: // per-operand and per-copy data

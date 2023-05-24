@@ -4183,57 +4183,29 @@ namespace Legion {
 
     std::vector<RegionRequirement> &CopyOp::get_reqs_by_type(ReqType type)
     {
-      switch (type)
-      {
-      case SRC_REQ:
-        return src_requirements;
-      case DST_REQ:
-        return dst_requirements;
-      case GATHER_REQ:
-        return src_indirect_requirements;
-      case SCATTER_REQ:
-        return dst_indirect_requirements;
-      }
-      // should never get here
-      return *(std::vector<RegionRequirement> *)nullptr;
+      std::vector<RegionRequirement> *reqs[] = {&src_requirements,
+                                                &dst_requirements,
+                                                &src_indirect_requirements,
+                                                &dst_indirect_requirements};
+      return *reqs[type];
     }
 
     template <typename T>
-    class CopyOp::Indexable
+    class CopyOp::InitField
     {
     public:
-      Indexable(const std::vector<T> &vec)
-        :vec(&vec),
-         base(nullptr),
-         stride(0),
-         offset(0),
-         count(vec.size())
-      {}
+      InitField(const std::vector<T> &vec)
+        :InitField(&vec, nullptr, 0, 0, vec.size()) {}
 
-      Indexable(std::vector<T> &vec)
-        :vec(nullptr),
-         base(vec.data()),
-         stride(sizeof (T)),
-         offset(0),
-         count(vec.size())
-      {}
+      InitField(T *t, size_t count)
+        :InitField(nullptr, t, sizeof *t, 0, count) {}
+
+      InitField(std::vector<T> &vec)
+        :InitField(vec.data(), vec.size()) {}
 
       template <typename C>
-      Indexable(C *c, T *t)
-        :vec(nullptr),
-         base(c),
-         stride(sizeof *c),
-         offset((char *)t - (char *)c),
-         count(ULONG_MAX)
-      {}
-
-      Indexable(T *t, size_t count)
-        :vec(nullptr),
-         base(t),
-         stride(sizeof *t),
-         offset(0),
-         count(count)
-      {}
+      InitField(C *c, T *t)
+        :InitField(nullptr, c, sizeof *c, (char *)t - (char *)c, ULONG_MAX) {}
 
       T get(size_t idx, T def)
       {
@@ -4243,7 +4215,7 @@ namespace Legion {
         if (vec != nullptr)
           return (*vec)[idx];
 
-        return *from_base(idx);
+        return *ptr(idx);
       }
 
       T *ptr(size_t idx)
@@ -4251,14 +4223,16 @@ namespace Legion {
         if (idx >= count || base == nullptr)
           return nullptr;
 
-        return from_base(idx);
+        return (T *)((char *)base + idx * stride + offset);
       }
 
     private:
-      T *from_base(size_t idx)
-      {
-        return (T *)((char *)base + idx * stride + offset);
-      }
+      InitField(const std::vector<T> *vec,
+                void *base,
+                size_t stride,
+                size_t offset,
+                size_t count)
+        :vec(vec), base(base), stride(stride), offset(offset), count(count) {}
 
       const std::vector<T> *vec;
       void *base;
@@ -4267,12 +4241,17 @@ namespace Legion {
       size_t count;
     };
 
+    struct CopyOp::InitInfo
+    {
+      InitField<bool> gather_is_range;
+      InitField<bool> scatter_is_range;
+    };
+
     template<typename T>
     void CopyOp::initialize_copies_with_launcher(const T &launcher)
     {
-      Indexable<bool> is_gather(launcher.src_indirect_is_range);
-      Indexable<bool> is_scatter(launcher.dst_indirect_is_range);
-      CopyInitInfo info{is_gather, is_scatter};
+      InitInfo info{InitField<bool>(launcher.src_indirect_is_range),
+                    InitField<bool>(launcher.dst_indirect_is_range)};
       initialize_copies(info);
     }
 
@@ -4280,13 +4259,12 @@ namespace Legion {
     CopyOp::initialize_copies_with_copies(std::vector<SingleCopy> &other)
     {
       SingleCopy *cps = other.data();
-      Indexable<bool> is_gather(cps, &cps->gather_is_range);
-      Indexable<bool> is_scatter(cps, &cps->scatter_is_range);
-      CopyInitInfo info{is_gather, is_scatter};
+      InitInfo info{InitField<bool>(cps, &cps->gather_is_range),
+                    InitField<bool>(cps, &cps->scatter_is_range)};
       initialize_copies(info);
     }
 
-    void CopyOp::initialize_copies(const CopyInitInfo &info)
+    void CopyOp::initialize_copies(InitInfo &info)
     {
       operands.clear();
       copies.clear();
@@ -4300,17 +4278,18 @@ namespace Legion {
       }
 
       size_t offset = 0;
-      std::vector<Indexable<Operand>> ops_by_type;
+      std::vector<InitField<Operand>> ops_by_type;
+
       for (ReqType type = SRC_REQ; type < REQ_COUNT; type = ReqType(type + 1))
       {
         size_t count = get_reqs_by_type(type).size();
         ops_by_type.emplace_back(&operands[offset], count);
-        offset += get_reqs_by_type(type).size();
+        offset += count;
       }
 
-      Indexable<Grant> grant(grants);
-      Indexable<PhaseBarrier> waits(wait_barriers);
-      Indexable<PhaseBarrier> arrives(arrive_barriers);
+      InitField<Grant> grant(grants);
+      InitField<PhaseBarrier> waits(wait_barriers);
+      InitField<PhaseBarrier> arrives(arrive_barriers);
 
       for (size_t i = 0; i < src_requirements.size(); i++)
       {
