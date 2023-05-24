@@ -1996,7 +1996,7 @@ pub struct Copy {
     chan_id: Option<ChanID>,
     pub op_id: OpID,
     pub size: u64,
-    request_type: u32,
+    _request_type: u32,
     pub copy_kind: Option<CopyKind>,
     pub copy_inst_infos: Vec<CopyInstInfo>,
 }
@@ -2017,7 +2017,7 @@ impl Copy {
             chan_id: None,
             op_id,
             size,
-            request_type,
+            _request_type: request_type,
             copy_kind: None,
             copy_inst_infos: Vec::new(),
         }
