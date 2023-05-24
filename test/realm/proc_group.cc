@@ -4,11 +4,11 @@
 #include <cassert>
 #include <cstring>
 
-#include "osdep.h"
-
 #include <time.h>
 
 #include "realm.h"
+
+#include "osdep.h"
 
 using namespace Realm;
 
@@ -32,37 +32,6 @@ enum {
   FID_TASK_START, // double
   FID_TASK_END,   // double
 };
-
-void accurate_sleep(long long microseconds) {
-  // Sleep can be inaccurate depending on system configuration and load,
-  // at least track that here so that we know when the sleep is accurate.
-
-  long long init_time = Realm::Clock::current_time_in_microseconds();
-  long long current_time = init_time;
-
-#if 1
-  // Attempt to do a more accurate sleep by breaking the interval into
-  // smaller pieces of size `granule` microseconds.
-
-  long long final_target_time = init_time + microseconds;
-
-  const long long granule = 100000; // 100 ms
-  while (final_target_time - current_time > granule) {
-    usleep(granule);
-    current_time = Realm::Clock::current_time_in_microseconds();
-  }
-#else
-  usleep(microseconds);
-  current_time = Realm::Clock::current_time_in_microseconds();
-#endif
-
-  double relative = ((double)(current_time - init_time))/microseconds;
-  if (relative > 1.2) {
-    log_app.warning() << "sleep took too long - goal: " << microseconds <<
-      " us, actual: " << current_time - init_time << " us, relative: " <<
-      relative;
-  }
-}
 
 void delay_task(const void *args, size_t arglen, 
 		const void *userdata, size_t userlen, Processor p)

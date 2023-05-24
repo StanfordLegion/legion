@@ -5,10 +5,10 @@
 
 #include <time.h>
 
-#include "osdep.h"
-
 #include "realm.h"
 #include "realm/profiling.h"
+
+#include "osdep.h"
 
 using namespace Realm;
 using namespace Realm::ProfilingMeasurements;
