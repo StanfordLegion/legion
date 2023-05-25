@@ -8961,22 +8961,8 @@ namespace Legion {
         {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
-          // If we're reading or reducing then make a collective view
-          if ((IS_READ_ONLY(req) || IS_REDUCE(req) || IS_COLLECTIVE(req)) &&
-              !std::binary_search(check_collective_regions.begin(),
-                check_collective_regions.begin()+previous_collectives, idx))
-            check_collective_regions.push_back(idx);
         }
-        // If all the points are using the same logical region then
-        // record that we should do a collective rendezvous
-        else if ((req.handle_type == LEGION_REGION_PROJECTION) &&
-            (req.projection == 0) && (IS_READ_ONLY(req) || IS_REDUCE(req)))
-        {
-          if (!std::binary_search(check_collective_regions.begin(),
-                check_collective_regions.begin()+previous_collectives, idx))
-            check_collective_regions.push_back(idx);
-        }
-        else if (IS_COLLECTIVE(req))
+        if (IS_COLLECTIVE(req))
         {
           if (!std::binary_search(check_collective_regions.begin(),
                 check_collective_regions.begin()+previous_collectives, idx))

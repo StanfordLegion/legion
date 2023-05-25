@@ -6532,7 +6532,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Mark that this is collective
-      requirement.privilege |= LEGION_COLLECTIVE_MASK;
+      requirement.prop |= LEGION_COLLECTIVE_MASK;
       if (!remap_region && !runtime->unsafe_mapper)
       {
         mapping_check = ctx->get_next_collective_index(COLLECTIVE_LOC_74);

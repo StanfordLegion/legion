@@ -21543,6 +21543,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline CoherenceProperty operator~(CoherenceProperty p)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(~unsigned(p));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator|(CoherenceProperty left, 
+                                       CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(unsigned(left) | unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator&(CoherenceProperty left,
+                                       CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(unsigned(left) & unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator^(CoherenceProperty left,
+                                       CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<CoherenceProperty>(unsigned(left) ^ unsigned(right));
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator|=(CoherenceProperty &left,
+                                        CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l |= r;
+      return left = static_cast<CoherenceProperty>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator&=(CoherenceProperty &left,
+                                        CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l &= r;
+      return left = static_cast<CoherenceProperty>(l);
+    }
+
+    //--------------------------------------------------------------------------
+    inline CoherenceProperty operator^=(CoherenceProperty &left,
+                                        CoherenceProperty right)
+    //--------------------------------------------------------------------------
+    {
+      unsigned l = static_cast<unsigned>(left);
+      unsigned r = static_cast<unsigned>(right);
+      l ^= r;
+      return left = static_cast<CoherenceProperty>(l);
+    }
+
+    //--------------------------------------------------------------------------
     inline AllocateMode operator~(AllocateMode a)
     //--------------------------------------------------------------------------
     {

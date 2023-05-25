@@ -41,7 +41,7 @@
 #define IS_DISCARD(req) \
   (((req).privilege & LEGION_DISCARD_MASK) == LEGION_DISCARD_MASK)
 #define IS_COLLECTIVE(req) \
-  (((req).privilege & LEGION_COLLECTIVE_MASK) == LEGION_COLLECTIVE_MASK)
+  (((req).prop & LEGION_COLLECTIVE_MASK) == LEGION_COLLECTIVE_MASK)
 #define PRIV_ONLY(req) \
   ((req).privilege & LEGION_READ_WRITE)
 #define IS_REDUCE(req) \

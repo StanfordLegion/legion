@@ -1389,7 +1389,7 @@ namespace Legion {
       if (HAS_WRITE_DISCARD(r))
         r.privilege |= (LEGION_READ_PRIV | LEGION_REDUCE_PRIV);
       // Then remove any discard and collective masks from the privileges
-      r.privilege &= ~(LEGION_DISCARD_MASK | LEGION_COLLECTIVE_MASK);
+      r.privilege &= ~LEGION_DISCARD_MASK;
     }
 
     //--------------------------------------------------------------------------
