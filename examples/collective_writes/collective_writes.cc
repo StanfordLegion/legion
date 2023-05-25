@@ -100,8 +100,8 @@ void top_level_task(const Task *task,
     IndexTaskLauncher write_launcher(WRITER_TASK_ID, launch_space,
                               TaskArgument(NULL, 0), arg_map);
     write_launcher.add_region_requirement(
-        RegionRequirement(rows_lp, DIV_PID,
-          LEGION_COLLECTIVE_WRITE_DISCARD, LEGION_EXCLUSIVE, lr));
+        RegionRequirement(rows_lp, DIV_PID, LEGION_WRITE_DISCARD,
+          LEGION_COLLECTIVE_EXCLUSIVE, lr));
     write_launcher.add_field(0, FID_X);
     runtime->execute_index_space(ctx, write_launcher);
   }
@@ -111,8 +111,8 @@ void top_level_task(const Task *task,
     IndexTaskLauncher read_launcher(READER_TASK_ID, launch_space,
                               TaskArgument(NULL, 0), arg_map);
     read_launcher.add_region_requirement(
-        RegionRequirement(columns_lp, MOD_PID,
-          LEGION_COLLECTIVE_READ_ONLY, LEGION_EXCLUSIVE, lr));
+        RegionRequirement(columns_lp, MOD_PID, LEGION_READ_ONLY,
+          LEGION_COLLECTIVE_EXCLUSIVE, lr));
     read_launcher.add_field(0, FID_X);
     runtime->execute_index_space(ctx, read_launcher);
   }
