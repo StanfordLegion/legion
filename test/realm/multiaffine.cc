@@ -181,7 +181,9 @@ void top_level_task(const void *args, size_t arglen,
 
   // decide which processor we'll do writes on - use a GPU if available
   Processor proc_write = Machine::ProcessorQuery(Machine::get_machine())
+#if defined(REALM_USE_CUDA) // || defined(REALM_USE_HIP)
     .only_kind(Processor::TOC_PROC)
+#endif
     .first();
   if(!proc_write.exists())
     proc_write = p;
