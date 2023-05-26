@@ -767,7 +767,8 @@ namespace Legion {
       proc_desc_infos.emplace_back(ProcDesc());
       ProcDesc &info = proc_desc_infos.back();
       info.proc_id = p.id;
-      info.kind = p.kind();
+      // Implicit top-level tasks aren't associated with any processor
+      info.kind = p.exists() ? p.kind() : Processor::LOC_PROC;
       const size_t diff = sizeof(ProcDesc);
       owner->update_footprint(diff, this);
       process_proc_mem_aff_desc(p);
