@@ -17,6 +17,9 @@
 
 #include "realm/faults.h"
 #include "realm/profiling.h"
+#ifdef REALM_USE_LIBDW
+#include "realm/mutex.h"
+#endif
 
 #include <stdlib.h>
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS)
@@ -28,9 +31,15 @@
 #ifdef REALM_USE_UNWIND // enabled by default
 #include <unwind.h>
 #include <limits>
-#endif
+#endif /* REALM_USE_UNWIND */
 #include <execinfo.h>
-#endif
+#ifdef REALM_USE_LIBDW
+#include <dwarf.h>
+#include <elfutils/libdw.h>
+#include <elfutils/libdwfl.h>
+#include <unistd.h>
+#endif /* REALM_USE_LIBDW */
+#endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD) */
 #ifdef REALM_HAVE_CXXABI_H
 #include <cxxabi.h>
 #endif
@@ -41,6 +50,10 @@
 #endif
 
 namespace Realm {
+
+#ifdef REALM_USE_LIBDW
+  static Mutex backtrace_mutex;
+#endif
 
 // unwind.h is not supported by Windows
 #if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
@@ -234,9 +247,79 @@ namespace Realm {
 
     if(count > skip)
       pcs.insert(pcs.end(), rawptrs + skip, rawptrs + count);
+
     // recompute the hash too
     pc_hash = compute_hash();
   }
+
+#ifdef REALM_USE_LIBDW
+  static bool die_has_pc(Dwarf_Die *die, Dwarf_Addr pc) 
+  {
+    Dwarf_Addr low, high;
+
+    // continuous range
+    if (dwarf_hasattr(die, DW_AT_low_pc) && dwarf_hasattr(die, DW_AT_high_pc)) {
+      if (dwarf_lowpc(die, &low) != 0) {
+        return false;
+      }
+      if (dwarf_highpc(die, &high) != 0) {
+        Dwarf_Attribute attr_mem;
+        Dwarf_Attribute *attr = dwarf_attr(die, DW_AT_high_pc, &attr_mem);
+        Dwarf_Word value;
+        if (dwarf_formudata(attr, &value) != 0) {
+          return false;
+        }
+        high = low + value;
+      }
+      return pc >= low && pc < high;
+    }
+
+    // non-continuous range.
+    Dwarf_Addr base;
+    ptrdiff_t offset = 0;
+    while ((offset = dwarf_ranges(die, offset, &base, &low, &high)) > 0) {
+      if (pc >= low && pc < high) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static Dwarf_Die *find_fundie_by_pc(Dwarf_Die *parent_die, Dwarf_Addr pc,
+                                      Dwarf_Die *result) 
+  {
+    if (dwarf_child(parent_die, result) != 0) {
+      return 0;
+    }
+
+    Dwarf_Die *die = result;
+    do {
+      switch (dwarf_tag(die)) {
+      case DW_TAG_subprogram:
+      case DW_TAG_inlined_subroutine:
+        if (die_has_pc(die, pc)) {
+          return result;
+        }
+      };
+      bool declaration = false;
+      Dwarf_Attribute attr_mem;
+      dwarf_formflag(dwarf_attr(die, DW_AT_declaration, &attr_mem),
+                     &declaration);
+      if (!declaration) {
+        // let's be curious and look deeper in the tree,
+        // function are not necessarily at the first level, but
+        // might be nested inside a namespace, structure etc.
+        Dwarf_Die die_mem;
+        Dwarf_Die *indie = find_fundie_by_pc(die, pc, &die_mem);
+        if (indie) {
+          *result = die_mem;
+          return result;
+        }
+      }
+    } while (dwarf_siblingof(die, result) == 0);
+    return 0;
+  }
+#endif
 
   // attempts to map the pointers in the back trace to symbol names - this can be
   //   more expensive
@@ -245,21 +328,76 @@ namespace Realm {
     // have we already done the lookup?
     if(!symbols.empty()) return;
 
-    symbols.resize(pcs.size());
+    symbols.resize(pcs.size(), "unknown symbol");
+
+#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
+#ifdef REALM_USE_LIBDW
+    filenames.resize(pcs.size(), "unknown file");
+    line_numbers.resize(pcs.size(), 0);
+    AutoLock<> al(backtrace_mutex);
+
+    // Initialize Dwfl 
+    Dwfl_Callbacks proc_callbacks;
+    proc_callbacks.find_debuginfo = dwfl_standard_find_debuginfo,
+    proc_callbacks.debuginfo_path = nullptr,
+    proc_callbacks.find_elf = dwfl_linux_proc_find_elf;
+    Dwfl *dwfl_handle = dwfl_begin(&proc_callbacks);
+    assert(dwfl_handle != nullptr);
+
+    // use the current process.
+    dwfl_report_begin(dwfl_handle);
+    int r = dwfl_linux_proc_report(dwfl_handle, getpid());
+    dwfl_report_end(dwfl_handle, NULL, NULL);
+    assert(r >= 0);
 
     for(size_t i = 0; i < pcs.size(); i++) {
+      Dwarf_Addr trace_addr = static_cast<Dwarf_Addr>(Backtrace::pcs[i]);
+      Dwfl_Module* mod = dwfl_addrmodule(dwfl_handle, trace_addr);
+      if (mod) {
+        const char *sym_name = dwfl_module_addrname(mod, trace_addr);
+        if (sym_name) {
+          symbols[i].assign(sym_name);
+        }
+
+        Dwarf_Addr mod_bias = 0;
+        Dwarf_Die *cudie = dwfl_module_addrdie(mod, trace_addr, &mod_bias);
+
+        if (!cudie) {
+          while ((cudie = dwfl_module_nextcu(mod, cudie, &mod_bias))) {
+            Dwarf_Die die_mem;
+            Dwarf_Die *fundie = find_fundie_by_pc(cudie, trace_addr - mod_bias, &die_mem);
+            if (fundie) {
+              break;
+            }
+          }
+        }
+        if (!cudie) {
+          continue;
+        }
+        Dwarf_Line *srcloc = dwarf_getsrc_die(cudie, trace_addr - mod_bias);
+        if (srcloc) {
+          const char *srcfile = dwarf_linesrc(srcloc, 0, 0);
+          if (srcfile) {
+            filenames[i].assign(srcfile);
+          }
+          int line = 0;
+          dwarf_lineno(srcloc, &line);
+          line_numbers[i] = line;
+        }
+      }
+    }
+    dwfl_end(dwfl_handle);
+#else
+    for(size_t i = 0; i < pcs.size(); i++) {
       // try backtrace_symbols() first
-#if defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD)
       char **s = backtrace_symbols((void * const *)&(pcs[i]), 1);
       if(s) {
 	symbols[i].assign(s[0]);
 	free(s);
-	continue;
       }
-#endif
-
-      symbols[i] = "unknown";
     }
+#endif /* REALM_USE_LIBDW */
+#endif /* defined(REALM_ON_LINUX) || defined(REALM_ON_MACOS) || defined(REALM_ON_FREEBSD) */
   }
 
   std::ostream& operator<<(std::ostream& os, const Backtrace& bt)
@@ -271,9 +409,28 @@ namespace Realm {
     for(size_t i = 0; i < bt.pcs.size(); i++) {
       os << "  [" << i << "] = ";
       if(!bt.symbols.empty() && !bt.symbols[i].empty()) {
-        char *s = (char *)(bt.symbols[i].c_str());
-        char *lp = s;
+	char *s = (char *)(bt.symbols[i].c_str());
         bool print_raw = true;
+#ifdef REALM_USE_LIBDW
+#ifdef REALM_HAVE_CXXABI_H
+        int status = -4;
+        char *result = abi::__cxa_demangle(s, demangle_buffer, &demangle_len, &status);
+        if (status == 0) {
+	  demangle_buffer = result;
+          os << demangle_buffer << " at ";
+          print_raw = false;
+        }
+#endif
+        // we can not demangle the object symbol, so print it directly
+        if (print_raw) {
+          os << s << " at ";
+        }
+        if (!bt.filenames[i].empty()) {
+          os << bt.filenames[i] << ":" << bt.line_numbers[i] << " ";
+        }
+        os << "[" << bt.pcs[i] << "]";
+#else
+        char *lp = s;
 #ifdef REALM_HAVE_CXXABI_H
         while(*lp && (*lp != '(')) lp++;
         if(*lp && (lp[1] != '+')) {
@@ -298,6 +455,7 @@ namespace Realm {
 #endif
         if(print_raw)
 	  os << bt.symbols[i];
+#endif /* REALM_USE_LIBDW */
       } else {
         os << std::hex << std::setfill('0') << std::setw(sizeof(uintptr_t)*2) << bt.pcs[i];
         os << std::dec << std::setfill(' ');
