@@ -112,6 +112,13 @@ namespace Realm {
       bool has_numa_preference;
       unsigned long numa_node_affinity[MAX_NUMA_NODE_LEN];
       std::set<CUdevice> peers;  // other GPUs we can do p2p copies with
+      int pci_busid;
+      int pci_domainid;
+      int pci_deviceid;
+      size_t pci_bandwidth;   // Current enabled pci-e bandwidth
+      std::vector<size_t> logical_peer_bandwidth;
+      std::vector<size_t> logical_peer_latency;
+
 
       #ifdef REALM_USE_CUDART_HIJACK
       cudaDeviceProp prop;
@@ -721,11 +728,7 @@ namespace Realm {
       void device_synchronize(void);
 
 #ifdef REALM_USE_CUDART_HIJACK
-      void event_create(CUevent *event, int flags);
-      void event_destroy(CUevent event);
       void event_record(CUevent event, CUstream stream);
-      void event_synchronize(CUevent event);
-      void event_elapsed_time(float *ms, CUevent start, CUevent end);
       
       void configure_call(dim3 grid_dim, dim3 block_dim,
 			  size_t shared_memory, CUstream stream);
@@ -1288,9 +1291,36 @@ namespace Realm {
 #define NVML_11_APIS(__op__)
 #endif
 
+#if CUDA_VERSION < 11040
+    // Define an NVML api that doesn't exist prior to CUDA Toolkit 11.5, but should
+    // exist in systems that require it that we need to support (we'll detect it's
+    // availability later)
+    //
+    // Although these are NVML apis, NVML_API_VERSION doesn't support any way to detect
+    // minor versioning, so we'll use the cuda header's versioning here, which should
+    // coincide with the versions we're looking for
+    typedef enum nvmlIntNvLinkDeviceType_enum
+    {
+      NVML_NVLINK_DEVICE_TYPE_GPU = 0x00,
+      NVML_NVLINK_DEVICE_TYPE_IBMNPU = 0x01,
+      NVML_NVLINK_DEVICE_TYPE_SWITCH = 0x02,
+      NVML_NVLINK_DEVICE_TYPE_UNKNOWN = 0xFF
+    } nvmlIntNvLinkDeviceType_t;
+
+    nvmlReturn_t
+    nvmlDeviceGetNvLinkRemoteDeviceType(nvmlDevice_t device, unsigned int link,
+                                        nvmlIntNvLinkDeviceType_t *pNvLinkDeviceType);
+#endif
+
 #define NVML_APIS(__op__)                                                                \
   __op__(nvmlInit);                                                                      \
   __op__(nvmlDeviceGetHandleByUUID);                                                     \
+  __op__(nvmlDeviceGetMaxPcieLinkWidth);                                                 \
+  __op__(nvmlDeviceGetMaxPcieLinkGeneration);                                            \
+  __op__(nvmlDeviceGetNvLinkState);                                                      \
+  __op__(nvmlDeviceGetNvLinkVersion);                                                    \
+  __op__(nvmlDeviceGetNvLinkRemotePciInfo);                                              \
+  __op__(nvmlDeviceGetNvLinkRemoteDeviceType);                                           \
   NVML_11_APIS(__op__);
 
 #define DECL_FNPTR_EXTERN(name) extern decltype(&name) name##_fnptr;

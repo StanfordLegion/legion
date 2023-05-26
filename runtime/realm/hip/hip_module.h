@@ -40,11 +40,12 @@ namespace Realm {
     class GPUWorker;
     struct GPUInfo;
     class GPUZCMemory;
+    class GPUReplHeapListener;
 
     // our interface to the rest of the runtime
     class HipModule : public Module {
     protected:
-      HipModule(void);
+      HipModule(RuntimeImpl *_runtime);
       
     public:
       virtual ~HipModule(void);
@@ -99,6 +100,8 @@ namespace Realm {
       int cfg_d2d_stream_priority;
       bool cfg_use_hip_ipc;
 
+      RuntimeImpl *runtime;
+
       // "global" variables live here too
       GPUWorker *shared_worker;
       std::map<GPU *, GPUWorker *> dedicated_workers;
@@ -107,6 +110,7 @@ namespace Realm {
       void *zcmem_cpu_base, *zcib_cpu_base;
       GPUZCMemory *zcmem;
       std::vector<void *> registered_host_ptrs;
+      GPUReplHeapListener *rh_listener;
 
       Mutex hipipc_mutex;
       Mutex::CondVar hipipc_condvar;

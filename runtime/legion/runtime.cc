@@ -10211,6 +10211,7 @@ namespace Legion {
              && dimension_constraints == rhs.dimension_constraints
              && tiling_constraints == rhs.tiling_constraints
              && offset_constraints == rhs.offset_constraints
+             && padding_constraint == rhs.padding_constraint
              && pointer_constraint == rhs.pointer_constraint;
     }
 
@@ -10227,6 +10228,7 @@ namespace Legion {
              && dimension_constraints == rhs.dimension_constraints
              && tiling_constraints == rhs.tiling_constraints
              && offset_constraints == rhs.offset_constraints
+             && padding_constraint == rhs.padding_constraint
              && pointer_constraint == rhs.pointer_constraint;
     }
 

@@ -41,8 +41,10 @@ namespace UCP {
   // class UCPContext
   //
 
-  bool UCPContext::open_context(int ep_nums_est, const ucp_config_t *config)
+  bool UCPContext::open_context(
+      const std::unordered_map<std::string, std::string> &ev_map)
   {
+    ucp_config_t *ucp_config;
     ucp_params_t ucp_params;
     ucp_context_attr_t context_attr;
     ucs_status_t status;
@@ -50,6 +52,25 @@ namespace UCP {
 #ifdef REALM_USE_CUDA
     Cuda::AutoGPUContext agc(gpu);
 #endif
+
+    // read ucp config once for all contexts
+    status = ucp_config_read(NULL, NULL, &ucp_config);
+    CHKERR_JUMP(status != UCS_OK, "ucp_config_read failed", log_ucp, err);
+
+    for (const auto &kv : ev_map) {
+      // "UCX_" should be removed from config name
+      const char *config_name = &kv.first.c_str()[4];
+
+      status = ucp_config_modify(ucp_config, config_name, kv.second.c_str());
+      if (status != UCS_OK) {
+        log_ucp.error() << "ucp_config_modify failed "
+                        << kv.first << " " << kv.second;
+        goto err_rel_config;
+      } else{
+        log_ucp.info() << kv.first << " modified to " << kv.second
+                       << " for context " << this;
+      }
+    }
 
     // Initialize UCX context
     ucp_params.field_mask        = UCP_PARAM_FIELD_FEATURES |
@@ -65,7 +86,7 @@ namespace UCP {
       ucp_params.estimated_num_eps = ep_nums_est;
     }
 
-    status = ucp_init(&ucp_params, config, &context);
+    status = ucp_init(&ucp_params, ucp_config, &context);
 
     CHKERR_JUMP(status != UCS_OK, "ucp_init failed", log_ucp, err);
 
@@ -74,12 +95,15 @@ namespace UCP {
     CHKERR_JUMP(status != UCS_OK, "ucp_context_query failed",
         log_ucp, err_cleanup_context);
 
-    request_size = context_attr.request_size;
+    ucp_req_size = context_attr.request_size;
 
+    ucp_config_release(ucp_config);
     return true;
 
 err_cleanup_context:
     ucp_cleanup(context);
+err_rel_config:
+    ucp_config_release(ucp_config);
 err:
     return false;
   }
@@ -320,7 +344,13 @@ err:
     return false;
   }
 
-  UCPContext::UCPContext()
+  UCPContext::UCPContext(size_t am_alignment_, bool use_wakeup_,
+      unsigned prog_boff_max_ /*progress thread maximum backoff*/,
+      int ep_nums_est_)
+    : am_alignment(am_alignment_)
+    , use_wakeup(use_wakeup_)
+    , prog_boff_max(prog_boff_max_)
+    , ep_nums_est(ep_nums_est_)
   {}
 
   UCPContext::~UCPContext()
@@ -383,70 +413,37 @@ err:
     context->pbuf_mp_mem_hs.erase(iter);
   }
 
-  bool UCPContext::init(const InitParams &init_params,
+  bool UCPContext::init(size_t user_req_size, size_t user_req_alignment,
+      size_t pbuf_max_size, size_t pbuf_max_chunk_size,
+      size_t pbuf_max_count, size_t pbuf_init_count,
+      size_t mmp_max_obj_size, bool leak_check,
       const std::unordered_map<std::string, std::string> &ev_map)
   {
-    am_alignment                    = init_params.am_alignment;
-    use_wakeup                      = init_params.use_wakeup;
-    prog_boff_max                   = init_params.prog_boff_max;
-    pbuf_max_size                   = init_params.pbuf_max_size;
-    MPool::InitParams req_mp_params = init_params.req_mp_params;
-    MPool::InitParams pbuf_mp_params;
-    VMPool::InitParams mmp_params;
+    this->pbuf_max_size = pbuf_max_size;
 
-    for (const auto &kv : ev_map) {
-      // "UCX_" should be removed from config name
-      const char *config_name = &kv.first.c_str()[4];
+    CHKERR_JUMP(!open_context(ev_map), "", log_ucp, err);
 
-      ucs_status_t status = ucp_config_modify(init_params.ucp_config,
-          config_name, kv.second.c_str());
-      if (status != UCS_OK) {
-        log_ucp.error() << "ucp_config_modify failed "
-                        << kv.first << " " << kv.second;
-        return false;
-      } else{
-        log_ucp.info() << kv.first << " modified to " << kv.second
-                       << " for context " << this;
-      }
-    }
-
-    bool ok = open_context(init_params.ep_nums_est, init_params.ucp_config);
-    CHKERR_JUMP(!ok, "", log_ucp, err);
-
-    ok = create_worker();
-    CHKERR_JUMP(!ok, "", log_ucp, err_cleanup_context);
+    CHKERR_JUMP(!create_worker(), "", log_ucp, err_cleanup_context);
 
     if (use_wakeup) {
-      ok = setup_worker_efd();
-      CHKERR_JUMP(!ok, "", log_ucp, err_destroy_worker);
+      CHKERR_JUMP(!setup_worker_efd(), "", log_ucp, err_destroy_worker);
     }
 
-    // update request mpool object size to account for ucp request
-    req_mp_params.obj_size         += request_size;
-    req_mp_params.alignment_offset += request_size;
-    request_mp = new MPool(req_mp_params);
+    // request mpoll
+    request_mp = new MPool("request_mp", leak_check,
+        user_req_size + ucp_req_size, user_req_alignment, ucp_req_size);
 
     // pre-registered payload buffer mpool
-    pbuf_mp_params.obj_size          = init_params.pbuf_max_size;
-    pbuf_mp_params.max_chunk_size    = init_params.pbuf_max_chunk_size;
-    pbuf_mp_params.max_objs          = init_params.pbuf_max_count;
-    pbuf_mp_params.init_num_objs     = init_params.pbuf_init_count;
-    pbuf_mp_params.alignment         = am_alignment;
-    pbuf_mp_params.alignment_offset  = 0;
-    pbuf_mp_params.name              = "pbuf_mp";
-    pbuf_mp_params.chunk_alloc       = &UCPContext::pbuf_chunk_alloc;
-    pbuf_mp_params.chunk_release     = &UCPContext::pbuf_chunk_release;
-    pbuf_mp_params.chunk_alloc_arg   = this;
-    pbuf_mp_params.chunk_release_arg = this;
-
-    pbuf_mp = new MPool(pbuf_mp_params);
+    pbuf_mp = new MPool("pbuf_mp", leak_check,
+        pbuf_max_size, am_alignment, 0, 1024,
+        pbuf_init_count, pbuf_max_count, pbuf_max_chunk_size, 1.5,
+        &UCPContext::pbuf_chunk_alloc, this,
+        &UCPContext::pbuf_chunk_release, this,
+        nullptr, nullptr, nullptr, nullptr);
 
     // simple malloc mpool
-    mmp_params.max_obj_size = init_params.mmp_max_obj_size;
-    mmp_params.alignment    = am_alignment;
-    mmp_params.name         = "internal_malloc_mp";
-
-    mmp = new VMPool(mmp_params);
+    mmp = new VMPool("internal_malloc_mp", leak_check,
+        mmp_max_obj_size, am_alignment);
 
     initialized = true;
     log_ucp.info() << "initialized ucp context " << this
@@ -464,7 +461,6 @@ err_cleanup_context:
     ucp_cleanup(context);
 err:
     return false;
-
   }
 
   void UCPContext::finalize()
@@ -594,12 +590,12 @@ err:
     }
     if (!buf) return nullptr;
 
-    return buf + request_size;
+    return buf + ucp_req_size;
   }
 
   void UCPContext::request_release(void *req)
   {
-    char *buf = reinterpret_cast<char*>(req) - request_size;
+    char *buf = reinterpret_cast<char*>(req) - ucp_req_size;
     AutoLock<> al(req_mp_mutex);
     MPool::put(buf);
   }

@@ -15034,9 +15034,6 @@ namespace Legion {
       add_launch_space_reference(launch_space);
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
-#ifdef LEGION_SPY
-      intermediate_index_event = Runtime::create_ap_user_event(NULL);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15189,29 +15186,27 @@ namespace Legion {
           desc.inst = manager->get_instance(key);
           desc.field_offset = manager->layout->find_field_info(
                         *(requirement.privilege_fields.begin())).field_id;
-          index_preconditions.insert(ref.get_ready_event());
+          const ApEvent inst_ready = ref.get_ready_event();
+          if (inst_ready.exists())
+            index_preconditions.push_back(inst_ready);
 #ifdef DEBUG_LEGION
           assert(!points.empty());
 #endif
           ready = (instances.size() == points.size());
+          if (!intermediate_index_event.exists())
+            intermediate_index_event = Runtime::create_ap_user_event(&info);
         }
         if (ready)
         {
           ApEvent done_event = thunk->perform(this, runtime->forest,
               Runtime::merge_events(&info, index_preconditions), instances);
-#ifdef LEGION_SPY
-          Runtime::trigger_event(NULL, intermediate_index_event, done_event);
-#endif
+          Runtime::trigger_event(&info, intermediate_index_event, done_event);
           if (!request_early_complete(done_event))
             complete_execution(Runtime::protect_event(done_event));
           else
             complete_execution();
         }
-#ifdef LEGION_SPY
         return intermediate_index_event;
-#else
-        return completion_event;
-#endif
       }
       else
       {
@@ -15676,6 +15671,7 @@ namespace Legion {
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       copy_fill_priority = 0;
+      intermediate_index_event = ApUserEvent::NO_AP_USER_EVENT;
     }
 
     //--------------------------------------------------------------------------

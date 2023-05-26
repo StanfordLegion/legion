@@ -532,7 +532,7 @@ if __name__ == '__main__':
         help='URL of Terra repository to clone from.')
     parser.add_argument(
         '--terra-branch', dest='terra_branch', required=False,
-        default='release-1.0.6',
+        default='release-1.1.0',
         help='Branch of Terra repository to checkout.')
     parser.add_argument(
         '--terra-lua', dest='terra_lua', required=False,
@@ -546,11 +546,11 @@ if __name__ == '__main__':
         help='Use CMake to build Terra.')
     parser.add_argument(
         '--gasnet-version', dest='gasnet_version', required=False,
-        default=os.environ.get('GASNET_VERSION', 'GASNet-2022.9.2'),
+        default=os.environ.get('GASNET_VERSION', 'GASNet-2023.3.0'),
         help='Select GASNet version.')
     parser.add_argument(
         '--gasnet-config-version', dest='gasnet_config_version', required=False,
-        default='10c55f5d53d803f5305e6983a0cf581b8e467aed',
+        default='cad9d8bc629293594672233745e2bb5aa20e76ed',
         help='Select version of the GASNet configuration/build tool.')
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,

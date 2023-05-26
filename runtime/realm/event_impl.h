@@ -52,6 +52,7 @@ namespace Realm {
 #endif
 
     extern Logger log_poison; // defined in event_impl.cc
+    class ProcessorImpl;      // defined in proc_impl.h
 
     class EventWaiter {
     public:
@@ -122,6 +123,7 @@ namespace Realm {
 
     public:
       ID me;
+      ProcessorImpl *owning_processor;
       NodeID owner;
     };
 
@@ -181,6 +183,7 @@ namespace Realm {
       void init(ID _me, unsigned _init_owner);
 
       static GenEventImpl *create_genevent(void);
+      static void free_genevent(GenEventImpl *);
 
       // get the Event (id+generation) for the current (i.e. untriggered) generation
       Event current_event(void) const;

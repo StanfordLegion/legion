@@ -224,22 +224,21 @@ int find_the_best_cpu(std::vector<std::pair<int, double>> &cpu_status, std::vect
 void main_task(const void *args, size_t arglen, 
                const void *userdata, size_t userlen, Processor p)
 {
-  // set the processors for the profiling and worker tasks.
   Machine::ProcessorQuery pq = Machine::ProcessorQuery(Machine::get_machine()).only_kind(Processor::LOC_PROC);
-  Processor profile_proc = Processor::NO_PROC;
+  // pick the utility processor for profiling tasks
+  Processor profile_proc = Machine::ProcessorQuery(Machine::get_machine()).local_address_space().only_kind(Processor::UTIL_PROC).first();
+  assert(profile_proc.exists());
+  // set the processors for worker tasks.
   std::vector<Processor> worker_procs;
-  if (pq.count() < 3) {
-    log_app.fatal("It is better to run this program with at least 3 CPU processors and 2 per rank, please specify it through -ll:cpu");
-    profile_proc = p;
-    worker_procs.push_back(p);
-  } else {
-    profile_proc = pq.next(p);
-    assert (profile_proc.address_space() == p.address_space());
-    for(Machine::ProcessorQuery::iterator it = pq.begin(); it; ++it) {
-      if ((*it) != p && (*it) != profile_proc) {
-        worker_procs.push_back(*it);
-      }
+  for(Machine::ProcessorQuery::iterator it = pq.begin(); it; ++it) {
+    // for better performance, we do not include the processor used by main_task for worker tasks
+    if ((*it) != p) {
+      worker_procs.push_back(*it);
     }
+  }
+  // if there is only one cpu processor, we use it for worker tasks as well
+  if (worker_procs.empty()) {
+    worker_procs.push_back(p);
   }
 
   // first, profile a task
@@ -471,15 +470,15 @@ int main(int argc, char **argv) {
                                   CodeDescriptor(compute_task),
                                   ProfilingRequestSet()).external_wait();
 
-  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, COMPUTE_PROF_TASK,
+  Processor::register_task_by_kind(Processor::UTIL_PROC, false /*!global*/, COMPUTE_PROF_TASK,
                                   CodeDescriptor(compute_prof_task),
                                   ProfilingRequestSet()).external_wait();
 
-  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, COPY_PROF_TASK,
+  Processor::register_task_by_kind(Processor::UTIL_PROC, false /*!global*/, COPY_PROF_TASK,
                                   CodeDescriptor(copy_prof_task),
                                   ProfilingRequestSet()).external_wait();
 
-  Processor::register_task_by_kind(Processor::LOC_PROC, false /*!global*/, INST_PROF_TASK,
+  Processor::register_task_by_kind(Processor::UTIL_PROC, false /*!global*/, INST_PROF_TASK,
                                   CodeDescriptor(inst_prof_task),
                                   ProfilingRequestSet()).external_wait();
 
