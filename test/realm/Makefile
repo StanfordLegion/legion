@@ -72,6 +72,7 @@ TESTARGS_compqueue := -ll:cpu 4
 TESTARGS_event_subscribe := -ll:cpu 4
 TESTARGS_deferred_allocs := -ll:gsize 0 -all
 TESTARGS_scatter := -p1 2 -p2 2
+TESTARGS_alltoall := -ll:csize 1024
 TESTARGS_sparse_construct := -verbose
 
 REALM_OBJS := $(patsubst %.cc,%.o,$(notdir $(REALM_SRC))) \

@@ -61,6 +61,93 @@ namespace UCP {
     REALM_THREAD_LOCAL const TimeLimit *ucp_work_until = nullptr;
   };
 
+  enum {
+    REQUEST_AM_FLAG_FAILURE = 1ul << 0
+  };
+
+  enum {
+    REMOTE_COMP_FLAG_FAILURE = 1ul << 0
+  };
+
+  struct CompList {
+    size_t bytes{0};
+
+    static const size_t TOTAL_CAPACITY = 256;
+    typedef char Storage_unaligned[TOTAL_CAPACITY];
+    REALM_ALIGNED_TYPE_CONST(Storage_aligned, Storage_unaligned,
+        Realm::CompletionCallbackBase::ALIGNMENT);
+    Storage_aligned storage;
+  };
+
+  struct RemoteComp {
+    CompList        *comp_list;
+    atomic<size_t>  remote_pending;
+    uint8_t         flags;
+    RemoteComp(size_t _remote_pending)
+      : comp_list(new CompList)
+      , remote_pending(_remote_pending)
+      , flags(0)
+    {}
+
+    ~RemoteComp()
+    {
+      delete comp_list;
+    }
+  };
+
+  struct UCPRDMAInfo {
+    uint64_t reg_base;
+    int dev_index;
+    char rkey[0];
+
+    UCPRDMAInfo() = delete;
+    ~UCPRDMAInfo() = delete;
+  } __attribute__ ((packed)); // gcc-specific
+
+  struct MCDesc {
+    uint8_t           flags;
+    atomic<size_t>    local_pending; // number of targets pending local
+                                     // completion (to support multicast)
+    MCDesc(size_t _local_pending)
+      : flags(0)
+      , local_pending(_local_pending)
+    {}
+  };
+
+  struct Request {
+    // UCPContext::Request must be the first field because
+    // the space preceding it is used internally by ucp
+    UCPContext::Request       ucp;
+    UCPInternal               *internal;
+    UCPContext                *context;
+    union {
+      struct {
+        PayloadBaseType       payload_base_type;
+        CompList              *local_comp;
+        MCDesc                *mc_desc;
+      } am_send;
+
+      struct {
+        void                  *header;
+        void                  *payload;
+        size_t                header_size;
+        size_t                payload_size;
+        int                   payload_mode;
+        ucp_ep_h              reply_ep;
+        // header buffer from am rndv should always be freed
+      } am_rndv_recv;
+
+      struct {
+        UCPRDMAInfo           *rdma_info_buf;
+      } rma;
+    };
+
+    // Should be allocated/freed only through UCPInternal because it must
+    // always have UCP-request-size bytes of available space before itself.
+    Request() = delete;
+    ~Request() = delete;
+  };
+
   struct RealmCallbackArgs {
     UCPInternal    *internal;
     UCPContext     *context;
@@ -461,8 +548,6 @@ err:
   {
     size_t ep_nums_est = boot_handle.pg_size;
 #endif
-    ucp_config_t *ucp_config;
-    ucs_status_t status;
     std::unordered_map<std::string, std::string> ev_map;
     size_t total_num_eps = 0;
 
@@ -488,21 +573,6 @@ err:
                         << config.pbuf_mp_thresh;
     }
 
-    UCPContext::InitParams init_params;
-    init_params.ep_nums_est              = ep_nums_est;
-    init_params.am_alignment             = AM_ALIGNMENT;
-    init_params.req_mp_params.obj_size   = sizeof(Request);
-    init_params.req_mp_params.alignment  = alignof(Request);
-    init_params.req_mp_params.leak_check = config.mpool_leakcheck;
-    init_params.req_mp_params.name       = "request_mp";
-    init_params.pbuf_init_count          = config.pbuf_init_count;
-    init_params.pbuf_max_count           = config.pbuf_max_count;
-    init_params.pbuf_max_size            = config.pbuf_max_size + AM_ALIGNMENT;
-    init_params.pbuf_max_chunk_size      = config.pbuf_max_chunk_size;
-    init_params.mmp_max_obj_size         = config.mmp_max_obj_size;
-    init_params.use_wakeup               = config.use_wakeup;
-    init_params.prog_boff_max            = config.prog_boff_max;
-
     read_env_var_update_map("UCX_NET_DEVICES", "", &config.host_nics, &ev_map);
     read_env_var_update_map("UCX_TLS", "", &config.tls_host, &ev_map);
     read_env_var_update_map("UCX_IB_SEG_SIZE",
@@ -513,16 +583,15 @@ err:
     CHKERR_JUMP(!string_to_val_units(config.ib_seg_size, &ib_seg_size),
         "failed to read ib_seg_size value", log_ucp, err);
 
-    // read ucp config once for all contexts
-    status = ucp_config_read(NULL, NULL, &ucp_config);
-    CHKERR_JUMP(status != UCS_OK, "ucp_config_read failed", log_ucp, err);
-
-    init_params.ucp_config = ucp_config;
-
     // create the host context
-    ucp_contexts.emplace_back();
-    CHKERR_JUMP(!ucp_contexts.back().init(init_params, ev_map),
-        "failed to initialize host ucp context", log_ucp, err_rel_config);
+    ucp_contexts.emplace_back(AM_ALIGNMENT, config.use_wakeup,
+        config.prog_boff_max, ep_nums_est);
+
+    CHKERR_JUMP(!ucp_contexts.back().init(sizeof(Request), alignof(Request),
+        config.pbuf_max_size + AM_ALIGNMENT, config.pbuf_max_chunk_size,
+        config.pbuf_max_count, config.pbuf_init_count,
+        config.mmp_max_obj_size, config.mpool_leakcheck, ev_map),
+        "failed to initialize host ucp context", log_ucp, err_fin_contexts);
 
 #ifdef REALM_USE_CUDA
     // create a separate ucp context for each gpu observed in attach
@@ -536,11 +605,9 @@ err:
     if (!config.gpu_nics.empty()) {
       std::istringstream stream(config.gpu_nics);
       std::string token;
-      while (std::getline(stream, token, ';'))
-      {
+      while (std::getline(stream, token, ';')) {
         const size_t c = token.find(':');
-        if ((c != std::string::npos) && (c > 0))
-        {
+        if ((c != std::string::npos) && (c > 0)) {
           const int cuda_device_index = std::stoi(token.substr(0, c));
           const std::string nics = token.substr(c + 1);
           gpu_nics[cuda_device_index] = nics;
@@ -554,17 +621,21 @@ err:
     read_env_var_update_map("UCX_TLS", "", &config.tls_dev, &ev_map);
     read_env_var_update_map("UCX_ZCOPY_THRESH",
         std::to_string(ZCOPY_THRESH_DEV), &config.zcopy_thresh_dev, &ev_map);
-    init_params.pbuf_init_count = init_params.pbuf_max_count = 0;
+
     for (Cuda::GPU *gpu : gpus) {
       ev_map.erase("UCX_NET_DEVICES");
       auto it = gpu_nics.find(gpu->info->index);
       if (it != gpu_nics.end()) {
         read_env_var_update_map("UCX_NET_DEVICES", "", &it->second, &ev_map);
       }
-      ucp_contexts.emplace_back();
+      ucp_contexts.emplace_back(AM_ALIGNMENT, config.use_wakeup,
+          config.prog_boff_max, ep_nums_est);
+
       ucp_contexts.back().gpu = gpu;
       dev_ctx_map[gpu->info->index] = &ucp_contexts.back();
-      CHKERR_JUMP(!ucp_contexts.back().init(init_params, ev_map),
+      CHKERR_JUMP(!ucp_contexts.back().init(sizeof(Request), alignof(Request),
+            1, 1, 0, 0, /* we never get payload buffer from GPU contexts */
+            config.mmp_max_obj_size, config.mpool_leakcheck, ev_map),
           "failed to initialize gpu ucp context", log_ucp, err_fin_contexts);
     }
 #endif
@@ -591,16 +662,13 @@ err:
 
     log_ucp.info() << "total num_eps " << total_num_eps;
 
-    ucp_config_release(ucp_config);
     return true;
 
 err_fin_contexts:
-    for (UCPContext &context : ucp_contexts) {
-      context.finalize();
+    while (!ucp_contexts.empty()) {
+      ucp_contexts.back().finalize();
+      ucp_contexts.pop_back();
     }
-err_rel_config:
-    ucp_config_release(ucp_config);
-    ucp_contexts.clear();
 err:
     return false;
   }
@@ -648,11 +716,8 @@ err:
     config = _config;
 
     // RealmCallbackArgs mpool
-    MPool::InitParams rcba_mp_params;
-    rcba_mp_params.obj_size  = sizeof(RealmCallbackArgs);
-    rcba_mp_params.alignment = alignof(RealmCallbackArgs);
-    rcba_mp_params.name      = "rcba_mp";
-    rcba_mp                  = new MPool(rcba_mp_params);
+    rcba_mp = new MPool("rcba_mp", config.mpool_leakcheck,
+        sizeof(RealmCallbackArgs), alignof(RealmCallbackArgs), 0);
 
     return true;
     // most of initialization happens after attach()
@@ -1692,6 +1757,7 @@ err:
     ucp_msg_hdr.msgid = _msgid;
     payload_size      = _max_payload_size;
 
+    payload_base_type = PAYLOAD_BASE_LAST;
     if (payload_size > 0) {
       if ((src_payload_addr != nullptr) && (src_payload_lines <= 1)) {
         // contiguous source data can be used directly

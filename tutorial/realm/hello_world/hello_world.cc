@@ -37,7 +37,7 @@ void hello_cpu_task(const void *args, size_t arglen, const void *userdata,
   log_app.print() << "Hello world from CPU!";
 }
 
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
 void hello_gpu_task(const void *args, size_t arglen, const void *userdata,
                     size_t userlen, Processor p) 
 {
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
                                    CodeDescriptor(hello_cpu_task),
                                    ProfilingRequestSet(),
                                    0, 0).wait();
-#ifdef REALM_USE_CUDA
+#if defined(REALM_USE_CUDA) || defined(REALM_USE_HIP)
   Processor::register_task_by_kind(Processor::TOC_PROC, false /*!global*/,
                                    HELLO_TASK,
                                    CodeDescriptor(hello_gpu_task),

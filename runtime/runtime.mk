@@ -498,7 +498,7 @@ ifeq ($(strip $(USE_HIP)),1)
       HIPCC_FLAGS	+= -O2
     endif
     ifneq ($(strip $(HIP_ARCH)),)
-      HIPCC_FLAGS	+= --offload-target=$(HIP_ARCH)
+      HIPCC_FLAGS	+= --offload-arch=$(HIP_ARCH)
     endif
     LEGION_LD_FLAGS	+= -lm -L$(HIP_PATH)/lib -lamdhip64
   else ifeq ($(strip $(HIP_TARGET)),CUDA)
@@ -810,6 +810,12 @@ ifeq ($(strip $(USE_ZLIB)),1)
   LEGION_CC_FLAGS += -DLEGION_USE_ZLIB
   LEGION_LD_FLAGS += -l$(ZLIB_LIBNAME)
   SLIB_LEGION_DEPS += -l$(ZLIB_LIBNAME)
+endif
+
+# backtrace
+REALM_BACKTRACE_USE_UNWIND ?= 1
+ifeq ($(strip $(REALM_BACKTRACE_USE_UNWIND)),1)
+  REALM_CC_FLAGS += -DREALM_USE_UNWIND
 endif
 
 

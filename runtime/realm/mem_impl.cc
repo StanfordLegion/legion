@@ -866,13 +866,13 @@ namespace Realm {
 #ifdef DEBUG_DEFERRED_ALLOCATIONS
   Logger log_defalloc("defalloc");
 
-  std::ostream& operator<<(std::ostream& os, const MemoryImpl::PendingAlloc& p)
+  std::ostream& operator<<(std::ostream& os, const LocalManagedMemory::PendingAlloc& p)
   {
     os << p.inst->me << "(" << ((void *)(p.inst)) << "," << p.bytes << "," << p.alignment << "," << p.last_release_seqid << ")";
     return os;
   }
 
-  std::ostream& operator<<(std::ostream& os, const MemoryImpl::PendingRelease& p)
+  std::ostream& operator<<(std::ostream& os, const LocalManagedMemory::PendingRelease& p)
   {
     os << p.inst->me << "(" << ((void *)(p.inst)) << "," << p.is_ready << "," << p.seqid << ")";
     return os;
@@ -899,6 +899,9 @@ namespace Realm {
       return false;
     }
 
+    // if we have to unwind allocs we thought were successful, don't nuke the
+    //  ones that were known good before our experiment
+    size_t orig_num_success = successful_allocs.size();
     std::vector<PendingAlloc>::iterator a_now = pending_allocs.begin();
     BasicRangeAllocator<size_t, RegionInstance> test_allocator = release_allocator;
     while(a_now != pending_allocs.end()) {
@@ -989,7 +992,10 @@ namespace Realm {
       } else {
 	// nope - it didn't work - unwind everything and clear out
 	//  the allocations we thought we could do
-	successful_allocs.clear();
+#ifdef DEBUG_DEFERRED_ALLOCATIONS
+	log_defalloc.print() << "unwind allocs: " << PrettyVector<std::pair<RegionInstanceImpl *, size_t> >(successful_allocs) << " " << orig_num_success;
+#endif
+	successful_allocs.resize(orig_num_success);
 	return false;
       }
     }
