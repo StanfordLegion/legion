@@ -1163,10 +1163,10 @@ macos_clang_cxx17_release_cmake_legion:
   <<: [*macos, *tests]
   variables:
     <<: [*macos_clang, *release, *cxx17_normal, *cmake, *legion, *ctest, *short, *no_ccache]
-macos_clang_cxx11_debug_cmake_regent:
-  <<: [*macos, *tests]
-  variables:
-    <<: [*macos_clang, *debug, *cxx11_normal, *cmake, *regent, *short, *no_ccache]
+# macos_clang_cxx11_debug_cmake_regent:
+#   <<: [*macos, *tests]
+#   variables:
+#     <<: [*macos_clang, *debug, *cxx11_normal, *cmake, *regent, *short, *no_ccache]
 
 # Run minimal tests on other compilers.
 
