@@ -1142,6 +1142,9 @@ namespace Legion {
         GATHER_REQ = 2,
         SCATTER_REQ = 3,
       };
+    private:
+      static constexpr size_t REQ_COUNT = SCATTER_REQ + 1;
+      static const ReqType req_types[REQ_COUNT];
     public:
       struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross>,
                                   public PhysicalTraceInfo {
@@ -1356,8 +1359,6 @@ namespace Legion {
       void initialize_copies_with_copies(std::vector<SingleCopy> &other);
 
     private: // used internally for initialization
-      static constexpr size_t REQ_COUNT = SCATTER_REQ + 1;
-
       template <typename T> class InitField;
       struct InitInfo;
 

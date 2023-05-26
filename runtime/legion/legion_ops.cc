@@ -4148,6 +4148,8 @@ namespace Legion {
     {
     }
 
+    const CopyOp::ReqType CopyOp::req_types[REQ_COUNT] =
+      {SRC_REQ, DST_REQ, GATHER_REQ, SCATTER_REQ};
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
@@ -4269,7 +4271,7 @@ namespace Legion {
       operands.clear();
       copies.clear();
 
-      for (ReqType type = SRC_REQ; type < REQ_COUNT; type = ReqType(type + 1))
+      for (ReqType type : req_types)
       {
         std::vector<RegionRequirement> &reqs = get_reqs_by_type(type);
 
@@ -4280,7 +4282,7 @@ namespace Legion {
       size_t offset = 0;
       std::vector<InitField<Operand>> ops_by_type;
 
-      for (ReqType type = SRC_REQ; type < REQ_COUNT; type = ReqType(type + 1))
+      for (ReqType type : req_types)
       {
         size_t count = get_reqs_by_type(type).size();
         ops_by_type.emplace_back(&operands[offset], count);
