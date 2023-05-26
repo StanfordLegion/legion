@@ -36,7 +36,7 @@ add_subdirectory(subgraph)
 add_subdirectory(reservation)
 add_subdirectory(completion_queue)
 add_subdirectory(profiling)
-# FIXME: HIP does not appear to have full support for surf2Dwrite
+# FIXME: https://github.com/StanfordLegion/legion/issues/1475
 if (REALM_USE_CUDA)# OR REALM_USE_HIP)
   add_subdirectory(cuda_interop)
 endif ()

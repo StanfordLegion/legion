@@ -1285,7 +1285,7 @@ p100_cuda110_gcc9_cxx14_release_cuda_legion:
 p100_cuda112_gcc9_cxx17_debug_cuda_legion:
   <<: [*p100, *tests]
   variables:
-    <<: [*gcc9, *debug, *cxx14_normal, *p100_cuda112, *legion, *short, *cmake, *ctest, *shared]
+    <<: [*gcc9, *debug, *cxx17_normal, *p100_cuda112, *legion, *short, *cmake, *ctest, *shared]
 p100_cuda112_gcc9_cxx17_release_cmake_cuda_legion:
   <<: [*p100, *tests]
   variables:

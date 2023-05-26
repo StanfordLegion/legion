@@ -15,6 +15,7 @@
 
 // test for Realm's serializing code
 
+#include "realm.h"
 #include "realm/serialize.h"
 
 #include <string.h>
