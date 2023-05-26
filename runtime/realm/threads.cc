@@ -917,8 +917,8 @@ namespace Realm {
     // TODO: actually use heap size
 
 #ifdef REALM_USE_ALTSTACK
-    // default altstack size is 64KB
-    altstack_size = 64 << 10;
+    // default altstack size is 256KB
+    altstack_size = 256 << 10;
     if(params.alt_stack_size != params.ALTSTACK_SIZE_DEFAULT)
       altstack_size = params.alt_stack_size;
     else if(rsrv.params.alt_stack_size != rsrv.params.ALTSTACK_SIZE_DEFAULT)
