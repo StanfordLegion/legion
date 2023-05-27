@@ -788,17 +788,18 @@ namespace Legion {
               options.check_collective_regions.begin(); it !=
               options.check_collective_regions.end(); it++)
         {
-          // Remove it if it is too big or 
-          if ((*it >= regions.size()) || IS_WRITE(regions[*it]))
-          {
-            if (*it < regions.size())
-              REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
-                  "Ignoring request by mapper %s to check for collective usage "
-                  "for region requirement %d of task %s (UID %lld) because "
-                  "region requirement has writing privileges.",
-                  mapper->get_mapper_name(), *it, 
-                  get_task_name(), unique_op_id)
-          }
+          if ((*it) >= regions.size())
+            continue;
+          const RegionRequirement &req = regions[*it];
+          if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+            continue;
+          if (IS_WRITE(req))
+            REPORT_LEGION_WARNING(LEGION_WARNING_WRITE_PRIVILEGE_COLLECTIVE,
+                "Ignoring request by mapper %s to check for collective usage "
+                "for region requirement %d of task %s (UID %lld) because "
+                "region requirement has writing privileges.",
+                mapper->get_mapper_name(), *it, 
+                get_task_name(), unique_op_id)
           else
             check_collective_regions.push_back(*it);
         }
