@@ -47,13 +47,13 @@
 #define IS_REDUCE(req) \
   (((req).privilege & LEGION_READ_WRITE) == LEGION_REDUCE)
 #define IS_EXCLUSIVE(req) \
-  (((req).prop & LEGION_EXCLUSIVE)  == LEGION_EXCLUSIVE)
+  (((req).prop & 0x3) == LEGION_EXCLUSIVE)
 #define IS_ATOMIC(req) \
-  (((req).prop & LEGION_ATOMIC) == LEGION_ATOMIC)
+  (((req).prop & 0x3) == LEGION_ATOMIC)
 #define IS_SIMULT(req) \
-  (((req).prop & LEGION_SIMULTANEOUS) == LEGION_SIMULTANEOUS)
+  (((req).prop & 0x3) == LEGION_SIMULTANEOUS)
 #define IS_RELAXED(req) \
-  (((req).prop & LEGION_RELAXED) == LEGION_RELAXED)
+  (((req).prop & 0x3) == LEGION_RELAXED)
 
 namespace Legion {
 
