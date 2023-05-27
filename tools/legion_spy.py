@@ -6122,16 +6122,16 @@ class Requirement(object):
         return bool(self.priv & COLLECTIVE_MASK)
 
     def is_exclusive(self):
-        return self.coher == EXCLUSIVE
+        return (self.coher & RELAXED) == EXCLUSIVE
 
     def is_atomic(self):
-        return self.coher == ATOMIC
+        return (self.coher & RELAXED) == ATOMIC
 
     def is_simult(self):
-        return self.coher == SIMULTANEOUS
+        return (self.coher & RELAXED) == SIMULTANEOUS
 
     def is_relaxed(self):
-        return self.coher == RELAXED
+        return (self.coher & RELAXED) == RELAXED
 
     def is_projection(self):
         return self.projection_function is not None
