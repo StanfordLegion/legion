@@ -3925,7 +3925,7 @@ namespace Legion {
         {
           // Record that this close op should make a new equivalence
           // set at this region and invalidate all the ones below
-          const bool overwriting = HAS_WRITE_DISCARD(user.usage) &&
+          const bool overwriting = IS_WRITE_DISCARD(user.usage) &&
                     !has_next_child && !user.op->is_predicated_op() && 
                     !trace_info.recording_trace;
           close_op->record_refinements(refinement_mask, overwriting);
@@ -7277,7 +7277,7 @@ namespace Legion {
       : CollectiveCopyFillAnalysis(rt, o, idx, rn, true/*on heap*/,
                                    t_info, IS_WRITE(req)),
         usage(req), precondition(pre), term_event(term),
-        check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
+        check_initialized(check && !IS_WRITE_DISCARD(usage)),
         record_valid(record), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
@@ -11502,7 +11502,7 @@ namespace Legion {
           }
         }
       }
-      else if (IS_WRITE(analysis.usage) && IS_DISCARD(analysis.usage))
+      else if (IS_WRITE_DISCARD(analysis.usage))
       {
         // Write-only
         // Update the initialized data before messing with the user mask
@@ -11714,6 +11714,9 @@ namespace Legion {
           }
         }
       }
+      // If we're doing a read-discard then we can invalidate the state
+      if (IS_READ_DISCARD(analysis.usage))
+        invalidate_state(expr, expr_covers, user_mask);
       // Update the post conditions for these views if we're recording 
       if (analysis.trace_info.recording)
       {
@@ -17108,7 +17111,7 @@ namespace Legion {
     {
       // No need for the lock here since we should be called from a copy
       // fill aggregator that is being built while already holding the lock
-      if (HAS_READ(usage) && !IS_DISCARD(usage))
+      if (HAS_READ(usage) && !IS_WRITE_DISCARD(usage))
       {
         FieldMaskSet<IndexSpaceExpression> not_dominated;
         if (view->is_reduction_kind())

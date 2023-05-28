@@ -17085,7 +17085,7 @@ namespace Legion {
       // In the future we might consider breaking this out so that we
       // generate two close operations: a read-only one for the predicate
       // true case, and normal close operation for the predicate false case
-      const bool overwriting = HAS_WRITE_DISCARD(closer.user.usage) && 
+      const bool overwriting = IS_WRITE_DISCARD(closer.user.usage) && 
           (next_child == NULL) && !closer.user.op->is_predicated_op();
       // Now we can look at all the children
       for (LegionList<FieldState>::iterator it = 

@@ -36,10 +36,12 @@
   ((req).privilege & (LEGION_WRITE_PRIV | LEGION_REDUCE))
 #define IS_WRITE(req) \
   ((req).privilege & LEGION_WRITE_PRIV)
-#define HAS_WRITE_DISCARD(req) \
+#define IS_WRITE_DISCARD(req) \
   (((req).privilege & LEGION_WRITE_ONLY) == LEGION_WRITE_ONLY)
-#define IS_DISCARD(req) \
-  (((req).privilege & LEGION_DISCARD_MASK) == LEGION_DISCARD_MASK)
+#define IS_READ_DISCARD(req) \
+  (((req).privilege & LEGION_READ_DISCARD) == LEGION_READ_DISCARD)
+#define FILTER_DISCARD(req) \
+  ((req).privilege & ~(LEGION_DISCARD_INPUT_MASK | LEGION_DISCARD_OUTPUT_MASK))
 #define IS_COLLECTIVE(req) \
   (((req).prop & LEGION_COLLECTIVE_MASK) == LEGION_COLLECTIVE_MASK)
 #define PRIV_ONLY(req) \
@@ -272,7 +274,7 @@ namespace Legion {
       }
       else
       {
-        if (HAS_WRITE_DISCARD(u2))
+        if (IS_WRITE_DISCARD(u2))
         {
           // WAW with a write-only
           return LEGION_ANTI_DEPENDENCE;
