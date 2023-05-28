@@ -3151,7 +3151,7 @@ namespace Legion {
       void send_index_partition_child_replication(AddressSpaceID target,
                                                   Serializer &rez);
       void send_index_partition_disjoint_update(AddressSpaceID target,
-                                                Serializer &rez);
+          Serializer &rez, RtEvent pre = RtEvent::NO_RT_EVENT);
       void send_index_partition_shard_rects_request(AddressSpaceID target,
                                                     Serializer &rez);
       void send_index_partition_shard_rects_response(AddressSpaceID target,

@@ -32,6 +32,7 @@ list(APPEND REALM_TESTS
   idcheck
   inst_reuse
   transpose
+  proc_group
   deppart
   scatter
   compqueue
@@ -72,6 +73,8 @@ if(Legion_USE_HIP)
   # some tests have HIP source files too
   set(HIPSRC_memspeed memspeed_gpu.cu)
   set(HIPSRC_simple_reduce simple_reduce_gpu.cu)
+  # FIXME: https://github.com/StanfordLegion/legion/issues/1476
+  # set(HIPSRC_multiaffine multiaffine_gpu.cu)
 
   # FIXME: https://github.com/StanfordLegion/legion/issues/1308
   # list(APPEND REALM_TESTS cuda_arrays)
@@ -106,10 +109,12 @@ set_target_properties(scatter PROPERTIES CXX_STANDARD 11
 
 # some tests need test-specific arguments
 set(TESTARGS_ctxswitch         -ll:io 1 -t 30 -i 10000)
+set(TESTARGS_proc_group        -ll:cpu 4)
 set(TESTARGS_compqueue         -ll:cpu 4)
 set(TESTARGS_event_subscribe   -ll:cpu 4)
 set(TESTARGS_deferred_allocs   -ll:gsize 0 -all)
 set(TESTARGS_scatter           -p1 2 -p2 2)
+set(TESTARGS_alltoall          -ll:csize 1024)
 set(TESTARGS_simple_reduce     -all)
 set(TESTARGS_sparse_construct  -verbose)
 set(TESTARGS_cuda_arrays       -ll:gpu 1)

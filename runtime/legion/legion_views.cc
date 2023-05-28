@@ -2947,7 +2947,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!finder->second.ready_event.exists());
           assert(finder->second.trace_info == NULL);
-          assert(finder->second.analysis_mapping == NULL);
+          assert(finder->second.analysis_mapping != NULL);
 #endif
           // First local arrival
           finder->second.remaining_local_arrivals = local_collective_arrivals;

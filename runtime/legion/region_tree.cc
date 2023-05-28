@@ -9520,6 +9520,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    AddressSpaceID IndexPartNode::find_color_creator_space(LegionColor color,
+                                        CollectiveMapping *&child_mapping) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(child_mapping == NULL);
+#endif
+      if (collective_mapping == NULL)
+      {
+        if (is_owner())
+          return local_space;
+        else
+          return owner_space;
+      }
+      else
+      {
+        // See whether the children are sharded or replicated
+        if (((LegionColor)collective_mapping->size()) <= total_children)
+        {
+          // Sharded, so figure out which space to send the request to
+          const size_t chunk = (max_linearized_color + 
+              collective_mapping->size() - 1) / collective_mapping->size();
+          const unsigned offset = color / chunk;
+#ifdef DEBUG_LEGION
+          assert(offset < collective_mapping->size());
+#endif
+          return (*collective_mapping)[offset];
+        }
+        else
+        {
+          // Replicated so find the child collective mapping
+          std::vector<AddressSpaceID> child_spaces;
+          const unsigned offset = color_space->compute_color_offset(color); 
+#ifdef DEBUG_LEGION
+          assert(offset < collective_mapping->size());
+#endif
+          for (unsigned idx = offset; 
+                idx < collective_mapping->size(); idx += total_children)
+            child_spaces.push_back((*collective_mapping)[idx]);
+#ifdef DEBUG_LEGION
+          assert(!child_spaces.empty());
+#endif
+          child_mapping = new CollectiveMapping(child_spaces, 
+              context->runtime->legion_collective_radix);
+          if (child_mapping->contains(local_space))
+            return local_space;
+          else
+            return child_mapping->find_nearest(local_space);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceNode* IndexPartNode::get_child(const LegionColor c,RtEvent *defer)
     //--------------------------------------------------------------------------
     {
@@ -9561,48 +9614,8 @@ namespace Legion {
       {
         // See if we need to send a request to get the handle for this
         CollectiveMapping *child_mapping = NULL;
-        AddressSpaceID creator_space = local_space;
-        if (collective_mapping == NULL)
-        {
-          if (!is_owner())
-            creator_space = owner_space;
-        }
-        else
-        {
-          // See whether the children are sharded or replicated
-          if (((LegionColor)collective_mapping->size()) <= total_children)
-          {
-            // Sharded, so figure out which space to send the request to
-            const size_t chunk = (max_linearized_color + 
-                collective_mapping->size() - 1) / collective_mapping->size();
-            const unsigned offset = c / chunk;
-#ifdef DEBUG_LEGION
-            assert(offset < collective_mapping->size());
-#endif
-            creator_space = (*collective_mapping)[offset];
-          }
-          else
-          {
-            // Replicated so find the child collective mapping
-            std::vector<AddressSpaceID> child_spaces;
-            const unsigned offset = color_space->compute_color_offset(c); 
-#ifdef DEBUG_LEGION
-            assert(offset < collective_mapping->size());
-#endif
-            for (unsigned idx = offset; 
-                  idx < collective_mapping->size(); idx += total_children)
-              child_spaces.push_back((*collective_mapping)[idx]);
-#ifdef DEBUG_LEGION
-            assert(!child_spaces.empty());
-#endif
-            child_mapping = new CollectiveMapping(child_spaces, 
-                context->runtime->legion_collective_radix);
-            if (child_mapping->contains(local_space))
-              creator_space = local_space;
-            else
-              creator_space = child_mapping->find_nearest(local_space);
-          }
-        }
+        AddressSpaceID creator_space = 
+          find_color_creator_space(c, child_mapping);
         if (creator_space != local_space)
         {
           if (child_mapping != NULL)
@@ -10150,7 +10163,7 @@ namespace Legion {
             rez.serialize(total_children_volume);
             rez.serialize(total_intersection_volume);
           }
-          runtime->send_index_partition_disjoint_update(target, rez);
+          runtime->send_index_partition_disjoint_update(target,rez,initialized);
         }
       }
       return false;
@@ -11108,30 +11121,6 @@ namespace Legion {
       // Compute our local shard rectangles
       if (find_local_shard_rects())
         assert(false); // should never delete ourselves
-#if 0
-      if (children.empty())
-      {
-        if (!is_owner())
-        {
-          // Pack up the rectangles and send them upstream to the parent
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(handle);
-            rez.serialize<bool>(true); // up
-            pack_shard_rects(rez, true/*clear*/);
-          }
-          context->runtime->send_index_partition_shard_rects_response(
-              collective_mapping->get_parent(owner_space, local_space), rez);
-        }
-        else
-        {
-          Runtime::trigger_event(shard_rects_ready);
-          if (remove_base_gc_ref(RUNTIME_REF))
-            assert(false); // should never hit this
-        }
-      }
-#endif
       return shard_rects_ready;
     }
 
@@ -11298,16 +11287,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode::RemoteKDTracker::RemoteKDTracker(std::set<LegionColor> &c, 
-                                                    Runtime *rt)
-      : colors(c), runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT),
-        remaining(0)
+    IndexPartNode::RemoteKDTracker::RemoteKDTracker(Runtime *rt)
+      : runtime(rt), done_event(RtUserEvent::NO_RT_USER_EVENT), remaining(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::RemoteKDTracker::find_remote_interfering(
+    RtEvent IndexPartNode::RemoteKDTracker::find_remote_interfering(
         const std::set<AddressSpaceID> &targets, IndexPartition handle,
         IndexSpaceExpression *expr)
     //--------------------------------------------------------------------------
@@ -11326,7 +11313,7 @@ namespace Legion {
           assert(remaining.load() > 0);
 #endif
           if (remaining.fetch_sub(1) == 1)
-            return;
+            return RtEvent::NO_RT_EVENT;
           continue;
         }
         Serializer rez;
@@ -11342,12 +11329,26 @@ namespace Legion {
       {
         AutoLock t_lock(tracker_lock);
         if (remaining.load() == 0)
-          return;
+          return RtEvent::NO_RT_EVENT;
         done_event = Runtime::create_rt_user_event();
         wait_on = done_event;
       }
-      if (!wait_on.has_triggered())
-        wait_on.wait();
+      return wait_on;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::RemoteKDTracker::get_remote_interfering(
+                                                  std::set<LegionColor> &colors)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock since we're done at this point
+      if (!remote_colors.empty())
+      {
+        if (colors.empty())
+          colors.swap(remote_colors);
+        else
+          colors.insert(remote_colors.begin(), remote_colors.end());
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -11363,7 +11364,7 @@ namespace Legion {
       {
         LegionColor color;
         derez.deserialize(color);
-        colors.insert(color);
+        remote_colors.insert(color);
       }
 #ifdef DEBUG_LEGION
       assert(remaining.load() > 0);

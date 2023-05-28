@@ -1816,7 +1816,9 @@ namespace Realm {
 	  } else
 	    i = ap->next();
 	} else {
+#ifndef __HIP_DEVICE_COMPILE__
 	  assert(i->opcode() == PieceLookup::Opcodes::OP_SPLIT1);
+#endif
 	  i = static_cast<const PieceLookup::SplitPlane<N,T> *>(i)->next(p);
 	}
       }

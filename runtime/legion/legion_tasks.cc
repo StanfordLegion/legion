@@ -4532,18 +4532,11 @@ namespace Legion {
               is_output_global(idx), is_output_valid(idx));
 
         // Initialize any region tree contexts
-        std::set<RtEvent> execution_events;
         execution_context->initialize_region_tree_contexts(clone_requirements,
-                                version_infos, unmap_events, execution_events);
+                                                  version_infos, unmap_events);
         // Update the physical regions with any padding they might have
         if (variant->needs_padding)
           execution_context->record_padded_fields(variant);
-        // Execution events come from copying over virtual mapping state
-        // which needs to be done before the child task starts
-        if (!execution_events.empty())
-          for (std::set<RtEvent>::const_iterator it = 
-                execution_events.begin(); it != execution_events.end(); it++)
-            wait_on_events.insert(ApEvent(*it));
       }
       // If we have a predicate event then merge that in here as well
       if (true_guard.exists())

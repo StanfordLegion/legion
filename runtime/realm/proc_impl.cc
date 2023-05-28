@@ -40,6 +40,7 @@ namespace Realm {
     /*static*/ const Processor Processor::NO_PROC = { 0 }; 
 
   namespace ThreadLocal {
+    // Assume zero initialized
     REALM_THREAD_LOCAL Processor current_processor = { 0 };
     
     // if nonzero, prevents application thread from yielding execution
@@ -470,7 +471,7 @@ namespace Realm {
 
     ProcessorImpl::ProcessorImpl(Processor _me, Processor::Kind _kind,
                                  int _num_cores)
-      : me(_me), kind(_kind), num_cores(_num_cores)
+      : free_local_events(get_runtime()->local_events, Network::my_node_id, get_runtime()->local_event_free_list), me(_me), kind(_kind), num_cores(_num_cores)
     {
     }
 
@@ -484,6 +485,23 @@ namespace Realm {
 
     void ProcessorImpl::shutdown(void)
     {
+    }
+
+    GenEventImpl* ProcessorImpl::create_genevent(void)
+    {
+      GenEventImpl *impl = nullptr;
+      
+      impl = free_local_events.alloc_entry();
+      assert(impl != nullptr);
+      // Remember the processor that allocated it
+      impl->owning_processor = this;
+      return impl;
+    }
+
+    void ProcessorImpl::free_genevent(GenEventImpl *e)
+    {
+      assert(e->owning_processor == this);
+      free_local_events.free_entry(e);
     }
 
     void ProcessorImpl::execute_task(Processor::TaskFuncID func_id,

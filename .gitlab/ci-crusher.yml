@@ -1,6 +1,6 @@
 variables:
   USE_HIP: "1"
-  ROCM_VERSION: "4.5.0"
+  ROCM_VERSION: "5.4.3"
   HIP_ARCH: "gfx90a" # for runtime.mk
   GPU_ARCH: "gfx90a" # for Regent
 
@@ -11,8 +11,8 @@ variables:
   CXXFLAGS: "-std=c++11"
   CXX_STANDARD: "11"
 
-  SCHEDULER_PARAMETERS: "-A CSC335_crusher -t 3:00:00 -N 1 -p batch"
-  EXTERNAL_WORKDIR: /gpfs/alpine/csc335/proj-shared/ci/${CI_PIPELINE_ID}
+  SCHEDULER_PARAMETERS: "-A CSC335_crusher -t 3:00:00 -N 2 -n 2 -c 56 -p batch"
+  EXTERNAL_WORKDIR: /lustre/orion/proj-shared/csc335/ci/${CI_PIPELINE_ID}
   GIT_SUBMODULE_STRATEGY: recursive
 
   THREADS: 16 # for parallel build
@@ -75,23 +75,23 @@ legion_cmake:
   variables:
     <<: [*legion, *cmake, *ctest]
 
-regent:
-  <<: [*tests]
-  stage: test
-  tags:
-    - slurm
-    - crusher
-  variables:
-    <<: [*regent]
+# regent:
+#   <<: [*tests]
+#   stage: test
+#   tags:
+#     - slurm
+#     - crusher
+#   variables:
+#     <<: [*regent]
 
-regent_cmake:
-  <<: [*tests]
-  stage: test
-  tags:
-    - slurm
-    - crusher
-  variables:
-    <<: [*regent, *cmake]
+# regent_cmake:
+#   <<: [*tests]
+#   stage: test
+#   tags:
+#     - slurm
+#     - crusher
+#   variables:
+#     <<: [*regent, *cmake]
 
 clean:
   stage: clean

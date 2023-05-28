@@ -3381,17 +3381,9 @@ namespace Realm {
         }
 
         if(peer_gpu->fb_ibmem != nullptr) {
-          Machine::MemoryMemoryAffinity pma;
+          // Don't add fb_ibmem to affinity topology as this is an internal
+          // memory
           peer_fbs.insert(peer_gpu->fb_ibmem->me);
-          pma.m1 = fbmem->me;
-          pma.m2 = peer_gpu->fb_ibmem->me;
-          pma.bandwidth = info->logical_peer_bandwidth[i];
-          pma.latency = info->logical_peer_latency[i];
-          runtime->add_mem_mem_affinity(pma);
-          if (fb_ibmem != nullptr) {
-            pma.m1 = fb_ibmem->me;
-            runtime->add_mem_mem_affinity(pma);
-          }
         }
       }
 
@@ -3990,8 +3982,9 @@ namespace Realm {
                 &info->pci_deviceid, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID, info->device));
             CHECK_CU(CUDA_DRIVER_FNPTR(cuDeviceGetAttribute)(
                 &info->pci_domainid, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID, info->device));
-            // Assume x16 PCI-e 2.0, which is typical in most systems
-            info->pci_bandwidth = 64;
+            // Assume x16 PCI-e 2.0 = 8000 MB/s, which is reasonable for most
+            // systems
+            info->pci_bandwidth = 8000;
             info->logical_peer_bandwidth.resize(num_devices, 0);
             info->logical_peer_latency.resize(num_devices, SIZE_MAX);
 
@@ -4007,6 +4000,8 @@ namespace Realm {
               // Rates in MB/s from https://en.wikipedia.org/wiki/PCI_Express
               static const unsigned int rates[] = {250,  500,  985,  1969,
                                                    3938, 7563, 15125};
+              static const unsigned int rates_len =
+                  sizeof(rates) / sizeof(rates[0]);
               // Use the max pcie link information here, as when the GPU is not in use,
               // the OS may power down some links to conserve power, but we want to
               // estimate the bandwidth when in use.
@@ -4014,8 +4009,12 @@ namespace Realm {
                   NVML_FNPTR(nvmlDeviceGetMaxPcieLinkGeneration)(info->nvml_dev, &gen));
               CHECK_NVML(
                   NVML_FNPTR(nvmlDeviceGetMaxPcieLinkWidth)(info->nvml_dev, &buswidth));
-              assert((gen - 1) < (sizeof(rates) / sizeof(rates[0])));
-              info->pci_bandwidth = (rates[gen - 1] * 8ULL * buswidth) / 1000ULL;
+              if (gen >= sizeof(rates) / sizeof(rates[0])) {
+                log_gpu.warning() << "Unknown PCIe generation version '" << gen
+                                  << "', assuming '" << rates_len << '\'';
+                gen = rates_len;
+              }
+              info->pci_bandwidth = (rates[gen - 1] * buswidth);
 
 #if !defined(_WIN32) && NVML_API_VERSION >= 11
               memset(info->numa_node_affinity, 0, sizeof(info->numa_node_affinity));
@@ -4045,8 +4044,10 @@ namespace Realm {
         for(std::vector<GPUInfo *>::iterator it = infos.begin(); it != infos.end();
             ++it) {
           GPUInfo *info = *it;
-          // NVLINK link rates (in GB/s) based off https://en.wikipedia.org/wiki/NVLink
-          static const size_t nvlink_bandwidth_rates[] = {160, 200, 200, 200};
+          // NVLINK link rates (in MB/s) based off
+          // https://en.wikipedia.org/wiki/NVLink
+          static const size_t nvlink_bandwidth_rates[] = {20000, 25000, 25000,
+                                                          23610};
           // Iterate each of the links for this GPU and find what's on the other end
           // of the link, adding this link's bandwidth to the accumulated peer pair
           // bandwidth.
@@ -4060,6 +4061,7 @@ namespace Realm {
             if(status != NVML_SUCCESS || link_state != NVML_FEATURE_ENABLED) {
               continue;
             }
+
             CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkVersion)(info->nvml_dev, i,
                                                               &nvlink_version));
             if(nvlink_version >
@@ -4068,6 +4070,7 @@ namespace Realm {
               nvlink_version =
                   sizeof(nvlink_bandwidth_rates) / sizeof(nvlink_bandwidth_rates[0]) - 1;
             }
+
             if(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType) != nullptr) {
               CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemoteDeviceType)(info->nvml_dev,
                                                                          i, &dev_type));
@@ -4076,6 +4079,15 @@ namespace Realm {
               // assume GPU
               dev_type = NVML_NVLINK_DEVICE_TYPE_GPU;
             }
+
+            unsigned nvlink_bandwidth = nvlink_bandwidth_rates[nvlink_version];
+            if ((info->major == 8) && (info->minor > 2)) {
+              // NVML has no way of querying the minor version of nvlink, but
+              // nvlink 3.1 used with non-GA100 ampere systems has significantly
+              // less bandwidth per lane
+              nvlink_bandwidth = 14063;
+            }
+
             if(dev_type == NVML_NVLINK_DEVICE_TYPE_GPU) {
               CHECK_NVML(NVML_FNPTR(nvmlDeviceGetNvLinkRemotePciInfo)(info->nvml_dev, i,
                                                                       &pci_info));
@@ -4089,12 +4101,12 @@ namespace Realm {
                    infos[peer_gpu_idx]->pci_domainid == static_cast<int>(pci_info.domain)) {
                   // Found the peer device on the other end of the link!  Add this link's
                   // bandwidth to the logical peer link
-                  info->logical_peer_bandwidth[peer_gpu_idx] +=
-                      nvlink_bandwidth_rates[nvlink_version];
+                  info->logical_peer_bandwidth[peer_gpu_idx] += nvlink_bandwidth;
                   info->logical_peer_latency[peer_gpu_idx] = 100;
                   break;
                 }
               }
+
               if(peer_gpu_idx == num_devices) {
                 // We can't make any assumptions about this link, since we don't know
                 // what's on the other side.  This could be a GPU that was removed via
@@ -4105,11 +4117,13 @@ namespace Realm {
                                << pci_info.busId << "(" << std::hex
                                << pci_info.pciDeviceId << "), ignoring...";
               }
-            } else if(dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH) {
-              nvswitch_bandwidth += nvlink_bandwidth_rates[nvlink_version];
-            } else if(dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU) {
+            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_SWITCH)) {
+              // Accumulate the link bandwidth for one gpu and assume symmetry
+              // across all GPUs, and all GPus have access to the NVSWITCH fabric
+              nvswitch_bandwidth += nvlink_bandwidth;
+            } else if((info == infos[0]) && (dev_type == NVML_NVLINK_DEVICE_TYPE_IBMNPU)) {
               // TODO: use the npu_bandwidth for sysmem affinities
-              // npu_bandwidth += nvlink_bandwidth_rates[nvlink_version];
+              // npu_bandwidth += nvlink_bandwidth;
             }
           }
         }
@@ -4128,11 +4142,11 @@ namespace Realm {
                 &buswidth, CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH,
                 infos[i]->device));
             infos[i]->logical_peer_bandwidth[i] =
-                (size_t(memclk) * size_t(buswidth)) / 1000000ULL;
+                (125ULL * memclk * buswidth) / 1000000ULL;
             infos[i]->logical_peer_latency[i] =
                 std::max(1ULL, 10000000ULL / memclk);
             log_gpu.info() << "GPU #" << i << " local memory: "
-                           << infos[i]->logical_peer_bandwidth[i] << " gbps, "
+                           << infos[i]->logical_peer_bandwidth[i] << " MB/s, "
                            << infos[i]->logical_peer_latency[i] << " ns";
           }
           for (size_t j = 0; j < infos.size(); j++) {
@@ -4157,7 +4171,7 @@ namespace Realm {
                   << "p2p access from device " << infos[i]->index
                   << " to device " << infos[j]->index
                   << " bandwidth: " << infos[i]->logical_peer_bandwidth[j]
-                  << " gbps"
+                  << " MB/s"
                   << " latency: " << infos[i]->logical_peer_latency[j] << " ns";
             }
           }
