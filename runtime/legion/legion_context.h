@@ -1155,7 +1155,8 @@ namespace Legion {
           LogicalPartition partition, std::set<RtEvent> &ready_events,
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
-      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root);
+      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
+                                              IndexSpaceNode *color_space);
       virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
                                        const std::vector<ShardID> &participants,
                                        std::vector<IndexPartNode*> &children);
@@ -2979,7 +2980,8 @@ namespace Legion {
           const std::map<ShardID,LegionMap<LegionColor,FieldMask> > &children,
           const bool expr_covers);
       void handle_compute_equivalence_sets(Deserializer &derez);
-      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root);
+      virtual ProjectionNode* compute_fallback_refinement(RegionNode *root,
+                                              IndexSpaceNode *color_space);
       virtual void find_all_disjoint_complete_children(IndexSpaceNode *node,
                                        const std::vector<ShardID> &participants,
                                        std::vector<IndexPartNode*> &children);

@@ -1538,7 +1538,8 @@ namespace Legion {
       void remove_projection_summary(ProjectionSummary *summary);
       bool has_interfering_shards(LogicalAnalysis &analysis,
                           ProjectionSummary *one, ProjectionSummary *two);
-      ProjectionNode* find_or_create_fallback_refinement(InnerContext *context);
+      ProjectionNode* find_or_create_fallback_refinement(InnerContext *context,
+                                                  IndexSpaceNode *color_space);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif

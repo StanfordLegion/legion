@@ -3829,7 +3829,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ProjectionNode* InnerContext::compute_fallback_refinement(RegionNode *root)
+    ProjectionNode* InnerContext::compute_fallback_refinement(RegionNode *root,
+                                                    IndexSpaceNode *color_space)
     //--------------------------------------------------------------------------
     {
       // Explore the region tree to find the disjoint and complete

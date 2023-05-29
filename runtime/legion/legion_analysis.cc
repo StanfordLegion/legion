@@ -5460,7 +5460,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionNode* LogicalState::find_or_create_fallback_refinement(
-                                                          InnerContext *context)
+                             InnerContext *context, IndexSpaceNode *color_space)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5468,8 +5468,8 @@ namespace Legion {
 #endif
       if (fallback_refinement == NULL)
       {
-        fallback_refinement = 
-          context->compute_fallback_refinement(owner->as_region_node());
+        fallback_refinement = context->compute_fallback_refinement(
+            owner->as_region_node(), color_space);
         fallback_refinement->add_reference();
       }
       return fallback_refinement;
@@ -5638,8 +5638,8 @@ namespace Legion {
       {
         // Create a projection summary to represent the fallback refinement
         // subtree to use for equivalence sets
-        ProjectionNode *fallback =
-          find_or_create_fallback_refinement(analysis.context);
+        ProjectionNode *fallback = find_or_create_fallback_refinement(
+            analysis.context, info.projection_space);
         // Create a new refinement for the fallback fields
         RefinementTracker *tracker = owner->create_refinement_tracker(fallback);
         refinement_trackers.insert(tracker, fallback_refine);
@@ -5757,12 +5757,17 @@ namespace Legion {
           // These fields are not refined at all and we can't use the
           // projection because its not disjoint and complete so we 
           // need to make a default one to consider
-          ProjectionNode *fallback =
-            find_or_create_fallback_refinement(logical_analysis.context);
+          ProjectionNode *fallback = find_or_create_fallback_refinement(
+              logical_analysis.context, projection->domain);
           RefinementTracker *tracker =
             owner->create_refinement_tracker(false/*current refinement*/);
           tracker->update_refinement_projection(fallback);
           refinement_trackers.insert(tracker, traversal_mask);
+          // Create a refinement tree and record it with the analysis
+          RefinementNode *refinement = fallback->create_refinement();
+          logical_analysis.record_pending_refinement(privilege, req_index,
+              refinement, traversal_mask, refinement_operations);
+          // These fields are now also disjoint and complete
           disjoint_complete_mask |= traversal_mask;
         }
       }
