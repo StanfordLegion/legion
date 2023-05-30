@@ -18,6 +18,7 @@
 from __future__ import print_function
 import argparse, datetime, glob, json, multiprocessing, os, platform, shlex, shutil, subprocess, sys, traceback, tempfile
 import signal
+from pathlib import Path
 
 make_exe = os.environ.get('MAKE', 'make')
 
@@ -100,8 +101,15 @@ if 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == 1:
         ['tutorial/realm/cuda_interop/realm_cuda_interop', []],
     ]
 
-legion_cxx_provenance_tests = [
+legion_cxx_prof_tests = [
     ['examples/provenance/provenance', []],
+    ['test/gather_perf/gather_perf', ['-m', '1']],
+    ['test/gather_perf/gather_perf', ['-m', '2']],
+    ['test/gather_perf/gather_perf', ['-m', '3']],
+    ['test/gather_perf/gather_perf', ['-m', '4']],
+    ['test/gather_perf/gather_perf', ['-m', '5']],
+    ['test/gather_perf/gather_perf', ['-m', '6']],
+    ['test/gather_perf/gather_perf', ['-m', '7']],
 ]
 
 legion_fortran_tests = [
@@ -375,16 +383,15 @@ def run_test_legion_jupyter_cxx(launcher, root_dir, tmp_dir, bin_dir, env, threa
     cmd(canonical_python_test_cmd, env=env)
     cmd([make_exe, '-C', python_dir, 'clean'], env=env)
 
-def run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
+def run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-lg:prof','1', '-lg:prof_logfile', 'prof_%.gz']
-    run_cxx(legion_cxx_provenance_tests, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
-    provenance_test_dir = os.path.join(root_dir, 'examples', 'provenance')
-    test_cmd = [sys.executable, 'test.py']
-    env = dict(list(env.items()) + [
-        ('LEGION_DIR', root_dir),
-        ('TMP_DIR', tmp_dir),
-    ])
-    cmd(test_cmd, env=env, cwd=provenance_test_dir)
+    from tools.test_prof import run_prof_test
+    for test_file, test_flags in legion_cxx_prof_tests:
+        prof_test = [[test_file, test_flags],]
+        run_cxx(prof_test, flags, launcher, root_dir, bin_dir, env, thread_count, timelimit)
+        test_file_path = Path(os.path.join(root_dir, test_file))
+        test_dir = test_file_path.parent.absolute()
+        run_prof_test(root_dir, test_dir, tmp_dir)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit):
     flags = ['-logfile', 'out_%.log']
@@ -1181,7 +1188,7 @@ def run_tests(test_modules=None,
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_prof:
-                    run_test_legion_provenance_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
+                    run_test_legion_prof_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if networks:
                     run_test_legion_network_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, timelimit)
                 if use_openmp:

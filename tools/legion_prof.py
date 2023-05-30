@@ -2031,7 +2031,7 @@ class ChanOperation(Base):
 
 class CopyInstInfo(object):
     __slots__ = [
-        'src', 'dst', 'src_fid', 'dst_fid', 'src_inst_uid', 'dst_inst_uid', 'fevent', 'indirect',
+        'src', 'dst', 'src_fid', 'dst_fid', 'src_inst_uid', 'dst_inst_uid', 'fevent', 'num_hops', 'indirect',
         'src_instance', 'dst_instance'
         ]
 
@@ -2042,7 +2042,7 @@ class CopyInstInfo(object):
                  dst: Optional[Memory],
                  src_fid: int, dst_fid: int,
                  src_inst_uid: int, dst_inst_uid: int, 
-                 fevent: int, indirect: bool
+                 fevent: int, num_hops: int, indirect: bool
     ) -> None:
         self.src = src
         self.dst = dst
@@ -2051,6 +2051,7 @@ class CopyInstInfo(object):
         self.src_inst_uid = src_inst_uid
         self.dst_inst_uid = dst_inst_uid
         self.fevent = fevent
+        self.num_hops = num_hops
         self.indirect = indirect
         # if gather dst = None, if scatter, src = None
         self.src_instance: Optional["Instance"] = None
@@ -2089,12 +2090,12 @@ class CopyInstInfo(object):
             dst_inst_id = hex(self.dst_instance.inst_id)
         if self.indirect == False:
             assert (self.src_inst_uid != 0) and (self.dst_inst_uid != 0)
-            return 'src_inst=%s, dst_inst=%s' % (src_inst_id, dst_inst_id)
+            return 'src_inst=%s, src_fid=%s, dst_inst=%s, dst_fid=%s, num_hops=%s' % (src_inst_id, self.src_fid, dst_inst_id, self.dst_fid, self.num_hops)
         else:
             if self.src_inst_uid == 0:
-                return 'Scatter: dst_indirect_inst=%s' % (dst_inst_id)
+                return 'Scatter: dst_indirect_inst=%s, fid=%s' % (dst_inst_id, self.dst_fid)
             elif self.dst_inst_uid == 0:
-                return 'Gather: src_indirect_inst=%s' % (src_inst_id)
+                return 'Gather: src_indirect_inst=%s, fid=%s' % (src_inst_id, self.src_fid)
             else:
                 print(self.src_inst_uid, self.dst_inst_uid)
                 assert 0
@@ -2104,38 +2105,27 @@ class CopyInstInfo(object):
         return self.get_short_text()
 
 class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
-    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'num_hops', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
+    __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'request_type', 'fevent', 'copy_kind', 'copy_inst_infos']
     
     @typecheck
-    def __init__(self, fevent: int) -> None:
+    def __init__(self, initiation_op: Operation, size: int, 
+                 create: int, ready: int, 
+                 start: int, stop: int, 
+                 request_type: int,
+                 fevent: int
+    ) -> None:
         ChanOperation.__init__(self)
         TimeRange.__init__(self, None, None, None, None)
-        assert isinstance(EMPTY_OP, Operation)
-        HasInitiationDependencies.__init__(self, EMPTY_OP)
-        self.size = 0
-        self.num_hops = 0
-        self.request_type = 0
-        self.fevent = fevent
-        self.copy_kind: Optional[CopyKind] = None
-        self.copy_inst_infos: List[CopyInstInfo] = list()
-
-    @typecheck
-    def add_copy_info(self, initiation_op: Operation, size: int, 
-                      create: int, ready: int, 
-                      start: int, stop: int, 
-                      num_hops: int, request_type: int
-    ) -> None:
-        # sanity check
-        assert self.initiation_op == EMPTY_OP 
+        HasInitiationDependencies.__init__(self, initiation_op)
         self.size = size
-        self.num_hops = num_hops
         self.request_type = request_type
         self.create = create
         self.ready = ready
         self.start = start
         self.stop = stop
-        self.initiation_op = initiation_op
-        self.initiation = initiation_op.op_id
+        self.fevent = fevent
+        self.copy_kind: Optional[CopyKind] = None
+        self.copy_inst_infos: List[CopyInstInfo] = list()
 
     @typecheck
     def add_copy_inst_info(self, copy_inst_info: CopyInstInfo
@@ -2201,7 +2191,7 @@ class Copy(ChanOperation, TimeRange, HasInitiationDependencies):
 
     @typecheck
     def __repr__(self) -> str:
-        val = repr(self.copy_kind) + ': size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos)) + ', num hops=' + str(self.num_hops)
+        val = repr(self.copy_kind) + ': size='+ size_pretty(self.size) + ', num reqs=' + str(len(self.copy_inst_infos))
         cnt = 0
         for node in self.copy_inst_infos:
             val = val + '$req[' + str(cnt) + ']: ' +  node.get_short_text()
@@ -2308,29 +2298,21 @@ class Fill(ChanOperation, TimeRange, HasInitiationDependencies):
     __slots__ = TimeRange._abstract_slots + HasInitiationDependencies._abstract_slots + ['size', 'fevent', 'fill_inst_infos']
 
     @typecheck
-    def __init__(self, fevent: int) -> None:
+    def __init__(self, initiation_op: Operation, size: int,
+                 create: int, ready: int, 
+                 start: int, stop: int,
+                 fevent: int
+    ) -> None:
         ChanOperation.__init__(self)
         TimeRange.__init__(self, None, None, None, None)
-        assert isinstance(EMPTY_OP, Operation)
-        HasInitiationDependencies.__init__(self, EMPTY_OP)
-        self.size = 0
-        self.fevent = fevent
-        self.fill_inst_infos: List[FillInstInfo] = list()
-
-    @typecheck
-    def add_fill_info(self, initiation_op: Operation, size: int,
-                      create: int, ready: int, 
-                      start: int, stop: int
-    ) -> None:
-        # sanity check
-        assert self.initiation_op == EMPTY_OP 
+        HasInitiationDependencies.__init__(self, initiation_op)
         self.size = size
         self.create = create
         self.ready = ready
         self.start = start
         self.stop = stop
-        self.initiation_op = initiation_op
-        self.initiation = initiation_op.op_id
+        self.fevent = fevent
+        self.fill_inst_infos: List[FillInstInfo] = list()
 
     @typecheck
     def add_fill_inst_info(self, 
@@ -3754,12 +3736,11 @@ class State(object):
     def log_copy_info(self, op_id: int, size: int,
                       create: int, ready: int, 
                       start: int, stop: int,
-                      num_hops: int, request_type: int,
+                      request_type: int,
                       fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        copy = self.find_or_create_copy(fevent)
-        copy.add_copy_info(op, size, create, ready, start, stop, num_hops, request_type)
+        copy = self.create_copy(op, size, create, ready, start, stop, request_type, fevent)
         if stop > self.last_time:
             self.last_time = stop
 
@@ -3768,18 +3749,19 @@ class State(object):
     def log_copy_inst_info(self, src: int, dst: int,
                            src_fid: int, dst_fid: int,
                            src_inst: int, dst_inst: int, 
-                           fevent: int, indirect: int
+                           fevent: int, num_hops: int, 
+                           indirect: int
     ) -> None:
         # src_inst and dst_inst are inst_uid
         indirect = bool(indirect)
-        copy = self.find_or_create_copy(fevent)
+        copy = self.find_copy(fevent)
         src_mem = None
         if src != 0:
             src_mem = self.find_or_create_memory(src)
         dst_mem = None
         if dst != 0:
             dst_mem = self.find_or_create_memory(dst)
-        copy_inst_info = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy_inst_info = self.create_copy_inst_info(src_mem, dst_mem, src_fid, dst_fid, src_inst, dst_inst, fevent, num_hops, indirect)
         copy.add_copy_inst_info(copy_inst_info)
 
     @typecheck
@@ -3796,8 +3778,7 @@ class State(object):
                       fevent: int
     ) -> None:
         op = self.find_or_create_op(op_id)
-        fill = self.find_or_create_fill(fevent)
-        fill.add_fill_info(op, size, create, ready, start, stop)
+        fill = self.create_fill(op, size, create, ready, start, stop, fevent)
         if stop > self.last_time:
             self.last_time = stop
 
@@ -3807,7 +3788,7 @@ class State(object):
                            dst_inst: int, fevent: int
     ) -> None:
         # dst_inst are inst_uid
-        fill = self.find_or_create_fill(fevent)
+        fill = self.find_fill(fevent)
         dst_mem = self.find_or_create_memory(dst)
         fill_inst_info = self.create_fill_inst_info(dst_mem, fid, dst_inst, fevent)
         fill.add_fill_inst_info(fill_inst_info)
@@ -4171,23 +4152,48 @@ class State(object):
         return task
 
     @typecheck
-    def find_or_create_copy(self, fevent: int) -> Copy:
+    def create_copy(self, op: Operation, size: int,
+                    create: int, ready: int, 
+                    start: int, stop: int,
+                    request_type: int,
+                    fevent: int
+    ) -> Copy:
         key = fevent
         if key not in self.copy_map:
-            copy = Copy(fevent)
+            copy = Copy(op, size, create, ready, start, stop, request_type, fevent)
             self.add_copy_map(fevent,copy)
             # update prof_uid map
             self.prof_uid_map[copy.prof_uid] = copy
         return self.copy_map[key]
+    
+    @typecheck
+    def find_copy(self, fevent: int) -> Copy:
+        key = fevent
+        if key not in self.copy_map:
+            print("Can not find copy" + str(fevent))
+            assert 0
+        return self.copy_map[key]
 
     @typecheck
-    def find_or_create_fill(self, fevent: int) -> Fill:
+    def create_fill(self, op: Operation, size: int,
+                    create: int, ready: int, 
+                    start: int, stop: int,
+                    fevent: int
+    ) -> Fill:
         key = fevent
         if key not in self.fill_map:
-            fill = Fill(fevent)
+            fill = Fill(op, size, create, ready, start, stop, fevent)
             self.add_fill_map(fevent,fill)
             # update prof_uid map
             self.prof_uid_map[fill.prof_uid] = fill
+        return self.fill_map[key]
+
+    @typecheck
+    def find_fill(self, fevent: int) -> Fill:
+        key = fevent
+        if key not in self.fill_map:
+            print("Can not find fill" + str(fevent))
+            assert 0
         return self.fill_map[key]
 
     @typecheck
@@ -4356,9 +4362,9 @@ class State(object):
                               dst: Optional[Memory],
                               src_fid: int, dst_fid: int,
                               src_inst: int, dst_inst: int, 
-                              fevent: int, indirect: bool
+                              fevent: int, num_hops: int, indirect: bool
     ) -> CopyInstInfo:
-        copy_inst_info =  CopyInstInfo(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, indirect)
+        copy_inst_info =  CopyInstInfo(src, dst, src_fid, dst_fid, src_inst, dst_inst, fevent, num_hops, indirect)
         return copy_inst_info
 
     @typecheck
