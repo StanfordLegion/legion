@@ -9520,6 +9520,7 @@ namespace Legion {
                                                   context, first_shard);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     EquivalenceSet* ShardManager::deduplicate_equivalence_set_creation(
                                 RegionNode *region_node, size_t op_ctx_index,
@@ -9732,6 +9733,7 @@ namespace Legion {
         created_equivalence_sets.erase(finder);
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     FillView* ShardManager::deduplicate_fill_view_creation(

@@ -729,7 +729,7 @@ namespace Legion {
       };
     public:
       TraceViewSet(InnerContext *context, DistributedID owner_did,
-                   RegionNode *region);
+                   IndexSpaceExpression *expr, RegionTreeID tree_id);
       virtual ~TraceViewSet(void);
     public:
       void insert(LogicalView *view,
@@ -791,7 +791,8 @@ namespace Legion {
                         FieldMaskSet<IndexSpaceExpression> > ViewExprs;
     public:
       InnerContext *const context;
-      RegionNode *const region;
+      IndexSpaceExpression *const expression;
+      const RegionTreeID tree_id;
       const DistributedID owner_did;
     protected:
       // At most one expression per field
@@ -846,7 +847,8 @@ namespace Legion {
       };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        RegionNode *region, const FieldMask &mask);
+                        IndexSpaceExpression *expr,
+                        const FieldMask &mask, RegionTreeID tree_id);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
     public:
@@ -889,9 +891,9 @@ namespace Legion {
     public:
       InnerContext *const context;
       RegionTreeForest *const forest;
-      RegionNode *const region;
       IndexSpaceExpression *const condition_expr;
       const FieldMask condition_mask;
+      const RegionTreeID tree_id;
     private:
       mutable LocalLock set_lock;
       FieldMaskSet<EquivalenceSet> current_sets;

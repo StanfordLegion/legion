@@ -3768,7 +3768,8 @@ namespace Legion {
                                             AddressSpaceID source);
       void handle_equivalence_set_owner_update(Deserializer &derez);
       void handle_equivalence_set_make_owner(Deserializer &derez);
-      void handle_equivalence_set_clone_request(Deserializer &derez);
+      void handle_equivalence_set_clone_request(Deserializer &derez,
+                                                AddressSpaceID source);
       void handle_equivalence_set_clone_response(Deserializer &derez);
       void handle_equivalence_set_capture_request(Deserializer &derez,
                                                   AddressSpaceID source);

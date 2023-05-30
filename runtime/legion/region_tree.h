@@ -1293,6 +1293,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0; 
       virtual void tighten_index_space(void) = 0;
+      virtual bool is_set(void) const { return true; }
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -2016,11 +2017,10 @@ namespace Legion {
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs) = delete;
     public:
-      inline bool is_set(void) const { return index_space_set.load(); }
-    public:
       virtual void notify_invalid(void);
       virtual void notify_local(void);
     public:
+      virtual bool is_set(void) const { return index_space_set.load(); }
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
       virtual IndexSpaceNode* as_index_space_node(void);

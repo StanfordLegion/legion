@@ -10828,7 +10828,8 @@ namespace Legion {
         const AddressSpaceID local_space = runtime->address_space;
         EquivalenceSet *set = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), local_space, 
-            region_node, physical_context, true/*register now*/);
+            region_node->row_source, region_node->handle.get_tree_id(),
+            physical_context, true/*register now*/);
         // Merge the state from the old equivalence sets if not overwriting
         if (!refinement_overwrite)
         {

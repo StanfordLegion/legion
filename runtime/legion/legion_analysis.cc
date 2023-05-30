@@ -3801,6 +3801,7 @@ namespace Legion {
             version_infos, op_id, ready_events);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionRefinementNode::register_refinement(ContextID ctx, 
         const FieldMask &refinement_mask, InnerContext *context,
@@ -3852,6 +3853,7 @@ namespace Legion {
         child->register_refinement(ctx, refinement_mask, context, op_ctx_index,
             refinement_number, parent_req_index, applied_events, version_infos);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // PartitionRefinementNode
@@ -13685,22 +13687,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID id,
                                    AddressSpaceID logical,
-                                   RegionNode *node, InnerContext *ctx,
+                                   IndexSpaceExpression *expr,
+                                   RegionTreeID tid, InnerContext *ctx,
                                    bool reg_now,
                                    CollectiveMapping *mapping /*= NULL*/)
       : DistributedCollectable(rt,
           LEGION_DISTRIBUTED_HELP_ENCODE(id, EQUIVALENCE_SET_DC),
-          reg_now, mapping), context(ctx), region_node(node), 
-        set_expr(node->row_source), tracing_preconditions(NULL),
-        tracing_anticonditions(NULL), tracing_postconditions(NULL), 
-        logical_owner_space(logical), replicated_owner_state(NULL), 
-        migration_index(0), sample_count(0)
+          reg_now, mapping), context(ctx), set_expr(expr), tree_id(tid),
+        tracing_preconditions(NULL), tracing_anticonditions(NULL),
+        tracing_postconditions(NULL), logical_owner_space(logical),
+        replicated_owner_state(NULL), migration_index(0), sample_count(0)
     //--------------------------------------------------------------------------
     {
       context->add_nested_resource_ref(did);
       context->add_nested_gc_ref(did);
       set_expr->add_nested_expression_reference(did);
-      region_node->add_nested_resource_ref(did);
       next_deferral_precondition.store(0);
       // If we have a collective mapping then we know that everyone agrees
       // on who the current logical owner is
@@ -13741,8 +13742,6 @@ namespace Legion {
         delete context;
       if (set_expr->remove_nested_expression_reference(did))
         delete set_expr;
-      if (region_node->remove_nested_resource_ref(did))
-        delete region_node;
     }
 
     //--------------------------------------------------------------------------
@@ -13895,7 +13894,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_logical_owner() || region_node->row_source->is_empty());
+      assert(is_logical_owner() || set_expr->is_empty());
       assert(sources.size() == corresponding.size());
 #endif
       AutoLock eq(eq_lock);
@@ -15051,7 +15050,8 @@ namespace Legion {
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
-          tracing_postconditions = new TraceViewSet(context, did, region_node);
+          tracing_postconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
           for (FieldMaskSet<InstanceView>::const_iterator it =
@@ -15115,14 +15115,12 @@ namespace Legion {
       if (current_samples.size() == SAMPLES_PER_MIGRATION_TEST)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_LARGE_EQUIVALENCE_SET_NODE_USAGE,
-            "Internal runtime performance warning: equivalence set %llx of "
-            "region (%d,%d,%d) has %zd different users which is the same as "
+            "Internal runtime performance warning: equivalence set %llx "
+            "has %zd different users which is the same as "
             "the sampling rate of %d. Region requirement %d of operation %s "
             "(UID %lld) triggered this warning. Please report this "
             "application use case to the Legion developers mailing list.",
-            did, region_node->handle.get_index_space().get_id(),
-            region_node->handle.get_field_space().get_id(),
-            region_node->handle.get_tree_id(), current_samples.size(),
+            did, current_samples.size(),
             SAMPLES_PER_MIGRATION_TEST, analysis.index,
             (analysis.op->get_operation_kind() == Operation::TASK_OP_KIND) ?
               static_cast<TaskOp*>(analysis.op)->get_task_name() :
@@ -15258,7 +15256,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        pack_state(rez, logical_owner_space, did, region_node, set_expr,
+        pack_state(rez, logical_owner_space, did, set_expr, set_expr,
                     true/*covers*/, all_ones, true/*pack guards*/);
       }
       runtime->send_equivalence_set_migration(logical_owner_space, rez);
@@ -16989,7 +16987,7 @@ namespace Legion {
               LegionMap<InstanceView*,
                 FieldMaskSet<IndexSpaceExpression> > updates;
               alias_analysis.visit_leaves(needed_mask, context, runtime->forest,
-                  region_node->handle.get_tree_id(), updates);
+                  tree_id, updates);
               for (LegionMap<InstanceView*,
                     FieldMaskSet<IndexSpaceExpression> >::const_iterator 
                     uit = updates.begin(); uit != updates.end(); uit++)
@@ -17503,7 +17501,7 @@ namespace Legion {
             // Record any fill operations that need to be performed as a result
             // and update the reduction instances with new reductions
             alias_analysis.visit_leaves(reduction_mask, context, analysis,
-                fill_aggregator, fill_view, region_node->handle.get_tree_id(),
+                fill_aggregator, fill_view, tree_id,
                 this, did, reduction_instances);
           }
           else
@@ -19755,7 +19753,8 @@ namespace Legion {
       if (analysis.trace_info.recording)
       {
         if (tracing_postconditions == NULL)
-          tracing_postconditions = new TraceViewSet(context, did, region_node);
+          tracing_postconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
         const RegionUsage usage(LEGION_WRITE_PRIV, LEGION_EXCLUSIVE, 0);
         for (FieldMaskSet<LogicalView>::const_iterator it =
               analysis.views.begin(); it != analysis.views.end(); it++)
@@ -20422,8 +20421,7 @@ namespace Legion {
           continue;
         // Check that the expressions overlap
         IndexSpaceExpression *overlap_expr = 
-          runtime->forest->intersect_index_spaces(expr,
-              it->first->region_node->row_source);
+          runtime->forest->intersect_index_spaces(expr, it->first->set_expr);
         if (overlap_expr->is_empty())
           continue;
         it->first->clone_to_local(this, overlap, applied_events,
@@ -20461,7 +20459,8 @@ namespace Legion {
             not_dominated.insert(expr, user_mask);
         }
         if ((tracing_preconditions == NULL) && !not_dominated.empty())
-          tracing_preconditions = new TraceViewSet(context, did, region_node);
+          tracing_preconditions =
+            new TraceViewSet(context, did, set_expr, tree_id);
         for (FieldMaskSet<IndexSpaceExpression>::const_iterator it =
               not_dominated.begin(); it != not_dominated.end(); it++)
           tracing_preconditions->insert(view, it->first, it->second);
@@ -20485,7 +20484,8 @@ namespace Legion {
           tracing_postconditions->invalidate_all_but(view, expr, user_mask);
       }
       else
-        tracing_postconditions = new TraceViewSet(context, did, region_node);
+        tracing_postconditions =
+          new TraceViewSet(context, did, set_expr, tree_id);
       tracing_postconditions->insert(view, expr, user_mask);
     }
 
@@ -20496,7 +20496,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (tracing_anticonditions == NULL)
-        tracing_anticonditions = new TraceViewSet(context, did, region_node);
+        tracing_anticonditions =
+          new TraceViewSet(context, did, set_expr, tree_id);
       tracing_anticonditions->insert(view, expr, mask);
     }
 
@@ -20534,19 +20535,19 @@ namespace Legion {
       // Compute the views to send back
       if (tracing_preconditions != NULL)
       {
-        previews = new TraceViewSet(context, 0/*no owner*/, region_node);
+        previews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
         tracing_preconditions->find_overlaps(*previews, expr, 
                                              (expr == set_expr), mask);
       }
       if (tracing_anticonditions != NULL)
       {
-        antiviews = new TraceViewSet(context, 0/*no owner*/, region_node);
+        antiviews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
         tracing_anticonditions->find_overlaps(*antiviews, expr,
                                              (expr == set_expr), mask);
       }
       if (tracing_postconditions != NULL)
       {
-        postviews = new TraceViewSet(context, 0/*no owner*/, region_node);
+        postviews = new TraceViewSet(context, 0/*no owner*/, set_expr, tree_id);
         tracing_postconditions->find_overlaps(*postviews, expr,
                                              (expr == set_expr), mask);
       }
@@ -20562,7 +20563,8 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(target);
-          rez.serialize(region_node->handle);
+          set_expr->pack_expression(rez, target_space);
+          rez.serialize(tree_id);
           if (previews != NULL)
             previews->pack(rez, target_space, true/*pack references*/);
           else
@@ -20766,7 +20768,8 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
-        rez.serialize(region_node->handle);
+        set_expr->pack_expression(rez, target);
+        rez.serialize(tree_id);
         rez.serialize(context->get_replication_id());
         rez.serialize(context->did);
         // There be dragons here!
@@ -20831,12 +20834,14 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      LogicalRegion handle;
-      derez.deserialize(handle);
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+                                        runtime->determine_owner(did));
+      RegionTreeID tid;
+      derez.deserialize(tid);
       DistributedID repl_id, ctx_did;
       derez.deserialize(repl_id);
       derez.deserialize(ctx_did);
-      RegionNode *node = runtime->forest->get_node(handle);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
       
@@ -20859,11 +20864,11 @@ namespace Legion {
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        set = new(location) EquivalenceSet(runtime, did, logical_owner,
-                                           node, context,false/*register now*/);
+        set = new(location) EquivalenceSet(runtime, did, logical_owner, expr,
+                                           tid, context,false/*register now*/);
       else
-        set = new EquivalenceSet(runtime, did, logical_owner,
-                                 node, context, false/*register now*/);
+        set = new EquivalenceSet(runtime, did, logical_owner, expr,
+                                 tid, context, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime();
     }
@@ -20876,11 +20881,14 @@ namespace Legion {
                                     const bool invalidate_overlap)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(src->tree_id == tree_id);
+#endif
       if (this == src)
       {
         // Empty equivalence sets can sometimes be asked to clone to themself
 #ifdef DEBUG_LEGION
-        assert(region_node->row_source->is_empty());
+        assert(set_expr->is_empty());
 #endif
         return;
       }
@@ -20891,7 +20899,7 @@ namespace Legion {
                             invalidate_overlap, forward_to_owner);
       }
       else
-        src->clone_to_remote(did, target_space, region_node,
+        src->clone_to_remote(did, target_space, set_expr,
              mask, applied_events, invalidate_overlap, forward_to_owner);
     }
 
@@ -21019,9 +21027,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::pack_state(Serializer &rez,const AddressSpaceID target,
-                          DistributedID target_did, RegionNode *target_region,
-                          IndexSpaceExpression *expr, const bool expr_covers, 
-                          const FieldMask &mask, const bool pack_guards)
+                    DistributedID target_did, IndexSpaceExpression *target_expr,
+                    IndexSpaceExpression *expr, const bool expr_covers, 
+                    const FieldMask &mask, const bool pack_guards)
     //--------------------------------------------------------------------------
     {
       LegionMap<IndexSpaceExpression*,FieldMaskSet<LogicalView> > valid_updates;
@@ -21040,7 +21048,7 @@ namespace Legion {
                            pack_guards ? &read_only_guards : NULL, 
                            pack_guards ? &reduction_fill_guards : NULL, 
                            precondition_updates, anticondition_updates, 
-                           postcondition_updates, target_did, target_region);
+                           postcondition_updates, target_did, target_expr);
       pack_updates(rez, target, valid_updates, initialized_updates,
            reduction_updates, restricted_updates, released_updates, 
            &read_only_guards, &reduction_fill_guards, precondition_updates, 
@@ -21345,7 +21353,8 @@ namespace Legion {
       TraceViewSet *precondition_updates = NULL;
       if (num_preconditions > 0)
       {
-        precondition_updates = new TraceViewSet(context, did, region_node);
+        precondition_updates =
+          new TraceViewSet(context, did, set_expr, tree_id);
         precondition_updates->unpack(derez, num_preconditions, 
                                      source, ready_events);
       }
@@ -21354,7 +21363,8 @@ namespace Legion {
       TraceViewSet *anticondition_updates = NULL;
       if (num_anticonditions > 0)
       {
-        anticondition_updates = new TraceViewSet(context, did, region_node);
+        anticondition_updates =
+          new TraceViewSet(context, did, set_expr, tree_id);
         anticondition_updates->unpack(derez, num_anticonditions, 
                                      source, ready_events);
       }
@@ -21363,7 +21373,8 @@ namespace Legion {
       TraceViewSet *postcondition_updates = NULL;
       if (num_postconditions > 0)
       {
-        postcondition_updates = new TraceViewSet(context, did, region_node);
+        postcondition_updates =
+          new TraceViewSet(context, did, set_expr, tree_id);
         postcondition_updates->unpack(derez, num_postconditions, 
                                      source, ready_events);
       }
@@ -21555,6 +21566,9 @@ namespace Legion {
                      const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(dst->tree_id == tree_id);
+#endif
       // Lock in exclusive mode if we're doing an invalidate
       AutoLock eq(eq_lock, invalidate_overlap ? 0 : 1, invalidate_overlap);
       if (!is_logical_owner())
@@ -21566,7 +21580,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(dst->did);
           rez.serialize(local_space);
-          rez.serialize(dst->region_node->handle);
+          dst->set_expr->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
@@ -21590,7 +21604,7 @@ namespace Legion {
       if (!set_expr->is_empty())
       {
         overlap = runtime->forest->intersect_index_spaces(set_expr, 
-                                      dst->region_node->row_source);
+                                                    dst->set_expr);
         const size_t overlap_volume = overlap->get_volume();
 #ifdef DEBUG_LEGION
         assert(overlap_volume > 0);
@@ -21601,7 +21615,7 @@ namespace Legion {
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates, dst->did, dst->region_node);
+                             postcondition_updates, dst->did, dst->set_expr);
       }
       else if (dst->set_expr->is_empty())
         find_overlap_updates(set_expr, true/*covers*/, mask, valid_updates,
@@ -21609,7 +21623,7 @@ namespace Legion {
                              restricted_updates, released_updates,
                              NULL/*guards*/,NULL/*guards*/,
                              precondition_updates, anticondition_updates,
-                             postcondition_updates, dst->did, dst->region_node);
+                             postcondition_updates, dst->did, dst->set_expr);
       // We hold the lock so calling back into the destination is safe
       dst->apply_state(valid_updates, initialized_updates, reduction_updates,
             restricted_updates, released_updates, precondition_updates,
@@ -21631,7 +21645,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::clone_to_remote(DistributedID target, 
-                     AddressSpaceID target_space, RegionNode *target_region, 
+                     AddressSpaceID target_space, 
+                     IndexSpaceExpression *target_expr, 
                      FieldMask mask, std::set<RtEvent> &applied_events, 
                      const bool invalidate_overlap, const bool forward_to_owner)
     //--------------------------------------------------------------------------
@@ -21647,7 +21662,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(target);
           rez.serialize(target_space);
-          rez.serialize(target_region->handle);
+          target_expr->pack_expression(rez, logical_owner_space);
           rez.serialize(mask);
           rez.serialize(done_event);
           rez.serialize<bool>(invalidate_overlap);
@@ -21657,8 +21672,8 @@ namespace Legion {
         applied_events.insert(done_event);
         return;
       }
-      IndexSpaceExpression *overlap = runtime->forest->intersect_index_spaces(
-                                          set_expr, target_region->row_source);
+      IndexSpaceExpression *overlap =
+        runtime->forest->intersect_index_spaces(set_expr, target_expr);
 #ifdef DEBUG_LEGION
       assert(!overlap->is_empty());
 #endif
@@ -21667,8 +21682,8 @@ namespace Legion {
       const bool overlap_covers = (overlap_volume == set_volume); 
       if (overlap_covers)
         overlap = set_expr;
-      else if (overlap_volume == target_region->row_source->get_volume())
-        overlap = target_region->row_source;
+      else if (overlap_volume == target_expr->get_volume())
+        overlap = target_expr;
       // If we make it here, then we've got valid data for the all the fields
       const RtUserEvent done_event = Runtime::create_rt_user_event();
       Serializer rez;
@@ -21678,7 +21693,7 @@ namespace Legion {
         rez.serialize(local_space);
         rez.serialize(done_event);
         rez.serialize<bool>(forward_to_owner);
-        pack_state(rez, target_space, target, target_region, overlap,
+        pack_state(rez, target_space, target, target_expr, overlap,
                    overlap_covers, mask, false/*pack guards*/);
       }
       runtime->send_equivalence_set_clone_response(target_space, rez);
@@ -21709,7 +21724,7 @@ namespace Legion {
               TraceViewSet *&precondition_updates,
               TraceViewSet *&anticondition_updates,
               TraceViewSet *&postcondition_updates,
-              DistributedID target_did, RegionNode *target_region) const
+              DistributedID target_did, IndexSpaceExpression *target_expr) const
     //--------------------------------------------------------------------------
     {
       // Get updates from the total valid instances
@@ -21997,7 +22012,7 @@ namespace Legion {
         if (precondition_updates == NULL)
         {
           precondition_updates = 
-            new TraceViewSet(context, target_did, target_region);
+            new TraceViewSet(context, target_did, target_expr, tree_id);
           tracing_preconditions->find_overlaps(*precondition_updates,
                                  overlap_expr, overlap_covers, mask);
           if (precondition_updates->empty())
@@ -22015,7 +22030,7 @@ namespace Legion {
         if (anticondition_updates == NULL)
         {
           anticondition_updates =
-            new TraceViewSet(context, target_did, target_region);
+            new TraceViewSet(context, target_did, target_expr, tree_id);
           tracing_anticonditions->find_overlaps(*anticondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (anticondition_updates->empty())
@@ -22033,7 +22048,7 @@ namespace Legion {
         if (postcondition_updates == NULL)
         {
           postcondition_updates = 
-            new TraceViewSet(context, target_did, target_region);
+            new TraceViewSet(context, target_did, target_expr, tree_id);
           tracing_postconditions->find_overlaps(*postcondition_updates,
                                   overlap_expr, overlap_covers, mask);
           if (postcondition_updates->empty())
@@ -22215,7 +22230,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(precondition_updates->owner_did == did);
-        assert(precondition_updates->region == region_node);
+        assert(precondition_updates->expression == set_expr);
+        assert(precondition_updates->tree_id == tree_id);
 #endif
         if (tracing_preconditions == NULL)
         {
@@ -22235,7 +22251,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(anticondition_updates->owner_did == did);
-        assert(anticondition_updates->region == region_node);
+        assert(anticondition_updates->expression == set_expr);
+        assert(anticondition_updates->tree_id == tree_id);
 #endif
         if (tracing_anticonditions == NULL)
         {
@@ -22255,7 +22272,8 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(postcondition_updates->owner_did == did);
-        assert(postcondition_updates->region == region_node);
+        assert(postcondition_updates->expression == set_expr);
+        assert(postcondition_updates->tree_id == tree_id);
 #endif
         if (tracing_postconditions == NULL)
         {
@@ -22275,7 +22293,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_clone_request(Deserializer &derez,
-                                                         Runtime *runtime)
+                                        Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -22287,8 +22305,8 @@ namespace Legion {
       derez.deserialize(target);
       AddressSpaceID target_space;
       derez.deserialize(target_space);
-      LogicalRegion handle;
-      derez.deserialize(handle);
+      IndexSpaceExpression *target_expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
       derez.deserialize(mask);
       RtUserEvent done_event;
@@ -22312,11 +22330,8 @@ namespace Legion {
                         applied_events, invalidate_overlap);
       }
       else
-      {
-        RegionNode *target_region = runtime->forest->get_node(handle);
-        set->clone_to_remote(target, target_space, target_region, mask,
+        set->clone_to_remote(target, target_space, target_expr, mask,
                   applied_events, invalidate_overlap, forward_to_owner);
-      }
       if (!applied_events.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(applied_events));
@@ -22387,38 +22402,33 @@ namespace Legion {
       DerezCheck z(derez);
       TraceConditionSet *target;
       derez.deserialize(target);
-      LogicalRegion handle;
-      derez.deserialize(handle);
+      IndexSpaceExpression *expr =
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      RegionTreeID tid;
+      derez.deserialize(tid);
       TraceViewSet *previews = NULL;
       TraceViewSet *antiviews = NULL;
       TraceViewSet *postviews = NULL;
-      RegionNode *region_node = NULL;
       size_t num_previews;
       derez.deserialize(num_previews);
       std::set<RtEvent> ready_events;
       if (num_previews > 0)
       {
-        if (region_node == NULL)
-          region_node = runtime->forest->get_node(handle);
-        previews = new TraceViewSet(target->context, 0/*no owner*/,region_node);
+        previews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
         previews->unpack(derez, num_previews, source, ready_events); 
       }
       size_t num_antiviews;
       derez.deserialize(num_antiviews);
       if (num_antiviews > 0)
       {
-        if (region_node == NULL)
-          region_node = runtime->forest->get_node(handle);
-        antiviews = new TraceViewSet(target->context,0/*no owner*/,region_node);
+        antiviews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
         antiviews->unpack(derez, num_antiviews, source, ready_events);
       }
       size_t num_postviews;
       derez.deserialize(num_postviews);
       if (num_postviews > 0)
       {
-        if (region_node == NULL)
-          region_node = runtime->forest->get_node(handle);
-        postviews = new TraceViewSet(target->context,0/*no owner*/,region_node);
+        postviews = new TraceViewSet(target->context, 0/*no owner*/, expr, tid);
         postviews->unpack(derez, num_postviews, source, ready_events);
       }
       RtUserEvent done_event;
@@ -22899,7 +22909,8 @@ namespace Legion {
         // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
         const RtEvent ready = context->compute_equivalence_sets(this, 
-            runtime->address_space, region_node, remaining_mask);
+            runtime->address_space, region_node->row_source, remaining_mask,
+            region_node->handle.get_tree_id());
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
@@ -23009,10 +23020,6 @@ namespace Legion {
                                                 const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert((node == set->region_node)
-             || !node->as_region_node()->row_source->is_empty());
-#endif
       AutoLock m_lock(manager_lock);
       if (equivalence_sets.insert(set, mask))
         set->add_base_resource_ref(VERSION_MANAGER_REF);
@@ -23087,10 +23094,6 @@ namespace Legion {
             // Once it's valid for any field then it's valid for all of them
             if (it->second * finder->second)
               continue;
-#ifdef DEBUG_LEGION
-            assert((node == it->first->region_node)
-                   || !node->as_region_node()->row_source->is_empty());
-#endif
             if (equivalence_sets.insert(it->first, it->second))
               it->first->add_base_resource_ref(VERSION_MANAGER_REF);
             to_delete.push_back(it->first);
@@ -23218,7 +23221,6 @@ namespace Legion {
       // No need for the lock here since we know this is initialization
 #ifdef DEBUG_LEGION
       assert(!!mask);
-      assert(node == set->region_node);
       assert(disjoint_complete * mask);
 #endif
       if (!disjoint_complete)
@@ -23718,7 +23720,6 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       assert(!!mask);
-      assert(set->region_node == node);
       // There should not be any other equivalence sets for these fields
       // This is a valid assertion in general, but not with control replication
       // where you can get two merge close ops updating subsets
@@ -23946,6 +23947,7 @@ namespace Legion {
       disjoint_complete |= mask;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::invalidate_refinement(InnerContext &context,
                                       const FieldMask &mask, bool self,
@@ -24106,6 +24108,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::filter_refinement_subscriptions(const FieldMask &mask,
@@ -24186,6 +24189,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void VersionManager::merge(VersionManager &src, 
                              std::set<RegionTreeNode*> &to_traverse,
@@ -24660,6 +24664,7 @@ namespace Legion {
         it->first->unpack_global_ref();
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *node,

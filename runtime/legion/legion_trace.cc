@@ -2573,12 +2573,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceViewSet::TraceViewSet(InnerContext *ctx, DistributedID own_did, 
-                               RegionNode *r)
-      : context(ctx), region(r), owner_did(
+                               IndexSpaceExpression *expr, RegionTreeID tid)
+      : context(ctx), expression(expr), tree_id(tid), owner_did(
           (own_did > 0) ? own_did : ctx->did), has_collective_views(false)
     //--------------------------------------------------------------------------
     {
-      region->add_nested_resource_ref(owner_did);
+      expression->add_nested_expression_reference(owner_did);
       if (owner_did == ctx->did)
         context->add_base_resource_ref(TRACE_REF);
       else
@@ -2609,8 +2609,8 @@ namespace Legion {
         if (context->remove_nested_resource_ref(owner_did))
           delete context;
       }
-      if (region->remove_nested_resource_ref(owner_did))
-        delete region;
+      if (expression->remove_nested_expression_reference(owner_did))
+        delete expression;
       conditions.clear();
     }
 
@@ -2620,7 +2620,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ViewExprs::iterator finder = conditions.find(view);
-      IndexSpaceExpression *const total_expr = region->row_source; 
+      IndexSpaceExpression *const total_expr = expression; 
       const size_t expr_volume = expr->get_volume();
       if (expr != total_expr)
       {
@@ -2761,7 +2761,7 @@ namespace Legion {
         return;
       }
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = region->row_source; 
+      IndexSpaceExpression *const total_expr = expression; 
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -2974,7 +2974,7 @@ namespace Legion {
       if (expr->is_empty())
         return true;
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = region->row_source;
+      IndexSpaceExpression *const total_expr = expression;
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -3112,7 +3112,7 @@ namespace Legion {
         return;
       }
       const size_t expr_volume = expr->get_volume();
-      IndexSpaceExpression *const total_expr = region->row_source;
+      IndexSpaceExpression *const total_expr = expression;
 #ifdef DEBUG_LEGION
       // This is a necessary but not sufficient condition for dominance
       // If we need to we can put in the full intersection test later
@@ -3789,8 +3789,8 @@ namespace Legion {
     void TraceViewSet::dump(void) const
     //--------------------------------------------------------------------------
     {
-      const LogicalRegion lr = region->handle;
       RegionTreeForest *forest = context->runtime->forest;
+      RegionNode *region = forest->get_tree(tree_id);
       for (ViewExprs::const_iterator vit = 
             conditions.begin(); vit != conditions.end(); ++vit)
       {
@@ -3800,8 +3800,6 @@ namespace Legion {
         {
           char *mask = region->column_source->to_string(it->second, context);
           const void *name = NULL; size_t name_size = 0;
-          forest->runtime->retrieve_semantic_information(lr, 
-              LEGION_NAME_SEMANTIC_TAG, name, name_size, true, true);
           if (view->is_fill_view())
           {
             log_tracing.info() << "  "
@@ -3891,8 +3889,7 @@ namespace Legion {
         if (dids.size() > 1)
         {
           InnerContext::CollectiveResult *result =
-            context->find_or_create_collective_view(
-                region->handle.get_tree_id(), dids, ready);
+            context->find_or_create_collective_view(tree_id, dids, ready);
           results[it->first] = result;
         }
         else
@@ -4172,8 +4169,7 @@ namespace Legion {
       {
         RtEvent ready;
         InnerContext::CollectiveResult *result =
-          context->find_or_create_collective_view(
-              region->handle.get_tree_id(), dids, ready);
+          context->find_or_create_collective_view(tree_id, dids, ready);
         if (ready.exists() && !ready.has_triggered())
           ready.wait();
         // Then wait for the collective view to be registered
@@ -4208,15 +4204,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceConditionSet::TraceConditionSet(PhysicalTrace *trace,
-                   RegionTreeForest *f, RegionNode *node, const FieldMask &mask)
+                   RegionTreeForest *f, IndexSpaceExpression *expr,
+                   const FieldMask &mask, RegionTreeID tid)
       : context(trace->logical_trace->context), forest(f),
-        region(node), condition_expr(region->row_source), condition_mask(mask),
+        condition_expr(expr), condition_mask(mask), tree_id(tid),
         invalid_mask(mask), precondition_views(NULL), anticondition_views(NULL),
         postcondition_views(NULL)
     //--------------------------------------------------------------------------
     {
       condition_expr->add_base_expression_reference(TRACE_REF);
-      region->add_base_gc_ref(TRACE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -4264,8 +4260,6 @@ namespace Legion {
             unique_view_expressions.end(); it++) 
         if ((*it)->remove_base_expression_reference(TRACE_REF))
           delete (*it);
-      if (region->remove_base_gc_ref(TRACE_REF))
-        delete region;
       if (condition_expr->remove_base_expression_reference(TRACE_REF))
         delete condition_expr;
       if (precondition_views != NULL)
@@ -4523,7 +4517,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceViewSet dump_view_set(context, 0/*owner did*/,
-          forest->get_tree(region->handle.get_tree_id()));
+                                 condition_expr, tree_id);
       for (ExprViews::const_iterator eit = 
             preconditions.begin(); eit != preconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -4537,7 +4531,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceViewSet dump_view_set(context, 0/*owner did*/,
-          forest->get_tree(region->handle.get_tree_id()));
+                                 condition_expr, tree_id);
       for (ExprViews::const_iterator eit = 
             anticonditions.begin(); eit != anticonditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -4551,7 +4545,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       TraceViewSet dump_view_set(context, 0/*owner did*/,
-          forest->get_tree(region->handle.get_tree_id()));
+                                 condition_expr, tree_id);
       for (ExprViews::const_iterator eit = 
             postconditions.begin(); eit != postconditions.end(); eit++)
         for (FieldMaskSet<LogicalView>::const_iterator it =
@@ -4778,23 +4772,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!invalid_mask);
 #endif
-      std::set<RtEvent> ready_events;
-      ContextID ctxid = context->get_context().get_id();
       AddressSpaceID space = forest->runtime->address_space;
-      region->compute_equivalence_sets(ctxid, context, this, space, 
-          condition_expr, invalid_mask, ready_events,
-          false/*downward only*/, false/*covers*/);
+      RtEvent ready = context->compute_equivalence_sets(this, space,
+                              condition_expr, invalid_mask, tree_id);
       invalid_mask.clear();
-      if (!ready_events.empty())
+      if (ready.exists() && !ready.has_triggered())
       {
-        const RtEvent ready = Runtime::merge_events(ready_events);
-        if (ready.exists() && !ready.has_triggered())
-        {
-          // Launch a meta-task to finalize this trace condition set
-          DeferTraceFinalizeSetsArgs args(this, opid);
-          return forest->runtime->issue_runtime_meta_task(args, 
-                          LG_LATENCY_DEFERRED_PRIORITY, ready);
-        }
+        // Launch a meta-task to finalize this trace condition set
+        DeferTraceFinalizeSetsArgs args(this, opid);
+        return forest->runtime->issue_runtime_meta_task(args, 
+                        LG_LATENCY_DEFERRED_PRIORITY, ready);
       }
       finalize_computed_sets();
       return RtEvent::NO_RT_EVENT;
@@ -5046,7 +5033,7 @@ namespace Legion {
       {
         TraceConditionSet *condition =
           new TraceConditionSet(trace, forest, 
-              it->first->region_node, it->second);
+              it->first->set_expr, it->second, it->first->tree_id);
         condition->add_reference();
         // This looks redundant because it is a bit since we're just going
         // to compute the single equivalence set we already have here but

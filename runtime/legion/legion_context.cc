@@ -3773,6 +3773,7 @@ namespace Legion {
       return full_inner_context;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
          AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
@@ -3791,6 +3792,7 @@ namespace Legion {
       else
         return RtEvent::NO_RT_EVENT;
     } 
+#endif
 
     //--------------------------------------------------------------------------
     EquivalenceSet* InnerContext::create_equivalence_set(RegionNode *node,
@@ -3802,13 +3804,14 @@ namespace Legion {
     {
       EquivalenceSet *result = new EquivalenceSet(runtime,
           runtime->get_available_distributed_id(), runtime->address_space,
-          node, find_parent_physical_context(index), true/*register now*/);
+          node->row_source, node->handle.get_tree_id(),
+          find_parent_physical_context(index), true/*register now*/);
       result->add_base_gc_ref(CONTEXT_REF);
       for (FieldMaskSet<EquivalenceSet>::const_iterator it =
             old_sets.begin(); it != old_sets.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(it->first->region_node != node);
+        assert(it->first->set_expr != node->row_source);
 #endif
         result->clone_from(runtime->address_space, it->first, it->second,
                            false/*forward to owner*/, applied_events);
@@ -10392,10 +10395,7 @@ namespace Legion {
           continue;
         }
         EquivalenceSet *eq_set = create_initial_equivalence_set(idx1, req);
-#ifdef DEBUG_LEGION
-        assert(eq_set->region_node->handle == req.region);
-#endif
-        RegionNode *region_node = eq_set->region_node;
+        RegionNode *region_node = runtime->forest->get_node(req.region);
         const FieldMask user_mask = 
           region_node->column_source->get_field_mask(req.privilege_fields);
         // Only need to initialize the context if this is
@@ -10491,10 +10491,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // This is the normal equivalence set creation pathway for single tasks
-      RegionNode *node = runtime->forest->get_node(req.region);
+      IndexSpaceNode *node = runtime->forest->get_node(req.region.index_space);
       EquivalenceSet *result =
         new EquivalenceSet(runtime, runtime->get_available_distributed_id(),
-            runtime->address_space, node,
+            runtime->address_space, node, req.region.get_tree_id(),
             find_parent_physical_context(idx), true/*register now*/);
       // Add a context ref that will be removed after this is registered
       result->add_base_gc_ref(CONTEXT_REF);
@@ -10831,16 +10831,17 @@ namespace Legion {
           runtime->find_distributed_collectable(context_did));
       EqSetTracker *target;
       derez.deserialize(target);
-      LogicalRegion handle;
-      derez.deserialize(handle);
-      RegionNode *region = runtime->forest->get_node(handle);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
       derez.deserialize(mask);
+      RegionTreeID tree_id;
+      derez.deserialize(tree_id);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
-                                                               region, mask);
+                                                          expr, mask, tree_id);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -12225,7 +12226,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
-         AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
+                       AddressSpaceID target_space, IndexSpaceExpression *expr,
+                       const FieldMask &mask, RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -21682,7 +21684,7 @@ namespace Legion {
                 old_sets.begin(); it != old_sets.end(); it++)
           {
 #ifdef DEBUG_LEGION
-            assert(it->first->region_node != node);
+            assert(it->first->set_expr != node->row_source);
 #endif
             result->clone_from(runtime->address_space, it->first, it->second,
                                false/*forward to owner*/, applied_events);
@@ -22639,7 +22641,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
-         AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
+                       AddressSpaceID target_space, IndexSpaceExpression *expr, 
+                       const FieldMask &mask, RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22653,8 +22656,9 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(target);
-        rez.serialize(region->handle);
+        expr->pack_expression(rez, owner_space);
         rez.serialize(mask);
+        rez.serialize(tree_id);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 

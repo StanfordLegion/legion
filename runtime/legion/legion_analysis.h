@@ -3556,7 +3556,8 @@ namespace Legion {
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID logical_owner,
-                     RegionNode *region_node,
+                     IndexSpaceExpression *expr,
+                     RegionTreeID tid,
                      InnerContext *context,
                      bool register_now, 
                      CollectiveMapping *mapping = NULL);
@@ -3863,7 +3864,7 @@ namespace Legion {
       void process_replication_invalidation(std::vector<RtEvent> &applied);
     protected:
       void pack_state(Serializer &rez, const AddressSpaceID target,
-            DistributedID target_did, RegionNode *target_region,
+            DistributedID target_did, IndexSpaceExpression *target_expr,
             IndexSpaceExpression *expr, const bool expr_covers,
             const FieldMask &mask, const bool pack_guards);
       void unpack_state_and_apply(Deserializer &derez, 
@@ -3876,7 +3877,7 @@ namespace Legion {
                           const bool invalidate_overlap,
                           const bool forward_to_owner);
       void clone_to_remote(DistributedID target, AddressSpaceID target_space,
-                    RegionNode *target_region, FieldMask mask,
+                    IndexSpaceExpression *target_expr, FieldMask mask,
                     std::set<RtEvent> &applied_events,
                     const bool invalidate_overlap, const bool forward_to_owner);
       void find_overlap_updates(IndexSpaceExpression *overlap, 
@@ -3895,7 +3896,7 @@ namespace Legion {
             TraceViewSet *&precondition_updates,
             TraceViewSet *&anticondition_updates,
             TraceViewSet *&postcondition_updates, 
-            DistributedID target, RegionNode *target_region) const;
+            DistributedID target, IndexSpaceExpression *target_expr) const;
       void apply_state(LegionMap<IndexSpaceExpression*,
                 FieldMaskSet<LogicalView> > &valid_updates,
             FieldMaskSet<IndexSpaceExpression> &initialized_updates,
@@ -3947,7 +3948,8 @@ namespace Legion {
       static void handle_replication_response(Deserializer &derez, Runtime *rt);
       static void handle_replication_invalidation(Deserializer &derez,
                                                   Runtime *rt);
-      static void handle_clone_request(Deserializer &derez, Runtime *runtime);
+      static void handle_clone_request(Deserializer &derez, Runtime *runtime, 
+                                       AddressSpaceID source);
       static void handle_clone_response(Deserializer &derez, Runtime *runtime);
       static void handle_capture_request(Deserializer &derez, Runtime *runtime,
                                          AddressSpaceID source);
@@ -3961,8 +3963,8 @@ namespace Legion {
       // It's crucial to correctness that all views stored in an equivalence
       // set come from the same context.
       InnerContext *const context;
-      RegionNode *const region_node;
-      IndexSpaceNode *const set_expr;
+      IndexSpaceExpression *const set_expr;
+      const RegionTreeID tree_id;
     protected:
       mutable LocalLock                                 eq_lock;
       // This is the physical state of the equivalence set
