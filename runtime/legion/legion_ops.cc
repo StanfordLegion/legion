@@ -4123,6 +4123,34 @@ namespace Legion {
     // Copy Operation 
     /////////////////////////////////////////////////////////////
 
+    CopyOp::SingleCopy::SingleCopy(unsigned copy_index,
+                                   CopyOp::Operand *src,
+                                   CopyOp::Operand *dst,
+                                   CopyOp::Operand *src_indirect,
+                                   CopyOp::Operand *dst_indirect,
+                                   Grant *grant,
+                                   PhaseBarrier *wait_barrier,
+                                   PhaseBarrier *arrive_barrier,
+                                   bool gather_is_range,
+                                   bool scatter_is_range)
+      :copy_index(copy_index),
+       src(src),
+       dst(dst),
+       src_indirect(src_indirect),
+       gather(src_indirect),
+       dst_indirect(dst_indirect),
+       scatter(dst_indirect),
+       grant(grant),
+       wait_barrier(wait_barrier),
+       arrive_barrier(arrive_barrier),
+       gather_is_range(gather_is_range),
+       scatter_is_range(scatter_is_range)
+    {
+    }
+
+    const CopyOp::ReqType CopyOp::req_types[REQ_COUNT] =
+      {SRC_REQ, DST_REQ, GATHER_REQ, SCATTER_REQ};
+
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
       : ExternalCopy(), MemoizableOp<SpeculativeOp>(rt)
@@ -4155,6 +4183,131 @@ namespace Legion {
       return *this;
     }
 
+    std::vector<RegionRequirement> &CopyOp::get_reqs_by_type(ReqType type)
+    {
+      std::vector<RegionRequirement> *reqs[] = {&src_requirements,
+                                                &dst_requirements,
+                                                &src_indirect_requirements,
+                                                &dst_indirect_requirements};
+      return *reqs[type];
+    }
+
+    template <typename T>
+    class CopyOp::InitField
+    {
+    public:
+      InitField(const std::vector<T> &vec)
+        :InitField(&vec, nullptr, 0, 0, vec.size()) {}
+
+      InitField(T *t, size_t count)
+        :InitField(nullptr, t, sizeof *t, 0, count) {}
+
+      InitField(std::vector<T> &vec)
+        :InitField(vec.data(), vec.size()) {}
+
+      template <typename C>
+      InitField(C *c, T *t)
+        :InitField(nullptr, c, sizeof *c, (char *)t - (char *)c, ULONG_MAX) {}
+
+      T get(size_t idx, T def)
+      {
+        if (idx >= count)
+          return def;
+
+        if (vec != nullptr)
+          return (*vec)[idx];
+
+        return *ptr(idx);
+      }
+
+      T *ptr(size_t idx)
+      {
+        if (idx >= count || base == nullptr)
+          return nullptr;
+
+        return (T *)((char *)base + idx * stride + offset);
+      }
+
+    private:
+      InitField(const std::vector<T> *vec,
+                void *base,
+                size_t stride,
+                size_t offset,
+                size_t count)
+        :vec(vec), base(base), stride(stride), offset(offset), count(count) {}
+
+      const std::vector<T> *vec;
+      void *base;
+      size_t stride;
+      size_t offset;
+      size_t count;
+    };
+
+    struct CopyOp::InitInfo
+    {
+      InitField<bool> gather_is_range;
+      InitField<bool> scatter_is_range;
+    };
+
+    template<typename T>
+    void CopyOp::initialize_copies_with_launcher(const T &launcher)
+    {
+      InitInfo info{InitField<bool>(launcher.src_indirect_is_range),
+                    InitField<bool>(launcher.dst_indirect_is_range)};
+      initialize_copies(info);
+    }
+
+    void
+    CopyOp::initialize_copies_with_copies(std::vector<SingleCopy> &other)
+    {
+      SingleCopy *cps = other.data();
+      InitInfo info{InitField<bool>(cps, &cps->gather_is_range),
+                    InitField<bool>(cps, &cps->scatter_is_range)};
+      initialize_copies(info);
+    }
+
+    void CopyOp::initialize_copies(InitInfo &info)
+    {
+      operands.clear();
+      copies.clear();
+
+      for (ReqType type : req_types)
+      {
+        std::vector<RegionRequirement> &reqs = get_reqs_by_type(type);
+
+        for (size_t cpidx = 0; cpidx < reqs.size(); cpidx++)
+          operands.emplace_back(cpidx, type, operands.size(), reqs[cpidx]);
+      }
+
+      size_t offset = 0;
+      std::vector<InitField<Operand>> ops_by_type;
+
+      for (ReqType type : req_types)
+      {
+        size_t count = get_reqs_by_type(type).size();
+        ops_by_type.emplace_back(&operands[offset], count);
+        offset += count;
+      }
+
+      InitField<Grant> grant(grants);
+      InitField<PhaseBarrier> waits(wait_barriers);
+      InitField<PhaseBarrier> arrives(arrive_barriers);
+
+      for (size_t i = 0; i < src_requirements.size(); i++)
+      {
+        copies.emplace_back(i,
+                            ops_by_type[SRC_REQ].ptr(i),
+                            ops_by_type[DST_REQ].ptr(i),
+                            ops_by_type[GATHER_REQ].ptr(i),
+                            ops_by_type[SCATTER_REQ].ptr(i),
+                            grant.ptr(i),
+                            waits.ptr(i),
+                            arrives.ptr(i),
+                            info.gather_is_range.get(i, false),
+                            info.scatter_is_range.get(i, false));
+      }
+    }
+
     //--------------------------------------------------------------------------
     void CopyOp::initialize(InnerContext *ctx, const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
@@ -4168,8 +4321,6 @@ namespace Legion {
       initialize_memoizable();
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
-      src_versions.resize(launcher.src_requirements.size());
-      dst_versions.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -4204,7 +4355,6 @@ namespace Legion {
       {
         const size_t gather_size = launcher.src_indirect_requirements.size();
         src_indirect_requirements.resize(gather_size);
-        gather_versions.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
           RegionRequirement &req = src_indirect_requirements[idx];
@@ -4225,10 +4375,9 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.src_indirect_is_range.size(), gather_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        gather_is_range = launcher.src_indirect_is_range;
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          if (!gather_is_range[idx])
+          if (!launcher.src_indirect_is_range[idx])
             continue;
           // For anything that is a gather by range we either need 
           // it also to be a scatter by range or we need a reduction
@@ -4253,7 +4402,6 @@ namespace Legion {
       {
         const size_t scatter_size = launcher.dst_indirect_requirements.size();
         dst_indirect_requirements.resize(scatter_size);
-        scatter_versions.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
           RegionRequirement &req = dst_indirect_requirements[idx];
@@ -4274,7 +4422,6 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.dst_indirect_is_range.size(), scatter_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        scatter_is_range = launcher.dst_indirect_is_range;
         if (!src_indirect_requirements.empty())
         {
           // Full indirections need to have the same index space
@@ -4339,6 +4486,7 @@ namespace Legion {
       {
         perform_type_checking();
       }
+      initialize_copies_with_launcher(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -4705,26 +4853,11 @@ namespace Legion {
       dst_indirect_requirements.clear();
       grants.clear();
       wait_barriers.clear();
+      copies.clear();
+      operands.clear();
       arrive_barriers.clear();
-      src_privilege_paths.clear();
-      dst_privilege_paths.clear();
-      gather_privilege_paths.clear();
-      scatter_privilege_paths.clear();
-      src_parent_indexes.clear();
-      dst_parent_indexes.clear();
-      gather_parent_indexes.clear();
-      scatter_parent_indexes.clear();
-      src_versions.clear();
-      dst_versions.clear();
-      gather_versions.clear();
-      scatter_versions.clear();
-      src_indirect_records.clear();
-      dst_indirect_records.clear();
-      gather_is_range.clear();
-      scatter_is_range.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
-      atomic_locks.clear();
       map_applied_conditions.clear();
       profiling_requests.clear();
       if (!profiling_info.empty())
@@ -4871,33 +5004,29 @@ namespace Legion {
       compute_parent_indexes();
       // Initialize the privilege and mapping paths for all of the
       // region requirements that we have
-      src_privilege_paths.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        initialize_privilege_path(src_privilege_paths[idx],
+        initialize_privilege_path(copies[idx].src->privilege_path,
                                   src_requirements[idx]);
       }
-      dst_privilege_paths.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        initialize_privilege_path(dst_privilege_paths[idx],
+        initialize_privilege_path(copies[idx].dst->privilege_path,
                                   dst_requirements[idx]);
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_privilege_paths.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
-          initialize_privilege_path(gather_privilege_paths[idx],
+          initialize_privilege_path(copies[idx].gather->privilege_path,
                                     src_indirect_requirements[idx]);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_privilege_paths.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
-          initialize_privilege_path(scatter_privilege_paths[idx],
+          initialize_privilege_path(copies[idx].scatter->privilege_path,
                                     dst_indirect_requirements[idx]);
         }
       } 
@@ -4917,14 +5046,13 @@ namespace Legion {
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
       ProjectionInfo projection_info;
-      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].
+                                                       src->privilege_path,
                                                      map_applied_conditions);
-      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
@@ -4936,7 +5064,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].
+                                                       dst->privilege_path,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -4944,25 +5073,25 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  projection_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].
+                                                   gather->privilege_path,
                                                  map_applied_conditions);
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         const size_t offset = src_requirements.size() +
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  projection_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].
+                                                   scatter->privilege_path,
                                                  map_applied_conditions);
       }
     }
@@ -5044,7 +5173,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      src_requirements[idx],
-                                                     src_versions[idx],
+                                                     copies[idx].src->version,
                                                      preconditions);
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -5056,7 +5185,7 @@ namespace Legion {
           dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                      dst_requirements[idx],
-                                                     dst_versions[idx],
+                                                     copies[idx].dst->version,
                                                      preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -5068,7 +5197,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  src_indirect_requirements[idx],
-                                                 gather_versions[idx],
+                                                 copies[idx].gather->version,
                                                  preconditions);
         offset += src_indirect_requirements.size();
       }
@@ -5077,7 +5206,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx,
                                                  dst_indirect_requirements[idx],
-                                                 scatter_versions[idx],
+                                                 copies[idx].scatter->version,
                                                  preconditions);
       }
       if (!preconditions.empty())
@@ -5110,7 +5239,6 @@ namespace Legion {
       output.dst_instances.resize(dst_requirements.size());
       output.src_indirect_instances.resize(src_indirect_requirements.size());
       output.dst_indirect_instances.resize(dst_indirect_requirements.size());
-      atomic_locks.resize(dst_requirements.size());
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
       output.copy_fill_priority = 0;
       output.compute_preimages = false;
@@ -5127,7 +5255,7 @@ namespace Legion {
           InstanceSet &valid_instances = valid_src_instances[idx];
           runtime->forest->physical_premap_region(this, idx, 
                                                   src_requirements[idx],
-                                                  src_versions[idx],
+                                                  copies[idx].src->version,
                                                   valid_instances,
                                                   map_applied_conditions);
           // Convert these to the valid set of mapping instances
@@ -5146,7 +5274,7 @@ namespace Legion {
           runtime->forest->physical_premap_region(this, 
                                                   idx+src_requirements.size(),
                                                   dst_requirements[idx],
-                                                  dst_versions[idx],
+                                                  copies[idx].dst->version,
                                                   valid_instances,
                                                   map_applied_conditions);
           // No need to filter for copies
@@ -5164,7 +5292,7 @@ namespace Legion {
             InstanceSet &valid_instances = valid_gather_instances[idx];
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 src_indirect_requirements[idx],
-                                                gather_versions[idx],
+                                                copies[idx].gather->version,
                                                 valid_instances,
                                                 map_applied_conditions);
             // Convert these to the valid set of mapping instances
@@ -5182,7 +5310,7 @@ namespace Legion {
             InstanceSet &valid_instances = valid_scatter_instances[idx];
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 dst_indirect_requirements[idx],
-                                                scatter_versions[idx],
+                                                copies[idx].scatter->version,
                                                 valid_instances,
                                                 map_applied_conditions);
             // Convert these to the valid set of mapping instances
@@ -5206,11 +5334,6 @@ namespace Legion {
 #endif
         profiling_reported = Runtime::create_rt_user_event();
       }
-      // Resize these now so they don't change later
-      if (!src_indirect_requirements.empty())
-        src_indirect_records.resize(src_indirect_requirements.size());
-      if (!dst_indirect_requirements.empty())
-        dst_indirect_records.resize(dst_indirect_requirements.size());
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
       ApEvent init_precondition = compute_init_precondition(trace_info);
@@ -5261,7 +5384,7 @@ namespace Legion {
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, src_targets,
               src_requirements[idx], index_point, 
-              src_indirect_records[idx], true/*source*/);
+              copies[idx].src_indirect_records, true/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -5274,7 +5397,7 @@ namespace Legion {
               local_precondition, local_postcondition, collective_precondition,
               collective_postcondition, trace_info, dst_targets,
               dst_requirements[idx], index_point, 
-              dst_indirect_records[idx], false/*source*/);
+              copies[idx].dst_indirect_records, false/*source*/);
           if (exchange_done.exists())
             perform_ready_events.insert(exchange_done);
         }
@@ -5287,7 +5410,7 @@ namespace Legion {
                                      output.untracked_valid_srcs.end());
           runtime->forest->physical_perform_updates_and_registration(
                                               src_requirements[idx],
-                                              src_versions[idx],
+                                              copies[idx].src->version,
                                               this, idx,
                                               init_precondition,
                                               src_indirect ? 
@@ -5326,7 +5449,7 @@ namespace Legion {
         ApEvent effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
                                           dst_requirements[idx],
-                                          dst_versions[idx], this,
+                                          copies[idx].dst->version, this,
                                           dst_idx,
                                           init_precondition,
                                           dst_indirect ? 
@@ -5370,7 +5493,7 @@ namespace Legion {
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                        src_indirect_requirements[idx],
-                                       gather_versions[idx], this,
+                                       copies[idx].gather->version, this,
                                        gather_idx,
                                        init_precondition,
                                        local_postcondition,
@@ -5405,7 +5528,7 @@ namespace Legion {
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                       dst_indirect_requirements[idx],
-                                      scatter_versions[idx], this,
+                                      copies[idx].scatter->version, this,
                                       scatter_idx,
                                       init_precondition,
                                       local_postcondition,
@@ -5539,27 +5662,26 @@ namespace Legion {
           // Normal copy across
           copy_post = runtime->forest->copy_across( 
               src_requirements[index], dst_requirements[index],
-              src_versions[index], dst_versions[index],
+              copies[index].src->version, copies[index].dst->version,
               src_targets, dst_targets, this, index, trace_info.dst_index,
               init_precondition, predication_guard, 
-              atomic_locks[index], trace_info, applied_conditions);
+              copies[index].atomic_locks, trace_info, applied_conditions);
         }
         else
         {
           // Gather copy
 #ifdef DEBUG_LEGION
-          assert(index < src_indirect_records.size());
-          assert(!src_indirect_records[index].empty());
+          assert(!copies[index].src_indirect_records.empty());
 #endif
           copy_post = runtime->forest->gather_across(
               src_requirements[index], src_indirect_requirements[index],
-              dst_requirements[index], src_indirect_records[index], 
+              dst_requirements[index], copies[index].src_indirect_records,
               src_targets, (*gather_targets), dst_targets, this, index, 
               src_requirements.size() + dst_requirements.size() + index,
-              src_requirements.size() + index, gather_is_range[index],
+              src_requirements.size() + index, copies[index].gather_is_range,
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, 
-              atomic_locks[index], trace_info, applied_conditions, 
+              copies[index].atomic_locks, trace_info, applied_conditions,
               possible_src_indirect_out_of_range, compute_preimages);
         }
       }
@@ -5569,43 +5691,43 @@ namespace Legion {
         {
           // Scatter copy
 #ifdef DEBUG_LEGION
-          assert(index < dst_indirect_records.size());
-          assert(!dst_indirect_records[index].empty());
+          assert(!copies[index].dst_indirect_records.empty());
 #endif
           copy_post = runtime->forest->scatter_across(
               src_requirements[index], dst_indirect_requirements[index],
               dst_requirements[index], src_targets, (*scatter_targets),
-              dst_targets, dst_indirect_records[index], this, index, 
+              dst_targets, copies[index].dst_indirect_records, this, index,
               src_requirements.size() + dst_requirements.size() + index,
-              src_requirements.size() + index, scatter_is_range[index],
+              src_requirements.size() + index, copies[index].scatter_is_range,
               init_precondition, predication_guard, collective_precondition,
               collective_postcondition, local_precondition, 
-              atomic_locks[index], trace_info, applied_conditions, 
+              copies[index].atomic_locks, trace_info, applied_conditions,
               possible_dst_indirect_out_of_range, 
               possible_dst_indirect_aliasing, compute_preimages);
         }
         else
         {
 #ifdef DEBUG_LEGION
-          assert(gather_is_range[index] == scatter_is_range[index]);
-          assert(index < src_indirect_records.size());
-          assert(!src_indirect_records[index].empty());
-          assert(index < dst_indirect_records.size());
-          assert(!dst_indirect_records[index].empty());
+          assert(copies[index].gather_is_range ==
+                 copies[index].scatter_is_range);
+          assert(!copies[index].src_indirect_records.empty());
+          assert(!copies[index].dst_indirect_records.empty());
 #endif
           // Full indirection copy
           copy_post = runtime->forest->indirect_across(
               src_requirements[index], src_indirect_requirements[index],
               dst_requirements[index], dst_indirect_requirements[index],
-              src_targets, dst_targets, src_indirect_records[index], 
-              (*gather_targets), dst_indirect_records[index], 
+              src_targets, dst_targets, copies[index].src_indirect_records,
+              (*gather_targets), copies[index].dst_indirect_records,
               (*scatter_targets), this, index,
               src_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() + index,
               src_requirements.size() + dst_requirements.size() +
-              src_indirect_requirements.size() + index, gather_is_range[index],
+              src_indirect_requirements.size() + index,
+              copies[index].gather_is_range,
               init_precondition, predication_guard, collective_precondition,
-              collective_postcondition, local_precondition, atomic_locks[index],
+              collective_postcondition, local_precondition,
+              copies[index].atomic_locks,
               trace_info,applied_conditions, possible_src_indirect_out_of_range,
               possible_dst_indirect_out_of_range,
               possible_dst_indirect_aliasing, compute_preimages);
@@ -5754,19 +5876,10 @@ namespace Legion {
     unsigned CopyOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      if (idx < src_parent_indexes.size())
-        return src_parent_indexes[idx];
-      idx -= src_parent_indexes.size();
-      if (idx < dst_parent_indexes.size())
-        return dst_parent_indexes[idx];
-      idx -= dst_parent_indexes.size();
-      if (idx < gather_parent_indexes.size())
-        return gather_parent_indexes[idx];
-      idx -= gather_parent_indexes.size();
 #ifdef DEBUG_LEGION
-      assert(idx < scatter_parent_indexes.size());
+      assert(idx < operands.size());
 #endif
-      return scatter_parent_indexes[idx];
+      return operands[idx].parent_index;
     }
 
     //--------------------------------------------------------------------------
@@ -5839,19 +5952,11 @@ namespace Legion {
                                      Reservation lock, bool exclusive)
     //--------------------------------------------------------------------------
     {
-      // Figure out which index this should actually be for
-      unsigned mod_index = index;
-      if (mod_index >= src_requirements.size())
-        mod_index -= src_requirements.size();
-      if (mod_index >= dst_requirements.size())
-        mod_index -= dst_requirements.size();
-      if (mod_index >= src_indirect_requirements.size())
-        mod_index -= src_indirect_requirements.size();
-      AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-      assert(mod_index < atomic_locks.size());
+      assert(index < operands.size());
 #endif
-      std::map<Reservation,bool> &local_locks = atomic_locks[mod_index];
+      SingleCopy &copy = copies[operands[index].copy_index];
+      std::map<Reservation,bool> &local_locks = copy.atomic_locks;
       std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
       if (finder != local_locks.end())
       {
@@ -6116,8 +6221,6 @@ namespace Legion {
     void CopyOp::compute_parent_indexes(void)
     //--------------------------------------------------------------------------
     {
-      src_parent_indexes.resize(src_requirements.size());
-      dst_parent_indexes.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         int parent_index =
@@ -6136,7 +6239,7 @@ namespace Legion {
                            src_requirements[idx].region.field_space.id, 
                            src_requirements[idx].region.tree_id, idx)
         else
-          src_parent_indexes[idx] = unsigned(parent_index);
+          copies[idx].src->parent_index = unsigned(parent_index);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -6156,11 +6259,10 @@ namespace Legion {
                            dst_requirements[idx].region.field_space.id, 
                            dst_requirements[idx].region.tree_id, idx)
         else
-          dst_parent_indexes[idx] = unsigned(parent_index);
+          copies[idx].dst->parent_index = unsigned(parent_index);
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_parent_indexes.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           int parent_index = 
@@ -6179,12 +6281,11 @@ namespace Legion {
                            src_indirect_requirements[idx].region.field_space.id, 
                            src_indirect_requirements[idx].region.tree_id, idx)
           else
-            gather_parent_indexes[idx] = unsigned(parent_index);
+            copies[idx].gather->parent_index = unsigned(parent_index);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_parent_indexes.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           int parent_index = 
@@ -6203,7 +6304,7 @@ namespace Legion {
                            dst_indirect_requirements[idx].region.field_space.id, 
                            dst_indirect_requirements[idx].region.tree_id, idx)
           else
-            scatter_parent_indexes[idx] = unsigned(parent_index);
+            copies[idx].scatter->parent_index = unsigned(parent_index);
         }
       }
     }
@@ -6287,45 +6388,14 @@ namespace Legion {
     const VersionInfo& CopyOp::get_version_info(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      if (idx >= src_versions.size())
-      {
-        idx -= src_versions.size();
-        if (idx >= dst_versions.size())
-        {
-          idx -= dst_versions.size();
-          if (idx >= gather_versions.size())
-            return scatter_versions[idx - gather_versions.size()];
-          else
-            return gather_versions[idx];
-        }
-        else
-          return dst_versions[idx];
-      }
-      else
-        return src_versions[idx];
+      return operands[idx].version;
     }
 
     //--------------------------------------------------------------------------
     const RegionRequirement& CopyOp::get_requirement(unsigned idx) const
     //--------------------------------------------------------------------------
     {
-      if (idx >= src_requirements.size())
-      {
-        idx -= src_requirements.size();
-        if (idx >= dst_requirements.size())
-        {
-          idx -= dst_requirements.size();
-          if (idx >= src_indirect_requirements.size())
-            return dst_indirect_requirements[
-              idx - src_indirect_requirements.size()];
-          else
-            return src_indirect_requirements[idx];
-        }
-        else
-          return dst_requirements[idx];
-      }
-      else
-        return src_requirements[idx];
+      return operands[idx].requirement;
     }
 
     //--------------------------------------------------------------------------
@@ -6685,8 +6755,6 @@ namespace Legion {
         index_domain = launcher.launch_domain;
       src_requirements.resize(launcher.src_requirements.size());
       dst_requirements.resize(launcher.dst_requirements.size());
-      src_versions.resize(launcher.src_requirements.size());
-      dst_versions.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -6729,7 +6797,6 @@ namespace Legion {
       {
         const size_t gather_size = launcher.src_indirect_requirements.size();
         src_indirect_requirements.resize(gather_size);
-        gather_versions.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
           RegionRequirement &req = src_indirect_requirements[idx];
@@ -6750,10 +6817,9 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.src_indirect_is_range.size(), gather_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        gather_is_range = launcher.src_indirect_is_range;
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
-          if (!gather_is_range[idx])
+          if (!launcher.src_indirect_is_range[idx])
             continue;
           // For anything that is a gather by range we either need 
           // it also to be a scatter by range or we need a reduction
@@ -6771,7 +6837,6 @@ namespace Legion {
                 "is no corresponding range indirection on the destination.",
                 idx, parent_ctx->get_task_name(), parent_ctx->get_unique_id())
         }
-        src_indirect_records.resize(gather_size);
         collective_exchanges.resize(gather_size);
         possible_src_indirect_out_of_range =
           launcher.possible_src_indirect_out_of_range;
@@ -6780,7 +6845,6 @@ namespace Legion {
       {
         const size_t scatter_size = launcher.dst_indirect_requirements.size();
         dst_indirect_requirements.resize(scatter_size);
-        scatter_versions.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
           RegionRequirement &req = dst_indirect_requirements[idx];
@@ -6801,8 +6865,6 @@ namespace Legion {
               "parent task %s (ID %lld)", 
               launcher.dst_indirect_is_range.size(), scatter_size, 
               parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-        scatter_is_range = launcher.dst_indirect_is_range;
-        dst_indirect_records.resize(scatter_size);
         collective_exchanges.resize(scatter_size);
         possible_dst_indirect_out_of_range = 
           launcher.possible_dst_indirect_out_of_range;
@@ -6851,6 +6913,7 @@ namespace Legion {
       }
       if (runtime->check_privileges)
         perform_type_checking();
+      initialize_copies_with_launcher(launcher);
     }
 
     //--------------------------------------------------------------------------
@@ -6893,7 +6956,6 @@ namespace Legion {
       compute_parent_indexes();
       // Initialize the privilege and mapping paths for all of the
       // region requirements that we have
-      src_privilege_paths.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         RegionRequirement &req = src_requirements[idx];
@@ -6903,9 +6965,8 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
         }
-        initialize_privilege_path(src_privilege_paths[idx], req);
+        initialize_privilege_path(copies[idx].src->privilege_path, req);
       }
-      dst_privilege_paths.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         RegionRequirement &req = dst_requirements[idx];
@@ -6915,11 +6976,10 @@ namespace Legion {
           req.handle_type = LEGION_REGION_PROJECTION;
           req.projection = 0;
         }
-        initialize_privilege_path(dst_privilege_paths[idx], req);
+        initialize_privilege_path(copies[idx].dst->privilege_path, req);
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_privilege_paths.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           RegionRequirement &req = src_indirect_requirements[idx];
@@ -6929,12 +6989,11 @@ namespace Legion {
             req.handle_type = LEGION_REGION_PROJECTION;
             req.projection = 0;
           }
-          initialize_privilege_path(gather_privilege_paths[idx], req);
+          initialize_privilege_path(copies[idx].gather->privilege_path, req);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_privilege_paths.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           RegionRequirement &req = dst_indirect_requirements[idx];
@@ -6944,7 +7003,7 @@ namespace Legion {
             req.handle_type = LEGION_REGION_PROJECTION;
             req.projection = 0;
           }
-          initialize_privilege_path(scatter_privilege_paths[idx], req);
+          initialize_privilege_path(copies[idx].scatter->privilege_path, req);
         }
       } 
       if (runtime->legion_spy_enabled)
@@ -7074,17 +7133,16 @@ namespace Legion {
       if (!wait_barriers.empty() || !arrive_barriers.empty())
         parent_ctx->perform_barrier_dependence_analysis(this, 
                               wait_barriers, arrive_barriers);
-      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         ProjectionInfo src_info(runtime, src_requirements[idx], launch_space); 
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].
+                                                      src->privilege_path,
                                                      map_applied_conditions);
       }
-      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         ProjectionInfo dst_info(runtime, dst_requirements[idx], launch_space); 
@@ -7097,7 +7155,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      dst_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].
+                                                      dst->privilege_path,
                                                      map_applied_conditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -7105,7 +7164,6 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
         {
           ProjectionInfo gather_info(runtime, src_indirect_requirements[idx], 
@@ -7113,13 +7171,13 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].
+                                                   gather->privilege_path,
                                                  map_applied_conditions);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
         {
           ProjectionInfo scatter_info(runtime, dst_indirect_requirements[idx],
@@ -7127,7 +7185,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].
+                                                  scatter->privilege_path,
                                                  map_applied_conditions);
         }
       }
@@ -7393,16 +7452,15 @@ namespace Legion {
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
         }
 #ifdef DEBUG_LEGION
-        assert(index < src_indirect_records.size());
-        assert(src_indirect_records[index].size() < points.size());
+        assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        src_indirect_records[index].emplace_back(
+        copies[index].src_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts, key));
         exchange.src_records.push_back(&records);
-        if (src_indirect_records[index].size() == points.size())
+        if (copies[index].src_indirect_records.size() == points.size())
         {
           for (unsigned idx = 0; idx < exchange.src_records.size(); idx++)
-            *exchange.src_records[idx] = src_indirect_records[index];
+            *exchange.src_records[idx] = copies[index].src_indirect_records;
           Runtime::trigger_event(exchange.src_ready);
         }
         return exchange.src_ready;
@@ -7435,16 +7493,15 @@ namespace Legion {
              Runtime::merge_events(&trace_info, exchange.local_postconditions));
         }
 #ifdef DEBUG_LEGION
-        assert(index < dst_indirect_records.size());
-        assert(dst_indirect_records[index].size() < points.size());
+        assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        dst_indirect_records[index].emplace_back(
+        copies[index].dst_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts, key));
         exchange.dst_records.push_back(&records);
-        if (dst_indirect_records[index].size() == points.size())
+        if (copies[index].dst_indirect_records.size() == points.size())
         {
           for (unsigned idx = 0; idx < exchange.dst_records.size(); idx++)
-            *exchange.dst_records[idx] = dst_indirect_records[index];
+            *exchange.dst_records[idx] = copies[index].dst_indirect_records;
           Runtime::trigger_event(exchange.dst_ready);
         }
         return exchange.dst_ready;
@@ -7815,12 +7872,6 @@ namespace Legion {
         memcpy(mapper_data, owner->mapper_data, mapper_data_size);
       }
       // From CopyOp
-      src_parent_indexes        = owner->src_parent_indexes;
-      dst_parent_indexes        = owner->dst_parent_indexes;
-      gather_parent_indexes     = owner->gather_parent_indexes;
-      scatter_parent_indexes    = owner->scatter_parent_indexes;
-      gather_is_range           = owner->gather_is_range;
-      scatter_is_range          = owner->scatter_is_range;
       predication_guard         = owner->predication_guard;
       possible_src_indirect_out_of_range 
                                 = owner->possible_src_indirect_out_of_range;
@@ -7830,6 +7881,11 @@ namespace Legion {
                                 = owner->possible_dst_indirect_aliasing;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
+
+      initialize_copies_with_copies(owner->copies);
+
+      for (CopyOp::Operand &op : operands)
+        op.parent_index = owner->operands[op.req_index].parent_index;
     }
 
     //--------------------------------------------------------------------------
@@ -7881,11 +7937,9 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       if (!intra_space_mapping_dependences.empty())
         preconditions.swap(intra_space_mapping_dependences);
-      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
-            src_requirements[idx], src_versions[idx], preconditions);
-      dst_versions.resize(dst_requirements.size());
+            src_requirements[idx], copies[idx].src->version, preconditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -7895,27 +7949,27 @@ namespace Legion {
           dst_requirements[idx].privilege = LEGION_READ_WRITE;
         runtime->forest->perform_versioning_analysis(this,
             src_requirements.size() + idx, dst_requirements[idx],
-            dst_versions[idx], preconditions);
+            copies[idx].dst->version, preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = LEGION_REDUCE;
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           src_indirect_requirements[idx], gather_versions[idx], preconditions);
+           src_indirect_requirements[idx], copies[idx].gather->version,
+           preconditions);
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         const size_t offset = src_requirements.size() + 
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           dst_indirect_requirements[idx], scatter_versions[idx],preconditions);
+           dst_indirect_requirements[idx], copies[idx].scatter->version,
+           preconditions);
         if (!src_indirect_requirements.empty())
         {
           // Full indirections need to have the same index space
