@@ -197,12 +197,12 @@ cache: &global_cache
 .gasnetex_ucx : &gasnetex_ucx
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
 .gasnet1_ucx : &gasnet1_ucx
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
 .gasnet_embed_local : &gasnet_embed_local
   EMBED_GASNET: "1"
