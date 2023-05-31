@@ -321,7 +321,7 @@ namespace Legion {
                            const bool reduction_initialization) = 0;
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
-                          unsigned idx,
+                          unsigned parent_req_index,
                           const UniqueInst &inst,
                           RegionNode *node,
                           const RegionUsage &usage,
@@ -476,7 +476,7 @@ namespace Legion {
                            const bool reduction_initialization);
     public:
       virtual void record_op_inst(const TraceLocalID &tlid,
-                          unsigned idx,
+                          unsigned parent_req_index,
                           const UniqueInst &inst,
                           RegionNode *node,
                           const RegionUsage &usage,
@@ -773,16 +773,12 @@ namespace Legion {
           rec->record_indirect_insts(indirect_done, all_done, expr, insts,
                                      applied, privilege);
         }
-      inline void record_op_inst(const RegionUsage &usage,
-                                 const FieldMask &user_mask,
-                                 const UniqueInst &inst,
-                                 RegionNode *node,
-                                 std::set<RtEvent> &applied) const
-        {
-          sanity_check();
-          rec->record_op_inst(tlid, index, inst, node, usage, 
-                              user_mask, update_validity, applied);
-        }
+      // Not inline because we need to call a method on Operation
+      void record_op_inst(const RegionUsage &usage,
+                          const FieldMask &user_mask,
+                          const UniqueInst &inst,
+                          RegionNode *node, Operation *op,
+                          std::set<RtEvent> &applied) const;
     public:
       void pack_trace_info(Serializer &rez, std::set<RtEvent> &applied) const;
       static PhysicalTraceInfo unpack_trace_info(Deserializer &derez,
@@ -4136,7 +4132,7 @@ namespace Legion {
                                        IndexSpaceExpression *expr,
                                        const bool expr_covers,
                                        const FieldMask &version_mask,
-                                       const UniqueID opid,
+                                       UniqueID opid, unsigned parent_req_index,
                                        std::set<RtEvent> &ready);
     protected:
       void add_node_disjoint_complete_ref(void) const;

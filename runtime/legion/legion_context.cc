@@ -10835,13 +10835,13 @@ namespace Legion {
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       FieldMask mask;
       derez.deserialize(mask);
-      RegionTreeID tree_id;
-      derez.deserialize(tree_id);
+      unsigned req_index;
+      derez.deserialize(req_index);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target, source,
-                                                          expr, mask, tree_id);
+                                                        req_index, expr, mask);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -12226,8 +12226,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(EqSetTracker *target,
-                       AddressSpaceID target_space, IndexSpaceExpression *expr,
-                       const FieldMask &mask, RegionTreeID tree_id)
+                       AddressSpaceID target_space, unsigned req_index,
+                       IndexSpaceExpression *expr, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -22641,8 +22641,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(EqSetTracker *target,
-                       AddressSpaceID target_space, IndexSpaceExpression *expr, 
-                       const FieldMask &mask, RegionTreeID tree_id)
+                       AddressSpaceID target_space, unsigned req_index,
+                       IndexSpaceExpression *expr, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22658,7 +22658,7 @@ namespace Legion {
         rez.serialize(target);
         expr->pack_expression(rez, owner_space);
         rez.serialize(mask);
-        rez.serialize(tree_id);
+        rez.serialize(req_index);
         rez.serialize(ready_event);
       }
       // Send it to the owner space 

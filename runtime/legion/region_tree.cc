@@ -1759,7 +1759,8 @@ namespace Legion {
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(), context,
-          &version_info, user_mask, op->get_unique_op_id(), ready_events);
+          &version_info, user_mask, op->get_unique_op_id(), 
+          op->find_parent_index(index), ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -20819,13 +20820,14 @@ namespace Legion {
                                                  InnerContext *parent_ctx,
                                                  VersionInfo *version_info,
                                                  const FieldMask &mask,
-                                                 const UniqueID opid,
+                                                 UniqueID opid, 
+                                                 unsigned parent_req_index,
                                                  std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
       manager.perform_versioning_analysis(parent_ctx, version_info, this, 
-            row_source, true/*expr covers*/, mask, opid, applied);
+        row_source, true/*expr covers*/, mask, opid, parent_req_index, applied);
     }
     
     //--------------------------------------------------------------------------

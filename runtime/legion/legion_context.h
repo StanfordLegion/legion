@@ -1143,8 +1143,8 @@ namespace Legion {
       virtual void compute_task_tree_coordinates(
                             TaskTreeCoordinates &coordinates) const;
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      AddressSpaceID target_space, IndexSpaceExpression *expr,
-                      const FieldMask &mask, RegionTreeID tree_id);
+                      AddressSpaceID target_space, unsigned req_index,
+                      IndexSpaceExpression *expr, const FieldMask &mask);
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
@@ -2079,8 +2079,8 @@ namespace Legion {
                           std::set<RtEvent> &applied_events,
                           const ShardMapping *mapping, ShardID source_shard);
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      AddressSpaceID target_space, IndexSpaceExpression *expr,
-                      const FieldMask &mask, RegionTreeID tree_id);
+                      AddressSpaceID target_space, unsigned req_index,
+                      IndexSpaceExpression *expr, const FieldMask &mask);
     public:
       const UniqueID root_uid;
     protected:
@@ -3406,8 +3406,8 @@ namespace Legion {
       virtual InnerContext* find_top_context(InnerContext *previous = NULL);
     public:
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
-                      AddressSpaceID target_space, IndexSpaceExpression *expr,
-                      const FieldMask &mask, RegionTreeID tree_id);
+                      AddressSpaceID target_space, unsigned req_index,
+                      IndexSpaceExpression *expr, const FieldMask &mask);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void pack_task_context(Serializer &rez) const;
       virtual CollectiveResult* find_or_create_collective_view(

@@ -847,7 +847,7 @@ namespace Legion {
       };
     public:
       TraceConditionSet(PhysicalTrace *trace, RegionTreeForest *forest, 
-                        IndexSpaceExpression *expr,
+                        unsigned parent_req_index, IndexSpaceExpression *expr,
                         const FieldMask &mask, RegionTreeID tree_id);
       TraceConditionSet(const TraceConditionSet &rhs) = delete;
       virtual ~TraceConditionSet(void);
@@ -894,6 +894,7 @@ namespace Legion {
       IndexSpaceExpression *const condition_expr;
       const FieldMask condition_mask;
       const RegionTreeID tree_id;
+      const unsigned parent_req_index;
     private:
       mutable LocalLock set_lock;
       FieldMaskSet<EquivalenceSet> current_sets;
@@ -1415,6 +1416,8 @@ namespace Legion {
       // this trace and then extract the different condition sets for this trace
       // THESE ARE SHARDED FOR CONTROL REPLICATION!!!
       FieldMaskSet<RegionNode> trace_regions;
+      // Parent context requirement indexes for each of the regions
+      std::map<RegionNode*,unsigned> trace_region_parent_req_indexes;
       std::vector<TraceConditionSet*> conditions;
 #ifdef LEGION_SPY
     private:

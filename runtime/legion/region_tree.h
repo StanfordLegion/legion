@@ -4146,7 +4146,7 @@ namespace Legion {
                                        InnerContext *parent_ctx,
                                        VersionInfo *version_info,
                                        const FieldMask &version_mask,
-                                       const UniqueID opid, 
+                                       UniqueID opid, unsigned parent_req_index,
                                        std::set<RtEvent> &ready_events);
       void compute_equivalence_sets(ContextID ctx,
                                     InnerContext *parent_ctx,

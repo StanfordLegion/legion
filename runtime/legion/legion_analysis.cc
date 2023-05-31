@@ -948,7 +948,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteTraceRecorder::record_op_inst(const TraceLocalID &tlid,
-                                             unsigned idx,
+                                             unsigned parent_req_index,
                                              const UniqueInst &inst,
                                              RegionNode *node,
                                              const RegionUsage &usage,
@@ -967,7 +967,7 @@ namespace Legion {
           rez.serialize(REMOTE_TRACE_RECORD_OP_INST);
           rez.serialize(applied);
           tlid.serialize(rez);
-          rez.serialize(idx);
+          rez.serialize(parent_req_index);
           inst.serialize(rez);
           rez.serialize(node->handle);
           rez.serialize(usage);
@@ -979,7 +979,7 @@ namespace Legion {
         applied_events.insert(applied);
       }
       else
-        remote_tpl->record_op_inst(tlid, idx, inst, node, usage,
+        remote_tpl->record_op_inst(tlid, parent_req_index, inst, node, usage,
                                    user_mask, update_validity, effects);
     }
 
@@ -1941,6 +1941,19 @@ namespace Legion {
         update_validity(update)
     //--------------------------------------------------------------------------
     {
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTraceInfo::record_op_inst(const RegionUsage &usage,
+                                           const FieldMask &user_mask,
+                                           const UniqueInst &inst,
+                                           RegionNode *node, Operation *op,
+                                           std::set<RtEvent> &applied) const
+    //--------------------------------------------------------------------------
+    {
+      sanity_check();
+      rec->record_op_inst(tlid, op->find_parent_index(index), inst, node,
+                          usage, user_mask, update_validity, applied);
     }
 
     //--------------------------------------------------------------------------
@@ -3780,6 +3793,7 @@ namespace Legion {
         return child->incorporate(refinement);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionRefinementNode::perform_versioning_analysis(ContextID ctx,
         InnerContext *context, const FieldMask &refinement_mask,
@@ -3801,7 +3815,6 @@ namespace Legion {
             version_infos, op_id, ready_events);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionRefinementNode::register_refinement(ContextID ctx, 
         const FieldMask &refinement_mask, InnerContext *context,
@@ -9813,7 +9826,7 @@ namespace Legion {
         {
           const UniqueInst unique_inst(individual_views[idx]);
           trace_info.record_op_inst(usage, target_views[idx].get_valid_mask(),
-                                    unique_inst, region, applied_events);
+                                    unique_inst, region, op, applied_events);
         }
       }
       if (!registered_events.empty())
@@ -22805,10 +22818,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
-                   VersionInfo *version_info, RegionNode *region_node,
-                   IndexSpaceExpression *expr, const bool expr_covers,
-                   const FieldMask &version_mask, const UniqueID opid,
-                   std::set<RtEvent> &ready_events)
+                     VersionInfo *version_info, RegionNode *region_node,
+                     IndexSpaceExpression *expr, const bool expr_covers,
+                     const FieldMask &version_mask, UniqueID opid,
+                     unsigned parent_req_index, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -22909,12 +22922,12 @@ namespace Legion {
         // Otherwise, bounce this computation off the context so that we know
         // that we are on the right node to perform it
         const RtEvent ready = context->compute_equivalence_sets(this, 
-            runtime->address_space, region_node->row_source, remaining_mask,
-            region_node->handle.get_tree_id());
+                            runtime->address_space, parent_req_index,
+                            region_node->row_source, remaining_mask);
         if (ready.exists() && !ready.has_triggered())
         {
           // Launch task to finalize the sets once they are ready
-          LgFinalizeEqSetsArgs args(this, compute_event, opid); 
+          LgFinalizeEqSetsArgs args(this, compute_event, opid);
           runtime->issue_runtime_meta_task(args, 
                              LG_LATENCY_DEFERRED_PRIORITY, ready);
         }
