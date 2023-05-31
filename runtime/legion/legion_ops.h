@@ -1298,6 +1298,9 @@ namespace Legion {
         GATHER_REQ = 2,
         SCATTER_REQ = 3,
       };
+    private:
+      static constexpr size_t REQ_COUNT = SCATTER_REQ + 1;
+      static const ReqType req_types[REQ_COUNT];
     public:
       struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross>,
                                   public PhysicalTraceInfo {
@@ -1457,30 +1460,83 @@ namespace Legion {
       // Separate function for this so it can be called by derived classes
       RtEvent perform_local_versioning_analysis(void);
     public:
-      std::vector<RegionTreePath>           src_privilege_paths;
-      std::vector<RegionTreePath>           dst_privilege_paths;
-      std::vector<unsigned>                 src_parent_indexes;
-      std::vector<unsigned>                 dst_parent_indexes;
-      LegionVector<VersionInfo>             src_versions;
-      LegionVector<VersionInfo>             dst_versions;
-      std::vector<IndexSpaceExpression*>    copy_expressions;
-    public: // These are only used for indirect copies
-      std::vector<RegionTreePath>           gather_privilege_paths;
-      std::vector<RegionTreePath>           scatter_privilege_paths;
-      std::vector<unsigned>                 gather_parent_indexes;
-      std::vector<unsigned>                 scatter_parent_indexes;
-      std::vector<bool>                     gather_is_range;
-      std::vector<bool>                     scatter_is_range;
-      LegionVector<VersionInfo>             gather_versions;
-      LegionVector<VersionInfo>             scatter_versions;
-      std::vector<std::vector<IndirectRecord> > src_indirect_records;
-      std::vector<std::vector<IndirectRecord> > dst_indirect_records;
+      struct Operand
+      {
+        Operand(unsigned copy_index,
+                ReqType type,
+                unsigned req_index,
+                RegionRequirement &requirement)
+          :copy_index(copy_index),
+           type(type),
+           req_index(req_index),
+           requirement(requirement)
+        {}
+
+        // from CopyLauncher
+        const unsigned copy_index;
+        const ReqType type;
+        const unsigned req_index;
+        RegionRequirement &requirement;
+
+        // calculated in CopyOp
+        RegionTreePath privilege_path;
+        unsigned parent_index;
+        VersionInfo version;
+      };
+
+      struct SingleCopy
+      {
+        SingleCopy(unsigned copy_index,
+                   Operand *src,
+                   Operand *dst,
+                   Operand *src_indirect,
+                   Operand *dst_indirect,
+                   Grant *grant,
+                   PhaseBarrier *wait_barrier,
+                   PhaseBarrier *arrive_barrier,
+                   bool gather_is_range,
+                   bool scatter_is_range);
+
+        // from CopyLauncher
+        const unsigned copy_index;
+        Operand * const src;
+        Operand * const dst;
+        Operand * const src_indirect;
+        Operand * const gather;
+        Operand * const dst_indirect;
+        Operand * const scatter;
+        Grant * const grant;
+        PhaseBarrier * const wait_barrier;
+        PhaseBarrier * const arrive_barrier;
+        bool gather_is_range;
+        bool scatter_is_range;
+
+        // calculated in CopyOp
+        std::vector<IndirectRecord> src_indirect_records;
+        std::vector<IndirectRecord> dst_indirect_records;
+        std::map<Reservation,bool> atomic_locks;
+      };
+
+    protected:
+      template<typename T>
+      void initialize_copies_with_launcher(const T &launcher);
+      void initialize_copies_with_copies(std::vector<SingleCopy> &other);
+
+    private: // used internally for initialization
+      template <typename T> class InitField;
+      struct InitInfo;
+
+      void initialize_copies(InitInfo &info);
+      std::vector<RegionRequirement> &get_reqs_by_type(ReqType type);
+
+    public: // per-operand and per-copy data
+      LegionVector<Operand> operands;
+      std::vector<SingleCopy> copies;
     protected: // for support with mapping
       MapperManager*              mapper;
     protected:
       std::vector<PhysicalManager*>         across_sources;
       std::map<PhysicalManager*,unsigned> acquired_instances;
-      std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
     protected:
       struct CopyProfilingInfo : public Mapping::Mapper::CopyProfilingInfo {

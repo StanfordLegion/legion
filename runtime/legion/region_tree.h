@@ -21,6 +21,7 @@
 #include "legion/legion_utilities.h"
 #include "legion/legion_allocation.h"
 #include "legion/legion_analysis.h"
+#include "legion/legion_profiling.h"
 #include "legion/garbage_collection.h"
 #include "legion/field_tree.h"
 
@@ -1013,7 +1014,7 @@ namespace Legion {
      * two different fields including with lots of different kinds
      * of indirections and transforms.
      */
-    class CopyAcrossExecutor : public Collectable {
+    class CopyAcrossExecutor : public InstanceNameClosure {
     public:
       struct DeferCopyAcrossArgs : public LgTaskArgs<DeferCopyAcrossArgs> {
       public:
@@ -1043,6 +1044,9 @@ namespace Legion {
           compute_preimages(preimages) { }
       virtual ~CopyAcrossExecutor(void) { }
     public:
+      // From InstanceNameClosure
+      virtual LgEvent find_instance_name(PhysicalInstance inst) const = 0;
+    public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
                               ApEvent copy_precondition,
                               ApEvent src_indirect_precondition, 
@@ -1055,7 +1059,7 @@ namespace Legion {
     public:
       static void handle_deferred_copy_across(const void *args);
     public:
-      Runtime *const runtime;
+      Runtime *const runtime; 
       // Reservations that must be acquired for performing this copy
       // across and whether they need to be acquired with exclusive
       // permissions or not
@@ -1079,6 +1083,9 @@ namespace Legion {
           src_indirect_instance(PhysicalInstance::NO_INST),
           dst_indirect_instance(PhysicalInstance::NO_INST) { }
       virtual ~CopyAcrossUnstructured(void) { }
+    public:
+      // From InstanceNameClosure
+      virtual LgEvent find_instance_name(PhysicalInstance inst) const;
     public:
       virtual ApEvent execute(Operation *op, PredEvent pred_guard,
                               ApEvent copy_precondition,
@@ -1115,7 +1122,6 @@ namespace Legion {
                                     const bool possible_out_of_range,
                                     const bool possible_aliasing,
                                     const bool exclusive_redop);
-      void log_across_profiling(LgEvent copy_post, int preimage = -1) const;
     public:
       // All the entries in these data structures are ordered by the
       // order of the fields in the original region requirements

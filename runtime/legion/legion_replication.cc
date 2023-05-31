@@ -3102,7 +3102,8 @@ namespace Legion {
                                        sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, req, 
                                                      projection_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].
+                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3118,7 +3119,8 @@ namespace Legion {
           req.privilege = LEGION_READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, req, 
                                                      projection_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].
+                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3126,7 +3128,6 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -3135,13 +3136,13 @@ namespace Legion {
                                          sharding_function, sharding_space); 
           runtime->forest->perform_dependence_analysis(this, offset + idx, req,
                                                  projection_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].
+                                                  gather->privilege_path,
                                                  logical_analysis);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         const size_t offset = src_requirements.size() +
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3151,7 +3152,8 @@ namespace Legion {
                                          sharding_function, sharding_space);
           runtime->forest->perform_dependence_analysis(this, offset + idx, req,
                                                  projection_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].
+                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3365,7 +3367,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      projection_info,
-                                                     src_privilege_paths[idx],
+                                                     copies[idx].
+                                                      src->privilege_path,
                                                      logical_analysis);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3381,7 +3384,8 @@ namespace Legion {
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
                                                      projection_info,
-                                                     dst_privilege_paths[idx],
+                                                     copies[idx].
+                                                      dst->privilege_path,
                                                      logical_analysis);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3389,7 +3393,6 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
-        gather_versions.resize(src_indirect_requirements.size());
         const unsigned offset = 
           src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
@@ -3399,13 +3402,13 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
                                                  gather_info,
-                                                 gather_privilege_paths[idx],
+                                                 copies[idx].
+                                                  gather->privilege_path,
                                                  logical_analysis);
         }
       }
       if (!dst_indirect_requirements.empty())
       {
-        scatter_versions.resize(dst_indirect_requirements.size());
         const unsigned offset = src_requirements.size() + 
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
@@ -3415,7 +3418,8 @@ namespace Legion {
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
                                                  scatter_info,
-                                                 scatter_privilege_paths[idx],
+                                                 copies[idx].
+                                                  scatter->privilege_path,
                                                  logical_analysis);
         }
       }
@@ -3657,13 +3661,13 @@ namespace Legion {
           }
         }
 #ifdef DEBUG_LEGION
-        assert(index < src_indirect_records.size());
-        assert(src_indirect_records[index].size() < points.size());
+        assert(index < copies.size());
+        assert(copies[index].src_indirect_records.size() < points.size());
 #endif
-        src_indirect_records[index].emplace_back(
+        copies[index].src_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts));
         exchange.src_records.push_back(&records);
-        if (src_indirect_records[index].size() == points.size())
+        if (copies[index].src_indirect_records.size() == points.size())
           return finalize_exchange(index, true/*sources*/);
         return exchange.src_ready;
       }
@@ -3709,13 +3713,13 @@ namespace Legion {
           }
         }
 #ifdef DEBUG_LEGION
-        assert(index < dst_indirect_records.size());
-        assert(dst_indirect_records[index].size() < points.size());
+        assert(index < copies.size());
+        assert(copies[index].dst_indirect_records.size() < points.size());
 #endif
-        dst_indirect_records[index].emplace_back(
+        copies[index].dst_indirect_records.emplace_back(
             IndirectRecord(runtime->forest, req, insts));
         exchange.dst_records.push_back(&records);
-        if (dst_indirect_records[index].size() == points.size())
+        if (copies[index].dst_indirect_records.size() == points.size())
           return finalize_exchange(index, false/*sources*/);
         return exchange.dst_ready;
       }
@@ -3733,7 +3737,7 @@ namespace Legion {
         assert(index < src_collectives.size());
 #endif
         const RtEvent ready = src_collectives[index]->exchange_records(
-                      exchange.src_records, src_indirect_records[index]);
+                      exchange.src_records, copies[index].src_indirect_records);
         if (exchange.src_ready.exists())
         {
           Runtime::trigger_event(exchange.src_ready, ready);
@@ -3748,7 +3752,7 @@ namespace Legion {
         assert(index < dst_collectives.size());
 #endif
         const RtEvent ready = dst_collectives[index]->exchange_records(
-                      exchange.dst_records, dst_indirect_records[index]);
+                      exchange.dst_records, copies[index].dst_indirect_records);
         if (exchange.dst_ready.exists())
         {
           Runtime::trigger_event(exchange.dst_ready, ready);
