@@ -189,12 +189,12 @@ cache: &global_cache
 .gasnetex_ucx : &gasnetex_ucx
   REALM_NETWORKS: "gasnetex"
   CONDUIT: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
 .gasnet1_ucx : &gasnet1_ucx
   REALM_NETWORKS: "gasnet1"
   CONDUIT: "ucx"
-  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.8.0/ucx-1.8.0.tar.gz"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
 .gasnet_embed_local : &gasnet_embed_local
   EMBED_GASNET: "1"
@@ -209,6 +209,7 @@ cache: &global_cache
   MPIR_CVAR_NOLOCAL: "1"
 .ucx: &ucx
   REALM_NETWORKS: "ucx"
+  UCX_SOURCE: "https://github.com/openucx/ucx/releases/download/v1.14.1/ucx-1.14.1.tar.gz"
   UCX_WARN_UNUSED_ENV_VARS: "n"
   # mpi_interop example requires MPI to build correctly
   USE_MPI: "1"
@@ -290,15 +291,18 @@ before_script:
       mkdir ucx
       cd ucx
       wget -O - $UCX_SOURCE | tar --strip-components=1 -zxf -
-      UCX_INSTALL_ROOT=$PWD/install
-      UCX_CONFIG_OPTS="--disable-numa"
-      contrib/configure-release --prefix=$UCX_INSTALL_ROOT $UCX_CONFIG_OPTS
+      if [[ -n "$CUDA" ]]; then
+        UCX_CONFIG_OPTS="--with-cuda=$CUDA"
+        # CI tests are run on a single node. So disable shared-memory and cuda ipc
+        # transports to be able to test some network functionality.
+        export UCX_TLS=^sm,cuda_ipc
+      else
+        UCX_CONFIG_OPTS="--without-cuda"
+        export UCX_TLS=^sm
+      fi
+      contrib/configure-release-mt $UCX_CONFIG_OPTS
       make -j8 install
-      PATH=$PATH:$UCX_INSTALL_ROOT/bin
-      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$UCX_INSTALL_ROOT/lib
-      # force inter-rank communication through tcp to make it "slow"
-      export UCX_TLS=tcp
-      cd ..
+      cd -
     fi
     if [[ "$REALM_NETWORKS" != "" ]]; then
       # OpenMPI:
@@ -325,22 +329,6 @@ before_script:
         fi
       fi
       if [[ "$REALM_NETWORKS" == ucx ]]; then
-        apt-get install -y autoconf automake m4 libtool
-        git clone https://github.com/openucx/ucx ucx-git
-        cd ucx-git
-        git checkout 5f26dd4
-        ./autogen.sh
-        if [[ "$CUDA" != "" ]]; then
-          ./contrib/configure-release-mt --with-cuda=$CUDA
-          # CI tests are run on a single node. So disable shared-memory and cuda ipc
-          # transports to be able to test some network functionality.
-          export UCX_TLS=^sm,cuda_ipc
-        else
-          ./contrib/configure-release-mt --without-cuda
-          export UCX_TLS=^sm
-        fi
-        make -j install
-        cd -
         # build mpi bootstrap .so file.
         # the mpicc used here must be consistent with launcher's mpirun.
         mpicc -shared -fPIC -o realm_ucp_bootstrap_mpi.so runtime/realm/ucx/bootstrap/bootstrap_mpi.c
