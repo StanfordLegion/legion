@@ -3679,6 +3679,10 @@ namespace Realm {
 
     virtual RegionInstance get_pointer_instance(void) const;
 
+    virtual const std::vector<RegionInstance>* get_instances(void) const;
+
+    virtual FieldID get_field(void) const;
+
     virtual TransferIterator *create_address_iterator(RegionInstance peer) const;
 
     virtual TransferIterator *create_indirect_iterator(Memory addrs_mem,
@@ -3758,6 +3762,18 @@ namespace Realm {
   RegionInstance IndirectionInfoTyped<N,T,N2,T2>::get_pointer_instance(void) const
   {
     return inst;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  const std::vector<RegionInstance>* IndirectionInfoTyped<N,T,N2,T2>::get_instances(void) const
+  {
+    return &insts;
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  FieldID IndirectionInfoTyped<N,T,N2,T2>::get_field(void) const
+  {
+    return field_id;
   }
   
   template <int N, typename T, int N2, typename T2>
@@ -4127,10 +4143,19 @@ namespace Realm {
         prof_usage.source = src_mem;
         prof_usage.target = dst_mem;
         prof_usage.size += domain_size * combined_field_size;
+	std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
+	std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
         prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-          srcs[i].inst,
-          dsts[i].inst,
-          1 /*num_fields*/,
+	  instinfo_src_insts,
+	  instinfo_dst_insts,
+	  RegionInstance::NO_INST,
+	  RegionInstance::NO_INST,
+	  instinfo_src_field_ids,
+	  instinfo_dst_field_ids,
+	  0,
+	  0,
           ProfilingMeasurements::OperationCopyInfo::REDUCE,
           unsigned(pathlen) });
         fld_start += 1;
@@ -4204,10 +4229,19 @@ namespace Realm {
         prof_usage.source = Memory::NO_MEMORY;
         prof_usage.target = dst_mem;
         prof_usage.size += domain_size * combined_field_size;
+	std::vector<RegionInstance> instinfo_src_insts;
+	std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
+	std::vector<FieldID> instinfo_src_field_ids;
+	std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
         prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-              RegionInstance::NO_INST,
-              dsts[i].inst,
-              1 /*num_fields*/,
+	      instinfo_src_insts,
+	      instinfo_dst_insts,
+	      RegionInstance::NO_INST,
+	      RegionInstance::NO_INST,
+	      instinfo_src_field_ids,
+	      instinfo_dst_field_ids,
+	      0,
+	      0,
               ProfilingMeasurements::OperationCopyInfo::FILL,
               unsigned(pathlen) });
         fld_start += 1;
@@ -4329,10 +4363,17 @@ namespace Realm {
             prof_usage.source = src_mem;
             prof_usage.target = dst_mem;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	    std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 srcs[i].inst,
-                 dsts[i].inst,
-                 num_fields,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 RegionInstance::NO_INST,
+		 RegionInstance::NO_INST,
+		 src_field_ids,
+		 dst_field_ids,
+		 0,
+		 0,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(pathlen) });
             fld_start += num_fields;
@@ -4356,10 +4397,22 @@ namespace Realm {
             prof_usage.source = src_mem;
             prof_usage.target = Memory::NO_MEMORY;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts{srcs[i].inst};
+	    std::vector<RegionInstance> instinfo_dst_insts;
+	    if (scatter_info->get_instances()) {
+	      instinfo_dst_insts = *(scatter_info->get_instances());
+	    }
+	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 srcs[i].inst,
-                 RegionInstance::NO_INST,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 RegionInstance::NO_INST,
+		 scatter_info->get_pointer_instance(),
+		 instinfo_src_field_ids,
+		 instinfo_dst_field_ids,
+		 0,
+		 scatter_info->get_field(),
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
             fld_start += 1;
@@ -4385,10 +4438,22 @@ namespace Realm {
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = dst_mem;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts;
+	    if (gather_info->get_instances()) {
+	      instinfo_src_insts = *(gather_info->get_instances());
+	    }
+	    std::vector<RegionInstance> instinfo_dst_insts{dsts[i].inst};
+	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 RegionInstance::NO_INST,
-                 dsts[i].inst,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 gather_info->get_pointer_instance(),
+		 RegionInstance::NO_INST,
+		 instinfo_src_field_ids,
+		 instinfo_dst_field_ids,
+		 gather_info->get_field(),
+		 0,
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
             fld_start += 1;
@@ -4434,10 +4499,25 @@ namespace Realm {
             prof_usage.source = Memory::NO_MEMORY;
             prof_usage.target = Memory::NO_MEMORY;
             prof_usage.size += domain_size * combined_field_size;
+	    std::vector<RegionInstance> instinfo_src_insts;
+	    if (gather_info->get_instances()) {
+	      instinfo_src_insts = *(gather_info->get_instances());
+	    }
+	    std::vector<RegionInstance> instinfo_dst_insts;
+	    if (scatter_info->get_instances()) {
+	      instinfo_dst_insts = *(scatter_info->get_instances());
+	    }
+	    std::vector<FieldID> instinfo_src_field_ids{srcs[i].field_id};
+	    std::vector<FieldID> instinfo_dst_field_ids{dsts[i].field_id};
             prof_cpinfo.inst_info.push_back(ProfilingMeasurements::OperationCopyInfo::InstInfo {
-                 RegionInstance::NO_INST,
-                 RegionInstance::NO_INST,
-                 1 /*num_fields*/,
+		 instinfo_src_insts,
+		 instinfo_dst_insts,
+		 gather_info->get_pointer_instance(),
+		 scatter_info->get_pointer_instance(),
+		 instinfo_src_field_ids,
+		 instinfo_dst_field_ids,
+		 gather_info->get_field(),
+		 scatter_info->get_field(),
                  ProfilingMeasurements::OperationCopyInfo::COPY,
                  unsigned(graph.xd_nodes.size() - prev_nodes) });
             fld_start += 1;

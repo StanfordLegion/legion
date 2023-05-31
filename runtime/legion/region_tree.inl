@@ -128,7 +128,12 @@ namespace Legion {
         priority =
           op->add_copy_profiling_request(trace_info, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_fill_request(requests, op, collective);
+      {
+        SmallNameClosure<1> *closure = new SmallNameClosure<1>();
+        closure->record_instance_name(dst_fields.front().inst, unique_event);
+        forest->runtime->profiler->add_fill_request(requests, closure, 
+                                                    op, collective);
+      }
       ApEvent fill_pre;
       if (pred_guard.exists())
         // No need for tracing to know about the precondition
@@ -137,7 +142,6 @@ namespace Legion {
         fill_pre = precondition;
       ApEvent result = ApEvent(space.fill(dst_fields, requests,
               fill_value, fill_size, fill_pre, priority));
-      LgEvent fevent = result;
       if (pred_guard.exists())
       {
         result = Runtime::ignorefaults(result);
@@ -167,13 +171,6 @@ namespace Legion {
         result = new_result;
       }
 #endif
-      if (forest->runtime->profiler != NULL)
-      {
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          forest->runtime->profiler->record_fill_instance(
-              dst_fields[idx].field_id, dst_fields[idx].inst,
-              unique_event, fevent);
-      }
 #ifdef LEGION_SPY
       LegionSpy::log_fill_events(op->get_unique_op_id(), expr_id, handle,
           tree_id, precondition, result, fill_uid, collective);
@@ -227,8 +224,13 @@ namespace Legion {
         priority =
           op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_copy_request(requests, op, 1/*count*/,
-                                                    collective);
+      {
+        SmallNameClosure<2> *closure = new SmallNameClosure<2>();
+        closure->record_instance_name(src_fields.front().inst, src_unique);
+        closure->record_instance_name(dst_fields.front().inst, dst_unique);
+        forest->runtime->profiler->add_copy_request(requests, closure,
+                                                    op, 1/*count*/, collective);
+      }
       ApEvent copy_pre;
       if (pred_guard.exists())
         copy_pre = Runtime::merge_events(NULL,precondition,ApEvent(pred_guard));
@@ -240,7 +242,6 @@ namespace Legion {
                                         true/*exclusive*/, copy_pre);
       ApEvent result = ApEvent(space.copy(src_fields, dst_fields, requests,
                                           copy_pre, priority));
-      LgEvent fevent = result;
       // Release any reservations after the copy is done
       for (std::vector<Reservation>::const_iterator it =
             reservations.begin(); it != reservations.end(); it++)
@@ -283,14 +284,6 @@ namespace Legion {
         result = new_result;
       }
 #endif
-      if (forest->runtime->profiler != NULL)
-      {
-        for (unsigned idx = 0; idx < src_fields.size(); idx++)
-          forest->runtime->profiler->record_copy_instances(
-              src_fields[idx].field_id, dst_fields[idx].field_id,
-              src_fields[idx].inst, dst_fields[idx].inst,
-              src_unique, dst_unique, fevent);
-      }
 #ifdef LEGION_SPY
       LegionSpy::log_copy_events(op->get_unique_op_id(), expr_id, src_tree_id,
                                  dst_tree_id, precondition, result, collective);
@@ -6476,10 +6469,8 @@ namespace Legion {
       if (!replay)
         priority = op->add_copy_profiling_request(trace_info, requests,
                                           false/*fill*/, total_copies);
-      // TODO: need to log unique IDs for instances here for copy indirections
-      // The code right now is only correct for straight copy across
       if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, op, total_copies);
+        runtime->profiler->add_copy_request(requests, this, op, total_copies);
       ApEvent copy_pre;
       if (pred_guard.exists())
         copy_pre =
@@ -6494,23 +6485,15 @@ namespace Legion {
       if (!indirections.empty())
       {
         if (individual_field_indexes.empty())
-        {
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
                 indirections, requests, copy_pre, priority));
-          if (runtime->profiler != NULL)
-            log_across_profiling(last_copy);
-        }
         else
           last_copy = issue_individual_copies(copy_pre, requests);
           
       }
       else
-      {
         last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
               requests, copy_pre, priority));
-        if (runtime->profiler != NULL)
-          log_across_profiling(last_copy);
-      }
       // Release any reservations
       for (std::map<Reservation,bool>::const_iterator it =
             reservations.begin(); it != reservations.end(); it++)
@@ -6622,8 +6605,6 @@ namespace Legion {
                             indirections, requests, precondition, priority));
         if (post.exists())
           postconditions.push_back(post);
-        if (runtime->profiler != NULL)
-          log_across_profiling(post, idx);
       }
       if (postconditions.empty())
         return ApEvent::NO_AP_EVENT;

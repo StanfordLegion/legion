@@ -33,6 +33,60 @@ namespace Legion {
     // be thread safe no matter what Realm decides to do 
     __thread LegionProfInstance *thread_local_profiling_instance = NULL;
 
+
+    //--------------------------------------------------------------------------
+    template<size_t ENTRIES>
+    SmallNameClosure<ENTRIES>::SmallNameClosure(void)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < ENTRIES; idx++)
+        instances[idx] = PhysicalInstance::NO_INST;
+    }
+
+    //--------------------------------------------------------------------------
+    template<size_t ENTRIES>
+    void SmallNameClosure<ENTRIES>::record_instance_name(
+                                        PhysicalInstance instance, LgEvent name)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < ENTRIES; idx++)
+      {
+        if (!instances[idx].exists())
+        {
+          instances[idx] = instance;
+          names[idx] = name;
+          return;
+        }
+        if (instances[idx] == instance)
+        {
+#ifdef DEBUG_LEGION
+          assert(names[idx] == name);
+#endif
+          return;
+        }
+      }
+      // Should not run out of space
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<size_t ENTRIES>
+    LgEvent SmallNameClosure<ENTRIES>::find_instance_name(
+                                                    PhysicalInstance inst) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < ENTRIES; idx++)
+        if (instances[idx] == inst)
+          return names[idx];
+      // Should always find it before this
+      assert(false);
+      return names[0];
+    }
+
+    // Explicit instantiations for 1 and 2
+    template class SmallNameClosure<1>;
+    template class SmallNameClosure<2>;
+
     //--------------------------------------------------------------------------
     LegionProfMarker::LegionProfMarker(const char* _name)
       : name(_name), stopped(false)
@@ -418,7 +472,7 @@ namespace Legion {
         GPUTaskInfo &info = gpu_task_infos.back();
         info.op_id = prof_info->op_id;
         info.task_id = prof_info->id;
-        info.variant_id = prof_info->id2;
+        info.variant_id = prof_info->extra.id2;
         info.proc_id = usage.proc.id;
         info.create = timeline.create_time;
         info.ready = timeline.ready_time;
@@ -458,7 +512,7 @@ namespace Legion {
         TaskInfo &info = task_infos.back();
         info.op_id = prof_info->op_id;
         info.task_id = prof_info->id;
-        info.variant_id = prof_info->id2;
+        info.variant_id = prof_info->extra.id2;
         info.proc_id = usage.proc.id;
         info.create = timeline.create_time;
         info.ready = timeline.ready_time;
@@ -633,25 +687,123 @@ namespace Legion {
       info.fevent = LgEvent(fevent.finish_event);
       info.collective = (CollectiveKind)prof_info->id;
       assert(!cpinfo.inst_info.empty());
-      for (unsigned idx = 0; idx < cpinfo.inst_info.size(); idx++)
+      InstanceNameClosure *closure = prof_info->extra.closure;
+      typedef Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo 
+        InstInfo;
+      for (std::vector<InstInfo>::const_iterator it =
+            cpinfo.inst_info.begin(); it != cpinfo.inst_info.end(); it++)
       {
-        if (idx == 0)
+#ifdef DEBUG_LEGION
+        assert(it->src_fields.size() == it->dst_fields.size());
+#endif
+        if (it->src_indirection_inst.exists() ||
+            it->dst_indirection_inst.exists())
         {
-          info.num_hops = cpinfo.inst_info[idx].num_hops;
-          info.request_type = cpinfo.inst_info[idx].request_type;
+          // Apparently we have to do the full cross-product of
+          // everything here. I don't really understand so just
+          // log what the Realm developers say and redirect any
+          // questions from the profiler back to Realm
+          unsigned offset = info.inst_infos.size();
+          info.inst_infos.resize(offset + (it->src_insts.size() * 
+                it->src_fields.size() * it->dst_insts.size() *
+                it->dst_fields.size()) + 1/*extra for indirection*/);
+          // Finally log the indirection instance(s)
+          CopyInstInfo &indirect = info.inst_infos[offset++];
+          indirect.indirect = true;
+          indirect.num_hops = it->num_hops;
+          if (it->src_indirection_inst.exists())
+          {
+            indirect.src = it->src_indirection_inst.get_location().id;
+            indirect.src_fid = it->src_indirection_field;
+            indirect.src_inst_uid = 
+              closure->find_instance_name(it->src_indirection_inst);
+          }
+          else
+          {
+            indirect.src = 0;
+            indirect.src_fid = 0;
+            indirect.src_inst_uid = LgEvent::NO_LG_EVENT;
+          }
+          if (it->dst_indirection_inst.exists())
+          {
+            indirect.dst = it->dst_indirection_inst.get_location().id;
+            indirect.dst_fid = it->dst_indirection_field;
+            indirect.dst_inst_uid =
+              closure->find_instance_name(it->dst_indirection_inst);
+          }
+          else
+          {
+            indirect.dst = 0;
+            indirect.dst_fid = 0;
+            indirect.dst_inst_uid = LgEvent::NO_LG_EVENT;
+          }
+          for (unsigned idx1 = 0; idx1 < it->src_insts.size(); idx1++)
+          {
+            PhysicalInstance src_inst = it->src_insts[idx1];
+            Memory src_location = src_inst.get_location();
+            LgEvent src_name = closure->find_instance_name(src_inst);
+            for (unsigned idx2 = 0; idx2 < it->dst_insts.size(); idx2++)
+            {
+              PhysicalInstance dst_inst = it->dst_insts[idx2];
+              Memory dst_location = dst_inst.get_location();
+              LgEvent dst_name = closure->find_instance_name(dst_inst);
+              for (unsigned idx3 = 0; idx3 < it->src_fields.size(); idx3++)
+              {
+                const FieldID src_fid = it->src_fields[idx3];
+                for (unsigned idx4 = 0; idx4 < it->dst_fields.size(); idx4++)
+                {
+                  const FieldID dst_fid = it->dst_fields[idx4];
+                  CopyInstInfo &inst_info = info.inst_infos[offset++];
+                  inst_info.src = src_location.id;
+                  inst_info.dst = dst_location.id;
+                  inst_info.src_fid = src_fid;
+                  inst_info.dst_fid = dst_fid;
+                  inst_info.src_inst_uid = src_name;
+                  inst_info.dst_inst_uid = dst_name;
+                  inst_info.num_hops = it->num_hops;
+                  inst_info.indirect = false;
+                }
+              }
+            }
+          }
         }
         else
         {
-          // Check that they are all the same, they should be since
-          // Legion is very particular in how it issues copies
-          assert(info.num_hops == cpinfo.inst_info[idx].num_hops);
-          assert(info.request_type == cpinfo.inst_info[idx].request_type);
+#ifdef DEBUG_LEGION
+          // Ask the Realm developers about why these assertions are true
+          // because I still don't completely understand the logic
+          assert(it->src_insts.size() == 1);
+          assert(it->dst_insts.size() == 1);
+#endif
+          PhysicalInstance src_inst = it->src_insts.front();
+          PhysicalInstance dst_inst = it->dst_insts.front();
+          Memory src_location = src_inst.get_location();
+          Memory dst_location = dst_inst.get_location();
+          LgEvent src_name = closure->find_instance_name(src_inst);
+          LgEvent dst_name = closure->find_instance_name(dst_inst);
+          const unsigned offset = info.inst_infos.size();
+          info.inst_infos.resize(offset + it->src_fields.size());
+          for (unsigned idx = 0; idx < it->src_fields.size(); idx++)
+          {
+            CopyInstInfo &inst_info = info.inst_infos[offset+idx];
+            inst_info.src = src_location.id;
+            inst_info.dst = dst_location.id;
+            inst_info.src_fid = it->src_fields[idx];
+            inst_info.dst_fid = it->dst_fields[idx];
+            inst_info.src_inst_uid = src_name;
+            inst_info.dst_inst_uid = dst_name;
+            inst_info.num_hops = it->num_hops;
+            inst_info.indirect = false;
+          }
         }
       }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
 #endif
-      owner->update_footprint(sizeof(CopyInfo), this);
+      owner->update_footprint(sizeof(CopyInfo) +
+          info.inst_infos.size() * sizeof(CopyInstInfo), this);
+      if (closure->remove_reference())
+        delete closure;
     }
 
     //--------------------------------------------------------------------------
@@ -662,8 +814,14 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(response.has_measurement<
+          Realm::ProfilingMeasurements::OperationCopyInfo>());
+      assert(response.has_measurement<
           Realm::ProfilingMeasurements::OperationTimeline>());
 #endif
+      Realm::ProfilingMeasurements::OperationCopyInfo cpinfo;
+      response.get_measurement<
+        Realm::ProfilingMeasurements::OperationCopyInfo>(cpinfo);
+
       Realm::ProfilingMeasurements::OperationTimeline timeline;
       response.get_measurement<
             Realm::ProfilingMeasurements::OperationTimeline>(timeline);
@@ -683,10 +841,36 @@ namespace Legion {
       if (response.get_measurement(fevent))
         info.fevent = LgEvent(fevent.finish_event);
       info.collective = (CollectiveKind)prof_info->id;
+      InstanceNameClosure *closure = prof_info->extra.closure;
+      typedef Realm::ProfilingMeasurements::OperationCopyInfo::InstInfo 
+        InstInfo;
+      for (std::vector<InstInfo>::const_iterator it =
+            cpinfo.inst_info.begin(); it != cpinfo.inst_info.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!it->dst_fields.empty());
+        assert(it->dst_insts.size() == 1);
+#endif
+        PhysicalInstance instance = it->dst_insts.front();
+        Memory location = instance.get_location();
+        LgEvent name = closure->find_instance_name(instance);
+        unsigned offset = info.inst_infos.size();
+        info.inst_infos.resize(offset + it->dst_fields.size());
+        for (unsigned idx = 0; idx < it->dst_fields.size(); idx++)
+        {
+          FillInstInfo &inst_info = info.inst_infos[offset+idx];
+          inst_info.dst = location.id;
+          inst_info.fid = it->dst_fields[idx];
+          inst_info.dst_inst_uid = name; 
+        }
+      }
 #ifdef LEGION_PROF_PROVENANCE
       info.provenance = prof_info->provenance;
 #endif
-      owner->update_footprint(sizeof(FillInfo), this);
+      owner->update_footprint(sizeof(FillInfo) + 
+          info.inst_infos.size() * sizeof(FillInstInfo), this);
+      if (closure->remove_reference())
+        delete closure;
     }
 
     //--------------------------------------------------------------------------
@@ -842,58 +1026,6 @@ namespace Legion {
       info.stop = stop;
       info.proc_id = proc.id;
       owner->update_footprint(sizeof(RuntimeCallInfo), this);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::record_fill_instance(FieldID fid, 
-                            PhysicalInstance inst, LgEvent name, LgEvent fevent)
-    //--------------------------------------------------------------------------
-    {
-      fill_inst_infos.emplace_back(FillInstInfo());
-      FillInstInfo &info = fill_inst_infos.back();
-      info.dst = inst.get_location().id;
-      info.fid = fid;
-      info.dst_inst_uid = name;
-      info.fevent = fevent;
-      owner->update_footprint(sizeof(info), this);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::record_copy_instances(FieldID src_fid,
-          FieldID dst_fid, PhysicalInstance src_inst, PhysicalInstance dst_inst,
-          LgEvent src_name, LgEvent dst_name, LgEvent fevent)
-    //--------------------------------------------------------------------------
-    {
-      copy_inst_infos.emplace_back(CopyInstInfo());
-      CopyInstInfo &info = copy_inst_infos.back();
-      info.src = src_inst.get_location().id;
-      info.dst = dst_inst.get_location().id;
-      info.src_fid = src_fid;
-      info.dst_fid = dst_fid;
-      info.src_inst_uid = src_name;
-      info.dst_inst_uid = dst_name;
-      info.fevent = fevent;
-      info.indirect = false;
-      owner->update_footprint(sizeof(info), this);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfInstance::record_indirect_instances(FieldID src_fid, 
-          FieldID dst_fid, PhysicalInstance src_inst, PhysicalInstance dst_inst,
-          LgEvent src_name, LgEvent dst_name, LgEvent fevent)
-    //--------------------------------------------------------------------------
-    {
-      copy_inst_infos.emplace_back(CopyInstInfo());
-      CopyInstInfo &info = copy_inst_infos.back();
-      info.src = src_inst.exists() ? src_inst.get_location().id : 0;
-      info.dst = dst_inst.exists() ? dst_inst.get_location().id : 0;
-      info.src_fid = src_fid;
-      info.dst_fid = dst_fid;
-      info.src_inst_uid = src_name;
-      info.dst_inst_uid = dst_name;
-      info.fevent = fevent;
-      info.indirect = true;
-      owner->update_footprint(sizeof(info), this);
     }
 
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -1081,18 +1213,8 @@ namespace Legion {
       {
         serializer->serialize(*it);
       }
-      for (std::deque<FillInstInfo>::const_iterator it =
-            fill_inst_infos.begin(); it != fill_inst_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
            it != copy_infos.end(); it++)
-      {
-        serializer->serialize(*it);
-      }
-      for (std::deque<CopyInstInfo>::const_iterator it =
-            copy_inst_infos.begin(); it != copy_inst_infos.end(); it++)
       {
         serializer->serialize(*it);
       }
@@ -1146,9 +1268,7 @@ namespace Legion {
       index_space_size_desc.clear();
       meta_infos.clear();
       copy_infos.clear();
-      copy_inst_infos.clear();
       fill_infos.clear();
-      fill_inst_infos.clear();
       inst_timeline_infos.clear();
       partition_infos.clear();
       mapper_call_infos.clear();
@@ -1436,18 +1556,8 @@ namespace Legion {
       {
         CopyInfo &front = copy_infos.front();
         serializer->serialize(front);
-        diff += sizeof(front);
+        diff += sizeof(front) + front.inst_infos.size() * sizeof(CopyInstInfo);
         copy_infos.pop_front();
-        const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if (t_curr >= t_stop)
-          return diff;
-      }
-      while (!copy_inst_infos.empty())
-      {
-        CopyInstInfo &front = copy_inst_infos.front();
-        serializer->serialize(front);
-        diff += sizeof(front);
-        copy_inst_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -1456,18 +1566,8 @@ namespace Legion {
       {
         FillInfo &front = fill_infos.front();
         serializer->serialize(front);
-        diff += sizeof(front);
+        diff += sizeof(front) + front.inst_infos.size() * sizeof(FillInstInfo);
         fill_infos.pop_front();
-        const long long t_curr = Realm::Clock::current_time_in_microseconds();
-        if (t_curr >= t_stop)
-          return diff;
-      }
-      while (!fill_inst_infos.empty())
-      {
-        FillInstInfo &front = fill_inst_infos.front();
-        serializer->serialize(front);
-        diff += sizeof(front);
-        fill_inst_infos.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -1940,7 +2040,7 @@ namespace Legion {
 #endif
       ProfilingInfo info(this, LEGION_PROF_TASK); 
       info.id = tid;
-      info.id2 = vid;
+      info.extra.id2 = vid;
       info.op_id = task_uid;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2012,7 +2112,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
-                       Operation *op, unsigned count, CollectiveKind collective)
+                                          InstanceNameClosure *closure,
+                                          Operation *op, unsigned count,
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2024,6 +2126,8 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      closure->add_reference();
+      info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2038,7 +2142,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
-                                       Operation *op, CollectiveKind collective)
+                                          InstanceNameClosure *closure,
+                                          Operation *op, 
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2050,12 +2156,16 @@ namespace Legion {
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      closure->add_reference();
+      info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationCopyInfo>();
       req.add_measurement<
         Realm::ProfilingMeasurements::OperationFinishEvent>();
     }
@@ -2129,7 +2239,7 @@ namespace Legion {
 #endif
       ProfilingInfo info(this, LEGION_PROF_TASK); 
       info.id = tid;
-      info.id2 = vid;
+      info.extra.id2 = vid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
@@ -2174,7 +2284,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_copy_request(Realm::ProfilingRequestSet &requests,
-                        UniqueID uid, unsigned count, CollectiveKind collective)
+                                          InstanceNameClosure *closure,
+                                          UniqueID uid, unsigned count,
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2186,6 +2298,8 @@ namespace Legion {
       info.op_id = uid;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      closure->add_reference();
+      info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -2200,7 +2314,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_fill_request(Realm::ProfilingRequestSet &requests,
-                                        UniqueID uid, CollectiveKind collective)
+                                          InstanceNameClosure *closure,
+                                          UniqueID uid,
+                                          CollectiveKind collective)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2212,12 +2328,16 @@ namespace Legion {
       info.op_id = uid;
       // Use ID to encode the collective copy kind
       info.id = collective;
+      closure->add_reference();
+      info.extra.closure = closure;
       Realm::ProfilingRequest &req = requests.add_request(target_proc,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationMemoryUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationCopyInfo>();
       req.add_measurement<
         Realm::ProfilingMeasurements::OperationFinishEvent>();
     }
@@ -2454,41 +2574,6 @@ namespace Legion {
       thread_local_profiling_instance->process_proc_desc(current);
       thread_local_profiling_instance->record_runtime_call(current, kind, 
                                                            start, stop);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::record_fill_instance(FieldID fid, 
-                            PhysicalInstance inst, LgEvent name, LgEvent fevent)
-    //--------------------------------------------------------------------------
-    {
-      if (thread_local_profiling_instance == NULL)
-        create_thread_local_profiling_instance();
-      thread_local_profiling_instance->record_fill_instance(fid, inst, 
-                                                            name, fevent);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::record_copy_instances(FieldID src_fid, FieldID dst_fid,
-                           PhysicalInstance src_inst, PhysicalInstance dst_inst,
-                           LgEvent src_name, LgEvent dst_name, LgEvent fevent)
-    //--------------------------------------------------------------------------
-    {
-      if (thread_local_profiling_instance == NULL)
-        create_thread_local_profiling_instance();
-      thread_local_profiling_instance->record_copy_instances(src_fid, dst_fid,
-          src_inst, dst_inst, src_name, dst_name, fevent);
-    }
-
-    //--------------------------------------------------------------------------
-    void LegionProfiler::record_indirect_instances(FieldID src_fid, 
-          FieldID dst_fid, PhysicalInstance src_inst, PhysicalInstance dst_inst,
-          LgEvent src_name, LgEvent dst_name, LgEvent fevent)
-    //--------------------------------------------------------------------------
-    {
-      if (thread_local_profiling_instance == NULL)
-        create_thread_local_profiling_instance();
-      thread_local_profiling_instance->record_indirect_instances(src_fid,
-          dst_fid, src_inst, dst_inst, src_name, dst_name, fevent);
     }
 
 #ifdef DEBUG_LEGION
