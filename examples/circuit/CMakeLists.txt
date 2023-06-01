@@ -31,6 +31,7 @@ set(CPU_SOURCES
 if(Legion_USE_CUDA)
   set(GPU_SOURCES circuit_gpu.cu)
   add_executable(circuit ${CPU_SOURCES} ${GPU_SOURCES})
+  set_target_cuda_architectures(TARGET circuit ARCHS ${Legion_CUDA_ARCH})
 elseif(Legion_USE_HIP)
   set(GPU_SOURCES circuit_gpu.cu)
   if(Legion_HIP_TARGET STREQUAL "CUDA")
