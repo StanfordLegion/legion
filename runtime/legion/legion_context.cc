@@ -3773,26 +3773,143 @@ namespace Legion {
       return full_inner_context;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(EqSetTracker *target,
-         AddressSpaceID target_space, RegionNode *region, const FieldMask &mask)
+                             AddressSpaceID target_space, unsigned req_index,
+                             IndexSpaceExpression *expr, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      // We know we are on a node now where the version information
-      // is up to date so we can call into the region tree to actually
-      // compute the equivalence sets for this expression
-      std::set<RtEvent> ready;
-      const ContextID ctx = get_context_id();
-      region->compute_equivalence_sets(ctx, this, target, target_space,
-                                       region->row_source, mask, ready,
-                                       false/*down only*/, true/*covers*/);
-      if (!ready.empty())
-        return Runtime::merge_events(ready);
-      else
-        return RtEvent::NO_RT_EVENT;
-    } 
+      // Find the equivalence set tree for this region requirement
+      EqKDTree *tree = find_equivalence_set_kd_tree(req_index);
+      // Then ask the index space expression to traverse the tree for
+      // all of its rectangles and find the equivalence sets that are needed
+      FieldMaskSet<EqKDTree> to_create;
+      FieldMaskSet<EquivalenceSet> eq_sets;
+      std::vector<RtEvent> pending_sets;
+      std::vector<EqKDTree*> subscriptions;
+      std::map<EqKDTree*,Domain> creation_rects;
+      std::map<ShardID,LegionMap<Domain,FieldMask> > remote_shard_rects;
+      expr->compute_equivalence_sets(tree, mask, target, target_space,
+          eq_sets, pending_sets, subscriptions, to_create, 
+          creation_rects, remote_shard_rects);
+#ifdef DEBUG_LEGION
+      assert(remote_shard_rects.empty());
 #endif
+      if (target_space != local_space)
+      {
+        // Send a message back to the target node with the results
+
+      }
+      else
+      {
+        // We can report the results back immediately
+
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    EqKDTree* InnerContext::find_equivalence_set_kd_tree(unsigned req_index)
+    //--------------------------------------------------------------------------
+    {
+      // Use the privilege lock since we also need to access the created
+      // requirements data structure as well in this routine
+      RtEvent wait_on;
+      {
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        if (req_index < equivalence_set_trees.size())
+        {
+          EqKDTree *tree = equivalence_set_trees[req_index];
+          if (tree != NULL)
+            return tree;
+        }
+        std::map<unsigned,RtUserEvent>::const_iterator finder =
+          pending_equivalence_set_trees.find(req_index);
+        if (finder != pending_equivalence_set_trees.end())
+          wait_on = finder->second;
+      }
+      IndexSpace handle = IndexSpace::NO_SPACE;
+      if (!wait_on.exists())
+      {
+        // Make sure we didn't lose the race
+        AutoLock priv_lock(privilege_lock);
+        if (req_index < equivalence_set_trees.size())
+        {
+          EqKDTree *tree = equivalence_set_trees[req_index];
+          if (tree != NULL)
+            return tree;
+        }
+        else
+          equivalence_set_trees.resize(req_index + 1, NULL);
+        std::map<unsigned,RtUserEvent>::iterator finder =
+          pending_equivalence_set_trees.find(req_index);
+        if (finder != pending_equivalence_set_trees.end())
+        {
+          // There's already a guard so someone else is making it
+          if (!finder->second.exists())
+            finder->second = Runtime::create_rt_user_event();
+          wait_on = finder->second;
+        }
+        else
+        {
+          // save a guard that we're making this
+          pending_equivalence_set_trees[req_index] = 
+            RtUserEvent::NO_RT_USER_EVENT;
+          if (regions.size() <= req_index)
+          {
+            std::map<unsigned,RegionRequirement>::const_iterator req_finder =
+              created_requirements.find(req_index);
+#ifdef DEBUG_LEGION
+            assert(req_finder != created_requirements.end());
+#endif
+            handle = req_finder->second.region.get_index_space();
+          }
+          else
+            handle = regions[req_index].region.get_index_space();
+        }
+      }
+      if (!wait_on.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(handle.exists());
+#endif
+        // Create the equivalence set tree
+        IndexSpaceNode *node = runtime->forest->get_node(handle);
+        // Normal contexts and control replication contexts will do 
+        // different things here while creating the equivalence set tree
+        EqKDTree *tree = create_equivalence_set_kd_tree(node);
+        tree->add_reference();
+        // Now we can save it and wake up anyone looking for it
+        AutoLock priv_lock(privilege_lock);
+        equivalence_set_trees[req_index] = tree;
+        std::map<unsigned,RtUserEvent>::iterator finder = 
+          pending_equivalence_set_trees.find(req_index);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_equivalence_set_trees.end());
+#endif
+        if (finder->second.exists())
+          Runtime::trigger_event(finder->second);
+        pending_equivalence_set_trees.erase(finder);
+        return tree;
+      }
+      else
+      {
+        wait_on.wait();
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(equivalence_set_trees[req_index] != NULL);
+#endif
+        return equivalence_set_trees[req_index];
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    EqKDTree* InnerContext::create_equivalence_set_kd_tree(IndexSpaceNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // We can just construct this like normal
+      return node->create_equivalence_set_kd_tree();
+    }
 
     //--------------------------------------------------------------------------
     EquivalenceSet* InnerContext::create_equivalence_set(RegionNode *node,
@@ -21655,6 +21772,16 @@ namespace Legion {
       if (equivalence_set_allocator_shard == total_shards)
         equivalence_set_allocator_shard = 0;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    EqKDTree* ReplicateContext::create_equivalence_set_kd_tree(
+                                                           IndexSpaceNode *node)
+    //--------------------------------------------------------------------------
+    {
+      // Tell it how many shards we have so it can create an initial spatial
+      // partitioning for that number of shards
+      return node->create_equivalence_set_kd_tree(total_shards);
     }
 
     //--------------------------------------------------------------------------

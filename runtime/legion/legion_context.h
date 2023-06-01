@@ -725,6 +725,11 @@ namespace Legion {
       // The last one to send the count to zero actually gets to delete
       // the requirement and the logical region
       std::map<unsigned,unsigned>               deletion_counts;
+      // Equivalence set trees are used for finding the equivalence sets
+      // for a given parent region requirement
+      std::vector<EqKDTree*>                    equivalence_set_trees;
+      // Pending computations for equivalence set trees
+      std::map<unsigned,RtUserEvent>            pending_equivalence_set_trees;
     protected:
       // This data structure doesn't need a lock becaue
       // it is only mutated by the application task 
@@ -1145,6 +1150,8 @@ namespace Legion {
       virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
                       AddressSpaceID target_space, unsigned req_index,
                       IndexSpaceExpression *expr, const FieldMask &mask);
+      EqKDTree* find_equivalence_set_kd_tree(unsigned req_index);
+      virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,
@@ -2969,6 +2976,10 @@ namespace Legion {
     public:
       // Support for making equivalence sets (logical analysis stage only)
       ShardID get_next_equivalence_set_origin(void);
+      virtual RtEvent compute_equivalence_sets(EqSetTracker *target,
+                      AddressSpaceID target_space, unsigned req_index,
+                      IndexSpaceExpression *expr, const FieldMask &mask);
+      virtual EqKDTree* create_equivalence_set_kd_tree(IndexSpaceNode *node);
       virtual EquivalenceSet* create_equivalence_set(RegionNode *node,
           size_t op_ctx_index, const std::vector<ShardID> &creating_shards,
           const FieldMask &mask, const FieldMaskSet<EquivalenceSet> &old_sets,

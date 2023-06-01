@@ -1426,6 +1426,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    void IndexSpaceOperationT<DIM,T>::compute_equivalence_sets(
+          EqKDTree *tree, const FieldMask &mask, 
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+        typed_tree->compute_equivalence_sets(itr.rect, mask, tracker,
+            tracker_space, eq_sets, pending_sets, subscriptions, 
+            to_create, creation_rects, remote_shard_rects);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                             const std::vector<IndexSpaceExpression*> &to_union,
                             RegionTreeForest *ctx)
@@ -4937,6 +4961,30 @@ namespace Legion {
     {
       return get_sparsity_map_kd_tree_internal<DIM,T>();
     }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::compute_equivalence_sets(
+          EqKDTree *tree, const FieldMask &mask, 
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+      EqKDTreeT<DIM,T> *typed_tree = tree->as_eq_kd_tree<DIM,T>();
+      DomainT<DIM,T> realm_index_space;
+      get_realm_index_space(realm_index_space, true/*tight*/);
+      for (Realm::IndexSpaceIterator<DIM,T> itr(realm_index_space); 
+            itr.valid; itr.step())
+        typed_tree->compute_equivalence_sets(itr.rect, mask, tracker,
+            tracker_space, eq_sets, pending_sets, subscriptions,
+            to_create, creation_rects, remote_shard_rects);
+    }
     
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -6222,6 +6270,432 @@ namespace Legion {
           result += right->count_intersecting_points(right_overlap);
       }
       return result;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Equivalence Set KD Tree
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline EqKDTreeT<DIM,T>* EqKDTree::as_eq_kd_tree(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      EqKDTreeT<DIM,T> *result = dynamic_cast<EqKDTreeT<DIM,T>*>(this);
+      assert(result != NULL);
+      return result;
+#else
+      return static_cast<EqKDTreeT<DIM,T>*>(this);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDTreeT<DIM,T>::EqKDTreeT(const Rect<DIM,T> &rect)
+      : bounds(rect)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDNode<DIM,T>::EqKDNode(const Rect<DIM,T> &rect)
+      : EqKDTreeT<DIM,T>(rect), lefts(NULL), rights(NULL), current(NULL),
+        previous(NULL), pending_set_creations(NULL), subscriptions(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    EqKDNode<DIM,T>::~EqKDNode(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(subscriptions == NULL);
+      assert(pending_set_creations == NULL);
+#endif
+      if (lefts != NULL)
+      {
+        for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+              lefts->begin(); it != lefts->end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        delete lefts;
+      }
+      if (rights != NULL)
+      {
+        for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+              rights->begin(); it != rights->end(); it++)
+          if (it->first->remove_reference())
+            delete it->first;
+        delete rights;
+      }
+      if (current != NULL)
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              current->begin(); it != current->end(); it++)
+          if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+            delete it->first;
+        delete current;
+      }
+      if (previous != NULL)
+      {
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+              previous->begin(); it != previous->end(); it++)
+          if (it->first->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+            delete it->first;
+        delete previous;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::compute_equivalence_sets( 
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(this->bounds.contains(rect));
+#endif
+      FieldMaskSet<EqKDNode<DIM,T> > to_traverse;
+      {
+        FieldMask remaining = mask;
+        AutoLock n_lock(node_lock);
+        if (lefts != NULL)
+        {
+          FieldMask right_mask;
+          for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                lefts->begin(); it != lefts->end(); it++)
+          {
+            const FieldMask overlap = it->second & remaining;
+            if (!overlap)
+              continue;
+            if (it->first->bounds.overlaps(rect))
+            {
+              to_traverse.insert(it->first, overlap);
+              if (!it->first->bounds.contains(rect))
+                right_mask |= overlap;
+            }
+            else
+              right_mask |= overlap;
+            remaining -= overlap;
+            if (!remaining)
+              continue;
+          }
+          if (!!right_mask)
+          {
+            for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+                  rights->begin(); it != rights->end(); it++)
+            {
+              const FieldMask overlap = it->second & right_mask;
+              if (!overlap)
+                continue;
+              if (it->first->bounds.overlaps(rect))
+                to_traverse.insert(it->first, overlap);
+              right_mask -= overlap;
+              if (!right_mask)
+                break;
+            }
+          }
+        }
+        if (!!remaining)
+        {
+          bool subscribed = false;
+          // These are fields that are unrefined, see if we already
+          // have equivalence sets for them
+          if (current != NULL)
+          {
+            for (FieldMaskSet<EquivalenceSet>::const_iterator it =
+                  current->begin(); it != current->end(); it++)
+            {
+              const FieldMask overlap = remaining & it->second;
+              if (!overlap)
+                continue;
+              eq_sets.insert(it->first, overlap);
+              remaining -= overlap;
+              if (!subscribed)
+              {
+                record_subscription(tracker, tracker_space, overlap);
+                subscriptions.push_back(this);
+                subscribed = true;
+              }
+              if (!remaining)
+                break;
+            }
+          }
+          if (!!remaining)
+          {
+            // if we still have remaining fields, check for any pending
+            // sets that might be in the process of being made
+            if (pending_set_creations != NULL)
+            {
+              for (LegionMap<RtUserEvent,FieldMask>::const_iterator it =
+                    pending_set_creations->begin(); it !=
+                    pending_set_creations->end(); it++)
+              {
+                const FieldMask overlap = remaining & it->second;
+                if (!overlap)
+                  continue;
+                pending_sets.push_back(it->first);
+                remaining -= overlap;
+                if (!subscribed)
+                {
+                  record_subscription(tracker, tracker_space, overlap);
+                  subscriptions.push_back(this);
+                  subscribed = true;
+                }
+                if (!remaining)
+                  break;
+              }
+            }
+            if (!!remaining)
+            {
+              // if we still have remaining fields, then we're going to 
+              // be the ones to make the equivalence set for these fields
+              // check to see if the rect is the same as our bounds or
+              // whether it is smaller
+              if (rect == this->bounds)
+              {
+                // easy case, we can just record that we're making a
+                // new equivalence set at this node
+                if (pending_set_creations == NULL)
+                  pending_set_creations =
+                    new LegionMap<RtUserEvent,FieldMask>();
+                const RtUserEvent ready = Runtime::create_rt_user_event();
+                pending_set_creations->insert(
+                    std::make_pair(ready, remaining));
+                // still need to put this in the subscriptions
+                // but don't record it as we'll do that when we
+                // get the message back with the name of the set 
+                subscriptions.push_back(this);
+                to_create.insert(this, remaining);
+                creation_rects[this] = Domain(rect);
+              }
+              else
+              {
+                // Need to create a new refinement for these fields
+                // to match the rectangle being requested
+                // First check to see if we can find a dimension where
+                // the half-way cutting plane puts the rectangle on 
+                // one side or the other, if we can find such a
+                // dimension then we'll just split on the biggest one
+                // and continue on our way. If we can't find such a 
+                // dimension we'll split on the dimension that where the
+                // edge of the rectangle falls closest to the halfway point
+                T split = 0;
+                int dim = -1;
+                size_t largest = 0;
+                for (int d = 0; d < DIM; d++)
+                {
+                  if (this->bounds.lo[d] == this->bounds.hi[d])
+                    continue;
+                   T mid = (this->bounds.lo[d] + this->bounds.hi[d]) / 2;
+                   if ((rect.hi[d] <= mid) || (mid < rect.lo[d]))
+                   {
+                      size_t extent = 
+                        (this->bounds.hi[d] - this->bounds.lo[d]) + 1;
+                      if ((dim < 0) || (largest < extent))
+                      {
+                        dim = d;
+                        split = mid;
+                        largest = extent;
+                      }
+                   }
+                }
+                if (dim < 0)
+                {
+                  // We couldn't find a nice splitting dimension, so
+                  // we're now going to find the one with an edge on
+                  // the rectangle that is closest to the middle splitting
+                  // point. We're guaranteed that such a split must exist
+                  // because the rect and the bounds are not equal
+                  T distance = 0;
+                  for (int d = 0; d < DIM; d++)
+                  {
+                    if (this->bounds.lo[d] == this->bounds.hi[d])
+                      continue;
+                    T mid = (this->bounds.lo[d] + this->bounds.hi[d]) / 2;
+                    if (this->bounds.lo[d] < rect.lo[d])
+                    {
+                      T dist = ((rect.lo[d]-1) <= mid) ?
+                        mid - (rect.lo[d]-1) : (rect.lo[d]-1) - mid;
+                      if ((dim < 0) || (dist < distance))
+                      {
+                        dim = d;
+                        split = rect.lo[d]-1;
+                        distance = dist;
+                      }
+                    }
+                    if (rect.hi[d] < this->bounds.hi[d])
+                    {
+                      T dist = (rect.hi[d] <= mid) ?
+                        mid - rect.hi[d] : rect.hi[d] - mid;
+                      if ((dim < 0) || (dist < distance))
+                      {
+                        dim = d;
+                        split = rect.hi[d];
+                        distance = dist;
+                      }
+                    }
+                  }
+#ifdef DEBUG_LEGION
+                  assert(dim >= 0);
+#endif
+                }
+                Rect<DIM,T> left_bounds = this->bounds;
+                Rect<DIM,T> right_bounds = this->bounds;
+                left_bounds.hi[dim] = split;
+                right_bounds.lo[dim] = split+1;
+                // See if we can reuse any existing subnodes or whether we
+                // need to make new ones
+                if (lefts != NULL)
+                {
+                  EqKDNode<DIM,T> *prior_left = NULL;
+                  for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator it =
+                        lefts->begin(); it != lefts->end(); it++)
+                  {
+                    if (it->first->bounds != left_bounds)
+                      continue;
+                    prior_left = it->first;
+                    it.merge(remaining);
+                    break;
+                  }
+                  if (prior_left != NULL)
+                  {
+                    EqKDNode<DIM,T> *prior_right = NULL;
+                    for (typename FieldMaskSet<EqKDNode<DIM,T> >::iterator it =
+                          rights->begin(); it != rights->end(); it++)
+                    {
+                      if (it->first->bounds != right_bounds)
+                        continue;
+                      prior_right = it->first;
+                      it.merge(remaining);
+                      break;
+                    }
+#ifdef DEBUG_LEGION
+                    assert(prior_right != NULL);
+                    assert(left_bounds.contains(rect) || 
+                        right_bounds.contains(rect));
+#endif
+                    if (left_bounds.contains(rect))
+                      to_traverse.insert(prior_left, remaining);
+                    else
+                      to_traverse.insert(prior_right, remaining);
+                    if (previous != NULL)
+                      clone_previous(prior_left, prior_right, remaining);
+                    else
+                      remaining.clear();
+                  }
+                }
+                if (!!remaining)
+                {
+                  // If we still have remaining fields, then we need to
+                  // make new left and right nodes
+                  EqKDNode<DIM,T> *new_left = 
+                    new EqKDNode<DIM,T>(left_bounds);
+                  EqKDNode<DIM,T> *new_right =
+                    new EqKDNode<DIM,T>(right_bounds);
+                  if (lefts == NULL)
+                    lefts = new FieldMaskSet<EqKDNode<DIM,T> >();
+                  if (lefts->insert(new_left, remaining))
+                    new_left->add_reference();
+                  if (rights == NULL)
+                    rights = new FieldMaskSet<EqKDNode<DIM,T> >();
+                  if (rights->insert(new_right, remaining))
+                    new_right->add_reference();
+                  if (previous != NULL)
+                    clone_previous(new_left, new_right, remaining);
+                }
+              }
+            }
+          }
+        }
+      }
+      for (typename FieldMaskSet<EqKDNode<DIM,T> >::const_iterator it =
+            to_traverse.begin(); it != to_traverse.end(); it++)
+      {
+        const Rect<DIM,T> overlap = rect.intersection(it->first->bounds);
+#ifdef DEBUG_LEGION
+        assert(!overlap.empty());
+#endif
+        it->first->compute_equivalence_sets(overlap, it->second, tracker,
+            tracker_space, eq_sets, pending_sets, subscriptions, to_create,
+            creation_rects, remote_shard_rects, local_shard);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::record_subscription(EqSetTracker *tracker,
+        AddressSpaceID tracker_space, const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      if (subscriptions == NULL)
+        subscriptions =
+          new LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> >();
+      // Add a reference if this is the first time this tracker has
+      // subscribed to us which we'll remove when the subscription ends
+      if ((*subscriptions)[tracker_space].insert(tracker, mask))
+        this->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::clone_previous(EqKDNode<DIM,T> *left, 
+                                        EqKDNode<DIM,T> *right, FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<EquivalenceSet*> to_delete;
+      for (FieldMaskSet<EquivalenceSet>::iterator it =
+            previous->begin(); it != previous->end(); it++)
+      {
+        const FieldMask overlap = it->second & mask;
+        if (!overlap)
+          continue;
+        left->record_previous(it->first, overlap);
+        right->record_previous(it->first, overlap);
+        it.filter(overlap);
+        if (!it->second)
+          to_delete.push_back(it->first);
+        mask -= overlap;
+        if (!mask)
+          break;
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it =
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        previous->erase(*it); 
+        if ((*it)->remove_base_gc_ref(DISJOINT_COMPLETE_REF))
+          delete (*it);
+      }
+      if (previous->empty())
+      {
+        delete previous;
+        previous = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void EqKDNode<DIM,T>::record_previous(EquivalenceSet *set, 
+                                          const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      if (previous == NULL)
+        previous = new FieldMaskSet<EquivalenceSet>();
+      if (previous->insert(set, mask))
+        set->add_base_gc_ref(DISJOINT_COMPLETE_REF);
     }
 
     /////////////////////////////////////////////////////////////

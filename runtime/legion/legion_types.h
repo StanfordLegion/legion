@@ -1904,6 +1904,8 @@ namespace Legion {
     class ColorSpaceIterator;
     template<int DIM, typename T> class ColorSpaceLinearizationT;
     template<int DIM, typename T, typename RT = void> class KDNode;
+    class EqKDTree;
+    template<int DIM, typename T> class EqKDTreeT;
 
     class RegionTreeContext;
     class RegionTreePath;

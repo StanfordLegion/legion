@@ -1382,6 +1382,17 @@ namespace Legion {
                   std::set<IndexSpaceExpression*> &expressions) = 0;
       virtual KDTree* get_sparsity_map_kd_tree(void) = 0;
     public:
+      virtual void compute_equivalence_sets(
+          EqKDTree *tree, const FieldMask &mask, 
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
+    public:
       static void handle_tighten_index_space(const void *args);
       static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
     public:
@@ -1672,6 +1683,17 @@ namespace Legion {
       virtual IndexSpaceExpression* find_congruent_expression(
                   std::set<IndexSpaceExpression*> &expressions);
       virtual KDTree* get_sparsity_map_kd_tree(void);
+    public:
+      virtual void compute_equivalence_sets(
+          EqKDTree *tree, const FieldMask &mask, 
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -2270,6 +2292,9 @@ namespace Legion {
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards) = 0;
     public:
+      virtual EqKDTree* create_equivalence_set_kd_tree(
+                                        size_t total_shards = 1) = 0;
+    public:
       const IndexSpace handle;
       IndexPartNode *const parent;
     protected:
@@ -2566,6 +2591,18 @@ namespace Legion {
                                   const std::vector<DomainPoint> &shard_points,
                                         const Domain &shard_domain,
                                         std::set<ShardID> &range_shards);
+    public:
+      virtual EqKDTree* create_equivalence_set_kd_tree(size_t total_shards = 1);
+      virtual void compute_equivalence_sets(
+          EqKDTree *tree, const FieldMask &mask, 
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0);
     public:
       bool contains_point(const Point<DIM,T> &point);
     protected:
@@ -2930,6 +2967,86 @@ namespace Legion {
       CollectiveMapping *const mapping;
       const bool tree_valid;
       IndexSpaceNode *result;
+    };
+
+    /**
+     * \class EqKDTree
+     * This class defines the interface for looking up equivalence
+     * sets for any given parent logical region
+     */
+    class EqKDTree : public Collectable {
+    public:
+      virtual ~EqKDTree(void) = 0;
+    public:
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+    public:
+      template<int DIM, typename T>
+      inline EqKDTreeT<DIM,T>* as_eq_kd_tree(void);
+    };
+
+    /**
+     * \class EqKDTreeT
+     */
+    template<int DIM, typename T>
+    class EqKDTreeT : public EqKDTree {
+    public:
+      EqKDTreeT(const Rect<DIM,T> &rect);
+      virtual ~EqKDTreeT(void) = 0;
+    public:
+      virtual void compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0) = 0;
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space) = 0;
+    public:
+      const Rect<DIM,T> bounds;
+    };
+
+    /**
+     * This class provides support for efficient spatial lookup of
+     * equivalence sets for a given parent region in a context. 
+     */
+    template<int DIM, typename T>
+    class EqKDNode : public EqKDTreeT<DIM,T> {
+    public:
+      EqKDNode(const Rect<DIM,T> &bounds);
+      virtual ~EqKDNode(void);
+    public:
+      virtual void compute_equivalence_sets(
+          const Rect<DIM,T> &rect, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space,
+          FieldMaskSet<EquivalenceSet> &eq_sets,
+          std::vector<RtEvent> &pending_sets,
+          std::vector<EqKDTree*> &subscriptions,
+          FieldMaskSet<EqKDTree> &to_create,
+          std::map<EqKDTree*,Domain> &creation_rects,
+          std::map<ShardID,LegionMap<Domain,FieldMask> > &remote_shard_rects,
+          ShardID local_shard = 0); 
+      virtual void record_equivalence_set(
+          EquivalenceSet *set, const FieldMask &mask,
+          EqSetTracker *tracker, AddressSpaceID tracker_space);
+    protected:
+      void record_subscription(EqSetTracker *tracker, 
+          AddressSpaceID tracker_space, const FieldMask &mask);
+      void clone_previous(EqKDNode<DIM,T> *left, EqKDNode<DIM,T> *right,
+                          FieldMask &clone_mask);
+      void record_previous(EquivalenceSet *set, const FieldMask &mask);
+    protected:
+      mutable LocalLock node_lock;
+      FieldMaskSet<EqKDNode<DIM,T> > *lefts, *rights;
+      FieldMaskSet<EquivalenceSet> *current, *previous;
+      LegionMap<RtUserEvent,FieldMask> *pending_set_creations;
+      LegionMap<AddressSpaceID,FieldMaskSet<EqSetTracker> > *subscriptions;
     };
 
     /**
