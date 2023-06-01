@@ -5375,7 +5375,8 @@ namespace Legion {
       for (ReqType type : req_types)
       {
         size_t count = get_reqs_by_type(type).size();
-        ops_by_type.emplace_back(&operands[offset], count);
+        Operand *start = (count == 0) ? nullptr : &operands[offset];
+        ops_by_type.emplace_back(start, count);
         offset += count;
       }
 
