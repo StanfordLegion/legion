@@ -5367,12 +5367,12 @@ namespace Legion {
       this->redop = rhs->redop;
       if (this->redop != 0)
       {
+        this->reduction_op = rhs->reduction_op;
         this->deterministic_redop = rhs->deterministic_redop;
         if (!this->deterministic_redop)
         {
           // Only need to initialize this if we're not doing a 
           // deterministic reduction operation
-          this->reduction_op = rhs->reduction_op;
           this->serdez_redop_fns = rhs->serdez_redop_fns;
         }
       }
@@ -5564,12 +5564,12 @@ namespace Legion {
       derez.deserialize(redop);
       if (redop > 0)
       {
+        reduction_op = Runtime::get_reduction_op(redop);
         derez.deserialize(deterministic_redop);
-        // Only need to fill these in if we're not doing a 
-        // deterministic reduction operation
         if (!deterministic_redop)
         {
-          reduction_op = Runtime::get_reduction_op(redop);
+          // Only need to fill this in if we're not doing a 
+          // deterministic reduction operation
           serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
         }
       }
