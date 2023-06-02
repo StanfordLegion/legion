@@ -428,7 +428,10 @@ namespace Realm {
         if (!bt.filenames[i].empty()) {
           os << bt.filenames[i] << ":" << bt.line_numbers[i] << " ";
         }
-        os << "[" << bt.pcs[i] << "]";
+        os << "[";
+        os << std::hex << std::setfill('0') << std::setw(sizeof(uintptr_t)*2) << bt.pcs[i];
+        os << std::dec << std::setfill(' ');
+        os << "]";
 #else
         char *lp = s;
 #ifdef REALM_HAVE_CXXABI_H
