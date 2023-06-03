@@ -56,39 +56,10 @@ namespace UCP {
     PAYLOAD_BASE_LAST
   };
 
-  enum {
-    REQUEST_AM_FLAG_FAILURE = 1ul << 0
-  };
-
-  enum {
-    REMOTE_COMP_FLAG_FAILURE = 1ul << 0
-  };
-
-  struct CompList {
-    size_t bytes{0};
-
-    static const size_t TOTAL_CAPACITY = 256;
-    typedef char Storage_unaligned[TOTAL_CAPACITY];
-    REALM_ALIGNED_TYPE_CONST(Storage_aligned, Storage_unaligned,
-        Realm::CompletionCallbackBase::ALIGNMENT);
-    Storage_aligned storage;
-  };
-
-  struct RemoteComp {
-    CompList        *comp_list;
-    atomic<size_t>  remote_pending;
-    uint8_t         flags;
-    RemoteComp(size_t _remote_pending)
-      : comp_list(new CompList)
-      , remote_pending(_remote_pending)
-      , flags(0)
-    {}
-
-    ~RemoteComp()
-    {
-      delete comp_list;
-    }
-  };
+  struct CompList;
+  struct RemoteComp;
+  struct UCPRDMAInfo;
+  struct Request;
 
   struct UCPMsgHdr {
     uint32_t       crc;
@@ -99,59 +70,6 @@ namespace UCP {
     size_t         rdma_payload_size;
     char           realm_hdr[0];
   } __attribute__ ((packed)); // gcc-specific
-
-  struct UCPRDMAInfo {
-    uint64_t reg_base;
-    int dev_index;
-    char rkey[0];
-
-    UCPRDMAInfo() = delete;
-    ~UCPRDMAInfo() = delete;
-  } __attribute__ ((packed)); // gcc-specific
-
-  struct MCDesc {
-    uint8_t           flags;
-    atomic<size_t>    local_pending; // number of targets pending local
-                                     // completion (to support multicast)
-    MCDesc(size_t _local_pending)
-      : flags(0)
-      , local_pending(_local_pending)
-    {}
-  };
-
-  struct Request {
-    // UCPContext::Request must be the first field because
-    // the space preceding it is used internally by ucp
-    UCPContext::Request       ucp;
-    UCPInternal               *internal;
-    UCPContext                *context;
-    union {
-      struct {
-        PayloadBaseType       payload_base_type;
-        CompList              *local_comp;
-        MCDesc                *mc_desc;
-      } am_send;
-
-      struct {
-        void                  *header;
-        void                  *payload;
-        size_t                header_size;
-        size_t                payload_size;
-        int                   payload_mode;
-        ucp_ep_h              reply_ep;
-        // header buffer from am rndv should always be freed
-      } am_rndv_recv;
-
-      struct {
-        UCPRDMAInfo           *rdma_info_buf;
-      } rma;
-    };
-
-    // Should be allocated/freed only through UCPInternal because it must
-    // always have UCP-request-size bytes of available space before itself.
-    Request() = delete;
-    ~Request() = delete;
-  };
 
   struct SegmentInfo {
     uintptr_t base, limit;
@@ -187,7 +105,7 @@ namespace UCP {
     struct Config {
       AmWithRemoteAddrMode am_wra_mode{AM_WITH_REMOTE_ADDR_MODE_AUTO};
       bool bind_hostmem{true};
-      int prog_boff_max{4};
+      int prog_boff_max{4}; //progress thread maximum backoff
       int pollers_max{2};
       bool mpool_leakcheck{false};
       bool crc_check{false};
@@ -413,7 +331,7 @@ namespace UCP {
     size_t src_payload_lines;
     size_t src_payload_line_stride;
     size_t header_size;
-    PayloadBaseType payload_base_type{PAYLOAD_BASE_LAST};
+    PayloadBaseType payload_base_type;
     UCPRDMAInfo *dest_payload_rdma_info{nullptr};
     CompList *local_comp{nullptr};
     RemoteComp *remote_comp{nullptr};

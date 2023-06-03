@@ -36,6 +36,7 @@ add_subdirectory(subgraph)
 add_subdirectory(reservation)
 add_subdirectory(completion_queue)
 add_subdirectory(profiling)
-if (REALM_USE_CUDA OR REALM_USE_HIP)
+# FIXME: https://github.com/StanfordLegion/legion/issues/1475
+if (REALM_USE_CUDA)# OR REALM_USE_HIP)
   add_subdirectory(cuda_interop)
 endif ()

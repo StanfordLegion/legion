@@ -128,7 +128,12 @@ namespace Legion {
         priority =
           op->add_copy_profiling_request(trace_info, requests, true/*fill*/);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_fill_request(requests, op, collective);
+      {
+        SmallNameClosure<1> *closure = new SmallNameClosure<1>();
+        closure->record_instance_name(dst_fields.front().inst, unique_event);
+        forest->runtime->profiler->add_fill_request(requests, closure, 
+                                                    op, collective);
+      }
       ApEvent fill_pre;
       if (pred_guard.exists())
         // No need for tracing to know about the precondition
@@ -137,7 +142,6 @@ namespace Legion {
         fill_pre = precondition;
       ApEvent result = ApEvent(space.fill(dst_fields, requests,
               fill_value, fill_size, fill_pre, priority));
-      LgEvent fevent = result;
       if (pred_guard.exists())
       {
         result = Runtime::ignorefaults(result);
@@ -167,13 +171,6 @@ namespace Legion {
         result = new_result;
       }
 #endif
-      if (forest->runtime->profiler != NULL)
-      {
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          forest->runtime->profiler->record_fill_instance(
-              dst_fields[idx].field_id, dst_fields[idx].inst,
-              unique_event, fevent);
-      }
 #ifdef LEGION_SPY
       LegionSpy::log_fill_events(op->get_unique_op_id(), expr_id, handle,
           tree_id, precondition, result, fill_uid, collective);
@@ -227,8 +224,13 @@ namespace Legion {
         priority =
           op->add_copy_profiling_request(trace_info, requests, false/*fill*/);
       if (forest->runtime->profiler != NULL)
-        forest->runtime->profiler->add_copy_request(requests, op, 1/*count*/,
-                                                    collective);
+      {
+        SmallNameClosure<2> *closure = new SmallNameClosure<2>();
+        closure->record_instance_name(src_fields.front().inst, src_unique);
+        closure->record_instance_name(dst_fields.front().inst, dst_unique);
+        forest->runtime->profiler->add_copy_request(requests, closure,
+                                                    op, 1/*count*/, collective);
+      }
       ApEvent copy_pre;
       if (pred_guard.exists())
         copy_pre = Runtime::merge_events(NULL,precondition,ApEvent(pred_guard));
@@ -240,7 +242,6 @@ namespace Legion {
                                         true/*exclusive*/, copy_pre);
       ApEvent result = ApEvent(space.copy(src_fields, dst_fields, requests,
                                           copy_pre, priority));
-      LgEvent fevent = result;
       // Release any reservations after the copy is done
       for (std::vector<Reservation>::const_iterator it =
             reservations.begin(); it != reservations.end(); it++)
@@ -283,14 +284,6 @@ namespace Legion {
         result = new_result;
       }
 #endif
-      if (forest->runtime->profiler != NULL)
-      {
-        for (unsigned idx = 0; idx < src_fields.size(); idx++)
-          forest->runtime->profiler->record_copy_instances(
-              src_fields[idx].field_id, dst_fields[idx].field_id,
-              src_fields[idx].inst, dst_fields[idx].inst,
-              src_unique, dst_unique, fevent);
-      }
 #ifdef LEGION_SPY
       LegionSpy::log_copy_events(op->get_unique_op_id(), expr_id, src_tree_id,
                                  dst_tree_id, precondition, result, collective);
@@ -6476,10 +6469,8 @@ namespace Legion {
       if (!replay)
         priority = op->add_copy_profiling_request(trace_info, requests,
                                           false/*fill*/, total_copies);
-      // TODO: need to log unique IDs for instances here for copy indirections
-      // The code right now is only correct for straight copy across
       if (runtime->profiler != NULL)
-        runtime->profiler->add_copy_request(requests, op, total_copies);
+        runtime->profiler->add_copy_request(requests, this, op, total_copies);
       ApEvent copy_pre;
       if (pred_guard.exists())
         copy_pre =
@@ -6494,23 +6485,15 @@ namespace Legion {
       if (!indirections.empty())
       {
         if (individual_field_indexes.empty())
-        {
           last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields, 
                 indirections, requests, copy_pre, priority));
-          if (runtime->profiler != NULL)
-            log_across_profiling(last_copy);
-        }
         else
           last_copy = issue_individual_copies(copy_pre, requests);
           
       }
       else
-      {
         last_copy = ApEvent(copy_domain.copy(src_fields, dst_fields,
               requests, copy_pre, priority));
-        if (runtime->profiler != NULL)
-          log_across_profiling(last_copy);
-      }
       // Release any reservations
       for (std::map<Reservation,bool>::const_iterator it =
             reservations.begin(); it != reservations.end(); it++)
@@ -6622,8 +6605,6 @@ namespace Legion {
                             indirections, requests, precondition, priority));
         if (post.exists())
           postconditions.push_back(post);
-        if (runtime->profiler != NULL)
-          log_across_profiling(post, idx);
       }
       if (postconditions.empty())
         return ApEvent::NO_AP_EVENT;
@@ -7100,9 +7081,33 @@ namespace Legion {
               rects_ready.wait();
             // Once we get the remote rectangles we can build the kd-trees
             if (!sparse_shard_rects->empty())
+            {
+              // Find the nearest address spaces for each color
+              std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >
+                sparse_shard_spaces;
+              sparse_shard_spaces.reserve(sparse_shard_rects->size());
+              LegionColor previous_color = INVALID_COLOR;
+              for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
+                    const_iterator it = sparse_shard_rects->begin(); 
+                    it != sparse_shard_rects->end(); it++)
+              {
+                if (it->second != previous_color)
+                {
+                  CollectiveMapping *child_mapping = NULL;
+                  sparse_shard_spaces.emplace_back(std::make_pair(it->first,
+                    this->find_color_creator_space(it->second, child_mapping)));
+                  if (child_mapping != NULL)
+                    delete child_mapping;
+                  previous_color = it->second;
+                }
+                else // colors are the same so we know address space
+                  sparse_shard_spaces.emplace_back(std::make_pair(it->first,
+                        sparse_shard_spaces.back().second));
+              }
               kd_remote = new KDNode<DIM,T,AddressSpaceID>(
-                  parent_space.bounds, *sparse_shard_rects);
-            // Add any local sparse paces into the dense remote rects
+                  parent_space.bounds, sparse_shard_spaces);
+            }
+            // Add any local sparse spaces into the dense remote rects
             // All the local dense spaces are already included
             for (ColorSpaceIterator itr(this, true/*local only*/); itr; itr++)
             {
@@ -7140,12 +7145,26 @@ namespace Legion {
           kd_remote->find_interfering(*itr, remote_spaces);
         if (!remote_spaces.empty())
         {
-          RemoteKDTracker tracker(color_set, context->runtime);
-          tracker.find_remote_interfering(remote_spaces, handle, expr); 
+          RemoteKDTracker tracker(context->runtime);
+          RtEvent remote_ready =
+            tracker.find_remote_interfering(remote_spaces, handle, expr); 
+          for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
+            kd_root->find_interfering(*itr, color_set);
+          if (remote_ready.exists() && !remote_ready.has_triggered())
+            remote_ready.wait();
+          tracker.get_remote_interfering(color_set);
+        }
+        else
+        {
+          for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
+            kd_root->find_interfering(*itr, color_set);
         }
       }
-      for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
-        kd_root->find_interfering(*itr, color_set);
+      else
+      {
+        for (RectInDomainIterator<DIM,T> itr(space); itr(); itr++)
+          kd_root->find_interfering(*itr, color_set);
+      }
       if (!color_set.empty())
         colors.insert(colors.end(), color_set.begin(), color_set.end());
       return true;
@@ -7163,7 +7182,7 @@ namespace Legion {
       dense_shard_rects = 
         new std::vector<std::pair<Rect<DIM,T>,LegionColor> >();
       sparse_shard_rects =
-        new std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >();
+        new std::vector<std::pair<Rect<DIM,T>,LegionColor> >();
     }
 
     //--------------------------------------------------------------------------
@@ -7177,6 +7196,11 @@ namespace Legion {
       {
         IndexSpaceNodeT<DIM,T> *child =
           static_cast<IndexSpaceNodeT<DIM,T>*>(get_child(*itr));
+        // We're going to exchange these data structures between all the
+        // copies of this partition so we only need to record our children
+        // if they're actually the owner child
+        if (!child->is_owner())
+          continue;
         children.push_back(child);
         RtEvent ready = child->get_realm_index_space_ready(true/*tight*/);
         if (ready.exists())
@@ -7200,35 +7224,53 @@ namespace Legion {
       assert(dense_shard_rects != NULL);
       assert(sparse_shard_rects != NULL);
 #endif
+      unsigned logn_children = 0;
       for (typename std::vector<IndexSpaceNodeT<DIM,T>*>::const_iterator it =
             children.begin(); it != children.end(); it++)
       {
         DomainT<DIM,T> child_space;
         (*it)->get_realm_index_space(child_space, true/*tight*/);
+        const std::pair<Rect<DIM,T>,LegionColor> next(
+                      child_space.bounds, (*it)->color);
         if (!child_space.dense())
         {
-          // Scan through all the previous rectangles to make sure we
-          // don't insert any duplicate bounding boxes
-          bool found = false;
-          for (typename std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >::
-                const_iterator sit = sparse_shard_rects->begin(); sit !=
-                sparse_shard_rects->end(); sit++)
+          // This is a sparse shard space and it's upper bound rectangle
+          // can be arbitrarily big, so we want to give it some flexibility to
+          // describe itself so others can prune out queries better. Therefore
+          // we ask Realm to try to compute an apprxomate covering of the
+          // index space. The number of rectangles we'll let it have will be
+          // O(log N) in the number of subspaces in the partition, so the
+          // more subspaces there are, there more rectangles we'll allow in
+          // the approximation. This will be O(N log N) total cost across
+          // all the sparse subspaces. We might consider making the number
+          // of rectangles O(N^(1/2)) in the future but I'm scared of the 
+          // scalability implications of that.
+          if (logn_children == 0)
           {
-            if (sit->first != child_space.bounds)
-              continue;
-#ifdef DEBUG_LEGION
-            assert(sit->second == local_space);
-#endif
-            found = true;
-            break;
+            // Compute ceil(log(N)) of the total children to know how many
+            // rectangles we can ask for in the approximation
+            LegionColor power = 1;
+            while (power < total_children)
+            {
+              logn_children++;
+              power *= 2;
+            }
           }
-          if (!found)
-            sparse_shard_rects->push_back(
-                std::make_pair(child_space.bounds, local_space));
+          std::vector<Rect<DIM,T> > covering;
+          // Note we don't care about the overhead, it can't be worse
+          // than the upper bound rectangle that we already have
+          if ((logn_children > 1) && child_space.compute_covering(
+                logn_children, INT_MAX/*overhead*/, covering))
+          {
+            for (typename std::vector<Rect<DIM,T> >::const_iterator cit =
+                  covering.begin(); cit != covering.end(); cit++)
+              sparse_shard_rects->push_back(std::make_pair(*cit, (*it)->color));
+          }
+          else // Can just add this as the covering failed
+            sparse_shard_rects->push_back(next);
         }
         else if (!child_space.bounds.empty())
-          dense_shard_rects->push_back(
-              std::make_pair(child_space.bounds, (*it)->color));
+          dense_shard_rects->push_back(next);
       }
       return perform_shard_rects_notification();
     }
@@ -7251,7 +7293,7 @@ namespace Legion {
         rez.serialize(it->second);
       }
       rez.serialize<size_t>(sparse_shard_rects->size());
-      for (typename std::vector<std::pair<Rect<DIM,T>,AddressSpaceID> >::
+      for (typename std::vector<std::pair<Rect<DIM,T>,LegionColor> >::
             const_iterator it = sparse_shard_rects->begin(); it !=
             sparse_shard_rects->end(); it++)
       {
@@ -7267,7 +7309,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexPartNodeT<DIM,T>::unpack_shard_rects(Deserializer &derez)
+    void IndexPartNodeT<DIM,T>::unpack_shard_rects(Deserializer &derez) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7282,7 +7324,7 @@ namespace Legion {
         dense_shard_rects->resize(offset + num_dense);
         for (unsigned idx = 0; idx < num_dense; idx++)
         {
-          std::pair<Rect<DIM,T>,LegionColor> &next = 
+          std::pair<Rect<DIM,T>,LegionColor> &next =
             (*dense_shard_rects)[offset + idx];
           derez.deserialize(next.first);
           derez.deserialize(next.second);
@@ -7296,7 +7338,7 @@ namespace Legion {
         sparse_shard_rects->resize(offset + num_sparse);
         for (unsigned idx = 0; idx < num_sparse; idx++)
         {
-          std::pair<Rect<DIM,T>,AddressSpaceID> &next = 
+          std::pair<Rect<DIM,T>,LegionColor> &next = 
             (*sparse_shard_rects)[offset + idx];
           derez.deserialize(next.first);
           derez.deserialize(next.second);

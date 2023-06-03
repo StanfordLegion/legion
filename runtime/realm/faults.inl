@@ -29,9 +29,14 @@ namespace Realm {
     bool serdez(S& serdez, const Backtrace& b)
     {
       return ((serdez & b.pc_hash) &&
-	      (serdez & b.pcs) &&
-	      (serdez & b.symbols));
+              (serdez & b.pcs) &&
+#ifdef REALM_USE_LIBDW
+              (serdez & b.symbols) &&
+              (serdez & b.filenames) &&
+              (serdez & b.line_numbers));
+#else
+              (serdez & b.symbols));
+#endif
     }
-
 
 }; // namespace Realm

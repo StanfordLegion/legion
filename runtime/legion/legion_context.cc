@@ -2826,8 +2826,7 @@ namespace Legion {
         current_trace(NULL), previous_trace(NULL),
         physical_trace_replay_status(0), valid_wait_event(false), 
         outstanding_subtasks(0), pending_subtasks(0), pending_frames(0),
-        currently_active_context(false), current_mapping_fence(NULL),
-        mapping_fence_gen(0), current_mapping_fence_index(0), 
+        currently_active_context(false), current_mapping_fence_index(0), 
         current_execution_fence_event(exec_fence),
         current_execution_fence_index(0), last_implicit(NULL),
         last_implicit_gen(0)
@@ -2871,6 +2870,10 @@ namespace Legion {
 #ifdef LEGION_GC
       log_garbage.info("GC Inner Context %lld %d", 
           LEGION_DISTRIBUTED_ID_FILTER(this->did), local_space); 
+#endif
+#ifdef LEGION_SPY
+      current_fence_uid = 0;
+      current_mapping_fence_gen = 0;
 #endif
     }
 
@@ -9250,7 +9253,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent InnerContext::register_implicit_dependences(Operation *op)
+    ApEvent InnerContext::register_implicit_dependences(Operation *op,
+                                                   RtEvent &mapping_fence_event)
     //--------------------------------------------------------------------------
     {
       // If there are any outstanding unmapped dependent partition operations
@@ -9266,31 +9270,27 @@ namespace Legion {
           last_implicit = NULL;
 #endif
       }
-      if (current_mapping_fence != NULL)
+      if (current_mapping_fence_event.exists())
       {
+        mapping_fence_event = current_mapping_fence_event;
 #ifdef LEGION_SPY
-        // Can't prune when doing legion spy
-        op->register_dependence(current_mapping_fence, mapping_fence_gen);
-        unsigned num_regions = op->get_region_count();
-        if (num_regions > 0)
+        if (current_fence_uid > 0)
         {
-          for (unsigned idx = 0; idx < num_regions; idx++)
+          unsigned num_regions = op->get_region_count();
+          if (num_regions > 0)
           {
+            for (unsigned idx = 0; idx < num_regions; idx++)
+            {
+              LegionSpy::log_mapping_dependence(
+                  get_unique_id(), current_fence_uid, 0,
+                  op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
+            }
+          }
+          else
             LegionSpy::log_mapping_dependence(
                 get_unique_id(), current_fence_uid, 0,
-                op->get_unique_op_id(), idx, TRUE_DEPENDENCE);
-          }
+                op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
         }
-        else
-          LegionSpy::log_mapping_dependence(
-              get_unique_id(), current_fence_uid, 0,
-              op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
-#else
-        // If we can prune it then go ahead and do so
-        // No need to remove the mapping reference because 
-        // the fence has already been committed
-        if (op->register_dependence(current_mapping_fence, mapping_fence_gen))
-          current_mapping_fence = NULL;
 #endif
       }
 #ifdef LEGION_SPY
@@ -9463,7 +9463,7 @@ namespace Legion {
       // Record a dependence on the previous fence
       if (mapping)
       {
-        if (current_mapping_fence != NULL)
+        if (current_fence_uid > 0)
           LegionSpy::log_mapping_dependence(get_unique_id(), current_fence_uid,
               0/*index*/, op->get_unique_op_id(), 0/*index*/, TRUE_DEPENDENCE);
         for (std::deque<UniqueID>::const_iterator it = 
@@ -9512,14 +9512,11 @@ namespace Legion {
     {
       if (mapping)
       {
-        if (current_mapping_fence != NULL)
-          current_mapping_fence->remove_mapping_reference(mapping_fence_gen);
-        current_mapping_fence = op;
-        mapping_fence_gen = op->get_generation();
         current_mapping_fence_index = op->get_ctx_index();
-        current_mapping_fence->add_mapping_reference(mapping_fence_gen);
+        current_mapping_fence_event = op->get_mapped_event();
 #ifdef LEGION_SPY
         current_fence_uid = op->get_unique_op_id();
+        current_mapping_fence_gen = op->get_generation();
         ops_since_last_fence.clear();
 #endif
       }
@@ -9546,14 +9543,7 @@ namespace Legion {
     RtEvent InnerContext::get_current_mapping_fence_event(void)
     //--------------------------------------------------------------------------
     {
-      if (current_mapping_fence == NULL)
-        return RtEvent::NO_RT_EVENT;
-      RtEvent result = current_mapping_fence->get_mapped_event();
-      // Check the generation
-      if (current_mapping_fence->get_generation() == mapping_fence_gen)
-        return result;
-      else
-        return RtEvent::NO_RT_EVENT;
+      return current_mapping_fence_event;
     }
 
     //--------------------------------------------------------------------------
@@ -10242,8 +10232,7 @@ namespace Legion {
     void InnerContext::initialize_region_tree_contexts(
                       const std::vector<RegionRequirement> &clone_requirements,
                       const LegionVector<VersionInfo> &version_infos,
-                      const std::vector<ApUserEvent> &unmap_events,
-                      std::set<RtEvent> &execution_events)
+                      const std::vector<ApUserEvent> &unmap_events)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_REGION_TREE_CONTEXTS_CALL);
@@ -10382,11 +10371,18 @@ namespace Legion {
           const FieldMaskSet<EquivalenceSet> &eq_sets = 
             version_infos[idx1].get_equivalence_sets();
           const AddressSpaceID space = runtime->address_space;
+          std::set<RtEvent> context_ready_events;
           for (FieldMaskSet<EquivalenceSet>::const_iterator it =
                 eq_sets.begin(); it != eq_sets.end(); it++)
             eq_set->clone_from(space, it->first, it->second, 
-                         false/*fowrard to owner*/, execution_events, 
+                         false/*fowrard to owner*/, context_ready_events,
                          IS_WRITE(regions[idx1])/*invalidate source overlap*/);
+          // If there are any events for making these equivalence sets ready
+          // then we make them look like a mapping fence to ensure that the
+          // equivalence sets are all ready before anyone tries to map
+          if (!context_ready_events.empty())
+            current_mapping_fence_event = 
+              Runtime::merge_events(context_ready_events);
         }
         // Now initialize our logical and physical contexts
         region_node->initialize_disjoint_complete_tree(ctx, user_mask);
@@ -11569,6 +11565,11 @@ namespace Legion {
               reorder_buffer.begin(); it != reorder_buffer.end(); it++)
           if ((it->stage == EXECUTING_STAGE) || (it->stage == EXECUTED_STAGE))
             preconditions.insert(it->operation->get_mapped_event());
+        // Also include the current mapping fence event, note that if there were
+        // no mapping fences we might still have a real event here corresponding
+        // to when the context was initialized for virtual mappings
+        if (current_mapping_fence_event.exists())
+          preconditions.insert(current_mapping_fence_event);
 #ifdef DEBUG_LEGION
         assert(!task_executed);
 #endif
@@ -11604,12 +11605,12 @@ namespace Legion {
             children_commit_invoked = true;
           }
         }
-        if (!preconditions.empty())
-          owner_task->handle_post_mapped(false/*deferral*/,
-              Runtime::merge_events(preconditions));
-        else
-          owner_task->handle_post_mapped(false/*deferral*/);
       }
+      if (!preconditions.empty())
+        owner_task->handle_post_mapped(false/*deferral*/,
+            Runtime::merge_events(preconditions));
+      else
+        owner_task->handle_post_mapped(false/*deferral*/);
       if (need_complete)
       {
         if (!child_completion_events.empty())
@@ -23933,8 +23934,7 @@ namespace Legion {
     void LeafContext::initialize_region_tree_contexts(
                        const std::vector<RegionRequirement> &clone_requirements,
                        const LegionVector<VersionInfo> &version_infos,
-                       const std::vector<ApUserEvent> &unmap_events,
-                       std::set<RtEvent> &execution_events)
+                       const std::vector<ApUserEvent> &unmap_events)
     //--------------------------------------------------------------------------
     {
       // Nothing to do

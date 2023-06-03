@@ -18,6 +18,10 @@
 
 using namespace Realm;
 
+#ifdef REALM_USE_HIP
+#include "hip_cuda_compat/hip_cuda.h"
+#endif
+
 __global__ void copyKernel(Rect<2> bounds, AffineAccessor<float, 2> linear_accessor,
                            cudaSurfaceObject_t surface)
 {

@@ -498,7 +498,7 @@ ifeq ($(strip $(USE_HIP)),1)
       HIPCC_FLAGS	+= -O2
     endif
     ifneq ($(strip $(HIP_ARCH)),)
-      HIPCC_FLAGS	+= --offload-target=$(HIP_ARCH)
+      HIPCC_FLAGS	+= --offload-arch=$(HIP_ARCH)
     endif
     LEGION_LD_FLAGS	+= -lm -L$(HIP_PATH)/lib -lamdhip64
   else ifeq ($(strip $(HIP_TARGET)),CUDA)
@@ -812,10 +812,33 @@ ifeq ($(strip $(USE_ZLIB)),1)
   SLIB_LEGION_DEPS += -l$(ZLIB_LIBNAME)
 endif
 
-# backtrace
+# capture backtrace using unwind
 REALM_BACKTRACE_USE_UNWIND ?= 1
 ifeq ($(strip $(REALM_BACKTRACE_USE_UNWIND)),1)
   REALM_CC_FLAGS += -DREALM_USE_UNWIND
+endif
+
+# analyze backtrace using libdw
+REALM_BACKTRACE_USE_LIBDW ?= 0
+ifeq ($(strip $(REALM_BACKTRACE_USE_LIBDW)),1)
+  ifndef LIBDW_PATH
+    # we try to find header in /usr/include and lib in /usr/lib/x86_64-linux-gnu
+    LIBDW_HEADER := $(wildcard /usr/include/elfutils/libdwfl.h)
+    ifeq ($(LIBDW_HEADER),)
+      $(error Can not find elfutils/libdwfl.h in /usr/include, please set LIBDW_PATH explicitly)
+    endif
+    LIBDW_LIBRARY := $(wildcard /usr/lib/*/libdw.so)
+    ifeq ($(LIBDW_LIBRARY),)
+      $(error Can not find libdw in /usr/lib/x86_64-linux-gnu, please set LIBDW_PATH explicitly)
+    endif
+    LIBDW_PATH = /usr
+    LIBDW_LIBRARY_PATH := $(abspath $(dir $(LIBDW_LIBRARY)))
+  else
+    LIBDW_LIBRARY_PATH := $(LIBDW_PATH)/lib
+  endif
+  REALM_CC_FLAGS += -DREALM_USE_LIBDW
+  INC_FLAGS += -I$(LIBDW_PATH)/include
+  LEGION_LD_FLAGS += -L$(LIBDW_LIBRARY_PATH) -ldw
 endif
 
 
